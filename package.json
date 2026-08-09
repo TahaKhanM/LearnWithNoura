@@ -4,26 +4,39 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "client": "vite",
+    "server": "tsx watch server/index.ts",
+    "dev": "concurrently -k -n client,server -c blue,green \"npm:client\" \"npm:server\"",
     "build": "tsc -b && vite build",
+    "typecheck:server": "tsc -p tsconfig.server.json",
     "lint": "oxlint",
     "preview": "vite preview",
     "test": "vitest run"
   },
   "dependencies": {
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "katex": "^0.18.3",
+    "openai": "^7.4.0",
     "react": "^19.2.8",
-    "react-dom": "^19.2.8"
+    "react-dom": "^19.2.8",
+    "react-markdown": "^10.1.0",
+    "rehype-katex": "^7.0.1",
+    "remark-math": "^6.0.0"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^7.0.0",
     "@testing-library/react": "^16.3.2",
+    "@types/express": "^5.0.6",
     "@types/node": "^24.13.3",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.4",
     "@vitest/ui": "^4.1.10",
+    "concurrently": "^10.0.4",
     "jsdom": "^28.1.0",
     "oxlint": "^1.75.0",
+    "tsx": "^4.23.11",
     "typescript": "~6.0.2",
     "vite": "^8.2.0",
     "vitest": "^4.1.10"

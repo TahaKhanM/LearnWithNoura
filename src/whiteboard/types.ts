@@ -37,7 +37,11 @@ export interface ChatStep {
   text: string;
 }
 
-export type LessonStep = WhiteboardAction | ChatStep;
+export interface ClearStep {
+  type: 'clear';
+}
+
+export type LessonStep = WhiteboardAction | ChatStep | ClearStep;
 
 export function DrawLine(
   x1: number,
@@ -60,6 +64,10 @@ export function writeText(
 
 export function chat(text: string): ChatStep {
   return { type: 'chat', text };
+}
+
+export function clearWhiteboard(): ClearStep {
+  return { type: 'clear' };
 }
 
 export function drawEllipse(

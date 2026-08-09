@@ -9,6 +9,7 @@ function delay(ms: number): Promise<void> {
 export interface StepRunnerHandlers {
   onChat: (text: string) => void;
   onWhiteboardAction: (action: WhiteboardAction) => void;
+  onClear: () => void;
 }
 
 export async function runLessonSteps(
@@ -18,6 +19,8 @@ export async function runLessonSteps(
   for (const step of steps) {
     if (step.type === 'chat') {
       handlers.onChat(step.text);
+    } else if (step.type === 'clear') {
+      handlers.onClear();
     } else {
       handlers.onWhiteboardAction(step);
     }

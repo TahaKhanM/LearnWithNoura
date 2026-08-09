@@ -21,3 +21,8 @@ body,
 body {
   overflow: hidden;
 }
+
+body.resizing-chat {
+  cursor: col-resize;
+  user-select: none;
+}

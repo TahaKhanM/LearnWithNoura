@@ -2,6 +2,12 @@
 
 Date: 2026-08-10
 
+> **Superseded in part**: the mock agent described below was replaced by a
+> real LLM-backed agent. See
+> `2026-08-10-real-agent-backend-design.md` for the current agent/backend
+> architecture. The whiteboard, chat panel, coordinate system, and step
+> runner described here are still accurate.
+
 ## Purpose
 
 A webapp where an AI tutor teaches via a whiteboard (drawing lines and text

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DrawLine, writeText, drawEllipse } from './types';
+import { DrawLine, writeText, drawEllipse, clearWhiteboard } from './types';
 
 describe('DrawLine', () => {
   it('builds a drawLine action from coordinates', () => {
@@ -57,5 +57,11 @@ describe('drawEllipse', () => {
       color: 'blue',
       strokeWidth: 2,
     });
+  });
+});
+
+describe('clearWhiteboard', () => {
+  it('builds a clear step', () => {
+    expect(clearWhiteboard()).toEqual({ type: 'clear' });
   });
 });
