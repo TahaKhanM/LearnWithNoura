@@ -9,12 +9,20 @@ export interface HistoryTurn {
   text: string;
 }
 
+/**
+ * Runs one tutor turn, handing each step to `onStep` the moment the model
+ * produces it rather than collecting them all first. The agent genuinely
+ * works one round at a time: say a line, draw a line, look at the board,
+ * decide what comes next. Emitting as we go lets the interface show that
+ * real rhythm instead of replaying a finished lesson on a timer.
+ */
 export async function runTutorTurn(
   client: OpenAI,
   model: string,
   history: HistoryTurn[],
   userMessage: string,
-): Promise<LessonStep[]> {
+  onStep: (step: LessonStep) => void,
+): Promise<void> {
   const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
     { role: 'system', content: SYSTEM_PROMPT },
     ...history.map(
@@ -25,8 +33,6 @@ export async function runTutorTurn(
     ),
     { role: 'user', content: userMessage },
   ];
-
-  const steps: LessonStep[] = [];
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
     const response = await client.chat.completions.create({
@@ -42,7 +48,7 @@ export async function runTutorTurn(
     const message = response.choices[0].message;
 
     if (message.content) {
-      steps.push({ type: 'chat', text: message.content });
+      onStep({ type: 'chat', text: message.content });
     }
 
     messages.push(message);
@@ -62,7 +68,7 @@ export async function runTutorTurn(
       }
 
       const step = toolCallToStep(call.function.name, args);
-      if (step) steps.push(step);
+      if (step) onStep(step);
 
       messages.push({
         role: 'tool',
@@ -71,6 +77,4 @@ export async function runTutorTurn(
       });
     }
   }
-
-  return steps;
 }

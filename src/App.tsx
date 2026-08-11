@@ -3,8 +3,9 @@ import { ChatPanel } from './chat/ChatPanel';
 import type { Message } from './chat/types';
 import { Whiteboard } from './whiteboard/Whiteboard';
 import type { WhiteboardAction } from './whiteboard/types';
-import { requestLesson } from './agent/tutorClient';
-import { runLessonSteps } from './agent/stepRunner';
+import { streamLesson } from './agent/tutorClient';
+import { StepQueue, playSteps } from './agent/stepRunner';
+import { cancelSpeech, isSpeechSupported, setSpeechEnabled } from './speech/speech';
 import './App.css';
 
 const CHAT_MIN_WIDTH = 260;
@@ -15,6 +16,8 @@ function App() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [whiteboardActions, setWhiteboardActions] = useState<WhiteboardAction[]>([]);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [isThinking, setIsThinking] = useState(false);
+  const [soundOn, setSoundOn] = useState(true);
   const [chatWidth, setChatWidth] = useState(CHAT_DEFAULT_WIDTH);
   const runIdRef = useRef(0);
   const messagesRef = useRef<Message[]>([]);
@@ -33,8 +36,7 @@ function App() {
   useEffect(() => {
     function onMouseMove(e: MouseEvent) {
       if (!isResizingRef.current) return;
-      const next = Math.min(CHAT_MAX_WIDTH, Math.max(CHAT_MIN_WIDTH, e.clientX));
-      setChatWidth(next);
+      setChatWidth(Math.min(CHAT_MAX_WIDTH, Math.max(CHAT_MIN_WIDTH, e.clientX)));
     }
     function onMouseUp() {
       if (!isResizingRef.current) return;
@@ -49,40 +51,69 @@ function App() {
     };
   }, []);
 
+  const toggleSound = useCallback(() => {
+    setSoundOn((on) => {
+      const next = !on;
+      setSpeechEnabled(next);
+      return next;
+    });
+  }, []);
+
   const handleSubmit = useCallback(
     async (text: string) => {
       const runId = ++runIdRef.current;
       const history = messagesRef.current;
+      const isStale = () => runIdRef.current !== runId;
 
+      cancelSpeech();
       appendMessage({ role: 'user', text });
       setWhiteboardActions([]);
       setIsPlaying(true);
+      setIsThinking(true);
+
+      const queue = new StepQueue();
+
+      // The stream fills the queue while the player drains it, so drawing
+      // begins on the first step instead of waiting for the whole lesson.
+      const player = playSteps(queue, {
+        onChat: (chatText) => {
+          if (isStale()) return;
+          appendMessage({ role: 'tutor', text: chatText });
+        },
+        onWhiteboardAction: (action) => {
+          if (isStale()) return;
+          setWhiteboardActions((prev) => [...prev, action]);
+        },
+        onClear: () => {
+          if (isStale()) return;
+          setWhiteboardActions([]);
+        },
+        onWaiting: (waiting) => {
+          if (isStale()) return;
+          setIsThinking(waiting);
+        },
+        isStale,
+      });
 
       try {
-        const steps = await requestLesson(text, history);
-        if (runIdRef.current !== runId) return;
-
-        await runLessonSteps(steps, {
-          onChat: (chatText) => {
-            if (runIdRef.current !== runId) return;
-            appendMessage({ role: 'tutor', text: chatText });
-          },
-          onWhiteboardAction: (action) => {
-            if (runIdRef.current !== runId) return;
-            setWhiteboardActions((prev) => [...prev, action]);
-          },
-          onClear: () => {
-            if (runIdRef.current !== runId) return;
-            setWhiteboardActions([]);
+        await streamLesson(text, history, {
+          onStep: (step) => {
+            if (isStale()) return;
+            queue.push(step);
           },
         });
+        queue.close();
+        await player;
       } catch (err) {
-        if (runIdRef.current !== runId) return;
+        queue.close();
+        await player.catch(() => undefined);
+        if (isStale()) return;
         const detail = err instanceof Error ? err.message : 'Unknown error';
         appendMessage({ role: 'tutor', text: `Sorry, something went wrong: ${detail}` });
       } finally {
-        if (runIdRef.current === runId) {
+        if (!isStale()) {
           setIsPlaying(false);
+          setIsThinking(false);
         }
       }
     },
@@ -94,6 +125,10 @@ function App() {
       <ChatPanel
         messages={messages}
         disabled={isPlaying}
+        thinking={isThinking}
+        soundOn={soundOn}
+        soundSupported={isSpeechSupported()}
+        onToggleSound={toggleSound}
         onSubmit={handleSubmit}
         width={chatWidth}
         onResizeStart={handleResizeStart}

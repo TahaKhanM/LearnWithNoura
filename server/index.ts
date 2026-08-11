@@ -28,12 +28,40 @@ app.post('/api/tutor', async (req, res) => {
     return;
   }
 
+  // Newline delimited JSON, one step per line, flushed as the model
+  // produces it. The client can start drawing the first line while the
+  // model is still deciding on the second.
+  res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders();
+
+  let aborted = false;
+  req.on('aborted', () => {
+    aborted = true;
+  });
+
+  function send(payload: unknown) {
+    if (aborted || res.writableEnded) return;
+    res.write(JSON.stringify(payload) + '\n');
+  }
+
   try {
-    const steps = await runTutorTurn(client, MODEL, Array.isArray(history) ? history : [], message);
-    res.json({ steps });
+    await runTutorTurn(
+      client,
+      MODEL,
+      Array.isArray(history) ? history : [],
+      message,
+      (step) => send({ type: 'step', step }),
+    );
+    send({ type: 'done' });
   } catch (err) {
     console.error('Tutor turn failed:', err);
-    res.status(502).json({ error: 'The tutor model request failed.' });
+    // Headers are already out, so the failure has to travel in the stream
+    // rather than as a status code.
+    send({ type: 'error', message: 'The tutor model request failed.' });
+  } finally {
+    if (!res.writableEnded) res.end();
   }
 });
 
