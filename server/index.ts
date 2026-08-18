@@ -3,6 +3,7 @@ import express from 'express';
 import OpenAI from 'openai';
 import { runTutorTurn, type HistoryTurn } from './tutorAgent';
 import { handleStt, handleTts, isVoiceConfigured } from './voice';
+import { assertPromptReadable } from './prompt';
 
 // override: true so .env is authoritative even if a stale OPENAI_API_KEY
 // is already exported in the parent shell (e.g. via ~/.zshrc).
@@ -13,6 +14,13 @@ const MODEL = process.env.OPENAI_MODEL || 'gpt-5.6-terra';
 
 if (!process.env.OPENAI_API_KEY) {
   console.error('Missing OPENAI_API_KEY in environment. Set it in .env.');
+  process.exit(1);
+}
+
+try {
+  assertPromptReadable();
+} catch (err) {
+  console.error('Could not read Seneca\'s system prompt:', err);
   process.exit(1);
 }
 

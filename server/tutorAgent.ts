@@ -1,6 +1,7 @@
 import type OpenAI from 'openai';
 import type { LessonStep } from '../src/whiteboard/types';
-import { SYSTEM_PROMPT, TOOLS, toolCallToStep } from './tools';
+import { TOOLS, toolCallToStep } from './tools';
+import { loadSystemPrompt } from './prompt';
 
 const MAX_TOOL_ROUNDS = 12;
 
@@ -24,7 +25,7 @@ export async function runTutorTurn(
   onStep: (step: LessonStep) => void,
 ): Promise<void> {
   const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
-    { role: 'system', content: SYSTEM_PROMPT },
+    { role: 'system', content: loadSystemPrompt() },
     ...history.map(
       (turn): OpenAI.Chat.ChatCompletionMessageParam => ({
         role: turn.role === 'user' ? 'user' : 'assistant',
