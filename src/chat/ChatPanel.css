@@ -202,3 +202,66 @@
 .chat-panel__resizer:active {
   background: rgba(37, 99, 235, 0.2);
 }
+
+/* Push to talk. Stays enabled while the tutor is speaking, because cutting
+   in mid explanation is the point of it. */
+.chat-panel__form .chat-panel__talk {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 1px solid #cbd5e1;
+  border-radius: 50%;
+  background: #ffffff;
+  color: #475569;
+  cursor: pointer;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  transition: transform 0.12s ease, background 0.12s ease, color 0.12s ease;
+}
+
+.chat-panel__form .chat-panel__talk svg { width: 17px; height: 17px; }
+
+.chat-panel__form .chat-panel__talk:hover { border-color: #94a3b8; color: #0f172a; }
+
+.chat-panel__form .chat-panel__talk:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
+.chat-panel__form .chat-panel__talk[data-state='recording'] {
+  background: #e14b3c;
+  border-color: #e14b3c;
+  color: #ffffff;
+  transform: scale(1.06);
+  animation: chat-talk-pulse 1.4s ease-in-out infinite;
+}
+
+.chat-panel__form .chat-panel__talk[data-state='transcribing'] {
+  background: #eff5ff;
+  border-color: #bfd3fb;
+  color: #2563eb;
+}
+
+@keyframes chat-talk-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(225, 75, 60, 0.45); }
+  50%      { box-shadow: 0 0 0 6px rgba(225, 75, 60, 0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-panel__form .chat-panel__talk { transition: none; }
+  .chat-panel__form .chat-panel__talk[data-state='recording'] { animation: none; }
+}
+
+.chat-panel__mic-error {
+  margin: 0;
+  padding: 8px 12px 0;
+  color: #b91c1c;
+  font-size: 12.5px;
+  line-height: 1.4;
+  background: white;
+}

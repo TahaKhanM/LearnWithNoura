@@ -5,7 +5,9 @@ import { Whiteboard } from './whiteboard/Whiteboard';
 import type { WhiteboardAction } from './whiteboard/types';
 import { streamLesson } from './agent/tutorClient';
 import { StepQueue, playSteps } from './agent/stepRunner';
-import { cancelSpeech, isSpeechSupported, setSpeechEnabled } from './speech/speech';
+import { cancelSpeech, isSpeechSupported, primeAudio, setSpeechEnabled } from './speech/speech';
+import { MicRecorder, isMicSupported, transcribe } from './speech/mic';
+import type { MicState } from './chat/ChatPanel';
 import './App.css';
 
 const CHAT_MIN_WIDTH = 260;
@@ -19,9 +21,31 @@ function App() {
   const [isThinking, setIsThinking] = useState(false);
   const [soundOn, setSoundOn] = useState(true);
   const [chatWidth, setChatWidth] = useState(CHAT_DEFAULT_WIDTH);
+  const [voiceReady, setVoiceReady] = useState(false);
+  const [micState, setMicState] = useState<MicState>('idle');
+  const [micError, setMicError] = useState<string | null>(null);
   const runIdRef = useRef(0);
   const messagesRef = useRef<Message[]>([]);
   const isResizingRef = useRef(false);
+  const recorderRef = useRef<MicRecorder | null>(null);
+  // True between press and release. The first press shows a permission
+  // prompt, which can outlast the press itself, so the recorder has to know
+  // whether the child is still holding by the time the microphone opens.
+  const heldRef = useRef(false);
+
+  // The server owns the ElevenLabs key, so it decides whether voice exists.
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/voice/status')
+      .then((r) => (r.ok ? r.json() : { enabled: false }))
+      .then((body: { enabled?: boolean }) => {
+        if (!cancelled) setVoiceReady(Boolean(body.enabled));
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const appendMessage = useCallback((message: Message) => {
     messagesRef.current = [...messagesRef.current, message];
@@ -65,6 +89,7 @@ function App() {
       const history = messagesRef.current;
       const isStale = () => runIdRef.current !== runId;
 
+      primeAudio();
       cancelSpeech();
       appendMessage({ role: 'user', text });
       setWhiteboardActions([]);
@@ -120,6 +145,64 @@ function App() {
     [appendMessage],
   );
 
+  const handleTalkStart = useCallback(async () => {
+    if (recorderRef.current?.active || heldRef.current) return;
+    heldRef.current = true;
+
+    // The button is live during a lesson on purpose, so the first thing a
+    // press does is stop the tutor talking. That keeps the tutor's own
+    // voice out of the recording and lets the child cut in.
+    primeAudio();
+    cancelSpeech();
+    setMicError(null);
+
+    const recorder = recorderRef.current ?? new MicRecorder();
+    recorderRef.current = recorder;
+
+    try {
+      await recorder.start();
+      // Let go while the prompt was still up: drop the microphone rather
+      // than leaving it open and recording with nothing to stop it.
+      if (!heldRef.current) {
+        recorder.release();
+        setMicState('idle');
+        return;
+      }
+      setMicState('recording');
+    } catch {
+      heldRef.current = false;
+      setMicState('idle');
+      setMicError('Seneca could not reach your microphone. Check the browser permission.');
+    }
+  }, []);
+
+  const handleTalkEnd = useCallback(async () => {
+    heldRef.current = false;
+    const recorder = recorderRef.current;
+    // Still waiting on the permission prompt, so there is nothing recorded
+    // yet. handleTalkStart sees the released flag and cleans up.
+    if (!recorder?.active) return;
+
+    setMicState('transcribing');
+    try {
+      const clip = await recorder.stop();
+      // A tap rather than a hold: nothing was said, so say nothing.
+      if (!clip) {
+        setMicState('idle');
+        return;
+      }
+      const text = await transcribe(clip);
+      setMicState('idle');
+      if (text) await handleSubmit(text);
+      else setMicError('That came through empty. Try holding the button a little longer.');
+    } catch (err) {
+      setMicState('idle');
+      setMicError(err instanceof Error ? err.message : 'Could not hear that.');
+    }
+  }, [handleSubmit]);
+
+  useEffect(() => () => recorderRef.current?.release(), []);
+
   return (
     <div className="app">
       <ChatPanel
@@ -127,11 +210,16 @@ function App() {
         disabled={isPlaying}
         thinking={isThinking}
         soundOn={soundOn}
-        soundSupported={isSpeechSupported()}
+        soundSupported={isSpeechSupported() && voiceReady}
         onToggleSound={toggleSound}
         onSubmit={handleSubmit}
         width={chatWidth}
         onResizeStart={handleResizeStart}
+        micSupported={isMicSupported() && voiceReady}
+        micState={micState}
+        micError={micError}
+        onTalkStart={handleTalkStart}
+        onTalkEnd={handleTalkEnd}
       />
       <Whiteboard actions={whiteboardActions} />
     </div>

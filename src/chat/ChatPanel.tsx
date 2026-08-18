@@ -7,6 +7,8 @@ import { normalizeLatexDelimiters } from './latex';
 import 'katex/dist/katex.min.css';
 import './ChatPanel.css';
 
+export type MicState = 'idle' | 'recording' | 'transcribing';
+
 interface ChatPanelProps {
   messages: Message[];
   disabled: boolean;
@@ -17,6 +19,11 @@ interface ChatPanelProps {
   onSubmit: (text: string) => void;
   width: number;
   onResizeStart: () => void;
+  micSupported: boolean;
+  micState: MicState;
+  micError: string | null;
+  onTalkStart: () => void;
+  onTalkEnd: () => void;
 }
 
 export function ChatPanel({
@@ -29,6 +36,11 @@ export function ChatPanel({
   onSubmit,
   width,
   onResizeStart,
+  micSupported,
+  micState,
+  micError,
+  onTalkStart,
+  onTalkEnd,
 }: ChatPanelProps) {
   const [draft, setDraft] = useState('');
   const historyRef = useRef<HTMLDivElement>(null);
@@ -44,6 +56,45 @@ export function ChatPanel({
     onSubmit(trimmed);
     setDraft('');
   }
+
+  function handleTalkDown(e: React.PointerEvent<HTMLButtonElement>) {
+    // Capture so letting go anywhere on the page still ends the recording.
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+    onTalkStart();
+  }
+
+  function handleTalkUp() {
+    onTalkEnd();
+  }
+
+  // Hold to talk has to work from the keyboard too, so space and enter
+  // behave like holding the button rather than firing a click.
+  function handleTalkKeyDown(e: React.KeyboardEvent<HTMLButtonElement>) {
+    if (e.key !== ' ' && e.key !== 'Enter') return;
+    e.preventDefault();
+    if (e.repeat) return;
+    onTalkStart();
+  }
+
+  function handleTalkKeyUp(e: React.KeyboardEvent<HTMLButtonElement>) {
+    if (e.key !== ' ' && e.key !== 'Enter') return;
+    e.preventDefault();
+    onTalkEnd();
+  }
+
+  const talkLabel =
+    micState === 'recording'
+      ? 'Listening, let go when you are done'
+      : micState === 'transcribing'
+        ? 'Working out what you said'
+        : 'Hold to talk to Seneca';
+
+  const inputPlaceholder =
+    micState === 'recording'
+      ? 'Listening…'
+      : micState === 'transcribing'
+        ? 'One moment…'
+        : 'Ask a question…';
 
   return (
     <div className="chat-panel" style={{ width }}>
@@ -97,12 +148,38 @@ export function ChatPanel({
           </div>
         )}
       </div>
+      {micError && <p className="chat-panel__mic-error">{micError}</p>}
+
       <form className="chat-panel__form" onSubmit={handleSubmit}>
+        {micSupported && (
+          <button
+            type="button"
+            className="chat-panel__talk"
+            // Deliberately never disabled: interrupting the tutor while it is
+            // talking is the whole point of push to talk.
+            data-state={micState}
+            aria-pressed={micState === 'recording'}
+            aria-label={talkLabel}
+            title={talkLabel}
+            onPointerDown={handleTalkDown}
+            onPointerUp={handleTalkUp}
+            onPointerCancel={handleTalkUp}
+            onKeyDown={handleTalkKeyDown}
+            onKeyUp={handleTalkKeyUp}
+            onContextMenu={(e) => e.preventDefault()}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <rect x="9" y="2" width="6" height="12" rx="3" />
+              <path d="M5 11a7 7 0 0 0 14 0" />
+              <path d="M12 18v4" />
+            </svg>
+          </button>
+        )}
         <input
           type="text"
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
-          placeholder="Ask a question…"
+          placeholder={inputPlaceholder}
           disabled={disabled}
         />
         <button type="submit" disabled={disabled || !draft.trim()}>

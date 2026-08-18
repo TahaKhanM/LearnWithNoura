@@ -2,6 +2,7 @@ import { config } from 'dotenv';
 import express from 'express';
 import OpenAI from 'openai';
 import { runTutorTurn, type HistoryTurn } from './tutorAgent';
+import { handleStt, handleTts, isVoiceConfigured } from './voice';
 
 // override: true so .env is authoritative even if a stale OPENAI_API_KEY
 // is already exported in the parent shell (e.g. via ~/.zshrc).
@@ -19,6 +20,21 @@ const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 const app = express();
 app.use(express.json());
+// Recordings arrive as an opaque audio body, so they bypass the JSON parser.
+app.use('/api/stt', express.raw({ type: 'audio/*', limit: '25mb' }));
+
+if (!isVoiceConfigured()) {
+  console.warn('No ELEVENLABS_API_KEY set. The tutor will run silently.');
+}
+
+// Tells the client whether to offer voice at all, so the UI reflects the
+// server's actual capability rather than guessing.
+app.get('/api/voice/status', (_req, res) => {
+  res.json({ enabled: isVoiceConfigured() });
+});
+
+app.post('/api/tts', handleTts);
+app.post('/api/stt', handleStt);
 
 app.post('/api/tutor', async (req, res) => {
   const { message, history } = req.body as { message?: string; history?: HistoryTurn[] };
