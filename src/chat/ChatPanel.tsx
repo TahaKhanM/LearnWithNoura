@@ -26,6 +26,29 @@ interface ChatPanelProps {
   onTalkEnd: () => void;
 }
 
+/** Seneca itself, the same character that stands on the landing page. */
+function SenecaFace() {
+  return (
+    <svg className="seneca-face" viewBox="0 0 54 54" aria-hidden="true">
+      <g transform="translate(-347,-252)">
+        <path
+          d="M348 296 c0 -25, 12 -41, 26 -41 s26 16, 26 41 c0 7 -6 9 -26 9 s-26 -2 -26 -9z"
+          fill="var(--blue)"
+        />
+        <circle className="seneca-face__eye" cx="366" cy="269" r="3.1" fill="var(--board)" />
+        <circle className="seneca-face__eye" cx="382" cy="269" r="3.1" fill="var(--board)" />
+        <path
+          d="M367 280 c3 3, 9 3, 12 0"
+          stroke="var(--board)"
+          strokeWidth="2.2"
+          strokeLinecap="round"
+          fill="none"
+        />
+      </g>
+    </svg>
+  );
+}
+
 export function ChatPanel({
   messages,
   disabled,
@@ -45,9 +68,13 @@ export function ChatPanel({
   const [draft, setDraft] = useState('');
   const historyRef = useRef<HTMLDivElement>(null);
 
+  // `disabled` is on exactly while a lesson is running, which is also when
+  // one of the tutor's lines is the one currently being spoken.
+  const lessonRunning = disabled;
+
   useEffect(() => {
     historyRef.current?.scrollTo({ top: historyRef.current.scrollHeight });
-  }, [messages]);
+  }, [messages, thinking]);
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -96,10 +123,19 @@ export function ChatPanel({
         ? 'One moment…'
         : 'Ask a question…';
 
+  // The line Seneca is on right now, so it can be shown as the one being
+  // said rather than as one more entry in a list.
+  const liveIndex = lessonRunning
+    ? messages.reduce((found, m, i) => (m.role === 'tutor' ? i : found), -1)
+    : -1;
+
   return (
     <div className="chat-panel" style={{ width }}>
       <div className="chat-panel__bar">
-        <span className="chat-panel__title">Seneca</span>
+        <span className="chat-panel__brand">
+          <SenecaFace />
+          Seneca
+        </span>
         {soundSupported && (
           <button
             type="button"
@@ -120,34 +156,46 @@ export function ChatPanel({
                 <path d="m16 9 5 6M21 9l-5 6" />
               </svg>
             )}
-            <span className="chat-panel__sound-label">{soundOn ? 'Voice on' : 'Voice off'}</span>
+            <span>{soundOn ? 'Voice on' : 'Voice off'}</span>
           </button>
         )}
       </div>
 
       <div className="chat-panel__history" ref={historyRef}>
         {messages.length === 0 && (
-          <p className="chat-panel__hint">
-            Ask your tutor anything. It will explain on the whiteboard as it
-            works, one step at a time.
-          </p>
+          <p className="chat-panel__greeting">Hi, I'm Seneca. What shall we work on?</p>
         )}
-        {messages.map((m, i) => (
-          <div key={i} className={`chat-panel__message chat-panel__message--${m.role}`}>
-            <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
-              {normalizeLatexDelimiters(m.text)}
-            </ReactMarkdown>
-          </div>
-        ))}
+
+        {messages.map((m, i) =>
+          m.role === 'user' ? (
+            <p key={i} className="chat-panel__ask">
+              {m.text}
+            </p>
+          ) : (
+            // Seneca speaks rather than sending messages, so its lines are
+            // unboxed. A chat bubble here would argue the opposite of what
+            // the product is for.
+            <div
+              key={i}
+              className={`chat-panel__say${i === liveIndex ? ' chat-panel__say--live' : ''}`}
+            >
+              <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
+                {normalizeLatexDelimiters(m.text)}
+              </ReactMarkdown>
+            </div>
+          ),
+        )}
+
         {disabled && (
-          <div className="chat-panel__status">
+          <p className="chat-panel__status">
             <span className="chat-panel__dots" aria-hidden="true">
               <i></i><i></i><i></i>
             </span>
             {thinking ? 'thinking' : 'drawing'}
-          </div>
+          </p>
         )}
       </div>
+
       {micError && <p className="chat-panel__mic-error">{micError}</p>}
 
       <form className="chat-panel__form" onSubmit={handleSubmit}>
@@ -176,16 +224,18 @@ export function ChatPanel({
           </button>
         )}
         <input
+          className="chat-panel__input"
           type="text"
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           placeholder={inputPlaceholder}
           disabled={disabled}
         />
-        <button type="submit" disabled={disabled || !draft.trim()}>
-          Send
+        <button type="submit" className="chat-panel__send" disabled={disabled || !draft.trim()}>
+          Ask
         </button>
       </form>
+
       <div
         className="chat-panel__resizer"
         onMouseDown={onResizeStart}

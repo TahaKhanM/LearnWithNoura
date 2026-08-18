@@ -1,44 +1,97 @@
 .whiteboard {
   flex: 1;
+  min-width: 0;
   height: 100%;
-  background: #ffffff;
+  padding: 20px 22px 22px 18px;
   display: flex;
-  align-items: center;
-  justify-content: center;
+}
+
+/* The board is a physical surface on a wall, ruled like the real thing,
+   rather than an empty div filling the window. */
+.whiteboard__surface {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  border-radius: 14px;
+  border: 1px solid var(--rail-line);
+  background-color: var(--board);
+  background-image:
+    linear-gradient(to right, var(--grid) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--grid) 1px, transparent 1px);
+  background-size: 34px 34px;
+  box-shadow:
+    0 1px 2px rgba(38, 35, 31, 0.05),
+    0 14px 34px -20px rgba(38, 35, 31, 0.4);
   overflow: hidden;
 }
 
 .whiteboard__svg {
+  position: relative;
   width: 100%;
   height: 100%;
+  display: block;
 }
 
-.whiteboard__line,
-.whiteboard__ellipse {
-  animation: draw-in 0.25s ease-out;
+.whiteboard__empty {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-hand);
+  font-size: 27px;
+  font-weight: 600;
+  color: var(--ink-faint);
+  pointer-events: none;
 }
 
 .whiteboard__text {
-  font-family: 'Segoe Print', 'Comic Sans MS', ui-rounded, system-ui, sans-serif;
-  animation: fade-in 0.3s ease-out;
+  font-family: var(--font-hand);
+  font-weight: 600;
+  animation: mark-in 0.32s ease-out backwards;
 }
 
-@keyframes draw-in {
-  from {
-    opacity: 0;
-  }
+/* Marks are drawn on, not faded in, so the child watches the line travel
+   the way it would from a real marker. */
+.whiteboard__stroke {
+  stroke-dasharray: var(--stroke-length);
+  stroke-dashoffset: var(--stroke-length);
+  animation: stroke-on 0.45s cubic-bezier(0.65, 0, 0.35, 1) forwards;
+}
+
+@keyframes stroke-on {
   to {
-    opacity: 1;
+    stroke-dashoffset: 0;
   }
 }
 
-@keyframes fade-in {
+@keyframes mark-in {
   from {
     opacity: 0;
-    transform: translateY(-4px);
+    transform: translateY(-3px);
   }
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .whiteboard__stroke {
+    stroke-dasharray: none;
+    stroke-dashoffset: 0;
+    animation: none;
+  }
+  .whiteboard__text {
+    animation: none;
+  }
+}
+
+@media (max-width: 720px) {
+  .whiteboard {
+    flex: 1;
+    min-height: 0;
+    padding: 0 14px 14px;
   }
 }

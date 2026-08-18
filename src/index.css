@@ -1,5 +1,32 @@
+/* The palette is a set of dry erase markers on a board, which is what the
+   product is imitating, and it is the same one the Seneca landing page
+   uses so the app is recognisably the thing the site promised. */
 :root {
-  font: 16px/1.45 system-ui, 'Segoe UI', Roboto, sans-serif;
+  --board: #fcfbf7;
+  --grid: #e9e6dc;
+  --rail: #ede9df;
+  --rail-line: #ddd8cb;
+  --ink: #26231f;
+  --ink-soft: #6e6862;
+  --ink-faint: #a8a199;
+  --blue: #2c5be0;
+  --blue-deep: #1e42ac;
+  --blue-wash: #edf1fd;
+  --red: #e14b3c;
+  --green: #14a07a;
+  --amber: #f0a227;
+
+  /* Outfit is the product's voice. Caveat is Seneca's handwriting, so it
+     is reserved for what Seneca puts on the board and for its own asides,
+     never for anything the child has to read at length. */
+  --font-ui: 'Outfit', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-hand: 'Caveat', 'Segoe Print', 'Comic Sans MS', cursive;
+
+  font-family: var(--font-ui);
+  font-size: 16px;
+  line-height: 1.45;
+  font-weight: 400;
+  color: var(--ink);
   color-scheme: light;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -20,9 +47,16 @@ body,
 
 body {
   overflow: hidden;
+  background: var(--rail);
 }
 
 body.resizing-chat {
   cursor: col-resize;
   user-select: none;
+}
+
+:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+  border-radius: 4px;
 }

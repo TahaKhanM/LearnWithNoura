@@ -28,6 +28,10 @@ let currentLine: Promise<void> = Promise.resolve();
 // flight when the child interrupted can tell that it is no longer wanted.
 let generation = 0;
 
+// How long to wait for a suspended context before giving up on audio for
+// this line. Long enough for a real resume, short enough not to stall.
+const RESUME_TIMEOUT_MS = 500;
+
 let context: AudioContext | null = null;
 let source: AudioBufferSourceNode | null = null;
 let inFlight: AbortController | null = null;
@@ -94,8 +98,15 @@ async function playLine(text: string, spoken: string, mine: number): Promise<voi
 
     const ctx = audioContext();
     // Autoplay policy can leave the context suspended if the lesson began
-    // without a gesture. Resuming is a no-op when it is already running.
-    if (ctx.state === 'suspended') await ctx.resume();
+    // without a gesture, and resume() then never settles. Racing it means a
+    // silent browser slows the lesson down rather than hanging it forever.
+    if (ctx.state === 'suspended') {
+      await Promise.race([ctx.resume(), delay(RESUME_TIMEOUT_MS)]);
+    }
+    if (ctx.state !== 'running') {
+      await delay(estimateSpeakingMs(text));
+      return;
+    }
 
     const buffer = await ctx.decodeAudioData(encoded);
     if (mine !== generation) return;
