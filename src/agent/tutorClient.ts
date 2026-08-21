@@ -15,6 +15,7 @@ export async function streamLesson(
   userMessage: string,
   history: Message[],
   board: BoardSnapshot,
+  boardImage: string | undefined,
   handlers: StreamHandlers,
   signal?: AbortSignal,
 ): Promise<void> {
@@ -26,6 +27,7 @@ export async function streamLesson(
       message: userMessage,
       history: history.map((m) => ({ role: m.role, text: m.text })),
       board: compactBoardSnapshot(board),
+      ...(boardImage ? { boardImage } : {}),
     }),
   });
 

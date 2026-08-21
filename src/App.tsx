@@ -12,6 +12,7 @@ import {
   snapshotBoard,
   type BoardObject,
 } from './whiteboard/scene';
+import { captureBoardPng } from './whiteboard/boardImage';
 import './App.css';
 
 const CHAT_MIN_WIDTH = 260;
@@ -32,6 +33,8 @@ function App() {
   const runIdRef = useRef(0);
   const messagesRef = useRef<Message[]>([]);
   const boardObjectsRef = useRef<BoardObject[]>([]);
+  const visualRevisionRef = useRef(0);
+  const sentVisualRevisionRef = useRef(0);
   const tutorCursorTimerRef = useRef<number | null>(null);
   const isResizingRef = useRef(false);
   const recorderRef = useRef<MicRecorder | null>(null);
@@ -90,6 +93,29 @@ function App() {
     [replaceBoardObjects],
   );
 
+  const upsertLearnerBoardObject = useCallback(
+    (object: BoardObject) => {
+      if (object.owner === 'learner' && object.action.type === 'drawPath') {
+        visualRevisionRef.current += 1;
+      }
+      upsertBoardObject(object);
+    },
+    [upsertBoardObject],
+  );
+
+  const removeLearnerBoardObject = useCallback(
+    (id: string) => {
+      const object = boardObjectsRef.current.find((item) => item.id === id);
+      // Removing geometry changes the visual interpretation too. Text-only
+      // edits remain fully represented by the structured scene.
+      if (object && object.action.type !== 'writeText') {
+        visualRevisionRef.current += 1;
+      }
+      removeBoardObject(id);
+    },
+    [removeBoardObject],
+  );
+
   const showTutorCursorFor = useCallback((id: string) => {
     setActiveTutorObjectId(id);
     if (tutorCursorTimerRef.current !== null) {
@@ -145,6 +171,18 @@ function App() {
       setIsPlaying(true);
       setIsThinking(true);
 
+      const visualRevision = visualRevisionRef.current;
+      let boardImage: string | undefined;
+      if (visualRevision > sentVisualRevisionRef.current) {
+        try {
+          boardImage = await captureBoardPng(board);
+        } catch (error) {
+          // The exact scene still reaches the model. A failed raster should
+          // degrade gracefully and be retried on the next learner turn.
+          console.warn('Could not capture visual whiteboard context:', error);
+        }
+      }
+
       const queue = new StepQueue();
 
       // The stream fills the queue while the player drains it, so drawing
@@ -173,12 +211,18 @@ function App() {
       });
 
       try {
-        await streamLesson(text, history, board, {
+        await streamLesson(text, history, board, boardImage, {
           onStep: (step) => {
             if (isStale()) return;
             queue.push(step);
           },
         });
+        if (boardImage) {
+          sentVisualRevisionRef.current = Math.max(
+            sentVisualRevisionRef.current,
+            visualRevision,
+          );
+        }
         queue.close();
         await player;
       } catch (err) {
@@ -285,8 +329,8 @@ function App() {
         objects={boardObjects}
         activeTutorObjectId={activeTutorObjectId}
         disabled={isPlaying}
-        onUpsertObject={upsertBoardObject}
-        onRemoveObject={removeBoardObject}
+        onUpsertObject={upsertLearnerBoardObject}
+        onRemoveObject={removeLearnerBoardObject}
       />
     </div>
   );

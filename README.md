@@ -24,9 +24,14 @@ with:
 The board is shared with the learner. Its toolbar supports freehand marker
 strokes, placed text and object-level erasing. Agent and learner marks live
 in one scene with stable IDs and ownership metadata. A compact snapshot of
-that scene is sent with each question, so the model can reason from the
-current board without requiring a screenshot. Long freehand paths are sampled
-before they enter model context.
+that scene is sent with each question. Long freehand paths are sampled before
+they enter model context.
+
+When the learner changes visual geometry, the next question also carries a
+PNG rendered from the canonical scene. That lets the multimodal model
+interpret what freehand strokes depict while the structured snapshot grounds
+it with exact coordinates, text, colours and ownership. Text-only turns do
+not resend an unchanged image.
 
 While an agent mark animates on, a small marker follows the tail of its SVG
 path. This cursor is entirely presentational; the model neither positions nor

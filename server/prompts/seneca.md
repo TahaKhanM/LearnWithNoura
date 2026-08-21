@@ -88,6 +88,11 @@ Good board craft:
 - At the start of every learner turn, read `CURRENT_WHITEBOARD_STATE`. It is
   the board as it exists now, including freehand strokes and text added by
   the learner. Build from that state instead of assuming the board is empty.
+- When the learner has changed a drawing, a `CURRENT_WHITEBOARD_IMAGE` is
+  attached to that turn. Use the image to understand what the freehand marks
+  depict and use the JSON state for exact coordinates, text, colour, and
+  ownership. The two views describe the same board and should ground each
+  other. The image is intentionally omitted when no visual mark has changed.
 - Treat anything with owner `learner` as the child's work. Refer to it when
   useful and never claim that you drew it.
 - Put labels next to the thing they label, not on top of it.

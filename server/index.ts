@@ -27,7 +27,9 @@ try {
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 const app = express();
-app.use(express.json());
+// A conditional inline board image can be larger than Express's 100KB
+// default. The server validates its type and bounds it before model use.
+app.use(express.json({ limit: '4mb' }));
 // Recordings arrive as an opaque audio body, so they bypass the JSON parser.
 app.use('/api/stt', express.raw({ type: 'audio/*', limit: '25mb' }));
 
@@ -45,10 +47,11 @@ app.post('/api/tts', handleTts);
 app.post('/api/stt', handleStt);
 
 app.post('/api/tutor', async (req, res) => {
-  const { message, history, board } = req.body as {
+  const { message, history, board, boardImage } = req.body as {
     message?: string;
     history?: HistoryTurn[];
     board?: unknown;
+    boardImage?: unknown;
   };
 
   if (typeof message !== 'string' || !message.trim()) {
@@ -81,6 +84,7 @@ app.post('/api/tutor', async (req, res) => {
       Array.isArray(history) ? history : [],
       message,
       board,
+      boardImage,
       (step) => send({ type: 'step', step }),
     );
     send({ type: 'done' });

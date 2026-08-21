@@ -2,7 +2,7 @@ import type OpenAI from 'openai';
 import type { LessonStep } from '../src/whiteboard/types';
 import { TOOLS, toolCallToStep } from './tools';
 import { loadSystemPrompt } from './prompt';
-import { boardContextForModel } from './boardContext';
+import { boardContextForModel, boardImageForModel } from './boardContext';
 
 const MAX_TOOL_ROUNDS = 12;
 
@@ -24,8 +24,19 @@ export async function runTutorTurn(
   history: HistoryTurn[],
   userMessage: string,
   boardState: unknown,
+  boardImage: unknown,
   onStep: (step: LessonStep) => void,
 ): Promise<void> {
+  const image = boardImageForModel(boardImage);
+  const boardContext = [
+    boardContextForModel(boardState),
+    ...(image
+      ? [
+          'CURRENT_WHITEBOARD_IMAGE is attached. Use it to interpret the freehand shapes; use the JSON for exact geometry and ownership.',
+        ]
+      : []),
+    `LEARNER_QUESTION:\n${userMessage}`,
+  ].join('\n\n');
   const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
     { role: 'system', content: loadSystemPrompt() },
     ...history.map(
@@ -36,7 +47,15 @@ export async function runTutorTurn(
     ),
     {
       role: 'user',
-      content: `${boardContextForModel(boardState)}\n\nLEARNER_QUESTION:\n${userMessage}`,
+      content: image
+        ? [
+            { type: 'text', text: boardContext },
+            {
+              type: 'image_url',
+              image_url: { url: image, detail: 'high' },
+            },
+          ]
+        : boardContext,
     },
   ];
 

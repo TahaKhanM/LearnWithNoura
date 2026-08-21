@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { boardContextForModel } from './boardContext';
+import { boardContextForModel, boardImageForModel } from './boardContext';
 
 describe('boardContextForModel', () => {
   it('labels the scene as reference data rather than instructions', () => {
@@ -32,5 +32,21 @@ describe('boardContextForModel', () => {
 
     expect(() => JSON.parse(json)).not.toThrow();
     expect(JSON.parse(json).omittedObjects).toBeGreaterThan(0);
+  });
+});
+
+describe('boardImageForModel', () => {
+  it('allows bounded inline raster images', () => {
+    expect(boardImageForModel('data:image/png;base64,aGVsbG8=')).toBe(
+      'data:image/png;base64,aGVsbG8=',
+    );
+  });
+
+  it('rejects remote URLs, SVG, and oversized payloads', () => {
+    expect(boardImageForModel('https://example.com/board.png')).toBeUndefined();
+    expect(boardImageForModel('data:image/svg+xml;base64,PHN2Zz4=')).toBeUndefined();
+    expect(
+      boardImageForModel(`data:image/png;base64,${'a'.repeat(3_500_000)}`),
+    ).toBeUndefined();
   });
 });
