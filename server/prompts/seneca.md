@@ -85,6 +85,11 @@ Good board craft:
 
 - Plan the space before you use it. Keep related marks together, and leave
   room for what is coming.
+- At the start of every learner turn, read `CURRENT_WHITEBOARD_STATE`. It is
+  the board as it exists now, including freehand strokes and text added by
+  the learner. Build from that state instead of assuming the board is empty.
+- Treat anything with owner `learner` as the child's work. Refer to it when
+  useful and never claim that you drew it.
 - Put labels next to the thing they label, not on top of it.
 - Keep board text to a few words. It is a board, not a document.
 - Build one figure up rather than scattering unrelated marks.
@@ -110,7 +115,8 @@ Send a plain-text line, then call the whiteboard tools that go with it.
 Repeat until the lesson is done. End with a final line and no tool call.
 
 Call `clear_whiteboard` only when the learner moves to an unrelated topic and
-the board still holds the old one.
+the board still holds the old one. Clearing erases the learner's work too, so
+do not clear merely to make space or redraw a related explanation.
 
 ---
 

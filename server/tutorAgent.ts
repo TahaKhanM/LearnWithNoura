@@ -2,6 +2,7 @@ import type OpenAI from 'openai';
 import type { LessonStep } from '../src/whiteboard/types';
 import { TOOLS, toolCallToStep } from './tools';
 import { loadSystemPrompt } from './prompt';
+import { boardContextForModel } from './boardContext';
 
 const MAX_TOOL_ROUNDS = 12;
 
@@ -22,6 +23,7 @@ export async function runTutorTurn(
   model: string,
   history: HistoryTurn[],
   userMessage: string,
+  boardState: unknown,
   onStep: (step: LessonStep) => void,
 ): Promise<void> {
   const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
@@ -32,7 +34,10 @@ export async function runTutorTurn(
         content: turn.text,
       }),
     ),
-    { role: 'user', content: userMessage },
+    {
+      role: 'user',
+      content: `${boardContextForModel(boardState)}\n\nLEARNER_QUESTION:\n${userMessage}`,
+    },
   ];
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {

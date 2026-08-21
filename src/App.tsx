@@ -2,12 +2,16 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { ChatPanel } from './chat/ChatPanel';
 import type { Message } from './chat/types';
 import { Whiteboard } from './whiteboard/Whiteboard';
-import type { WhiteboardAction } from './whiteboard/types';
 import { streamLesson } from './agent/tutorClient';
 import { StepQueue, playSteps } from './agent/stepRunner';
 import { cancelSpeech, isSpeechSupported, primeAudio, setSpeechEnabled } from './speech/speech';
 import { MicRecorder, isMicSupported, transcribe } from './speech/mic';
 import type { MicState } from './chat/ChatPanel';
+import {
+  createBoardObject,
+  snapshotBoard,
+  type BoardObject,
+} from './whiteboard/scene';
 import './App.css';
 
 const CHAT_MIN_WIDTH = 260;
@@ -16,7 +20,8 @@ const CHAT_DEFAULT_WIDTH = 340;
 
 function App() {
   const [messages, setMessages] = useState<Message[]>([]);
-  const [whiteboardActions, setWhiteboardActions] = useState<WhiteboardAction[]>([]);
+  const [boardObjects, setBoardObjects] = useState<BoardObject[]>([]);
+  const [activeTutorObjectId, setActiveTutorObjectId] = useState<string | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isThinking, setIsThinking] = useState(false);
   const [soundOn, setSoundOn] = useState(true);
@@ -26,6 +31,8 @@ function App() {
   const [micError, setMicError] = useState<string | null>(null);
   const runIdRef = useRef(0);
   const messagesRef = useRef<Message[]>([]);
+  const boardObjectsRef = useRef<BoardObject[]>([]);
+  const tutorCursorTimerRef = useRef<number | null>(null);
   const isResizingRef = useRef(false);
   const recorderRef = useRef<MicRecorder | null>(null);
   // True between press and release. The first press shows a permission
@@ -50,6 +57,48 @@ function App() {
   const appendMessage = useCallback((message: Message) => {
     messagesRef.current = [...messagesRef.current, message];
     setMessages(messagesRef.current);
+  }, []);
+
+  const replaceBoardObjects = useCallback(
+    (update: BoardObject[] | ((current: BoardObject[]) => BoardObject[])) => {
+      setBoardObjects((current) => {
+        const next = typeof update === 'function' ? update(current) : update;
+        boardObjectsRef.current = next;
+        return next;
+      });
+    },
+    [],
+  );
+
+  const upsertBoardObject = useCallback(
+    (object: BoardObject) => {
+      replaceBoardObjects((current) => {
+        const index = current.findIndex((item) => item.id === object.id);
+        if (index === -1) return [...current, object];
+        const next = [...current];
+        next[index] = object;
+        return next;
+      });
+    },
+    [replaceBoardObjects],
+  );
+
+  const removeBoardObject = useCallback(
+    (id: string) => {
+      replaceBoardObjects((current) => current.filter((object) => object.id !== id));
+    },
+    [replaceBoardObjects],
+  );
+
+  const showTutorCursorFor = useCallback((id: string) => {
+    setActiveTutorObjectId(id);
+    if (tutorCursorTimerRef.current !== null) {
+      window.clearTimeout(tutorCursorTimerRef.current);
+    }
+    tutorCursorTimerRef.current = window.setTimeout(() => {
+      setActiveTutorObjectId(null);
+      tutorCursorTimerRef.current = null;
+    }, 460);
   }, []);
 
   const handleResizeStart = useCallback(() => {
@@ -87,12 +136,12 @@ function App() {
     async (text: string) => {
       const runId = ++runIdRef.current;
       const history = messagesRef.current;
+      const board = snapshotBoard(boardObjectsRef.current);
       const isStale = () => runIdRef.current !== runId;
 
       primeAudio();
       cancelSpeech();
       appendMessage({ role: 'user', text });
-      setWhiteboardActions([]);
       setIsPlaying(true);
       setIsThinking(true);
 
@@ -107,11 +156,14 @@ function App() {
         },
         onWhiteboardAction: (action) => {
           if (isStale()) return;
-          setWhiteboardActions((prev) => [...prev, action]);
+          const object = createBoardObject('tutor', action);
+          upsertBoardObject(object);
+          showTutorCursorFor(object.id);
         },
         onClear: () => {
           if (isStale()) return;
-          setWhiteboardActions([]);
+          replaceBoardObjects([]);
+          setActiveTutorObjectId(null);
         },
         onWaiting: (waiting) => {
           if (isStale()) return;
@@ -121,7 +173,7 @@ function App() {
       });
 
       try {
-        await streamLesson(text, history, {
+        await streamLesson(text, history, board, {
           onStep: (step) => {
             if (isStale()) return;
             queue.push(step);
@@ -142,7 +194,7 @@ function App() {
         }
       }
     },
-    [appendMessage],
+    [appendMessage, replaceBoardObjects, showTutorCursorFor, upsertBoardObject],
   );
 
   const handleTalkStart = useCallback(async () => {
@@ -201,7 +253,15 @@ function App() {
     }
   }, [handleSubmit]);
 
-  useEffect(() => () => recorderRef.current?.release(), []);
+  useEffect(
+    () => () => {
+      recorderRef.current?.release();
+      if (tutorCursorTimerRef.current !== null) {
+        window.clearTimeout(tutorCursorTimerRef.current);
+      }
+    },
+    [],
+  );
 
   return (
     <div className="app">
@@ -221,7 +281,13 @@ function App() {
         onTalkStart={handleTalkStart}
         onTalkEnd={handleTalkEnd}
       />
-      <Whiteboard actions={whiteboardActions} />
+      <Whiteboard
+        objects={boardObjects}
+        activeTutorObjectId={activeTutorObjectId}
+        disabled={isPlaying}
+        onUpsertObject={upsertBoardObject}
+        onRemoveObject={removeBoardObject}
+      />
     </div>
   );
 }

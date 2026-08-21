@@ -4,8 +4,9 @@ import { speak, whenIdle } from '../speech/speech';
 // A beat after a sentence appears before its drawing lands, so the words
 // arrive first and the mark follows, rather than both snapping in together.
 const BEAT_AFTER_CHAT_MS = 380;
-// Marks in the same round belong to one gesture, so they follow closely.
-const BEAT_AFTER_MARK_MS = 220;
+// Let each 450ms stroke and its marker cursor reach the tail before the
+// next mark starts. Grouped tool calls still arrive as one teaching idea.
+const BEAT_AFTER_MARK_MS = 480;
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));

@@ -1,6 +1,7 @@
 import type { LessonStep } from '../whiteboard/types';
 import type { Message } from '../chat/types';
 import { NdjsonParser } from './ndjson';
+import { compactBoardSnapshot, type BoardSnapshot } from '../whiteboard/scene';
 
 interface StreamHandlers {
   onStep: (step: LessonStep) => void;
@@ -13,6 +14,7 @@ interface StreamHandlers {
 export async function streamLesson(
   userMessage: string,
   history: Message[],
+  board: BoardSnapshot,
   handlers: StreamHandlers,
   signal?: AbortSignal,
 ): Promise<void> {
@@ -23,6 +25,7 @@ export async function streamLesson(
     body: JSON.stringify({
       message: userMessage,
       history: history.map((m) => ({ role: m.role, text: m.text })),
+      board: compactBoardSnapshot(board),
     }),
   });
 

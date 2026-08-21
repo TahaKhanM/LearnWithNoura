@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DrawLine, writeText, drawEllipse, clearWhiteboard } from './types';
+import { DrawLine, writeText, drawEllipse, drawPath, clearWhiteboard } from './types';
 
 describe('DrawLine', () => {
   it('builds a drawLine action from coordinates', () => {
@@ -63,5 +63,27 @@ describe('drawEllipse', () => {
 describe('clearWhiteboard', () => {
   it('builds a clear step', () => {
     expect(clearWhiteboard()).toEqual({ type: 'clear' });
+  });
+});
+
+describe('drawPath', () => {
+  it('builds one freehand object from sampled points', () => {
+    expect(
+      drawPath(
+        [
+          { x: 1, y: 2 },
+          { x: 3, y: 4 },
+        ],
+        { color: 'blue', strokeWidth: 4 },
+      ),
+    ).toEqual({
+      type: 'drawPath',
+      points: [
+        { x: 1, y: 2 },
+        { x: 3, y: 4 },
+      ],
+      color: 'blue',
+      strokeWidth: 4,
+    });
   });
 });

@@ -21,6 +21,17 @@ with:
   draws a circle.
 - `clearWhiteboard()`: erases everything currently drawn.
 
+The board is shared with the learner. Its toolbar supports freehand marker
+strokes, placed text and object-level erasing. Agent and learner marks live
+in one scene with stable IDs and ownership metadata. A compact snapshot of
+that scene is sent with each question, so the model can reason from the
+current board without requiring a screenshot. Long freehand paths are sampled
+before they enter model context.
+
+While an agent mark animates on, a small marker follows the tail of its SVG
+path. This cursor is entirely presentational; the model neither positions nor
+sees it.
+
 See `docs/superpowers/specs/2026-08-10-whiteboard-tutor-design.md` (UI/
 coordinate system) and
 `docs/superpowers/specs/2026-08-10-real-agent-backend-design.md` (agent/

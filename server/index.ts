@@ -45,7 +45,11 @@ app.post('/api/tts', handleTts);
 app.post('/api/stt', handleStt);
 
 app.post('/api/tutor', async (req, res) => {
-  const { message, history } = req.body as { message?: string; history?: HistoryTurn[] };
+  const { message, history, board } = req.body as {
+    message?: string;
+    history?: HistoryTurn[];
+    board?: unknown;
+  };
 
   if (typeof message !== 'string' || !message.trim()) {
     res.status(400).json({ error: 'message is required' });
@@ -76,6 +80,7 @@ app.post('/api/tutor', async (req, res) => {
       MODEL,
       Array.isArray(history) ? history : [],
       message,
+      board,
       (step) => send({ type: 'step', step }),
     );
     send({ type: 'done' });
