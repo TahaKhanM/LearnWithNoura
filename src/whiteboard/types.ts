@@ -30,7 +30,24 @@ export interface DrawEllipseAction {
   strokeWidth?: number;
 }
 
-export type WhiteboardAction = DrawLineAction | WriteTextAction | DrawEllipseAction;
+export interface BoardPoint {
+  x: number;
+  y: number;
+}
+
+/** A freehand stroke created with the learner's pen tool. */
+export interface DrawPathAction {
+  type: 'drawPath';
+  points: BoardPoint[];
+  color?: string;
+  strokeWidth?: number;
+}
+
+export type WhiteboardAction =
+  | DrawLineAction
+  | WriteTextAction
+  | DrawEllipseAction
+  | DrawPathAction;
 
 export interface ChatStep {
   type: 'chat';
@@ -78,4 +95,11 @@ export function drawEllipse(
   options?: { color?: string; strokeWidth?: number },
 ): DrawEllipseAction {
   return { type: 'drawEllipse', x, y, rx, ry, ...options };
+}
+
+export function drawPath(
+  points: BoardPoint[],
+  options?: { color?: string; strokeWidth?: number },
+): DrawPathAction {
+  return { type: 'drawPath', points, ...options };
 }
