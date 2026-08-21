@@ -13,7 +13,7 @@ function escapeXml(value: string): string {
 /**
  * Re-renders the canonical scene rather than photographing the DOM. The
  * resulting image has the board and its marks, but no toolbar, text editor,
- * or animated Seneca cursor.
+ * or other interface chrome.
  */
 export function boardSnapshotToSvg(snapshot: BoardSnapshot): string {
   const marks = snapshot.objects.map(({ action }) => {

@@ -12,7 +12,6 @@ function renderBoard(
   const view = render(
     <Whiteboard
       objects={[]}
-      activeTutorObjectId={null}
       onUpsertObject={onUpsertObject}
       onRemoveObject={onRemoveObject}
       {...overrides}
@@ -87,22 +86,5 @@ describe('Whiteboard toolbar', () => {
     fireEvent.pointerDown(hitTarget as Element);
 
     expect(onRemoveObject).toHaveBeenCalledWith('line-1');
-  });
-});
-
-describe('Seneca drawing cursor', () => {
-  it('follows the active tutor stroke without becoming a board object', () => {
-    const object = createBoardObject('tutor', DrawLine(10, 20, 30, 40), 'line-1');
-    const { container } = renderBoard({
-      objects: [object],
-      activeTutorObjectId: 'line-1',
-    });
-
-    expect(container.querySelectorAll('[data-board-object]')).toHaveLength(1);
-    expect(
-      container
-        .querySelector('.whiteboard__tutor-cursor animateMotion')
-        ?.getAttribute('path'),
-    ).toBe('M 10 20 L 30 40');
   });
 });

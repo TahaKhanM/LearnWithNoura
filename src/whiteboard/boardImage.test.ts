@@ -27,6 +27,5 @@ describe('boardSnapshotToSvg', () => {
     expect(svg).toContain('a &lt; b &amp; c');
     expect(svg).toContain('id="grid"');
     expect(svg).not.toContain('toolbar');
-    expect(svg).not.toContain('tutor-cursor');
   });
 });

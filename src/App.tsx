@@ -22,7 +22,6 @@ const CHAT_DEFAULT_WIDTH = 340;
 function App() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [boardObjects, setBoardObjects] = useState<BoardObject[]>([]);
-  const [activeTutorObjectId, setActiveTutorObjectId] = useState<string | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isThinking, setIsThinking] = useState(false);
   const [soundOn, setSoundOn] = useState(true);
@@ -35,7 +34,6 @@ function App() {
   const boardObjectsRef = useRef<BoardObject[]>([]);
   const visualRevisionRef = useRef(0);
   const sentVisualRevisionRef = useRef(0);
-  const tutorCursorTimerRef = useRef<number | null>(null);
   const isResizingRef = useRef(false);
   const recorderRef = useRef<MicRecorder | null>(null);
   // True between press and release. The first press shows a permission
@@ -116,17 +114,6 @@ function App() {
     [removeBoardObject],
   );
 
-  const showTutorCursorFor = useCallback((id: string) => {
-    setActiveTutorObjectId(id);
-    if (tutorCursorTimerRef.current !== null) {
-      window.clearTimeout(tutorCursorTimerRef.current);
-    }
-    tutorCursorTimerRef.current = window.setTimeout(() => {
-      setActiveTutorObjectId(null);
-      tutorCursorTimerRef.current = null;
-    }, 460);
-  }, []);
-
   const handleResizeStart = useCallback(() => {
     isResizingRef.current = true;
     document.body.classList.add('resizing-chat');
@@ -196,12 +183,10 @@ function App() {
           if (isStale()) return;
           const object = createBoardObject('tutor', action);
           upsertBoardObject(object);
-          showTutorCursorFor(object.id);
         },
         onClear: () => {
           if (isStale()) return;
           replaceBoardObjects([]);
-          setActiveTutorObjectId(null);
         },
         onWaiting: (waiting) => {
           if (isStale()) return;
@@ -238,7 +223,7 @@ function App() {
         }
       }
     },
-    [appendMessage, replaceBoardObjects, showTutorCursorFor, upsertBoardObject],
+    [appendMessage, replaceBoardObjects, upsertBoardObject],
   );
 
   const handleTalkStart = useCallback(async () => {
@@ -297,15 +282,7 @@ function App() {
     }
   }, [handleSubmit]);
 
-  useEffect(
-    () => () => {
-      recorderRef.current?.release();
-      if (tutorCursorTimerRef.current !== null) {
-        window.clearTimeout(tutorCursorTimerRef.current);
-      }
-    },
-    [],
-  );
+  useEffect(() => () => recorderRef.current?.release(), []);
 
   return (
     <div className="app">
@@ -327,7 +304,6 @@ function App() {
       />
       <Whiteboard
         objects={boardObjects}
-        activeTutorObjectId={activeTutorObjectId}
         disabled={isPlaying}
         onUpsertObject={upsertLearnerBoardObject}
         onRemoveObject={removeLearnerBoardObject}

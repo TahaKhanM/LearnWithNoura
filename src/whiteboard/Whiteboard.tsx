@@ -1,13 +1,12 @@
 import { useRef, useState } from 'react';
 import { BOARD_WIDTH, BOARD_HEIGHT, drawPath, writeText, type BoardPoint } from './types';
 import { createBoardObject, nextBoardObjectId, type BoardObject } from './scene';
-import { cursorPathForAction, pointsToPath } from './geometry';
+import { pointsToPath } from './geometry';
 import { WhiteboardToolbar, type WhiteboardTool } from './WhiteboardToolbar';
 import './Whiteboard.css';
 
 interface WhiteboardProps {
   objects: BoardObject[];
-  activeTutorObjectId: string | null;
   disabled?: boolean;
   onUpsertObject: (object: BoardObject) => void;
   onRemoveObject: (id: string) => void;
@@ -52,27 +51,6 @@ function eventPoint(
       Math.min(BOARD_HEIGHT, ((event.clientY - rect.top) / rect.height) * BOARD_HEIGHT),
     ),
   };
-}
-
-function TutorMarkerCursor({ object }: { object: BoardObject }) {
-  return (
-    <g className="whiteboard__tutor-cursor" aria-hidden="true">
-      <animateMotion
-        dur="450ms"
-        fill="freeze"
-        path={cursorPathForAction(object.action)}
-        calcMode="spline"
-        keyTimes="0;1"
-        keySplines="0.65 0 0.35 1"
-      />
-      <circle className="whiteboard__tutor-cursor-halo" r="12" />
-      <g transform="rotate(-38)">
-        <path className="whiteboard__marker-body" d="M0 0-6-14-5-46Q-5-51 0-51H8Q13-51 13-46L7-14Z" />
-        <path className="whiteboard__marker-band" d="M-5-34H12V-25H-5Z" />
-        <path className="whiteboard__marker-nib" d="m0 0-6-14H7Z" />
-      </g>
-    </g>
-  );
 }
 
 interface BoardMarkProps {
@@ -202,7 +180,6 @@ interface TextEditor {
 
 export function Whiteboard({
   objects,
-  activeTutorObjectId,
   disabled = false,
   onUpsertObject,
   onRemoveObject,
@@ -305,9 +282,6 @@ export function Whiteboard({
     setTextDraft('');
   };
 
-  const activeTutorObject =
-    objects.find((object) => object.id === activeTutorObjectId && object.owner === 'tutor') ?? null;
-
   return (
     <div className="whiteboard">
       <div className="whiteboard__surface">
@@ -347,7 +321,6 @@ export function Whiteboard({
             />
           ))}
 
-          {activeTutorObject && <TutorMarkerCursor key={activeTutorObject.id} object={activeTutorObject} />}
         </svg>
 
         {textEditor && (

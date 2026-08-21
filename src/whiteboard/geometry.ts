@@ -1,4 +1,4 @@
-import type { BoardPoint, WhiteboardAction } from './types';
+import type { BoardPoint } from './types';
 
 export function pointsToPath(points: BoardPoint[]): string {
   if (points.length === 0) return '';
@@ -13,26 +13,4 @@ export function pointsToPath(points: BoardPoint[]): string {
   const last = points.at(-1) as BoardPoint;
   commands.push(`L ${last.x} ${last.y}`);
   return commands.join(' ');
-}
-
-/** Motion path followed by the purely-presentational Seneca marker. */
-export function cursorPathForAction(action: WhiteboardAction): string {
-  if (action.type === 'drawLine') {
-    return `M ${action.x1} ${action.y1} L ${action.x2} ${action.y2}`;
-  }
-  if (action.type === 'drawEllipse') {
-    return [
-      `M ${action.x + action.rx} ${action.y}`,
-      `A ${action.rx} ${action.ry} 0 1 1 ${action.x - action.rx} ${action.y}`,
-      `A ${action.rx} ${action.ry} 0 1 1 ${action.x + action.rx} ${action.y}`,
-    ].join(' ');
-  }
-  if (action.type === 'writeText') {
-    const width = Math.max(
-      action.fontSize ?? 20,
-      Math.round(action.str.length * (action.fontSize ?? 20) * 52) / 100,
-    );
-    return `M ${action.x} ${action.y} L ${action.x + width} ${action.y}`;
-  }
-  return pointsToPath(action.points);
 }

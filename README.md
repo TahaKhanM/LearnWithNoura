@@ -33,10 +33,6 @@ interpret what freehand strokes depict while the structured snapshot grounds
 it with exact coordinates, text, colours and ownership. Text-only turns do
 not resend an unchanged image.
 
-While an agent mark animates on, a small marker follows the tail of its SVG
-path. This cursor is entirely presentational; the model neither positions nor
-sees it.
-
 See `docs/superpowers/specs/2026-08-10-whiteboard-tutor-design.md` (UI/
 coordinate system) and
 `docs/superpowers/specs/2026-08-10-real-agent-backend-design.md` (agent/

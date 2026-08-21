@@ -228,47 +228,10 @@
   color: var(--ink-faint);
 }
 
-/*
- * This marker is presentation only: it follows the same SVG geometry and
- * timing as the newest tutor mark. It never enters model state.
- */
-.whiteboard__tutor-cursor {
-  pointer-events: none;
-  filter: drop-shadow(0 3px 3px rgba(38, 35, 31, 0.22));
-  animation: tutor-cursor-in-out 0.45s linear forwards;
-}
-
-.whiteboard__tutor-cursor-halo {
-  fill: rgba(44, 91, 224, 0.1);
-  stroke: rgba(44, 91, 224, 0.18);
-  stroke-width: 1;
-}
-
-.whiteboard__marker-body {
-  fill: #f8f6ef;
-  stroke: var(--ink);
-  stroke-width: 1.5;
-  stroke-linejoin: round;
-}
-
-.whiteboard__marker-band {
-  fill: var(--blue);
-}
-
-.whiteboard__marker-nib {
-  fill: var(--ink);
-}
-
 @keyframes stroke-on {
   to {
     stroke-dashoffset: 0;
   }
-}
-
-@keyframes tutor-cursor-in-out {
-  0% { opacity: 0; }
-  7%, 82% { opacity: 1; }
-  100% { opacity: 0; }
 }
 
 @keyframes mark-in {
@@ -290,9 +253,6 @@
   }
   .whiteboard__text--animated {
     animation: none;
-  }
-  .whiteboard__tutor-cursor {
-    display: none;
   }
 }
 
