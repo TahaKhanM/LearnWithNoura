@@ -1,0 +1,99 @@
+.board__svg {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: block;
+  touch-action: none;
+  user-select: none;
+}
+
+.board__svg--draw {
+  cursor: crosshair;
+}
+
+.board__svg--erase {
+  cursor: cell;
+}
+
+.board__stroke,
+.board__text {
+  pointer-events: none;
+}
+
+.board__katex {
+  overflow: visible;
+  pointer-events: none;
+}
+
+.board__katex > div {
+  display: inline-block;
+  line-height: 1.3;
+}
+
+.board__erase-target {
+  fill: transparent;
+  stroke: none;
+  pointer-events: all;
+}
+
+.board__item--erasable:hover .board__stroke,
+.board__item--erasable:hover .board__text {
+  opacity: 0.45;
+}
+
+/* The tutor's pen: a nib that rides the live stroke. */
+.board__pen {
+  opacity: 0;
+  transition: opacity 0.4s ease;
+  pointer-events: none;
+}
+
+.board__pen--active {
+  opacity: 1;
+  transition: opacity 0.12s ease;
+}
+
+.board__pen-dot {
+  fill: rgba(44, 91, 224, 0.35);
+}
+
+.board__pen-body {
+  fill: #26231f;
+  stroke: #fcfbf7;
+  stroke-width: 1;
+}
+
+/* Highlight halo: a marker circled around the thing being discussed. */
+.board__highlight {
+  fill: rgba(240, 162, 39, 0.14);
+  stroke: #f0a227;
+  stroke-width: 3;
+  animation: board-highlight 2.4s ease-out forwards;
+  pointer-events: none;
+}
+
+@keyframes board-highlight {
+  0% {
+    opacity: 0;
+    transform: scale(1.03);
+    transform-origin: center;
+    transform-box: fill-box;
+  }
+  12% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  70% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .board__highlight {
+    animation: none;
+    opacity: 0.85;
+  }
+}

@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { RouterProvider, useRouter } from './router';
+import { BoardHarness } from './dev/BoardHarness';
 import { ChatPanel } from './chat/ChatPanel';
 import type { Message } from './chat/types';
 import { Whiteboard } from './whiteboard/Whiteboard';
@@ -20,6 +22,20 @@ const CHAT_MAX_WIDTH = 800;
 const CHAT_DEFAULT_WIDTH = 340;
 
 function App() {
+  return (
+    <RouterProvider>
+      <Routes />
+    </RouterProvider>
+  );
+}
+
+function Routes() {
+  const { path } = useRouter();
+  if (path === '/dev/board') return <BoardHarness />;
+  return <LegacyApp />;
+}
+
+function LegacyApp() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [boardObjects, setBoardObjects] = useState<BoardObject[]>([]);
   const [isPlaying, setIsPlaying] = useState(false);
