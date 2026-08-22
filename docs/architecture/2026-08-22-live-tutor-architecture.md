@@ -88,6 +88,51 @@ gitignored. Children, sessions, session events, evidence. Local demo:
 durable across restarts. A deployed serverless preview would need a managed
 DB; documented as a limitation.
 
+## Turn discipline (what makes interruption feel instant)
+
+- The client runs an energy gate on the echo-cancelled mic stream: clear
+  speech over the tutor's voice stops playback locally (measured ≤1ms)
+  before the server's semantic VAD confirms (~150–170ms).
+- Every audio delta, caption delta, and board-op batch carries its
+  response id; a killed response's late events are dropped on arrival.
+- Board ops are stamped with "how much audio existed when the model said
+  this" and released when the playback clock reaches that point, so marks
+  land with the words about them — and unreleased marks die with the
+  interruption.
+- Board-op events persist as *unreleased* until the client confirms the
+  child saw them; a refresh replays exactly what was on screen (verified:
+  a stormy session replayed 4/4 items where the naive log held 10).
+- Truncation reports the exact heard milliseconds per spoken item, so the
+  model's memory matches the child's ears.
+
+## Fallback ladder (all paths exercised in a real browser)
+
+1. Realtime + mic → full voice loop.
+2. Mic denied → typing in, voice out. UI says the mic is blocked.
+3. Upstream failing → 4 reconnect attempts → labelled captions-only text
+   mode over HTTP, same board language, same session store.
+4. No API key → home screen refuses to start lessons, with instructions.
+
+## Measured results (local, 2026-08-23)
+
+- Typed ask → first audible audio: **750ms** (session metric).
+- Start pressed → first caption: **2.4–3.5s** across e2e runs.
+- Spoken barge-in (synthesized-speech fake mic) → local silence:
+  **≤1ms**; item truncated at the exact heard offset (e.g. 6477ms).
+- Realtime probe: first audio ~0.9–1.4s from connect; `response.cancel`
+  acknowledged in ~150–170ms.
+
+## Unseen-topic matrix (run through the real pipeline, screenshots kept)
+
+| Topic | Result |
+| --- | --- |
+| Triangle angle sum (spoken barge-in run) | Triangle + angle arcs + straight-line reference; adapted after interruption; evidence recorded |
+| Reading a line graph | Real axes, ticks, plotted data with dots, labels |
+| Water cycle | Box/label process build-up (connectors arrive as the flow is narrated) |
+| Metaphor vs simile | Colour-coded side-by-side comparison boxes |
+| Three quarters | Chocolate-bar fraction model, shaded 3 of 4 |
+| "Why is it brave to admit a mistake?" (no natural diagram) | Chose a small box-flow structure instead of forcing a picture |
+
 ## Out of scope (clean seams left)
 
 WhatsApp/notifications (event boundary = session summary row), billing,
