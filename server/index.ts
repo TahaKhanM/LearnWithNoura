@@ -1,103 +1,105 @@
 import { config } from 'dotenv';
+import { createServer } from 'node:http';
 import express from 'express';
 import OpenAI from 'openai';
-import { runTutorTurn, type HistoryTurn } from './tutorAgent';
-import { handleStt, handleTts, isVoiceConfigured } from './voice';
-import { assertPromptReadable } from './prompt';
+import { WebSocketServer } from 'ws';
+import { getDb } from './store/db';
+import { Repo } from './store/repo';
+import { createApi } from './api';
+import { connectRealtimeProxy } from './realtime/proxy';
+import { assertRealtimePromptReadable } from './realtime/instructions';
+import { runFallbackTurn } from './fallbackTutor';
 
 // override: true so .env is authoritative even if a stale OPENAI_API_KEY
 // is already exported in the parent shell (e.g. via ~/.zshrc).
 config({ override: true });
 
 const PORT = Number(process.env.PORT) || 8787;
-const MODEL = process.env.OPENAI_MODEL || 'gpt-5.6-terra';
+const REALTIME_MODEL = process.env.OPENAI_REALTIME_MODEL || 'gpt-realtime-2.1';
+const TEXT_MODEL = process.env.OPENAI_MODEL || 'gpt-5.6-terra';
+const API_KEY = process.env.OPENAI_API_KEY;
 
-if (!process.env.OPENAI_API_KEY) {
-  console.error('Missing OPENAI_API_KEY in environment. Set it in .env.');
-  process.exit(1);
+if (!API_KEY) {
+  // The app still starts so the interface can explain what is missing,
+  // rather than presenting a dead page.
+  console.warn('No OPENAI_API_KEY set — the tutor cannot run until it is configured in .env.');
 }
 
-try {
-  assertPromptReadable();
-} catch (err) {
-  console.error('Could not read Seneca\'s system prompt:', err);
-  process.exit(1);
-}
+assertRealtimePromptReadable();
 
-const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const repo = new Repo(getDb());
+const openai = API_KEY ? new OpenAI({ apiKey: API_KEY }) : null;
 
 const app = express();
-// A conditional inline board image can be larger than Express's 100KB
-// default. The server validates its type and bounds it before model use.
-app.use(express.json({ limit: '4mb' }));
-// Recordings arrive as an opaque audio body, so they bypass the JSON parser.
-app.use('/api/stt', express.raw({ type: 'audio/*', limit: '25mb' }));
+app.use(express.json({ limit: '1mb' }));
+app.use('/api', createApi(repo, openai, TEXT_MODEL));
 
-if (!isVoiceConfigured()) {
-  console.warn('No ELEVENLABS_API_KEY set. The tutor will run silently.');
-}
-
-// Tells the client whether to offer voice at all, so the UI reflects the
-// server's actual capability rather than guessing.
-app.get('/api/voice/status', (_req, res) => {
-  res.json({ enabled: isVoiceConfigured() });
-});
-
-app.post('/api/tts', handleTts);
-app.post('/api/stt', handleStt);
-
-app.post('/api/tutor', async (req, res) => {
-  const { message, history, board, boardImage } = req.body as {
-    message?: string;
-    history?: HistoryTurn[];
-    board?: unknown;
-    boardImage?: unknown;
-  };
-
-  if (typeof message !== 'string' || !message.trim()) {
-    res.status(400).json({ error: 'message is required' });
+// Captions-only fallback for when the realtime connection is unavailable.
+app.post('/api/fallback-turn', async (req, res) => {
+  if (!openai) {
+    res.status(503).json({ error: 'The tutor is not configured (missing OPENAI_API_KEY).' });
+    return;
+  }
+  const { sessionId, text } = req.body as { sessionId?: unknown; text?: unknown };
+  if (typeof sessionId !== 'string' || typeof text !== 'string' || !text.trim()) {
+    res.status(400).json({ error: 'sessionId and text are required' });
     return;
   }
 
-  // Newline delimited JSON, one step per line, flushed as the model
-  // produces it. The client can start drawing the first line while the
-  // model is still deciding on the second.
   res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
   res.setHeader('Cache-Control', 'no-cache, no-transform');
-  res.setHeader('X-Accel-Buffering', 'no');
   res.flushHeaders();
 
   let aborted = false;
   req.on('aborted', () => {
     aborted = true;
   });
-
-  function send(payload: unknown) {
-    if (aborted || res.writableEnded) return;
-    res.write(JSON.stringify(payload) + '\n');
-  }
+  const send = (payload: unknown) => {
+    if (!aborted && !res.writableEnded) res.write(JSON.stringify(payload) + '\n');
+  };
 
   try {
-    await runTutorTurn(
-      client,
-      MODEL,
-      Array.isArray(history) ? history : [],
-      message,
-      board,
-      boardImage,
-      (step) => send({ type: 'step', step }),
-    );
+    await runFallbackTurn(openai, TEXT_MODEL, repo, sessionId, text.trim(), send);
     send({ type: 'done' });
   } catch (err) {
-    console.error('Tutor turn failed:', err);
-    // Headers are already out, so the failure has to travel in the stream
-    // rather than as a status code.
-    send({ type: 'error', message: 'The tutor model request failed.' });
+    console.error('Fallback turn failed:', err);
+    send({ type: 'error', message: 'The tutor request failed.' });
   } finally {
     if (!res.writableEnded) res.end();
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`Seneca tutor backend listening on http://localhost:${PORT}`);
+const server = createServer(app);
+const wss = new WebSocketServer({ noServer: true });
+
+server.on('upgrade', (request, socket, head) => {
+  const url = new URL(request.url ?? '/', 'http://localhost');
+  if (url.pathname !== '/ws/lesson') {
+    socket.destroy();
+    return;
+  }
+  const sessionId = url.searchParams.get('session');
+  wss.handleUpgrade(request, socket, head, (client) => {
+    if (!API_KEY || !sessionId) {
+      client.send(
+        JSON.stringify({
+          type: 'error',
+          message: API_KEY ? 'Missing session id.' : 'The tutor is not configured on this server.',
+        }),
+      );
+      client.close(4400);
+      return;
+    }
+    connectRealtimeProxy(client, {
+      apiKey: API_KEY,
+      model: REALTIME_MODEL,
+      repo,
+      sessionId,
+      log: (line) => console.log(`[realtime] ${line}`),
+    });
+  });
+});
+
+server.listen(PORT, () => {
+  console.log(`Seneca backend listening on http://localhost:${PORT}`);
 });

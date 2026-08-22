@@ -1,10 +1,2 @@
-.app {
-  display: flex;
-  width: 100vw;
-  height: 100vh;
-  background: var(--rail);
-}
-
-@media (max-width: 720px) {
-  .app { flex-direction: column; }
-}
+/* Screen-level layout lives with each page; nothing global is needed
+   beyond the tokens in index.css. */

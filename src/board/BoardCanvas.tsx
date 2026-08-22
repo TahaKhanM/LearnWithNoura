@@ -1,7 +1,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import katex from 'katex';
 import 'katex/dist/katex.min.css';
-import { BOARD_W, BOARD_H, type ShapeSpec, type Vec } from '../../shared/boardOps';
+import { BOARD_W, BOARD_H, type Vec } from '../../shared/boardOps';
 import { compileScene, type CompiledItem, type RenderNode, type BBox } from './compile';
 import type { SceneState } from './scene';
 import { BoardAnimator, hideForAnimation, type PenPosition } from './animator';
@@ -333,7 +333,3 @@ export function BoardCanvas({
   );
 }
 
-/** Learner strokes become durable scene specs through this helper. */
-export function strokeSpec(points: Vec[]): ShapeSpec {
-  return { kind: 'path', points };
-}

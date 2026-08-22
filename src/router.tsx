@@ -26,9 +26,9 @@ export function RouterProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const navigate = useCallback((to: string) => {
-    if (to === window.location.pathname) return;
     window.history.pushState(null, '', to);
-    setPath(to);
+    // Track the pathname only, so "/parent?session=x" still matches "/parent".
+    setPath(window.location.pathname);
   }, []);
 
   return <RouterContext.Provider value={{ path, navigate }}>{children}</RouterContext.Provider>;
