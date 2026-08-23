@@ -113,7 +113,7 @@ Line references are to this working revision and are refreshed at handoff.
 | Environment | URL / deployment ID | SHA | Health/version/REST/WSS/log/persistence result |
 | --- | --- | --- | --- |
 | Preview | `https://noura-preview-mtk2982007.vercel.app` (final deployment ID in handoff) | `/version` must match final HEAD | Standard-protected; Home/deep routes/config/version pass; health 503 degraded; lessons disabled; logs clean |
-| Public v0 | `https://learnwithnoura.com` / `dpl_k7yESkTnLV7jBNavcqrgwdgCa4ff` | `9a92844bcf1d17d7679b9ef18b6a38c8f1ca2e1a` | Health/version/config pass; nested REST and Parent persistence pass; WSS ready/live PCM/interruption pass; fallback tools/board/evidence/summary/immutable end pass; synthetic rows cleaned |
+| Public v0 | `https://learnwithnoura.com` / `dpl_2YhuiyzmUqyX53J7XTqkPiyrpWfu` | `c8963e7c9968d2a89ca523662dae96d2fcb4b02e` | Health/version/config pass; nested REST and Parent persistence pass; WSS ready/live PCM pass; short loud tone did not cancel output; fused speech interruption tests pass; fallback tools/board/evidence/summary/immutable end pass; named smoke row cleaned |
 | Full Production | — | — | Real-user auth/privacy/ZDR/CA/target-hardware gates remain blocked |
 
 ## Manual/recorded evidence still required
