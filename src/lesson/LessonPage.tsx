@@ -9,9 +9,11 @@ import {
 import { PALETTE, type BoardOp, type Vec } from '../../shared/boardOps';
 import type { GenerationIdentity } from '../../shared/runtimeProtocol';
 import { emptyScene, describeScene, type SceneState } from '../board/scene';
-import { BoardCanvas, type BoardHighlight, type BoardTool } from '../board/BoardCanvas';
+import { BoardCanvas, type BoardCaptureOptions, type BoardHighlight, type BoardTool } from '../board/BoardCanvas';
 import type { BoardAnimator } from '../board/animator';
 import { BoardSceneCoordinator } from '../board/sceneCoordinator';
+import { groupItemCount, sceneForGroup } from '../board/sceneGroups';
+import { analyzeLearnerBoardChange, analysisFocusBox } from '../board/learnerSketch';
 import { deriveSemanticViewports } from '../board/semanticViewport';
 import { RealtimeSession } from './realtimeSession';
 import { Avatar } from './Avatar';
@@ -53,7 +55,12 @@ export function LessonPage({ sessionId }: LessonPageProps) {
   const boardEventTimer = useRef<number | null>(null);
   const pendingBoardNote = useRef<string[]>([]);
   const pendingBoardOps = useRef<BoardOp[]>([]);
-  const captureBoard = useRef<(() => Promise<string | null>) | null>(null);
+  const captureBoard = useRef<((options?: BoardCaptureOptions) => Promise<string | null>) | null>(null);
+  const boardSignalTimer = useRef<number | null>(null);
+  const highlightTimer = useRef<number | null>(null);
+  const [boardActivity, setBoardActivity] = useState<'idle' | 'noura' | 'learner'>('idle');
+  const activeVisualGroupRef = useRef<string | undefined>(undefined);
+  const visualGroupsRef = useRef<Array<{ id: string; label: string }>>([]);
 
   const session = useMemo(() => new RealtimeSession(sessionId), [sessionId]);
   const snap = useSyncExternalStore(session.subscribe, session.getSnapshot);
@@ -64,6 +71,11 @@ export function LessonPage({ sessionId }: LessonPageProps) {
     ),
     [session],
   );
+
+  useEffect(() => {
+    activeVisualGroupRef.current = activeVisualGroupId;
+    visualGroupsRef.current = visualGroups;
+  }, [activeVisualGroupId, visualGroups]);
 
   useEffect(() => {
     let cancelled = false;
@@ -83,11 +95,28 @@ export function LessonPage({ sessionId }: LessonPageProps) {
     };
   }, [sessionId]);
 
+  const registerVisualGroup = useCallback((cue?: VisualCueMetadata) => {
+    if (!cue?.semanticObjectId) return;
+    setVisualGroups((current) => current.some((group) => group.id === cue.semanticObjectId)
+      ? current.map((group) => group.id === cue.semanticObjectId ? { ...group, label: cue.groupLabel ?? group.label } : group)
+      : [...current, { id: cue.semanticObjectId as string, label: cue.groupLabel ?? cue.semanticObjectId as string }].slice(-12));
+    setActiveVisualGroupId(cue.semanticObjectId);
+    setFocusIndex(0);
+    setBoardOverview(false);
+  }, []);
+
+  const signalBoardActivity = useCallback((kind: 'noura' | 'learner', durationMs = 1_500) => {
+    setBoardActivity(kind);
+    if (boardSignalTimer.current !== null) window.clearTimeout(boardSignalTimer.current);
+    boardSignalTimer.current = window.setTimeout(() => setBoardActivity('idle'), durationMs);
+  }, []);
+
   const applyTutorOps = useCallback((ops: BoardOp[], animate: boolean, identity: GenerationIdentity, cue?: VisualCueMetadata) => {
     if (!animate) {
-      const result = boardState.current.applyReplay(ops, 'tutor');
+      const result = boardState.current.applyReplay(ops, 'tutor', cue?.semanticObjectId);
       if (!result) return Promise.resolve(false);
       setScene(result.scene);
+      registerVisualGroup(cue);
       requestAnimationFrame(() => animator.current?.finishAll());
       return Promise.resolve(true);
     }
@@ -96,7 +125,7 @@ export function LessonPage({ sessionId }: LessonPageProps) {
       // The cue has crossed the heard-audio boundary, so it is now true on the
       // visible board. Promote it before animation; learner input and ordinary
       // re-renders must build on this state rather than an older checkpoint.
-      const applied = boardState.current.applyTutorCheckpoint(ops);
+      const applied = boardState.current.applyTutorCheckpoint(ops, cue?.semanticObjectId);
       if (!applied) return false;
       const candidate = applied.scene;
       setScene(candidate);
@@ -104,14 +133,12 @@ export function LessonPage({ sessionId }: LessonPageProps) {
         const center = centerForItemIds(candidate, applied.highlighted);
         if (center) offerAttention(attention, identity, 'focused_object', center);
         setHighlights(applied.highlighted.map((id) => ({ id, nonce: ++highlightNonce.current })));
+        if (highlightTimer.current !== null) window.clearTimeout(highlightTimer.current);
+        highlightTimer.current = window.setTimeout(() => setHighlights([]), 1_300);
       }
       if (cue?.semanticObjectId) {
-        setVisualGroups((current) => current.some((group) => group.id === cue.semanticObjectId)
-          ? current
-          : [...current, { id: cue.semanticObjectId as string, label: cue.groupLabel ?? cue.semanticObjectId as string }].slice(-8));
-        setActiveVisualGroupId(cue.semanticObjectId);
-        setFocusIndex(0);
-        setBoardOverview(false);
+        registerVisualGroup(cue);
+        signalBoardActivity('noura');
         const center = centerForSemanticObject(candidate, cue.semanticObjectId);
         offerAttention(attention, identity, 'semantic_object', center, cue.semanticObjectId);
       }
@@ -122,12 +149,12 @@ export function LessonPage({ sessionId }: LessonPageProps) {
     });
     visualChain.current = transaction.catch(() => false);
     return transaction;
-  }, [session, attention]);
+  }, [session, attention, registerVisualGroup, signalBoardActivity]);
 
   useEffect(() => {
     session.onBoardOps = applyTutorOps;
-    session.onLearnerBoardReplay = (ops) => {
-      const result = boardState.current.applyReplay(ops, 'learner');
+    session.onLearnerBoardReplay = (ops, semanticGroupId) => {
+      const result = boardState.current.applyReplay(ops, 'learner', semanticGroupId);
       if (!result) return;
       setScene(result.scene);
     };
@@ -146,6 +173,8 @@ export function LessonPage({ sessionId }: LessonPageProps) {
     return () => {
       session.end();
       if (boardEventTimer.current !== null) window.clearTimeout(boardEventTimer.current);
+      if (boardSignalTimer.current !== null) window.clearTimeout(boardSignalTimer.current);
+      if (highlightTimer.current !== null) window.clearTimeout(highlightTimer.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session, applyTutorOps, attention]);
@@ -170,10 +199,11 @@ export function LessonPage({ sessionId }: LessonPageProps) {
 
   const handleLearnerStroke = useCallback(
     (points: Vec[]) => {
-      const id = `sketch-${Date.now().toString(36)}`;
+      const id = `sketch-${crypto.randomUUID()}`;
       const op: BoardOp = { op: 'add', id, color: penColor, spec: { kind: 'path', points } };
-      const result = boardState.current.applyLearner([op]);
+      const result = boardState.current.applyLearner([op], activeVisualGroupId);
       setScene(result.scene);
+      signalBoardActivity('learner', 1_800);
       const [x, y] = points[Math.floor(points.length / 2)];
       pendingBoardNote.current.push(
         `a freehand stroke around (${Math.round(x)}, ${Math.round(y)})`,
@@ -181,7 +211,7 @@ export function LessonPage({ sessionId }: LessonPageProps) {
       pendingBoardOps.current.push(op);
       scheduleBoardNote();
     },
-    [penColor], // eslint-disable-line react-hooks/exhaustive-deps
+    [penColor, activeVisualGroupId, signalBoardActivity], // eslint-disable-line react-hooks/exhaustive-deps
   );
 
   const handleLearnerErase = useCallback((id: string) => {
@@ -202,11 +232,18 @@ export function LessonPage({ sessionId }: LessonPageProps) {
       pendingBoardNote.current = [];
       pendingBoardOps.current = [];
       if (notes.length === 0 || ops.length === 0) return;
-      const imageDataUrl = await captureBoard.current?.() ?? null;
+      const semanticGroupId = activeVisualGroupRef.current;
+      const visible = sceneForGroup(boardState.current.current, semanticGroupId);
+      const analysis = analyzeLearnerBoardChange(visible, ops, semanticGroupId);
+      const imageDataUrl = await captureBoard.current?.({ focusBox: analysisFocusBox(analysis) }) ?? null;
+      const semanticGroupLabel = visualGroupsRef.current.find((group) => group.id === semanticGroupId)?.label;
       session.sendBoardEvent({
-        description: `${notes.join('; ')}. ${describeScene(boardState.current.current)}`,
+        description: `${notes.join('; ')}. ${describeScene(visible)}`,
         ops,
         imageDataUrl,
+        analysis,
+        ...(semanticGroupId ? { semanticObjectId: semanticGroupId } : {}),
+        ...(semanticGroupLabel ? { semanticGroupLabel } : {}),
       });
     }, 650);
   }, [session]);
@@ -224,7 +261,7 @@ export function LessonPage({ sessionId }: LessonPageProps) {
     animator.current = value;
   }, []);
 
-  const handleCaptureReady = useCallback((capture: () => Promise<string | null>) => {
+  const handleCaptureReady = useCallback((capture: (options?: BoardCaptureOptions) => Promise<string | null>) => {
     captureBoard.current = capture;
   }, []);
 
@@ -267,7 +304,10 @@ export function LessonPage({ sessionId }: LessonPageProps) {
 
   const lastChildLine = [...snap.captions].reverse().find((c) => c.role === 'child');
   const lastTutorLine = [...snap.captions].reverse().find((c) => c.role === 'tutor');
-  const semanticViewCount = deriveSemanticViewports(scene, activeVisualGroupId, highlights.map((highlight) => highlight.id)).length;
+  const visibleScene = useMemo(() => sceneForGroup(scene, activeVisualGroupId), [scene, activeVisualGroupId]);
+  const activeVisualGroup = visualGroups.find((group) => group.id === activeVisualGroupId);
+  const semanticViewCount = deriveSemanticViewports(visibleScene, activeVisualGroupId, highlights.map((highlight) => highlight.id)).length;
+  const activeBoardItemCount = groupItemCount(scene, activeVisualGroupId);
 
   const statusLabel =
     snap.phase === 'connecting'
@@ -328,6 +368,16 @@ export function LessonPage({ sessionId }: LessonPageProps) {
             Now: {snap.lessonState.activeConcept}
           </span>
         )}
+        {activeVisualGroup && (
+          <span className={`lesson__board-context lesson__board-context--${boardActivity}`} role="status" aria-live="polite" aria-atomic="true">
+            <span className="lesson__board-context-dot" aria-hidden="true" />
+            <strong>Board</strong>
+            <span>{activeVisualGroup.label}</span>
+            <span className="lesson__board-context-activity">
+              {boardActivity === 'noura' ? 'Noura is adding' : boardActivity === 'learner' ? 'Sharing your mark' : `${activeBoardItemCount} ${activeBoardItemCount === 1 ? 'object' : 'objects'}`}
+            </span>
+          </span>
+        )}
         <span className="lesson__spacer" />
         <button className="lesson__end" onClick={endLesson} disabled={ending}>
           {ending ? 'Wrapping up…' : 'End lesson'}
@@ -337,7 +387,7 @@ export function LessonPage({ sessionId }: LessonPageProps) {
       <main className="lesson__board">
         <div className={`lesson__surface${boardOverview ? ' lesson__surface--overview' : ''}`}>
           <BoardCanvas
-            scene={scene}
+            scene={visibleScene}
             highlights={highlights}
             tool={tool}
             penColor={penColor}
@@ -347,7 +397,7 @@ export function LessonPage({ sessionId }: LessonPageProps) {
             onLearnerActivityStart={() => session.beginLearnerActivity()}
             onTutorPen={handleTutorPen}
             onLearnerAttention={handleLearnerAttention}
-            longDescription={describeScene(scene)}
+            longDescription={describeScene(visibleScene)}
             animatorRef={handleAnimatorReady}
             focusSemanticObjectId={activeVisualGroupId}
             focusIndex={focusIndex}

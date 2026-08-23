@@ -2,6 +2,8 @@ import type { BoardOp } from '../../shared/boardOps';
 import { inspectScene, repairSceneOnce, type SceneInspection } from './inspection';
 import { layoutTutorAnnotations } from './annotationLayout';
 import { applyOps, emptyScene, type AppliedOps, type Owner, type SceneState } from './scene';
+import { sceneForGroup } from './sceneGroups';
+import { evaluateBoardQuality, type BoardQualityReport } from './quality';
 
 /**
  * Owns the board state that is already true on screen.
@@ -13,6 +15,7 @@ import { applyOps, emptyScene, type AppliedOps, type Owner, type SceneState } fr
  */
 export class BoardSceneCoordinator {
   private value: SceneState;
+  private quality: BoardQualityReport | null = null;
 
   constructor(initial: SceneState = emptyScene) {
     this.value = initial;
@@ -22,28 +25,48 @@ export class BoardSceneCoordinator {
     return this.value;
   }
 
-  applyLearner(ops: BoardOp[]): AppliedOps {
-    const applied = applyOps(this.value, ops, 'learner');
+  get lastQualityReport(): BoardQualityReport | null { return this.quality; }
+
+  applyLearner(ops: BoardOp[], semanticGroupId?: string): AppliedOps {
+    const applied = applyOps(this.value, ops, 'learner', semanticGroupId);
     this.value = applied.scene;
     return applied;
   }
 
-  applyTutorCheckpoint(ops: BoardOp[]): AppliedOps | null {
-    const applied = applyOps(this.value, ops, 'tutor');
-    let candidate = layoutTutorAnnotations(applied.scene);
+  applyTutorCheckpoint(ops: BoardOp[], semanticGroupId?: string): AppliedOps | null {
+    const applied = applyOps(this.value, ops, 'tutor', semanticGroupId);
+    const fullCandidate = applied.scene;
+    let candidate = layoutTutorAnnotations(semanticGroupId ? sceneForGroup(fullCandidate, semanticGroupId) : fullCandidate);
     let inspection = tutorInspection(candidate);
     if (!inspection.accepted) {
       candidate = repairSceneOnce(candidate, inspection);
       inspection = tutorInspection(candidate);
     }
     if (!inspection.accepted) return null;
-    this.value = candidate;
-    return { ...applied, scene: candidate };
+    const quality = evaluateBoardQuality(candidate);
+    this.quality = quality;
+    if (!quality.accepted) return null;
+    const committed = semanticGroupId ? mergeScopedScene(fullCandidate, candidate) : candidate;
+    this.value = committed;
+    return { ...applied, scene: committed };
   }
 
-  applyReplay(ops: BoardOp[], owner: Owner): AppliedOps | null {
-    return owner === 'learner' ? this.applyLearner(ops) : this.applyTutorCheckpoint(ops);
+  applyReplay(ops: BoardOp[], owner: Owner, semanticGroupId?: string): AppliedOps | null {
+    if (owner === 'learner') return this.applyLearner(ops, semanticGroupId);
+    // Released replay is historical visible truth. Re-run deterministic
+    // annotation layout under current code, but never make an older accepted
+    // section disappear because today's quality budget became stricter.
+    const applied = applyOps(this.value, ops, 'tutor', semanticGroupId);
+    const scoped = layoutTutorAnnotations(semanticGroupId ? sceneForGroup(applied.scene, semanticGroupId) : applied.scene);
+    const committed = semanticGroupId ? mergeScopedScene(applied.scene, scoped) : scoped;
+    this.value = committed;
+    return { ...applied, scene: committed };
   }
+}
+
+function mergeScopedScene(full: SceneState, scoped: SceneState): SceneState {
+  const replacements = new Map(scoped.items.map((item) => [item.id, item]));
+  return { ...full, items: full.items.map((item) => replacements.get(item.id) ?? item) };
 }
 
 /** Learner strokes are intentional input, including marks near an edge or on

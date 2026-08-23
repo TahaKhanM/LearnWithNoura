@@ -121,3 +121,50 @@ test('raw explanatory text is moved away from triangle strokes instead of accept
   });
   expect(strokeHitsAnnotation).toBe(false);
 });
+
+test('semantic groups are separate board sections and learner marks stay with their section', async ({ page, request }) => {
+  const { session, lessonCapability } = await createSyntheticSession(request, `sections-${Date.now().toString(36)}`);
+  await installFakeRealtime(page);
+  await setLessonCapability(page, session.id, lessonCapability);
+  await page.goto(`/lesson/${session.id}`);
+  await page.getByRole('button', { name: 'Begin' }).click();
+  await expect(page.getByText(/Type below — Noura is ready|Listening/)).toBeVisible();
+
+  await page.evaluate(() => {
+    const socket = (window as typeof window & { __nouraFakeSocket: { emit(type: string, payload: Record<string, unknown>, optional?: Record<string, unknown>): void } }).__nouraFakeSocket;
+    socket.emit('response_started', { response_id: 'section-response' });
+    socket.emit('board_ops', {
+      response_id: 'section-response', groupLabel: 'First idea',
+      ops: [{ op: 'add', id: 'group-one-box', spec: { kind: 'box', at: [500, 300], text: 'First idea' } }],
+    }, { audioSampleOffsets: { start: 0, end: 0 }, semanticObjectId: 'group-one', providerResponseId: 'section-response' });
+    socket.emit('board_ops', {
+      response_id: 'section-response', groupLabel: 'Second idea',
+      ops: [{ op: 'add', id: 'group-two-box', spec: { kind: 'box', at: [500, 300], text: 'Second idea' } }],
+    }, { audioSampleOffsets: { start: 0, end: 0 }, semanticObjectId: 'group-two', providerResponseId: 'section-response' });
+  });
+
+  const picker = page.getByLabel('Board section', { exact: true });
+  await expect(picker).toHaveValue('group-two');
+  await expect(page.locator('[data-item="group-two-box"]')).toBeVisible();
+  await expect(page.locator('[data-item="group-one-box"]')).toHaveCount(0);
+  await expect(page.getByRole('status')).toContainText('Second idea');
+
+  await picker.selectOption('group-one');
+  await expect(page.locator('[data-item="group-one-box"]')).toBeVisible();
+  await expect(page.locator('[data-item="group-two-box"]')).toHaveCount(0);
+
+  await page.getByRole('button', { name: 'Draw on the board' }).click();
+  const board = page.locator('.board__svg');
+  const box = await board.boundingBox();
+  expect(box).not.toBeNull();
+  await page.mouse.move(box!.x + box!.width * 0.25, box!.y + box!.height * 0.3);
+  await page.mouse.down();
+  await page.mouse.move(box!.x + box!.width * 0.35, box!.y + box!.height * 0.4, { steps: 4 });
+  await page.mouse.up();
+  await expect(page.locator('[data-item^="sketch-"]')).toHaveCount(1);
+
+  await picker.selectOption('group-two');
+  await expect(page.locator('[data-item^="sketch-"]')).toHaveCount(0);
+  await picker.selectOption('group-one');
+  await expect(page.locator('[data-item^="sketch-"]')).toHaveCount(1);
+});

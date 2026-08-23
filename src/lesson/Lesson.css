@@ -76,6 +76,28 @@
   max-width: 30vw;
 }
 
+.lesson__board-context {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 34vw;
+  padding: 5px 10px;
+  border: 1px solid rgba(38, 35, 31, 0.12);
+  border-radius: 999px;
+  background: rgba(252, 251, 247, 0.76);
+  color: var(--ink-soft);
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+
+.lesson__board-context > span:not(.lesson__board-context-dot) { overflow: hidden; text-overflow: ellipsis; }
+.lesson__board-context strong { color: var(--ink); font-weight: 700; }
+.lesson__board-context-dot { width: 7px; height: 7px; flex: 0 0 auto; border-radius: 50%; background: var(--green); }
+.lesson__board-context--noura .lesson__board-context-dot { background: var(--amber); box-shadow: 0 0 0 4px rgba(240, 162, 39, 0.14); }
+.lesson__board-context--learner .lesson__board-context-dot { background: var(--blue); box-shadow: 0 0 0 4px rgba(44, 91, 224, 0.13); }
+.lesson__board-context-activity { color: var(--ink-soft); }
+
 .lesson__spacer {
   flex: 1;
 }
@@ -424,6 +446,8 @@
   .lesson__ask input { width: 100%; min-width: 130px; }
   .lesson__ask { flex: 1; }
   .lesson__board { padding: 0 12px; }
+  .lesson__board-context { max-width: 44vw; }
+  .lesson__board-context-activity { display: none; }
 }
 
 @media (max-width: 540px) {
@@ -435,8 +459,10 @@
   .lesson__ended-actions { width: 100%; flex-direction: column; }
   .lesson__surface { overflow: hidden; overscroll-behavior: contain; }
   .lesson__group-picker select { max-width: 132px; }
+  .lesson__concept { display: none; }
+  .lesson__board-context { max-width: 56vw; }
 }
 
 @media (min-width: 541px) and (min-height: 501px) {
-  .lesson__overview-toggle, .lesson__pan-control, .lesson__group-picker { display: none; }
+  .lesson__overview-toggle, .lesson__pan-control { display: none; }
 }

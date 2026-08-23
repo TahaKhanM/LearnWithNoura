@@ -135,8 +135,39 @@ describe('RealtimeSession sealed response release', () => {
     session.onLearnerBoardReplay = replay;
     const identity = session.getIdentity();
     const ops = [{ op: 'add', id: 'sketch-test', spec: { kind: 'path', points: [[1, 1], [2, 2]] } }];
-    harness.handleServer(createRuntimeEvent(identity, 0, 'learner_board_replay', { batches: [ops] }));
-    expect(replay).toHaveBeenCalledWith(ops);
+    harness.handleServer(createRuntimeEvent(identity, 0, 'learner_board_replay', { batches: [{ ops, semanticObjectId: 'fraction-scale' }] }));
+    expect(replay).toHaveBeenCalledWith(ops, 'fraction-scale');
+  });
+
+  it('restores tutor board section metadata during replay', () => {
+    const session = new RealtimeSession('session');
+    const harness = session as unknown as SessionHarness;
+    const board = vi.fn(async () => true);
+    session.onBoardOps = board;
+    const identity = session.getIdentity();
+    const ops = [{ op: 'add', id: 'proof-line', spec: { kind: 'line', from: [1, 1], to: [2, 2] } }];
+    harness.handleServer(createRuntimeEvent(identity, 0, 'board_replay', { batches: [{ ops, semanticObjectId: 'proof', groupLabel: 'Proof' }] }));
+    expect(board).toHaveBeenCalledWith(ops, false, expect.anything(), { semanticObjectId: 'proof', groupLabel: 'Proof' });
+  });
+
+  it('reports a deterministic board-quality rejection back to the agent', async () => {
+    const session = new RealtimeSession('session');
+    const harness = session as unknown as SessionHarness;
+    const sent: Array<{ type: string; payload: Record<string, unknown> }> = [];
+    harness.ws = { readyState: 1, send: (raw) => sent.push(JSON.parse(raw) as { type: string; payload: Record<string, unknown> }) };
+    harness.audioOut = {
+      speaking: false, append: () => {}, currentEnergy: () => 0, playedSamples: () => 0,
+      stop: () => [], close: async () => {},
+    };
+    session.onBoardOps = async () => false;
+    const identity = session.getIdentity();
+    harness.handleServer(createRuntimeEvent(identity, 0, 'board_ops', {
+      response_id: 'quality-response', event_id: 77,
+      ops: [{ op: 'add', id: 'too-dense', spec: { kind: 'text', at: [100, 100], text: 'too dense' } }],
+    }, { audioSampleOffsets: { start: 0, end: 0 }, semanticObjectId: 'quality-group' }));
+    harness.releasePending();
+    await vi.waitFor(() => expect(sent.some((event) => event.type === 'ops_rejected')).toBe(true));
+    expect(sent.find((event) => event.type === 'ops_rejected')?.payload).toMatchObject({ event_id: 77, response_id: 'quality-response' });
   });
 
   it('rejects late sealed cues after interruption, reconnect identity replacement, and navigation cleanup', () => {

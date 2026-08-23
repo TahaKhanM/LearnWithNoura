@@ -5,6 +5,15 @@ import { applyOps, emptyScene } from './scene';
 import { contains, deriveSemanticViewport, deriveSemanticViewports } from './semanticViewport';
 
 describe('semantic mobile viewport', () => {
+  it('uses explicit section metadata when raw object ids do not share a prefix', () => {
+    const scene = applyOps(emptyScene, [
+      { op: 'add', id: 'arbitrary-object-id', spec: { kind: 'text', at: [700, 420], text: 'Section-specific note' } },
+    ], 'tutor', 'working-section').scene;
+    const viewport = deriveSemanticViewport(scene, 'working-section');
+    expect(viewport.w).toBeLessThan(1000);
+    expect(viewport.itemIds).toContain('arbitrary-object-id');
+  });
+
   it('derives readable bounded focus and accessible pan positions from semantic object bounds', () => {
     const adapted = adaptSemanticScene({
       schemaVersion: '1.0.0', planId: 'mobile-proof', intent: { objective: 'Pythagorean proof', domain: 'geometry' },

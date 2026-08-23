@@ -11,6 +11,7 @@ import { AudioIn } from './audioIn';
 import { GenerationScope } from './generationScope';
 import { ResponseCueTimeline, type ResponseCue } from './responseTimeline';
 import { VoiceInterruptionGate } from './voiceInterruption';
+import type { LearnerBoardAnalysis } from '../../shared/learnerBoard';
 
 export type Phase = 'connecting' | 'listening' | 'thinking' | 'speaking' | 'reconnecting' | 'fallback' | 'failed' | 'ended';
 export interface CaptionLine { role: 'tutor' | 'child'; text: string; live: boolean; responseId?: string }
@@ -79,7 +80,7 @@ export class RealtimeSession {
   private speechResponseStartMeasured = false;
 
   onBoardOps: (ops: BoardOp[], animate: boolean, identity: GenerationIdentity, cue?: VisualCueMetadata) => Promise<boolean | void> | boolean | void = () => {};
-  onLearnerBoardReplay: (ops: BoardOp[]) => void = () => {};
+  onLearnerBoardReplay: (ops: BoardOp[], semanticGroupId?: string) => void = () => {};
   onGenerationCancelled: (identity: GenerationIdentity) => void = () => {};
   onGenerationActivated: (identity: GenerationIdentity, reason: 'interruption' | 'ordinary') => void = () => {};
   onCaptionQuestion: (identity: GenerationIdentity) => void = () => {};
@@ -312,12 +313,30 @@ export class RealtimeSession {
       }
       case 'board_replay': {
         const batches = Array.isArray(message.batches) ? message.batches : [];
-        for (const batch of batches) if (Array.isArray(batch)) void this.onBoardOps(batch as BoardOp[], false, envelope);
+        for (const batch of batches) {
+          if (Array.isArray(batch)) void this.onBoardOps(batch as BoardOp[], false, envelope);
+          else if (batch && typeof batch === 'object') {
+            const replay = batch as { ops?: unknown; semanticObjectId?: unknown; groupLabel?: unknown };
+            if (Array.isArray(replay.ops)) void this.onBoardOps(replay.ops as BoardOp[], false, envelope, {
+              ...(typeof replay.semanticObjectId === 'string' ? { semanticObjectId: replay.semanticObjectId } : {}),
+              ...(typeof replay.groupLabel === 'string' ? { groupLabel: replay.groupLabel } : {}),
+            });
+          }
+        }
         break;
       }
       case 'learner_board_replay': {
         const batches = Array.isArray(message.batches) ? message.batches : [];
-        for (const batch of batches) if (Array.isArray(batch)) this.onLearnerBoardReplay(batch as BoardOp[]);
+        for (const batch of batches) {
+          if (Array.isArray(batch)) this.onLearnerBoardReplay(batch as BoardOp[]);
+          else if (batch && typeof batch === 'object') {
+            const replay = batch as { ops?: unknown; semanticObjectId?: unknown };
+            if (Array.isArray(replay.ops)) this.onLearnerBoardReplay(
+              replay.ops as BoardOp[],
+              typeof replay.semanticObjectId === 'string' ? replay.semanticObjectId : undefined,
+            );
+          }
+        }
         break;
       }
       case 'response_started': {
@@ -506,6 +525,14 @@ export class RealtimeSession {
       groupLabel: item.groupLabel,
       checkpoint: item.checkpoint,
     })).then((completed) => {
+      if (completed === false && item.eventId !== null) {
+        this.send('ops_rejected', {
+          event_id: item.eventId,
+          response_id: item.responseId,
+          reason: 'The checkpoint exceeded the board layout or legibility budget.',
+        });
+        return;
+      }
       if (completed !== false && item.eventId !== null) {
         if (item.idempotencyKey) {
           // Fallback checkpoints are part of an atomic generation and may only
@@ -603,13 +630,16 @@ export class RealtimeSession {
     if (step.type === 'stream_error') this.update({ error: String(step.message ?? 'The tutor failed.') });
   }
 
-  sendBoardEvent(input: { description: string; ops: BoardOp[]; imageDataUrl?: string | null }): void {
+  sendBoardEvent(input: { description: string; ops: BoardOp[]; imageDataUrl?: string | null; semanticObjectId?: string; semanticGroupLabel?: string; analysis?: LearnerBoardAnalysis }): void {
     const requestResponse = this.boardResponseRequested && !this.spokenTurnPending;
     this.boardResponseRequested = false;
     this.send('board_event', {
       description: input.description,
       ops: input.ops,
       requestResponse,
+      ...(input.semanticObjectId ? { semanticObjectId: input.semanticObjectId } : {}),
+      ...(input.semanticGroupLabel ? { semanticGroupLabel: input.semanticGroupLabel } : {}),
+      ...(input.analysis ? { analysis: input.analysis } : {}),
       ...(input.imageDataUrl ? { imageDataUrl: input.imageDataUrl } : {}),
     });
     if (requestResponse) this.update({ phase: 'thinking' });

@@ -64,6 +64,7 @@ test('actual Lesson start, listening, thinking, speaking/visual, reduced-motion 
   await expect(page.getByText('Speaking')).toBeVisible();
   await expect(page.locator('[data-item="fraction-scale-main"]')).toBeVisible();
   await expect(page.getByLabel('Board section', { exact: true })).toHaveValue('fraction-scale');
+  await expect(page.getByRole('status')).toContainText('Fraction number line');
   await assertActiveBoardTextContained(page, ['1/2', '3/4']);
   expect(await page.locator('.avatar').getAttribute('data-attention-target')).toBe('semantic_object');
   const firstSemanticView = await page.locator('.board__svg').getAttribute('viewBox');
@@ -74,6 +75,15 @@ test('actual Lesson start, listening, thinking, speaking/visual, reduced-motion 
   await page.getByRole('button', { name: 'Focus the active board area' }).click();
   await assertNoSeriousAxe(page);
 
+  await page.evaluate(() => {
+    const socket = (window as typeof window & { __nouraFakeSocket: { emit(type: string, payload: Record<string, unknown>, optional?: Record<string, unknown>): void } }).__nouraFakeSocket;
+    socket.emit('board_ops', {
+      response_id: 'fake-response', groupLabel: 'Fraction number line',
+      ops: [{ op: 'add', id: 'fraction-context-note', spec: { kind: 'text', at: [380, 170], text: 'Compare on one scale' } }],
+    }, { audioSampleOffsets: { start: 0, end: 0 }, visualCueId: 'fraction-context', semanticObjectId: 'fraction-scale', providerResponseId: 'fake-response' });
+  });
+  await expect(page.locator('[data-item="fraction-context-note"]')).toBeVisible();
+
   const highlightOfferedAt = await page.evaluate(() => {
     const socket = (window as typeof window & { __nouraFakeSocket: { emit(type: string, payload: Record<string, unknown>, optional?: Record<string, unknown>): void } }).__nouraFakeSocket;
     const start = performance.now();
@@ -81,6 +91,7 @@ test('actual Lesson start, listening, thinking, speaking/visual, reduced-motion 
     return start;
   });
   await expect(page.locator('.avatar[data-attention-target="focused_object"]')).toBeVisible();
+  await expect(page.locator('[data-item="fraction-context-note"]')).toHaveClass(/board__item--deemphasized/);
   expect(await page.evaluate((start) => performance.now() - start, highlightOfferedAt)).toBeLessThanOrEqual(200);
 
   await page.evaluate(() => {
@@ -98,14 +109,24 @@ test('actual Lesson start, listening, thinking, speaking/visual, reduced-motion 
   await expect(page.locator('[data-item="fraction-scale-future"]')).toHaveCount(0);
   await expect(page.locator('[data-item="fraction-scale-main"]')).toBeVisible();
   await expect(page.locator('[data-item^="sketch-"]')).toHaveCount(1);
+  await expect(page.locator('[data-item="fraction-context-note"]')).not.toHaveClass(/board__item--deemphasized/, { timeout: 2_000 });
   await expect.poll(() => page.evaluate(() => {
     const socket = (window as typeof window & { __nouraFakeSocket: { sent: Array<{ type: string; payload?: Record<string, unknown> }> } }).__nouraFakeSocket;
     const event = [...socket.sent].reverse().find((candidate) => candidate.type === 'board_event');
     return {
       hasImage: typeof event?.payload?.imageDataUrl === 'string' && String(event.payload.imageDataUrl).startsWith('data:image/jpeg;base64,'),
       opCount: Array.isArray(event?.payload?.ops) ? event.payload.ops.length : 0,
+      analysisVersion: (event?.payload?.analysis as { version?: string } | undefined)?.version,
+      analysisGroup: (event?.payload?.analysis as { semanticGroupId?: string } | undefined)?.semanticGroupId,
     };
-  })).toEqual({ hasImage: true, opCount: 1 });
+  })).toEqual({ hasImage: true, opCount: 1, analysisVersion: '1.0.0', analysisGroup: 'fraction-scale' });
+  expect(await page.evaluate(async () => {
+    const socket = (window as typeof window & { __nouraFakeSocket: { sent: Array<{ type: string; payload?: Record<string, unknown> }> } }).__nouraFakeSocket;
+    const src = String([...socket.sent].reverse().find((candidate) => candidate.type === 'board_event')?.payload?.imageDataUrl ?? '');
+    const image = new Image();
+    await new Promise<void>((resolve, reject) => { image.onload = () => resolve(); image.onerror = () => reject(new Error('context image failed')); image.src = src; });
+    return { width: image.naturalWidth, height: image.naturalHeight };
+  })).toEqual({ width: 960, height: 576 });
 
   const browserArtifactDir = resolve('artifacts/browser');
   mkdirSync(browserArtifactDir, { recursive: true });

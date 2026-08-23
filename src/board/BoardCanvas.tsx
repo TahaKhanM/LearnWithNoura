@@ -16,6 +16,8 @@ export interface BoardHighlight {
   nonce: number;
 }
 
+export interface BoardCaptureOptions { focusBox?: BBox }
+
 interface BoardCanvasProps {
   scene: SceneState;
   /** IDs the tutor just added; they get draw-on animation in this order. */
@@ -34,7 +36,7 @@ interface BoardCanvasProps {
   focusSemanticObjectId?: string;
   focusIndex?: number;
   overview?: boolean;
-  onCaptureReady?: (capture: () => Promise<string | null>) => void;
+  onCaptureReady?: (capture: (options?: BoardCaptureOptions) => Promise<string | null>) => void;
 }
 
 function KatexBlock({ node }: { node: Extract<RenderNode, { type: 'katex' }> }) {
@@ -196,7 +198,7 @@ export function BoardCanvas({
 
   useEffect(() => {
     if (!onCaptureReady) return;
-    onCaptureReady(() => captureBoardImage(svgRef.current));
+    onCaptureReady((options) => captureBoardImage(svgRef.current, options));
   }, [onCaptureReady]);
 
   useEffect(() => {
@@ -336,6 +338,7 @@ export function BoardCanvas({
       .map((h) => ({ ...h, bbox: byId.get(h.id) }))
       .filter((h): h is BoardHighlight & { bbox: BBox } => Boolean(h.bbox));
   }, [highlights, compiled]);
+  const highlightedIds = useMemo(() => new Set(highlights.map((highlight) => highlight.id)), [highlights]);
 
   return (
     <div className="board__a11y-wrap">
@@ -375,9 +378,11 @@ export function BoardCanvas({
             key={`${item.id}@${scene.epoch}`}
             data-item={item.id}
             onPointerDown={eraseTarget(item.id, item.owner)}
-            className={
-              tool === 'erase' && item.owner === 'learner' ? 'board__item board__item--erasable' : 'board__item'
-            }
+            className={[
+              'board__item',
+              tool === 'erase' && item.owner === 'learner' ? 'board__item--erasable' : '',
+              highlightedIds.size > 0 && item.owner === 'tutor' && !highlightedIds.has(item.id) ? 'board__item--deemphasized' : '',
+            ].filter(Boolean).join(' ')}
             tabIndex={interactive ? 0 : undefined}
             onFocus={() => onLearnerAttention?.([
               item.bbox.x + item.bbox.w / 2,
@@ -432,7 +437,7 @@ export function BoardCanvas({
   );
 }
 
-async function captureBoardImage(svg: SVGSVGElement | null): Promise<string | null> {
+async function captureBoardImage(svg: SVGSVGElement | null, options: BoardCaptureOptions = {}): Promise<string | null> {
   if (!svg) return null;
   const clone = svg.cloneNode(true) as SVGSVGElement;
   clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
@@ -449,14 +454,36 @@ async function captureBoardImage(svg: SVGSVGElement | null): Promise<string | nu
       image.src = url;
     });
     const canvas = document.createElement('canvas');
-    canvas.width = 768;
-    canvas.height = Math.round((768 * BOARD_H) / BOARD_W);
+    canvas.width = 960;
+    canvas.height = 576;
     const context = canvas.getContext('2d');
     if (!context) return null;
     context.fillStyle = '#fcfbf7';
     context.fillRect(0, 0, canvas.width, canvas.height);
-    context.drawImage(image, 0, 0, canvas.width, canvas.height);
-    for (const quality of [0.8, 0.65, 0.5]) {
+    if (options.focusBox) {
+      // One image carries both global context and a legible detail crop. This
+      // preserves spatial grounding while giving Realtime vision enough pixels
+      // to inspect a small learner mark.
+      context.drawImage(image, 0, 0, BOARD_W, BOARD_H, 0, 96, 640, 384);
+      context.strokeStyle = '#d9d4ca';
+      context.lineWidth = 2;
+      context.strokeRect(0, 96, 640, 384);
+      context.fillStyle = '#26231f';
+      context.font = '600 18px sans-serif';
+      context.fillText('Full board', 16, 78);
+      context.fillText('Learner’s new mark', 668, 78);
+
+      const crop = normalizedCrop(options.focusBox);
+      const target = fitInside(crop.w, crop.h, 276, 430);
+      const dx = 660 + (284 - target.w) / 2;
+      const dy = 96 + (430 - target.h) / 2;
+      context.drawImage(image, crop.x, crop.y, crop.w, crop.h, dx, dy, target.w, target.h);
+      context.strokeStyle = '#2c5be0';
+      context.strokeRect(dx - 4, dy - 4, target.w + 8, target.h + 8);
+    } else {
+      context.drawImage(image, 0, 0, BOARD_W, BOARD_H, 0, 0, canvas.width, canvas.height);
+    }
+    for (const quality of [0.82, 0.68, 0.54, 0.4]) {
       const dataUrl = canvas.toDataURL('image/jpeg', quality);
       if (dataUrl.length <= 300_000) return dataUrl;
     }
@@ -466,4 +493,20 @@ async function captureBoardImage(svg: SVGSVGElement | null): Promise<string | nu
   } finally {
     URL.revokeObjectURL(url);
   }
+}
+
+function normalizedCrop(box: BBox): BBox {
+  const x = Math.max(0, Math.min(BOARD_W - 1, box.x));
+  const y = Math.max(0, Math.min(BOARD_H - 1, box.y));
+  return {
+    x,
+    y,
+    w: Math.max(1, Math.min(BOARD_W - x, box.w)),
+    h: Math.max(1, Math.min(BOARD_H - y, box.h)),
+  };
+}
+
+function fitInside(width: number, height: number, maxWidth: number, maxHeight: number): { w: number; h: number } {
+  const scale = Math.min(maxWidth / width, maxHeight / height);
+  return { w: width * scale, h: height * scale };
 }

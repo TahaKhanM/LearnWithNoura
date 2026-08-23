@@ -21,11 +21,11 @@ export function deriveSemanticViewports(
   priorityItemIds: string[] = [],
 ): SemanticViewport[] {
   const compiled = compileScene(scene.items);
+  const sources = new Map(scene.items.map((item) => [item.id, item]));
   const matching = semanticObjectId
-    ? compiled.filter((item) => item.id === semanticObjectId || item.id.startsWith(`${semanticObjectId}-`))
+    ? compiled.filter((item) => sources.get(item.id)?.semanticGroupId === semanticObjectId || item.id === semanticObjectId || item.id.startsWith(`${semanticObjectId}-`))
     : [];
   if (matching.length === 0) return [overviewViewport()];
-  const sources = new Map(scene.items.map((item) => [item.id, item]));
   const matchingById = new Map(matching.map((item) => [item.id, item]));
   const anchors: Array<{ x: number; y: number; required?: BBox }> = [];
 
@@ -71,6 +71,14 @@ function addItemAnchor(
     const positions = (spec.marks ?? []).map((mark) => spec.at[0] + ((mark.value - spec.min) / (spec.max - spec.min)) * spec.w);
     anchors.push({ x: positions.reduce((sum, value) => sum + value, 0) / positions.length, y: spec.at[1], ...(required ? { required: item.bbox } : {}) });
     return;
+  }
+  if (spec?.kind === 'bars' && spec.items.length > 0) {
+    const label = item.nodes.find((node) => node.type === 'text' && node.text === spec.items[0].label);
+    if (label) {
+      const box = nodeBBox(label);
+      anchors.push({ x: box.x + box.w / 2, y: box.y + box.h / 2, ...(required ? { required: box } : {}) });
+      return;
+    }
   }
   const keyNode = item.nodes.find((node) => node.type === 'katex') ?? item.nodes.find((node) => node.type === 'text');
   const box = keyNode ? nodeBBox(keyNode) : item.bbox;

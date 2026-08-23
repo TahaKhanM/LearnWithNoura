@@ -12,6 +12,7 @@ import type { Confidence, Verdict } from '../store/repo.js';
 import { createLessonState, reduceLesson, responseHandoff } from '../lesson/orchestrator.js';
 import { ResponseTaxonomySchema, TeachingMoveSchema, type ResponseTaxonomy } from '../../shared/pedagogy.js';
 import { adaptSemanticScene } from '../../shared/semanticScene.js';
+import { LearnerBoardAnalysisSchema } from '../../shared/learnerBoard.js';
 import { ResponseSegmentAnnotator } from './segmentAnnotator.js';
 import { loadReleasedBoardContext } from './boardContext.js';
 import type { DomainRepository } from '../store/domain.js';
@@ -98,7 +99,7 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
   const responseIdentities = new Map<string, GenerationIdentity>();
   const responseTranscript = new Map<string, string>();
   const responseSegments = new Map<string, ResponseSegmentAnnotator>();
-  const pendingBoardOps = new Map<number, BoardOp[]>();
+  const pendingBoardOps = new Map<number, { ops: BoardOp[]; semanticGroupId?: string; groupLabel?: string }>();
   let activeResponseId: string | null = null;
   let speechInProgress = false;
   let endpointingEagerness: 'medium' | 'high' = 'medium';
@@ -203,6 +204,7 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
       session: {
         type: 'realtime',
         output_modalities: ['audio'],
+        reasoning: { effort: 'low' },
         instructions: currentInstructions(),
         tools: REALTIME_TOOLS,
         tool_choice: 'auto',
@@ -249,13 +251,27 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
     const events = await repo.listEvents(sessionId, 2000);
     const batches = events
       .filter((e) => ['board_ops', 'semantic_scene'].includes(e.type) && e.released)
-      .map((e) => validateOps((e.payload as { ops?: unknown[] })?.ops).ops)
-      .filter((ops) => ops.length > 0);
+      .map((e) => {
+        const payload = e.payload as { ops?: unknown[]; semanticObjectId?: unknown; groupLabel?: unknown; plan?: { groups?: Array<{ id?: unknown; label?: unknown }> } };
+        const ops = validateOps(payload.ops).ops;
+        const semanticObjectId = typeof payload.semanticObjectId === 'string'
+          ? payload.semanticObjectId
+          : typeof payload.plan?.groups?.[0]?.id === 'string' ? payload.plan.groups[0].id : undefined;
+        const groupLabel = typeof payload.groupLabel === 'string'
+          ? payload.groupLabel
+          : typeof payload.plan?.groups?.[0]?.label === 'string' ? payload.plan.groups[0].label : undefined;
+        return { ops, ...(semanticObjectId ? { semanticObjectId } : {}), ...(groupLabel ? { groupLabel } : {}) };
+      })
+      .filter((batch) => batch.ops.length > 0);
     if (batches.length > 0) sendClient({ type: 'board_replay', batches });
     const learnerBatches = events
       .filter((event) => event.type === 'learner_board' && event.released)
-      .map((event) => learnerBoardOps((event.payload as { ops?: unknown }).ops))
-      .filter((ops) => ops.length > 0);
+      .map((event) => {
+        const payload = event.payload as { ops?: unknown; semanticObjectId?: unknown };
+        const ops = learnerBoardOps(payload.ops);
+        return { ops, ...(typeof payload.semanticObjectId === 'string' ? { semanticObjectId: payload.semanticObjectId } : {}) };
+      })
+      .filter((batch) => batch.ops.length > 0);
     if (learnerBatches.length > 0) sendClient({ type: 'learner_board_replay', batches: learnerBatches });
   }
 
@@ -472,9 +488,52 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
     }
 
     switch (name) {
+      case 'inspect_board': {
+        const focus = typeof args.focus === 'string' ? args.focus.slice(0, 160) : undefined;
+        finishTool(callId, responseId, {
+          ok: true,
+          focus,
+          board: boardContext.toolSnapshot(focus),
+        });
+        break;
+      }
+
       case 'semantic_visual_plan': {
         try {
           const { plan, ops, checkpoints } = adaptSemanticScene(args);
+          if (plan.intent.action === 'reuse' || plan.intent.action === 'skip') {
+            const targetAvailable = plan.intent.action !== 'reuse' || Boolean(plan.intent.targetGroupId && boardContext.hasGroup(plan.intent.targetGroupId));
+            finishTool(callId, responseId, {
+              ok: targetAvailable,
+              accepted: targetAvailable,
+              action: plan.intent.action,
+              relevance: plan.intent.relevance,
+              questionAnswered: plan.intent.questionAnswered,
+              ...(!targetAvailable ? { reason: 'The requested board section is not visible. Inspect the board and choose an existing group or create a new visual.' } : {}),
+              board: boardContext.toolSnapshot(),
+            });
+            break;
+          }
+          const densityLimit = plan.intent.density === 'minimal' ? 14 : 30;
+          if (ops.length > densityLimit) {
+            finishTool(callId, responseId, {
+              ok: false,
+              accepted: false,
+              reason: `The ${plan.intent.density} visual exceeds its ${densityLimit}-object density budget. Simplify or split the teaching move.`,
+              questionAnswered: plan.intent.questionAnswered,
+              board: boardContext.toolSnapshot(),
+            });
+            break;
+          }
+          if (plan.intent.action === 'replace' && (!plan.intent.targetGroupId || !boardContext.hasGroup(plan.intent.targetGroupId))) {
+            finishTool(callId, responseId, {
+              ok: false,
+              accepted: false,
+              reason: 'The section requested for replacement is not visible. Inspect the board before replacing it.',
+              board: boardContext.toolSnapshot(),
+            });
+            break;
+          }
           const equivalent = boardContext.equivalentTutorScene(ops);
           if (equivalent.equivalent) {
             finishTool(callId, responseId, {
@@ -487,8 +546,15 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
             break;
           }
           for (const checkpoint of checkpoints) {
-            const eventId = await repo.addEvent(sessionId, 'semantic_scene', { plan, ops: checkpoint.ops, checkpointId: checkpoint.id, reveal: checkpoint.reveal }, false);
-            pendingBoardOps.set(eventId, checkpoint.ops);
+            const eventId = await repo.addEvent(sessionId, 'semantic_scene', {
+              plan,
+              ops: checkpoint.ops,
+              checkpointId: checkpoint.id,
+              reveal: checkpoint.reveal,
+              semanticObjectId: checkpoint.semanticObjectId,
+              groupLabel: checkpoint.groupLabel,
+            }, false);
+            pendingBoardOps.set(eventId, { ops: checkpoint.ops, semanticGroupId: checkpoint.semanticObjectId, groupLabel: checkpoint.groupLabel });
             responseSegment(responseId).addSemanticCue({
               type: 'board_ops',
               ops: checkpoint.ops,
@@ -507,6 +573,9 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
             applied: ops.length,
             checkpoints: checkpoints.length,
             noBoard: ops.length === 0,
+            action: plan.intent.action,
+            relevance: plan.intent.relevance,
+            questionAnswered: plan.intent.questionAnswered,
             acceptedPendingObjectIds: ops.filter((op) => op.op === 'add').map((op) => op.id),
             board: boardContext.toolSnapshot(),
           });
@@ -554,12 +623,23 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
 
       case 'board_ops': {
         const validated = validateOps(args.ops);
-        const novel = boardContext.novelTutorOps(validated.ops);
+        const semanticGroupId = lessonState.activeSemanticObjectId ?? `freeform-${identityForResponse(responseId)?.turnId ?? 'board'}`;
+        const novel = boardContext.novelTutorOps(validated.ops, semanticGroupId);
         const { ops } = novel;
         if (ops.length > 0) {
-          const eventId = await repo.addEvent(sessionId, 'board_ops', { ops }, false);
-          pendingBoardOps.set(eventId, ops);
-          responseSegment(responseId).addSemanticCue({ type: 'board_ops', ops, response_id: responseId, event_id: eventId });
+          const eventId = await repo.addEvent(sessionId, 'board_ops', {
+            ops,
+            semanticObjectId: semanticGroupId,
+            groupLabel: lessonState.microObjective || 'Working board',
+          }, false);
+          pendingBoardOps.set(eventId, { ops, semanticGroupId, groupLabel: lessonState.microObjective || 'Working board' });
+          responseSegment(responseId).addSemanticCue({
+            type: 'board_ops',
+            ops,
+            response_id: responseId,
+            event_id: eventId,
+            groupLabel: lessonState.microObjective || 'Working board',
+          }, { semanticObjectId: semanticGroupId });
         }
         finishTool(callId, responseId, {
           ok: validated.rejected.length === 0,
@@ -773,13 +853,30 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
         const description = String(message.description ?? '').trim().slice(0, 4000);
         const ops = learnerBoardOps(message.ops);
         const imageDataUrl = safeBoardImage(message.imageDataUrl);
+        const semanticGroupId = typeof message.semanticObjectId === 'string' ? message.semanticObjectId.slice(0, 160) : undefined;
+        const semanticGroupLabel = typeof message.semanticGroupLabel === 'string' ? message.semanticGroupLabel.slice(0, 160) : undefined;
+        const parsedAnalysis = LearnerBoardAnalysisSchema.safeParse(message.analysis);
+        const analysis = parsedAnalysis.success ? parsedAnalysis.data : null;
         if (!description && ops.length === 0) break;
-        await repo.addEvent(sessionId, 'learner_board', { description, ops, hasVisualContext: Boolean(imageDataUrl) });
-        boardContext.apply(ops, 'learner');
+        await repo.addEvent(sessionId, 'learner_board', {
+          description,
+          ops,
+          hasVisualContext: Boolean(imageDataUrl),
+          ...(semanticGroupId ? { semanticObjectId: semanticGroupId } : {}),
+          ...(semanticGroupLabel ? { groupLabel: semanticGroupLabel } : {}),
+          ...(analysis ? { analysis } : {}),
+        });
+        boardContext.apply(ops, 'learner', semanticGroupId, semanticGroupLabel);
+        if (analysis) boardContext.observeLearnerAnalysis(analysis);
         refreshBoardInstructions();
         const content: Array<Record<string, unknown>> = [{
           type: 'input_text',
-          text: `[The learner changed the shared board. Treat this as visual context, not a spoken message.] ${description}`,
+          text: [
+            '[The learner changed the shared board. Treat this as visual context, not a spoken message.]',
+            description,
+            analysis ? `Deterministic vector analysis (spatial hints, not meaning): ${analysis.summary}` : '',
+            'Use the attached full-board/detail image to interpret the mark. If its meaning is ambiguous, ask the learner rather than guessing.',
+          ].filter(Boolean).join(' '),
         }];
         if (imageDataUrl) content.push({ type: 'input_image', image_url: imageDataUrl, detail: 'high' });
         sendUpstream({
@@ -806,9 +903,9 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
         // The child has actually seen this batch; it is now part of the board.
         if (typeof message.event_id === 'number') {
           await repo.markEventReleased(sessionId, message.event_id);
-          const ops = pendingBoardOps.get(message.event_id);
-          if (ops) {
-            boardContext.apply(ops, 'tutor');
+          const pending = pendingBoardOps.get(message.event_id);
+          if (pending) {
+            boardContext.apply(pending.ops, 'tutor', pending.semanticGroupId, pending.groupLabel);
             pendingBoardOps.delete(message.event_id);
           } else {
             // Covers acknowledgement after an unusual connection handoff.
@@ -816,6 +913,27 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
           }
           refreshBoardInstructions();
         }
+        break;
+      }
+
+      case 'ops_rejected': {
+        const eventId = typeof message.event_id === 'number' ? message.event_id : null;
+        if (eventId !== null) pendingBoardOps.delete(eventId);
+        const reason = String(message.reason ?? 'The board checkpoint failed client layout validation.').slice(0, 300);
+        await repo.addEvent(sessionId, 'board_rejected', { eventId, reason });
+        boardContext.observeBoardRejection(reason);
+        refreshBoardInstructions();
+        sendUpstream({
+          type: 'conversation.item.create',
+          item: {
+            type: 'message',
+            role: 'system',
+            content: [{
+              type: 'input_text',
+              text: `[Board checkpoint rejected by deterministic layout validation.] ${reason} Inspect the visible board, simplify the visual, and reuse existing objects. Do not refer to the rejected marks as visible.`,
+            }],
+          },
+        });
         break;
       }
 

@@ -14,7 +14,7 @@ import type { FallbackTurnIdentity } from './store/repo.js';
 
 const MAX_ROUNDS = 10;
 const DEFAULT_TIMEOUT_MS = 20_000;
-const ALLOWED_TOOLS = new Set(['semantic_visual_plan', 'propose_teaching_move', 'record_evidence']);
+const ALLOWED_TOOLS = new Set(['inspect_board', 'semantic_visual_plan', 'propose_teaching_move', 'record_evidence']);
 const FALLBACK_TOOLS: OpenAI.Chat.ChatCompletionTool[] = REALTIME_TOOLS
   .filter((tool) => ALLOWED_TOOLS.has(tool.name))
   .map((tool) => ({
@@ -170,9 +170,41 @@ async function executeFallbackTurn(
         catch { /* handled by tool result */ }
         let output: Record<string, unknown> = { ok: false };
 
-        if (call.function.name === 'semantic_visual_plan') {
+        if (call.function.name === 'inspect_board') {
+          output = { ok: true, board: boardContext.toolSnapshot(typeof args.focus === 'string' ? args.focus.slice(0, 160) : undefined) };
+        } else if (call.function.name === 'semantic_visual_plan') {
           try {
             const { plan, ops, checkpoints } = adaptSemanticScene(args);
+            if (plan.intent.action === 'reuse' || plan.intent.action === 'skip') {
+              const targetAvailable = plan.intent.action !== 'reuse' || Boolean(plan.intent.targetGroupId && boardContext.hasGroup(plan.intent.targetGroupId));
+              output = {
+                ok: targetAvailable,
+                accepted: targetAvailable,
+                action: plan.intent.action,
+                relevance: plan.intent.relevance,
+                questionAnswered: plan.intent.questionAnswered,
+                ...(!targetAvailable ? { reason: 'The requested board section is not visible. Inspect the board first.' } : {}),
+                board: boardContext.toolSnapshot(),
+              };
+              messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(output) });
+              continue;
+            }
+            const densityLimit = plan.intent.density === 'minimal' ? 14 : 30;
+            if (ops.length > densityLimit) {
+              output = {
+                ok: false,
+                accepted: false,
+                reason: `The ${plan.intent.density} visual exceeds its ${densityLimit}-object density budget. Simplify or split the move.`,
+                board: boardContext.toolSnapshot(),
+              };
+              messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(output) });
+              continue;
+            }
+            if (plan.intent.action === 'replace' && (!plan.intent.targetGroupId || !boardContext.hasGroup(plan.intent.targetGroupId))) {
+              output = { ok: false, accepted: false, reason: 'The replacement target is not visible. Inspect the board first.', board: boardContext.toolSnapshot() };
+              messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(output) });
+              continue;
+            }
             const equivalent = boardContext.equivalentTutorScene(ops);
             if (equivalent.equivalent) {
               output = {
@@ -190,6 +222,8 @@ async function executeFallbackTurn(
                   ops: checkpoint.ops,
                   checkpointId: checkpoint.id,
                   reveal: checkpoint.reveal,
+                  semanticObjectId: checkpoint.semanticObjectId,
+                  groupLabel: checkpoint.groupLabel,
                 }, false);
                 await emit('board_ops', {
                   ops: checkpoint.ops,
@@ -205,6 +239,9 @@ async function executeFallbackTurn(
                 applied: ops.length,
                 checkpoints: checkpoints.length,
                 noBoard: ops.length === 0,
+                action: plan.intent.action,
+                relevance: plan.intent.relevance,
+                questionAnswered: plan.intent.questionAnswered,
                 acceptedPendingObjectIds: ops.filter((op) => op.op === 'add').map((op) => op.id),
                 board: boardContext.toolSnapshot(),
               };

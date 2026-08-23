@@ -10,7 +10,7 @@ Status: engineering controls implemented for local, access-gated and public-v0 s
 - Provider transcript/audio/tool events return through the proxy with generation identity.
 - Noura stores provider-independent transcript events, committed semantic scenes and evidence. Raw audio is not stored.
 - Parent summaries receive the immutable event cutoff and evidence IDs. Unsupported claims fall back deterministically.
-- Pointer/touch/focus events stay in the active browser interaction path. Committed learner board marks are stored as bounded learner-owned path BoardOps so they can replay; transient pointer movement is not stored. A compressed board image may be sent to the configured AI provider after a committed learner change, but Noura does not persist that image. Coarse camera input is not implemented.
+- Pointer/touch/focus events stay in the active browser interaction path. Committed learner board marks are stored as bounded learner-owned path BoardOps so they can replay; transient pointer movement is not stored. Noura also stores bounded deterministic stroke features (gesture class, bounds, closure, direction, nearest/touched board object IDs and section) as calibrated spatial hints. A compressed composite of the visible section plus an enlarged learner-mark detail may be sent to the configured AI provider after a committed learner change, but Noura does not persist that image. Coarse camera input is not implemented.
 
 ## Threats and controls
 

@@ -45,4 +45,27 @@ describe('BoardSceneCoordinator', () => {
     ])).not.toBeNull();
     expect(board.current.items.find((item) => item.id === 'sketch-edge')?.spec).toEqual({ kind: 'path', points });
   });
+
+  it('inspects overlapping semantic groups independently', () => {
+    const board = new BoardSceneCoordinator();
+    expect(board.applyTutorCheckpoint([
+      { op: 'add', id: 'group-one-box', spec: { kind: 'box', at: [500, 300], text: 'First page' } },
+    ], 'group-one')).not.toBeNull();
+    expect(board.applyTutorCheckpoint([
+      { op: 'add', id: 'group-two-box', spec: { kind: 'box', at: [500, 300], text: 'Second page' } },
+    ], 'group-two')).not.toBeNull();
+    expect(board.current.items.map((item) => [item.id, item.semanticGroupId])).toEqual([
+      ['group-one-box', 'group-one'], ['group-two-box', 'group-two'],
+    ]);
+  });
+
+  it('replays released historical work even when it exceeds the new live density budget', () => {
+    const board = new BoardSceneCoordinator();
+    const ops = Array.from({ length: 31 }, (_, index) => ({
+      op: 'add' as const, id: `historical-${index}`,
+      spec: { kind: 'line' as const, from: [40 + index, 100] as [number, number], to: [40 + index, 300] as [number, number] },
+    }));
+    expect(board.applyReplay(ops, 'tutor', 'historical')).not.toBeNull();
+    expect(board.current.items).toHaveLength(31);
+  });
 });

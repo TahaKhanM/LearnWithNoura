@@ -6,23 +6,42 @@
 export const REALTIME_TOOLS = [
   {
     type: 'function' as const,
-    name: 'semantic_visual_plan',
+    name: 'inspect_board',
     description:
-      'Describe one semantic visual group. Code selects domain layout, exact geometry, inspection, reveal order, and acceptance; use no_board when a diagram would not help.',
+      'Read the authoritative visible board sections, reusable object IDs, density, and recent learner-mark observations. Call before adapting an existing visual or whenever the learner refers to “this”, “that”, or their drawing.',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
-        schemaVersion: { type: 'string', enum: ['1.0.0'] },
+        focus: { type: 'string', maxLength: 160, description: 'Optional object, group, or learner-mark id to inspect.' },
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    name: 'semantic_visual_plan',
+    description:
+      'Decide whether a visual earns its place, then describe at most one semantic board section. Code owns composition, exact geometry, spacing, inspection, reveal order, and acceptance. Reuse/skip creates no new section; use no_board when speech is clearer.',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        schemaVersion: { type: 'string', enum: ['2.0.0'] },
         planId: { type: 'string', minLength: 1, maxLength: 120 },
         intent: {
           type: 'object', additionalProperties: false,
           properties: {
             objective: { type: 'string', minLength: 1, maxLength: 300 },
-            domain: { type: 'string', enum: ['geometry', 'quantitative', 'process', 'argument', 'history', 'grammar', 'table', 'timeline', 'none'] },
+            domain: { type: 'string', enum: ['geometry', 'quantitative', 'algebra', 'comparison', 'process', 'argument', 'history', 'grammar', 'table', 'timeline', 'none'] },
+            relevance: { type: 'string', enum: ['essential', 'supportive', 'none'] },
+            questionAnswered: { type: 'string', minLength: 1, maxLength: 300 },
+            rationale: { type: 'string', minLength: 1, maxLength: 400 },
+            action: { type: 'string', enum: ['create', 'reuse', 'replace', 'skip'] },
+            targetGroupId: { type: 'string', minLength: 1, maxLength: 160 },
+            density: { type: 'string', enum: ['minimal', 'standard'] },
             noBoardReason: { type: 'string', maxLength: 300 },
           },
-          required: ['objective', 'domain'],
+          required: ['objective', 'domain', 'relevance', 'questionAnswered', 'rationale', 'action', 'density'],
         },
         groups: {
           type: 'array', minItems: 0, maxItems: 1,
@@ -32,7 +51,7 @@ export const REALTIME_TOOLS = [
               id: { type: 'string', minLength: 1, maxLength: 80 },
               label: { type: 'string', minLength: 1, maxLength: 160 },
               revealOrder: { type: 'array', minItems: 1, items: { type: 'string', enum: ['outline', 'relation', 'label', 'connector', 'emphasis'] } },
-              template: { type: 'string', enum: ['pythagorean_area_proof', 'triangle_angle_sum', 'unit_circle_projection', 'fraction_comparison', 'slope_comparison', 'causal_cycle', 'argument_structure', 'cause_effect', 'grammar_structure', 'table', 'timeline', 'no_board'] },
+              template: { type: 'string', enum: ['pythagorean_area_proof', 'triangle_angle_sum', 'unit_circle_projection', 'fraction_comparison', 'slope_comparison', 'causal_cycle', 'argument_structure', 'cause_effect', 'grammar_structure', 'relationship_map', 'worked_steps', 'comparison', 'part_whole', 'table', 'timeline', 'no_board'] },
               parameters: { type: 'object' },
             },
             required: ['id', 'label', 'revealOrder', 'template', 'parameters'],
