@@ -16,7 +16,13 @@ export type Phase = 'connecting' | 'listening' | 'thinking' | 'speaking' | 'reco
 export interface CaptionLine { role: 'tutor' | 'child'; text: string; live: boolean; responseId?: string }
 export interface LessonState { activeConcept?: string; strategy?: string; nextStep?: string; phase?: string; activeSemanticObjectId?: string; characterAttentionTarget?: string }
 export interface EvidenceEntry { concept: string; observation: string; verdict: string; confidence: string }
-export interface TurnMetrics { askToFirstAudioMs?: number; detectorToStopScheduledMs?: number; providerCancelConfirmationMs?: number }
+export interface TurnMetrics {
+  askToFirstAudioMs?: number;
+  detectorToStopScheduledMs?: number;
+  providerCancelConfirmationMs?: number;
+  speechEndToResponseStartedMs?: number;
+  speechEndToFirstAudioMs?: number;
+}
 export interface SessionSnapshot {
   phase: Phase;
   identity: GenerationIdentity;
@@ -67,6 +73,10 @@ export class RealtimeSession {
   private scope: GenerationScope;
   private gate: RuntimeEventGate;
   private interruptionPending = false;
+  private spokenTurnPending = false;
+  private boardResponseRequested = false;
+  private speechStoppedAt = 0;
+  private speechResponseStartMeasured = false;
 
   onBoardOps: (ops: BoardOp[], animate: boolean, identity: GenerationIdentity, cue?: VisualCueMetadata) => Promise<boolean | void> | boolean | void = () => {};
   onLearnerBoardReplay: (ops: BoardOp[]) => void = () => {};
@@ -188,6 +198,8 @@ export class RealtimeSession {
     this.turnCounter += 1;
     this.activateScope(true);
     this.askAt = performance.now();
+    this.speechStoppedAt = 0;
+    this.speechResponseStartMeasured = false;
     this.firstAudioSeen = false;
     const idempotencyKey = `${this.sessionId}:${this.scope.identity.turnId}:${crypto.randomUUID()}`;
     if (wasFallback) {
@@ -212,8 +224,21 @@ export class RealtimeSession {
   }
 
   beginLearnerActivity(): void {
-    if (!['speaking', 'thinking'].includes(this.snapshot.phase)) return;
-    this.interruptLocally('interaction');
+    // A board-only turn should receive a response after its batched visual
+    // context arrives. If speech is already forming the turn, VAD owns the
+    // response and the board remains context for that same spoken turn.
+    if (!['listening', 'speaking', 'thinking'].includes(this.snapshot.phase)) return;
+    const boardTurnAlreadyOpen = this.boardResponseRequested;
+    if (!this.spokenTurnPending && !boardTurnAlreadyOpen) this.boardResponseRequested = true;
+    if (['speaking', 'thinking'].includes(this.snapshot.phase)) {
+      this.interruptLocally('interaction');
+      this.turnCounter += 1;
+      this.activateScope(true);
+      this.update({ phase: 'listening' });
+      return;
+    }
+    if (this.spokenTurnPending || boardTurnAlreadyOpen) return;
+    this.cancelGeneration('new learner board turn');
     this.turnCounter += 1;
     this.activateScope(true);
     this.update({ phase: 'listening' });
@@ -298,6 +323,13 @@ export class RealtimeSession {
       case 'response_started': {
         this.currentResponseId = typeof message.response_id === 'string' ? message.response_id : null;
         if (this.currentResponseId) this.scope.providerResponseIds.add(this.currentResponseId);
+        this.spokenTurnPending = false;
+        if (this.speechStoppedAt > 0 && !this.speechResponseStartMeasured) {
+          this.speechResponseStartMeasured = true;
+          const speechEndToResponseStartedMs = Math.max(0, Math.round(performance.now() - this.speechStoppedAt));
+          this.send('metric', { name: 'speech_end_to_response_started', ms: speechEndToResponseStartedMs });
+          this.update({ metrics: { ...this.snapshot.metrics, speechEndToResponseStartedMs } });
+        }
         break;
       }
       case 'audio': {
@@ -306,9 +338,16 @@ export class RealtimeSession {
         if (this.deadResponses.has(responseId)) break;
         this.currentResponseId = responseId;
         const itemId = typeof message.item_id === 'string' ? message.item_id : null;
+        if (this.speechStoppedAt > 0) {
+          const speechEndToFirstAudioMs = Math.max(0, Math.round(performance.now() - this.speechStoppedAt));
+          this.send('metric', { name: 'speech_end_to_first_audio', ms: speechEndToFirstAudioMs });
+          this.speechStoppedAt = 0;
+          this.update({ metrics: { ...this.snapshot.metrics, speechEndToFirstAudioMs } });
+        }
         if (!this.firstAudioSeen && this.askAt > 0) {
           this.firstAudioSeen = true;
           const askToFirstAudioMs = Math.round(performance.now() - this.askAt);
+          this.askAt = 0;
           this.send('metric', { name: 'ask_to_first_audio', ms: askToFirstAudioMs });
           this.update({ metrics: { ...this.snapshot.metrics, askToFirstAudioMs } });
         }
@@ -372,6 +411,8 @@ export class RealtimeSession {
         break;
       }
       case 'speech_started': {
+        this.spokenTurnPending = true;
+        this.boardResponseRequested = false;
         if (this.voiceInterruption.confirmServerSpeech(this.tutorTurnActive(), performance.now())) {
           this.confirmVoiceInterruption();
         }
@@ -379,6 +420,17 @@ export class RealtimeSession {
       }
       case 'speech_stopped': {
         this.voiceInterruption.endServerSpeech();
+        // Ignore an unconfirmed acoustic blip while Noura still owns the
+        // floor. Confirmed barge-in has already moved the phase to listening.
+        if (this.tutorTurnActive()) {
+          this.spokenTurnPending = false;
+          break;
+        }
+        this.speechStoppedAt = performance.now();
+        this.speechResponseStartMeasured = false;
+        this.firstAudioSeen = false;
+        this.askAt = 0;
+        this.update({ phase: 'thinking' });
         break;
       }
       case 'lesson_state': {
@@ -454,14 +506,23 @@ export class RealtimeSession {
       groupLabel: item.groupLabel,
       checkpoint: item.checkpoint,
     })).then((completed) => {
-      if (completed !== false && this.isCurrent(item.identity) && item.eventId !== null) {
+      if (completed !== false && item.eventId !== null) {
         if (item.idempotencyKey) {
+          // Fallback checkpoints are part of an atomic generation and may only
+          // acknowledge while that generation is still current.
+          if (!this.isCurrent(item.identity)) return;
           void fetch('/api/fallback-checkpoint', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', Authorization: `Lesson ${this.lessonCapability ?? ''}` },
             body: JSON.stringify({ eventId: item.eventId, idempotencyKey: item.idempotencyKey, ...item.identity }),
           }).catch(() => undefined);
-        } else this.send('ops_shown', { event_id: item.eventId });
+        } else {
+          // Realtime cues reached this method only after their audio boundary
+          // was heard. If the learner interrupts during draw-on animation,
+          // finish and acknowledge the visible checkpoint using the new
+          // client identity so it remains replayable after refresh.
+          this.send('ops_shown', { event_id: item.eventId });
+        }
       }
     });
   }
@@ -543,11 +604,15 @@ export class RealtimeSession {
   }
 
   sendBoardEvent(input: { description: string; ops: BoardOp[]; imageDataUrl?: string | null }): void {
+    const requestResponse = this.boardResponseRequested && !this.spokenTurnPending;
+    this.boardResponseRequested = false;
     this.send('board_event', {
       description: input.description,
       ops: input.ops,
+      requestResponse,
       ...(input.imageDataUrl ? { imageDataUrl: input.imageDataUrl } : {}),
     });
+    if (requestResponse) this.update({ phase: 'thinking' });
   }
 
   private activateScope(advanceGeneration: boolean): void {

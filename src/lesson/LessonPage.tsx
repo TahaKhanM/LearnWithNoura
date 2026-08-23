@@ -8,10 +8,10 @@ import {
 } from 'react';
 import { PALETTE, type BoardOp, type Vec } from '../../shared/boardOps';
 import type { GenerationIdentity } from '../../shared/runtimeProtocol';
-import { applyOps, emptyScene, describeScene, type SceneState } from '../board/scene';
-import { inspectScene, repairSceneOnce } from '../board/inspection';
+import { emptyScene, describeScene, type SceneState } from '../board/scene';
 import { BoardCanvas, type BoardHighlight, type BoardTool } from '../board/BoardCanvas';
 import type { BoardAnimator } from '../board/animator';
+import { BoardSceneCoordinator } from '../board/sceneCoordinator';
 import { deriveSemanticViewports } from '../board/semanticViewport';
 import { RealtimeSession } from './realtimeSession';
 import { Avatar } from './Avatar';
@@ -47,8 +47,7 @@ export function LessonPage({ sessionId }: LessonPageProps) {
   const [continuing, setContinuing] = useState(false);
   const [started, setStarted] = useState(false);
   const animator = useRef<BoardAnimator | null>(null);
-  const sceneRef = useRef<SceneState>(emptyScene);
-  const committedSceneRef = useRef<SceneState>(emptyScene);
+  const boardState = useRef(new BoardSceneCoordinator());
   const visualChain = useRef<Promise<boolean>>(Promise.resolve(true));
   const highlightNonce = useRef(0);
   const boardEventTimer = useRef<number | null>(null);
@@ -86,25 +85,20 @@ export function LessonPage({ sessionId }: LessonPageProps) {
 
   const applyTutorOps = useCallback((ops: BoardOp[], animate: boolean, identity: GenerationIdentity, cue?: VisualCueMetadata) => {
     if (!animate) {
-      const result = prepareScene(committedSceneRef.current, ops);
+      const result = boardState.current.applyReplay(ops, 'tutor');
       if (!result) return Promise.resolve(false);
-      committedSceneRef.current = result;
-      sceneRef.current = result;
-      setScene(result);
+      setScene(result.scene);
       requestAnimationFrame(() => animator.current?.finishAll());
       return Promise.resolve(true);
     }
     const transaction = visualChain.current.then(async () => {
       if (!sameIdentity(session.getIdentity(), identity)) return false;
-      const applied = applyOps(committedSceneRef.current, ops, 'tutor');
-      let candidate = applied.scene;
-      let inspection = inspectScene(candidate);
-      if (!inspection.accepted) {
-        candidate = repairSceneOnce(candidate, inspection);
-        inspection = inspectScene(candidate);
-      }
-      if (!inspection.accepted) return false;
-      sceneRef.current = candidate;
+      // The cue has crossed the heard-audio boundary, so it is now true on the
+      // visible board. Promote it before animation; learner input and ordinary
+      // re-renders must build on this state rather than an older checkpoint.
+      const applied = boardState.current.applyTutorCheckpoint(ops);
+      if (!applied) return false;
+      const candidate = applied.scene;
       setScene(candidate);
       if (applied.highlighted.length > 0) {
         const center = centerForItemIds(candidate, applied.highlighted);
@@ -122,17 +116,9 @@ export function LessonPage({ sessionId }: LessonPageProps) {
         offerAttention(attention, identity, 'semantic_object', center, cue.semanticObjectId);
       }
       await nextPaint();
-      const completed = await finishBoardAnimationWithin(animator.current, 2_400);
-      if (completed) {
-        const committed = mergeLatestLearnerMarks(candidate, committedSceneRef.current);
-        committedSceneRef.current = committed;
-        sceneRef.current = committed;
-        setScene(committed);
-        return true;
-      }
-      sceneRef.current = committedSceneRef.current;
-      setScene(committedSceneRef.current);
-      return false;
+      // Completion acknowledges durable replay. It no longer decides whether
+      // an already-visible checkpoint remains on screen.
+      return finishBoardAnimationWithin(animator.current, 2_400);
     });
     visualChain.current = transaction.catch(() => false);
     return transaction;
@@ -141,9 +127,8 @@ export function LessonPage({ sessionId }: LessonPageProps) {
   useEffect(() => {
     session.onBoardOps = applyTutorOps;
     session.onLearnerBoardReplay = (ops) => {
-      const result = applyOps(committedSceneRef.current, ops, 'learner');
-      committedSceneRef.current = result.scene;
-      sceneRef.current = result.scene;
+      const result = boardState.current.applyReplay(ops, 'learner');
+      if (!result) return;
       setScene(result.scene);
     };
     session.onGenerationCancelled = (identity) => {
@@ -169,7 +154,7 @@ export function LessonPage({ sessionId }: LessonPageProps) {
     attention.replaceGeneration(snap.identity);
     if (snap.phase === 'thinking') {
       const center = snap.lessonState.activeSemanticObjectId
-        ? centerForSemanticObject(sceneRef.current, snap.lessonState.activeSemanticObjectId)
+        ? centerForSemanticObject(boardState.current.current, snap.lessonState.activeSemanticObjectId)
         : undefined;
       offerAttention(attention, snap.identity, 'semantic_object', center, snap.lessonState.activeSemanticObjectId);
     }
@@ -187,13 +172,7 @@ export function LessonPage({ sessionId }: LessonPageProps) {
     (points: Vec[]) => {
       const id = `sketch-${Date.now().toString(36)}`;
       const op: BoardOp = { op: 'add', id, color: penColor, spec: { kind: 'path', points } };
-      const result = applyOps(
-        committedSceneRef.current,
-        [op],
-        'learner',
-      );
-      sceneRef.current = result.scene;
-      committedSceneRef.current = result.scene;
+      const result = boardState.current.applyLearner([op]);
       setScene(result.scene);
       const [x, y] = points[Math.floor(points.length / 2)];
       pendingBoardNote.current.push(
@@ -207,9 +186,7 @@ export function LessonPage({ sessionId }: LessonPageProps) {
 
   const handleLearnerErase = useCallback((id: string) => {
     const op: BoardOp = { op: 'erase', id };
-    const result = applyOps(committedSceneRef.current, [op], 'learner');
-    sceneRef.current = result.scene;
-    committedSceneRef.current = result.scene;
+    const result = boardState.current.applyLearner([op]);
     setScene(result.scene);
     pendingBoardNote.current.push('erased one of their own marks');
     pendingBoardOps.current.push(op);
@@ -227,12 +204,29 @@ export function LessonPage({ sessionId }: LessonPageProps) {
       if (notes.length === 0 || ops.length === 0) return;
       const imageDataUrl = await captureBoard.current?.() ?? null;
       session.sendBoardEvent({
-        description: `${notes.join('; ')}. ${describeScene(sceneRef.current)}`,
+        description: `${notes.join('; ')}. ${describeScene(boardState.current.current)}`,
         ops,
         imageDataUrl,
       });
     }, 650);
   }, [session]);
+
+  const handleTutorPen = useCallback((position: { x: number; y: number } | null) => {
+    if (position) offerAttention(attention, session.getIdentity(), 'tutor_pen', [position.x, position.y]);
+  }, [attention, session]);
+
+  const handleLearnerAttention = useCallback((position: Vec, kind: 'drawing' | 'pointer' | 'focus') => {
+    const target = kind === 'drawing' ? 'learner_drawing' : kind === 'focus' ? 'focused_object' : 'learner_pointer';
+    offerAttention(attention, session.getIdentity(), target, position);
+  }, [attention, session]);
+
+  const handleAnimatorReady = useCallback((value: BoardAnimator) => {
+    animator.current = value;
+  }, []);
+
+  const handleCaptureReady = useCallback((capture: () => Promise<string | null>) => {
+    captureBoard.current = capture;
+  }, []);
 
   const submitText = useCallback(
     (e: React.FormEvent) => {
@@ -351,21 +345,14 @@ export function LessonPage({ sessionId }: LessonPageProps) {
             onLearnerStroke={handleLearnerStroke}
             onLearnerErase={handleLearnerErase}
             onLearnerActivityStart={() => session.beginLearnerActivity()}
-            onTutorPen={(position) => {
-              if (position) offerAttention(attention, session.getIdentity(), 'tutor_pen', [position.x, position.y]);
-            }}
-            onLearnerAttention={(position, kind) => {
-              const target = kind === 'drawing' ? 'learner_drawing' : kind === 'focus' ? 'focused_object' : 'learner_pointer';
-              offerAttention(attention, session.getIdentity(), target, position);
-            }}
+            onTutorPen={handleTutorPen}
+            onLearnerAttention={handleLearnerAttention}
             longDescription={describeScene(scene)}
-            animatorRef={(a) => {
-              animator.current = a;
-            }}
+            animatorRef={handleAnimatorReady}
             focusSemanticObjectId={activeVisualGroupId}
             focusIndex={focusIndex}
             overview={boardOverview}
-            onCaptureReady={(capture) => { captureBoard.current = capture; }}
+            onCaptureReady={handleCaptureReady}
           />
           {!started && (
             <div className="lesson__start">
@@ -550,26 +537,6 @@ function offerAttention(
     smoothingProfile: targetType === 'interruption' ? 'immediate' : targetType === 'learner_pointer' ? 'gentle' : 'responsive',
     permittedInReducedMotion: ['interruption', 'semantic_object', 'neutral_learner', 'focused_object'].includes(targetType),
   });
-}
-
-function prepareScene(scene: SceneState, ops: BoardOp[]): SceneState | null {
-  let candidate = applyOps(scene, ops, 'tutor').scene;
-  let inspection = inspectScene(candidate);
-  if (!inspection.accepted) {
-    candidate = repairSceneOnce(candidate, inspection);
-    inspection = inspectScene(candidate);
-  }
-  return inspection.accepted ? candidate : null;
-}
-
-function mergeLatestLearnerMarks(candidate: SceneState, latest: SceneState): SceneState {
-  return {
-    epoch: Math.max(candidate.epoch, latest.epoch),
-    items: [
-      ...candidate.items.filter((item) => item.owner === 'tutor'),
-      ...latest.items.filter((item) => item.owner === 'learner'),
-    ],
-  };
 }
 
 function finishBoardAnimationWithin(boardAnimator: BoardAnimator | null, timeoutMs: number): Promise<boolean> {

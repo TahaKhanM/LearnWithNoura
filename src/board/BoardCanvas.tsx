@@ -163,6 +163,7 @@ export function BoardCanvas({
   const svgRef = useRef<SVGSVGElement>(null);
   const animator = useMemo(() => new BoardAnimator(), []);
   const [pen, setPen] = useState<PenPosition | null>(null);
+  const onTutorPenRef = useRef(onTutorPen);
   const nodeEls = useRef(new Map<string, (SVGElement | null)[]>());
   const animatedIds = useRef(new Set<string>());
   const lastEpoch = useRef(scene.epoch);
@@ -172,13 +173,26 @@ export function BoardCanvas({
   const strokeRef = useRef<Vec[] | null>(null);
 
   useEffect(() => {
+    onTutorPenRef.current = onTutorPen;
+  }, [onTutorPen]);
+
+  // The animator belongs to the mounted canvas, not to the render-time
+  // identity of callback props. Mic/phase updates can re-render LessonPage at
+  // audio-frame frequency and must never tear down an in-progress drawing.
+  useEffect(() => {
     animator.onPen = (position) => {
       setPen(position);
-      onTutorPen?.(position);
+      onTutorPenRef.current?.(position);
     };
+    return () => {
+      animator.onPen = () => {};
+      animator.cancelAll();
+    };
+  }, [animator]);
+
+  useEffect(() => {
     animatorRef?.(animator);
-    return () => animator.cancelAll();
-  }, [animator, animatorRef, onTutorPen]);
+  }, [animator, animatorRef]);
 
   useEffect(() => {
     if (!onCaptureReady) return;

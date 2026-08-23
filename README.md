@@ -36,7 +36,7 @@ The active path is:
 5. One `GenerationScope` owns audio, provisional captions, transient visuals, character tasks, timers, reconnect work and fallback cancellation.
 6. The PCM sample clock releases phrase captions, semantic visual cues, the pen and character attention.
 7. Semantic visual intent is adapted into exact BoardOps, inspected, repaired once and otherwise rejected as one transaction.
-8. Only completed visual checkpoints become committed and replayable.
+8. Heard, accepted visual checkpoints become the in-memory board immediately; completed draw-on animation acknowledges them for durable replay.
 9. Evidence observations carry source event IDs, normalized source spans, taxonomy, confidence basis, opportunity, independence and turn/generation lineage.
 10. Ending creates an immutable event cutoff; continuing creates a new linked session.
 
@@ -99,7 +99,8 @@ The browser suites use synthetic learner fixtures. Paid live-provider runs are n
 - Raw audio, pointer trails and camera data are not persisted.
 - Realtime audio and transient character/visual work are cancelled locally before provider confirmation; target-hardware acoustic silence remains **UNVERIFIED**.
 - Voice interruption requires sustained adaptive microphone energy plus independent server speech-start confirmation. Short noises and server VAD alone do not cancel Noura.
-- Released tutor checkpoints finish and remain visible across turn changes. Learner strokes are committed as learner-owned BoardOps, replay after refresh and send a compressed transient board image to Realtime so Noura can inspect the drawing.
+- Confirmed voice interruption temporarily raises semantic endpointing eagerness for that one turn, then restores the normal child-friendly setting. Speech-end-to-response and speech-end-to-audio intervals are recorded separately.
+- Released tutor checkpoints finish and remain visible across re-renders and turn changes, then acknowledge durable replay even if interruption happened mid-animation. Learner strokes are committed as learner-owned BoardOps, replay after refresh and send a compressed transient board image to Realtime so Noura can inspect and respond to a board-only turn.
 - Captions use PCM-timed phrase cues and final transcript correction. The app does not claim provider word timestamps or exact word synchronization.
 
 ## Known blockers

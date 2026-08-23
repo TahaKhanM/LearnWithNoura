@@ -6,9 +6,9 @@ Run the commands in README. Unit/property coverage includes state transitions, r
 
 Browser suites use a dedicated synthetic SQLite directory and separate ports. Visual baselines cover Noura Home at 1440×900, 834×1112, 390×844 and 844×390 plus every canonical semantic scene at desktop, tablet and mobile-focus widths.
 
-Voice-interruption unit/integration rows cover short loud noise plus server VAD, sustained local energy without server confirmation, adaptive room-noise calibration, and sustained speech with both detectors. These deterministic checks prevent false cancellation regressions but do not replace physical-room microphone testing.
+Voice-interruption unit/integration rows cover short loud noise plus server VAD, sustained local energy without server confirmation, adaptive room-noise calibration, sustained speech with both detectors, one-turn high-eagerness endpointing with medium restoration, the `speech_stopped → thinking` phase, and speech-end-to-response/audio metrics. These deterministic checks prevent false cancellation and turn-latency lifecycle regressions but do not replace physical-room microphone testing.
 
-The actual Lesson browser row also requires a released tutor board object to remain visible across interruption, a learner stroke to remain as a rendered scene item, and the batched learner event to contain one sanitized path operation plus a size-bounded JPEG board context.
+The actual Lesson browser rows require an animated tutor object to survive callback/phase re-renders and mid-animation learner interruption, finish visibly, emit replay acknowledgement after identity replacement, retain the learner stroke, and send a board-only response request with sanitized path operations plus a size-bounded JPEG board context. A separate row verifies the visible thinking state at speech stop before reply audio.
 
 ## Live-provider budget
 
@@ -24,6 +24,8 @@ Record device, OS, browser, headphones/speakers, noise condition, autoplay, perm
 - detector → stop scheduled;
 - scheduled stop → recorded acoustic silence;
 - provider cancellation confirmation;
+- provider speech end → response start;
+- provider speech end → first reply audio;
 - caption phrase and visual cue error;
 - avatar mouth/gaze/pen timestamps;
 - frame intervals and long tasks.

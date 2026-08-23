@@ -78,7 +78,7 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
    */
   let childHoldsFloor = false;
   /** What the most recent response.create was for, to target retries. */
-  let lastCreateSource: 'tool' | 'user' | 'start' = 'start';
+  let lastCreateSource: 'tool' | 'user' | 'board' | 'start' = 'start';
   /** A user ask hit an active response; ask again once it finishes. */
   let retryCreateOnDone = false;
   let clientIdentity: GenerationIdentity | null = null;
@@ -91,6 +91,8 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
   const responseTranscript = new Map<string, string>();
   const responseSegments = new Map<string, ResponseSegmentAnnotator>();
   let activeResponseId: string | null = null;
+  let speechInProgress = false;
+  let endpointingEagerness: 'medium' | 'high' = 'medium';
   let lessonState = createLessonState(session.goal);
   let lastLearnerEventId: number | null = null;
   let upstreamWork = Promise.resolve();
@@ -131,6 +133,18 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
 
   function sendUpstream(payload: unknown): void {
     if (upstream.readyState === NodeWebSocket.OPEN) upstream.send(JSON.stringify(payload));
+  }
+
+  function setEndpointingEagerness(eagerness: 'medium' | 'high'): void {
+    if (endpointingEagerness === eagerness) return;
+    endpointingEagerness = eagerness;
+    sendUpstream({
+      type: 'session.update',
+      session: {
+        type: 'realtime',
+        audio: { input: { turn_detection: semanticTurnDetection(eagerness) } },
+      },
+    });
   }
 
   function responseSegment(responseId: string): ResponseSegmentAnnotator {
@@ -183,14 +197,7 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
           input: {
             format: { type: 'audio/pcm', rate: 24000 },
             transcription: { model: 'gpt-4o-mini-transcribe' },
-            turn_detection: {
-              type: 'semantic_vad',
-              eagerness: 'medium',
-              create_response: true,
-              // Client-side sustained-speech confirmation owns cancellation;
-              // provider VAD alone must not stop Noura on incidental noise.
-              interrupt_response: false,
-            },
+            turn_detection: semanticTurnDetection('medium'),
           },
           output: { voice: 'marin', format: { type: 'audio/pcm', rate: 24000 } },
         },
@@ -274,6 +281,10 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
         // recovers from a false-positive local interrupt that VAD never
         // confirmed.
         childHoldsFloor = false;
+        speechInProgress = false;
+        // High eagerness is a one-turn barge-in accelerator. Ordinary turns
+        // retain medium semantic endpointing so a child can pause and think.
+        setEndpointingEagerness('medium');
         const response = event.response as { id?: string } | undefined;
         if (response?.id && clientIdentity) {
           activeResponseId = response.id;
@@ -336,11 +347,13 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
       case 'input_audio_buffer.speech_started':
         toolContinues = 0;
         childHoldsFloor = true;
+        speechInProgress = true;
         sendClient({ type: 'speech_started' });
         break;
 
       case 'input_audio_buffer.speech_stopped':
         // VAD will now create the next response itself.
+        speechInProgress = false;
         childHoldsFloor = false;
         sendClient({ type: 'speech_stopped' });
         break;
@@ -422,7 +435,7 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
         const alreadyActive =
           error?.code === 'conversation_already_has_active_response' ||
           /active response in progress/i.test(error?.message ?? '');
-        if (alreadyActive && lastCreateSource === 'user') retryCreateOnDone = true;
+        if (alreadyActive && ['user', 'board'].includes(lastCreateSource)) retryCreateOnDone = true;
         const benign = error?.code === 'response_cancel_not_active' || alreadyActive;
         log(`session ${sessionId}: upstream error ${JSON.stringify(event.error).slice(0, 300)}`);
         if (!benign) {
@@ -701,6 +714,7 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
         childHoldsFloor = true;
         if (activeResponseId) cancelledResponses.add(activeResponseId);
         lessonState = reduceLesson(lessonState, { type: 'INTERRUPTED' });
+        if (message.reason === 'voice') setEndpointingEagerness('high');
         sendUpstream({ type: 'response.cancel' });
         break;
       }
@@ -737,6 +751,15 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
             content,
           },
         });
+        // A board-only turn is a real learner turn, not passive telemetry.
+        // If speech is also active, semantic VAD will create the one response
+        // after speech stops and the image remains context for that turn.
+        if (message.requestResponse === true && !speechInProgress) {
+          childHoldsFloor = false;
+          toolContinues = 0;
+          lastCreateSource = 'board';
+          sendUpstream({ type: 'response.create' });
+        }
         break;
       }
 
@@ -800,4 +823,15 @@ function learnerBoardOps(raw: unknown): BoardOp[] {
 function safeBoardImage(value: unknown): string | null {
   if (typeof value !== 'string' || value.length > 320_000) return null;
   return /^data:image\/(?:png|jpeg);base64,[a-z0-9+/=]+$/i.test(value) ? value : null;
+}
+
+function semanticTurnDetection(eagerness: 'medium' | 'high') {
+  return {
+    type: 'semantic_vad',
+    eagerness,
+    create_response: true,
+    // Client-side sustained-speech confirmation owns cancellation; provider
+    // VAD alone must not stop Noura on incidental noise.
+    interrupt_response: false,
+  } as const;
 }
