@@ -10,7 +10,7 @@ Canonical production origin: [https://learnwithnoura.com](https://learnwithnoura
 | --- | --- | --- |
 | Local | Synthetic development and private single-host demonstrations | Supported with SQLite; microphone/acoustic targets remain hardware-unverified. |
 | Vercel Preview | Access-gated synthetic UI and visual-fixture evaluation | Protected at `noura-preview-mtk2982007.vercel.app`; interactive lessons are disabled because storage is ephemeral and `/healthz` reports degraded. |
-| Public v0 | Full-product synthetic demonstrations | Live at `learnwithnoura.com`. Real voice/WSS, interruption, fallback/tools, semantic board output, evidence, managed Postgres, immutable ending and Parent summary passed deployed synthetic smoke at revision `9a92844`. |
+| Public v0 | Full-product synthetic demonstrations | Live at `learnwithnoura.com`. Real voice/WSS, confirmed-speech interruption, fallback/tools, semantic board output, evidence, managed Postgres, immutable ending and Parent summary passed deployed synthetic smoke at revision `c8963e7`. |
 | Full Production | Real parent/child use | Still blocked fail-closed until real parent authentication is selected, privacy/safety operations are configured and ZDR evidence exists for any under-13 mode. |
 
 Do not use real child details, recordings or transcripts in the current build. Noura does not claim legal compliance or production child readiness.
@@ -98,6 +98,7 @@ The browser suites use synthetic learner fixtures. Paid live-provider runs are n
 - Camera-responsive behavior is **not implemented**. No lesson needs camera permission. Noura performs no face recognition, biometric processing, emotion inference, attention scoring, engagement scoring or facial comprehension inference.
 - Raw audio, pointer trails and camera data are not persisted.
 - Realtime audio and transient character/visual work are cancelled locally before provider confirmation; target-hardware acoustic silence remains **UNVERIFIED**.
+- Voice interruption requires sustained adaptive microphone energy plus independent server speech-start confirmation. Short noises and server VAD alone do not cancel Noura.
 - Captions use PCM-timed phrase cues and final transcript correction. The app does not claim provider word timestamps or exact word synchronization.
 
 ## Known blockers

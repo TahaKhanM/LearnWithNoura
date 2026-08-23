@@ -43,6 +43,7 @@ interface SessionInternals {
     close(): Promise<void>;
   };
   handleServer(raw: unknown): void;
+  handleMicEnergy(rms: number): void;
   releasePending(): void;
   connectionEpoch: number;
   cancelGeneration(reason: string): void;
@@ -155,6 +156,7 @@ describe('raw Realtime proxy to heard-sample session integration', () => {
     interrupted.upstream.emit({ type: 'input_audio_buffer.speech_started' });
     await flushProxy();
     interrupted.deliverProxyEnvelopes();
+    for (let frame = 0; frame < 7; frame += 1) internalsFor(interrupted.session).handleMicEnergy(0.09);
     expect(interrupted.session.getIdentity()).not.toEqual(oldIdentity);
 
     for (const step of ['transcript-done', 'audio-done'] as RawStep[]) emitStep(interrupted.upstream, 'old-response', step);
@@ -246,6 +248,10 @@ async function createHarness() {
       client.emit('message', JSON.stringify(createRuntimeEvent(session.getIdentity(), 0, 'hello', {})));
     },
   };
+}
+
+function internalsFor(session: RealtimeSession): SessionInternals {
+  return session as unknown as SessionInternals;
 }
 
 function flushProxy(): Promise<void> {
