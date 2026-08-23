@@ -95,11 +95,11 @@ Line references are to this working revision and are refreshed at handoff.
 | VCL-04 | Git integration/main Production branch | private org repo cannot connect on Hobby | BLOCKED by account/repo plan boundary |
 | VCL-05 | Preview/Production env separation | Preview-only variables; sensitive secrets | PASS metadata |
 | VCL-06 | Native WS duration based on inspected plan | Hobby; 300s Function | PASS config; deployed WSS pending |
-| VCL-07 | Preview exact SHA/version/health | deployment record below | PENDING |
-| VCL-08 | Preview synthetic/no Production child data | synthetic env; ephemeral local data | PASS boundary; persistence intentionally degraded |
+| VCL-07 | Preview exact SHA/version/health | protected stable alias; `/version` exact SHA; `/healthz` explicit 503 degraded | PASS identity; health correctly BLOCKED |
+| VCL-08 | Preview synthetic/no Production child data | synthetic-only env, Standard Protection, lesson creation disabled without shared storage | PASS safe boundary |
 | VCL-09 | Production durable store/auth/privacy | startup fail-closed | BLOCKED |
 | VCL-10 | Apex/www/SSL/DNS assignment | domain exists with Vercel nameservers; not attached before gate | Production BLOCKED |
-| VCL-11 | HTTPS/WSS/persistence/restart | Preview/Production smoke rows | PENDING/UNVERIFIED |
+| VCL-11 | HTTPS/WSS/persistence/restart | HTTPS/REST/deep routes pass; real Function test proved `/tmp` is not shared, then UI failed closed | WSS journey/persistence BLOCKED without managed store |
 | VCL-12 | Rollback target/procedure | operations runbook | Procedure PASS; target only after deployment |
 
 ## Runtime-model preservation
@@ -112,8 +112,8 @@ Line references are to this working revision and are refreshed at handoff.
 
 | Environment | URL / deployment ID | SHA | Health/version/REST/WSS/log/persistence result |
 | --- | --- | --- | --- |
-| Preview | Pending | Pending | Pending |
-| Production | Not deployed | N/A | Blocked by Postgres domain wiring, identity, privacy/safety, ZDR and target-hardware gates |
+| Preview | `https://noura-preview-mtk2982007.vercel.app` (final deployment ID in handoff) | `/version` must match final HEAD | Standard-protected; Home/deep routes/config/version pass; health 503 degraded; lessons disabled; logs clean |
+| Production | Static maintenance boundary only: `dpl_DPdMDbq9D69cSZyJX3VS4C7MbdeU` | Maintenance artifact | No tutor backend; purchased domain intentionally unattached; application Production blocked |
 
 ## Manual/recorded evidence still required
 

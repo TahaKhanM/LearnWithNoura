@@ -9,6 +9,8 @@
 - Canonical domain: `learnwithnoura.com`
 - Preferred alias: `www.learnwithnoura.com` → permanent apex redirect
 - GitHub integration: blocked because the repository is private and organization-owned while the inspected Hobby account cannot attach that repository class. Use reviewed manual CLI deployments until account/project ownership changes.
+- Deployment Protection: Standard Vercel Authentication (`all_except_custom_domains`).
+- Stable protected Preview alias: `https://noura-preview-mtk2982007.vercel.app`
 
 Do not print or download Production secrets into tracked files. `.vercel/`, `.env*` and databases are ignored.
 
@@ -25,6 +27,8 @@ Do not print or download Production secrets into tracked files. `.vercel/`, `.en
 9. Inspect error logs without transcript or secret content.
 
 Preview is synthetic-only and storage-ephemeral. A 503 degraded `/healthz` for durable storage is an intentional blocker, not a successful persistence claim.
+
+The first CLI deployment is forcibly classified by Vercel as Production even when Preview was requested. Two accidentally classified tutor deployments were immediately removed. The surviving Production deployment is the static maintenance boundary `dpl_DPdMDbq9D69cSZyJX3VS4C7MbdeU`; it has no tutor API and no purchased-domain assignment. This seed allows subsequent explicit `--target=preview` deployments to remain Preview.
 
 ## Production gate
 
