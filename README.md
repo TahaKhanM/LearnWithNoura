@@ -10,7 +10,7 @@ Canonical production origin: [https://learnwithnoura.com](https://learnwithnoura
 | --- | --- | --- |
 | Local | Synthetic development and private single-host demonstrations | Supported with SQLite; microphone/acoustic targets remain hardware-unverified. |
 | Vercel Preview | Access-gated synthetic UI and visual-fixture evaluation | Protected at `noura-preview-mtk2982007.vercel.app`; interactive lessons are disabled because storage is ephemeral and `/healthz` reports degraded. |
-| Public v0 | Full-product synthetic demonstrations | Live at `learnwithnoura.com`. Real voice/WSS, confirmed-speech interruption, fallback/tools, semantic board output, evidence, managed Postgres, immutable ending and Parent summary passed deployed synthetic smoke at revision `c8963e7`. |
+| Public v0 | Full-product synthetic demonstrations | Live at `learnwithnoura.com`. Real voice/WSS, confirmed-speech interruption, persistent tutor/learner board, Realtime image grounding, fallback/tools, evidence, managed Postgres, immutable ending and Parent summary passed deployed synthetic smoke at revision `563f4c3`. |
 | Full Production | Real parent/child use | Still blocked fail-closed until real parent authentication is selected, privacy/safety operations are configured and ZDR evidence exists for any under-13 mode. |
 
 Do not use real child details, recordings or transcripts in the current build. Noura does not claim legal compliance or production child readiness.
@@ -35,8 +35,8 @@ The active path is:
 4. A deterministic lesson reducer owns legal transitions and forbids waiting without a delivered question or task.
 5. One `GenerationScope` owns audio, provisional captions, transient visuals, character tasks, timers, reconnect work and fallback cancellation.
 6. The PCM sample clock releases phrase captions, semantic visual cues, the pen and character attention.
-7. Semantic visual intent is adapted into exact BoardOps, inspected, repaired once and otherwise rejected as one transaction.
-8. Only completed visual checkpoints become committed and replayable.
+7. Semantic visual intent is adapted into exact BoardOps; free-standing annotations are placed against real stroke geometry, inspected, repaired once and otherwise rejected as one transaction.
+8. Heard, accepted visual checkpoints become the in-memory board immediately; completed draw-on animation acknowledges them for durable replay.
 9. Evidence observations carry source event IDs, normalized source spans, taxonomy, confidence basis, opportunity, independence and turn/generation lineage.
 10. Ending creates an immutable event cutoff; continuing creates a new linked session.
 
@@ -99,6 +99,10 @@ The browser suites use synthetic learner fixtures. Paid live-provider runs are n
 - Raw audio, pointer trails and camera data are not persisted.
 - Realtime audio and transient character/visual work are cancelled locally before provider confirmation; target-hardware acoustic silence remains **UNVERIFIED**.
 - Voice interruption requires sustained adaptive microphone energy plus independent server speech-start confirmation. Short noises and server VAD alone do not cancel Noura.
+- Confirmed voice interruption temporarily raises semantic endpointing eagerness for that one turn, then restores the normal child-friendly setting. Speech-end-to-response and speech-end-to-audio intervals are recorded separately.
+- Released tutor checkpoints finish and remain visible across re-renders and turn changes, then acknowledge durable replay even if interruption happened mid-animation. Learner strokes are committed as learner-owned BoardOps, replay after refresh and send a compressed transient board image to Realtime so Noura can inspect and respond to a board-only turn.
+- The server mirrors only released tutor checkpoints and committed learner marks into the agent’s current-board instructions. Teaching-move and drawing tool results return reusable object IDs; exact raw redraws and mostly equivalent semantic scenes are suppressed so questions adapt the visible diagram in place.
+- Triangle angle-sum/straight-line proofs have a code-owned semantic template, while arbitrary raw diagrams still pass through the general geometry-aware annotation solver.
 - Captions use PCM-timed phrase cues and final transcript correction. The app does not claim provider word timestamps or exact word synchronization.
 
 ## Known blockers

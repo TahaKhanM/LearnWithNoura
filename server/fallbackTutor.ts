@@ -5,6 +5,7 @@ import { ResponseTaxonomySchema, TeachingMoveSchema, type ResponseTaxonomy } fro
 import { createLessonState, reduceLesson, responseHandoff } from './lesson/orchestrator.js';
 import { buildInstructions } from './realtime/instructions.js';
 import { REALTIME_TOOLS } from './realtime/tools.js';
+import { loadReleasedBoardContext } from './realtime/boardContext.js';
 import type { DomainRepository } from './store/domain.js';
 import type { FallbackTurnIdentity } from './store/repo.js';
 
@@ -124,6 +125,7 @@ async function executeFallbackTurn(
   };
 
   const instructions = buildInstructions({ childName: child.name, childAge: child.age, goal: session.goal });
+  const boardContext = await loadReleasedBoardContext(repo, request.sessionId);
   const storedHistory = await repo.listEvents(request.sessionId, 400);
   const history: OpenAI.Chat.ChatCompletionMessageParam[] = storedHistory
     .filter((event) => ['tutor_said', 'learner_said'].includes(event.type))
@@ -134,7 +136,7 @@ async function executeFallbackTurn(
     }))
     .filter((message) => message.content);
   const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
-    { role: 'system', content: `${instructions}\n\nVoice is unavailable, so words appear as captions. Use semantic_visual_plan rather than board_ops. Keep the same short spoken style.` },
+    { role: 'system', content: `${instructions}\n\n${boardContext.prompt()}\n\nVoice is unavailable, so words appear as captions. Use semantic_visual_plan rather than board_ops. Keep the same short spoken style.` },
     ...history,
     { role: 'user', content: request.userText },
   ];
@@ -171,23 +173,42 @@ async function executeFallbackTurn(
         if (call.function.name === 'semantic_visual_plan') {
           try {
             const { plan, ops, checkpoints } = adaptSemanticScene(args);
-            await ensureLearnerEvent();
-            for (const checkpoint of checkpoints) {
-              const eventId = await repo.addFallbackEvent(identity, 'semantic_scene', {
-                plan,
-                ops: checkpoint.ops,
-                checkpointId: checkpoint.id,
-                reveal: checkpoint.reveal,
-              }, false);
-              await emit('board_ops', {
-                ops: checkpoint.ops,
-                event_id: eventId,
-                response_id: `fallback-${request.generationId}`,
-                groupLabel: checkpoint.groupLabel,
-                checkpoint: checkpoint.reveal,
-              }, { visualCueId: checkpoint.id, semanticObjectId: checkpoint.semanticObjectId });
+            const equivalent = boardContext.equivalentTutorScene(ops);
+            if (equivalent.equivalent) {
+              output = {
+                ok: true,
+                accepted: false,
+                reason: 'An equivalent visual is already visible. Reuse its IDs and adapt it in place.',
+                equivalentObjects: equivalent.duplicates,
+                board: boardContext.toolSnapshot(),
+              };
+            } else {
+              await ensureLearnerEvent();
+              for (const checkpoint of checkpoints) {
+                const eventId = await repo.addFallbackEvent(identity, 'semantic_scene', {
+                  plan,
+                  ops: checkpoint.ops,
+                  checkpointId: checkpoint.id,
+                  reveal: checkpoint.reveal,
+                }, false);
+                await emit('board_ops', {
+                  ops: checkpoint.ops,
+                  event_id: eventId,
+                  response_id: `fallback-${request.generationId}`,
+                  groupLabel: checkpoint.groupLabel,
+                  checkpoint: checkpoint.reveal,
+                }, { visualCueId: checkpoint.id, semanticObjectId: checkpoint.semanticObjectId });
+              }
+              output = {
+                ok: true,
+                accepted: true,
+                applied: ops.length,
+                checkpoints: checkpoints.length,
+                noBoard: ops.length === 0,
+                acceptedPendingObjectIds: ops.filter((op) => op.op === 'add').map((op) => op.id),
+                board: boardContext.toolSnapshot(),
+              };
             }
-            output = { ok: true, accepted: true, applied: ops.length, checkpoints: checkpoints.length, noBoard: ops.length === 0 };
           } catch (error) {
             output = { ok: false, accepted: false, error: String(error).slice(0, 260) };
           }
@@ -207,7 +228,12 @@ async function executeFallbackTurn(
               await ensureLearnerEvent();
               await repo.addFallbackEvent(identity, 'lesson_state', state);
               await emit('lesson_state', { state }, lessonState.activeSemanticObjectId ? { semanticObjectId: lessonState.activeSemanticObjectId } : {});
-              output = { ok: true, legalPhase: lessonState.phase, owedAction: lessonState.owedAction };
+              output = {
+                ok: true,
+                legalPhase: lessonState.phase,
+                owedAction: lessonState.owedAction,
+                board: boardContext.toolSnapshot(),
+              };
             } catch (error) { output = { ok: false, error: String(error).slice(0, 220) }; }
           } else output = { ok: false, error: 'teaching move failed schema validation' };
         } else if (call.function.name === 'record_evidence') {

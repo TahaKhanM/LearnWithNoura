@@ -12,7 +12,7 @@
 - Deployment Protection: Standard Vercel Authentication (`all_except_custom_domains`).
 - Stable protected Preview alias: `https://noura-preview-mtk2982007.vercel.app`
 - Public v0: `https://learnwithnoura.com`; `www` permanently redirects to the apex.
-- Current verified public-v0 deployment: `dpl_2YhuiyzmUqyX53J7XTqkPiyrpWfu`, revision `c8963e7c9968d2a89ca523662dae96d2fcb4b02e`.
+- Current verified public-v0 deployment: `dpl_FWWpHQk2iJkGGyCLPLhE4pBqjUEK`, revision `563f4c3422a1802b2cb43b0ec797ae5dc6b5013a`.
 
 Do not print or download Production secrets into tracked files. `.vercel/`, `.env*` and databases are ignored.
 
@@ -48,12 +48,14 @@ The v0 boundary does not claim real-user readiness, legal compliance, ZDR, durab
 
 The Supabase shared pooler encrypts the v0 database connection, but its certificate chain is not in Node's default CA store. Public v0 therefore sets `NOURA_DATABASE_SSL_REJECT_UNAUTHORIZED=false`. Before full Production, download and pin the project Server root certificate and restore certificate/hostname verification.
 
-Launch evidence through revision `c8963e7`:
+Launch evidence through revision `563f4c3`:
 
 - public apex health 200, exact `/version`, production-v0 config and permanent `www` redirect;
 - signed guest cookie, parent scoping, learner/session creation, nested session reload and Parent overview persisted through managed Postgres;
 - public WSS reached `ready`, started a Realtime response, delivered live PCM and accepted local interruption;
 - a deployed short loud tone did not cancel the active response and live PCM continued; deterministic tests require sustained local speech plus server confirmation;
+- the actual Chromium Lesson kept a released tutor object and learner stroke visible across interruption, emitted a replayable learner path plus bounded JPEG, and passed accessibility/reflow checks;
+- deployed Realtime correctly identified both fractions using board image context alone, and a fresh WSS connection replayed the stored learner stroke;
 - captions-only fallback completed with model tools, semantic board output, evidence, atomic release, immutable ending and Parent summary;
 - all named synthetic smoke records were deleted after verification; the launch database was handed over empty.
 

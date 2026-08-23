@@ -31,6 +31,13 @@ describe('semantic visual adapters', () => {
     expect(unit.filter((op) => op.op === 'add' && op.spec.kind === 'line' && op.id.includes('projection'))).toHaveLength(2);
   });
 
+  it('builds a code-owned triangle angle-sum proof with annotation lanes', () => {
+    const triangle = adaptSemanticScene(plan('triangle_angle_sum')).ops;
+    expect(triangle.filter((op) => op.op === 'add' && op.spec.kind === 'angle')).toHaveLength(3);
+    expect(triangle.some((op) => op.op === 'add' && op.spec.kind === 'label' && op.spec.text.includes('180'))).toBe(true);
+    expect(triangle.some((op) => op.op === 'add' && op.spec.kind === 'equation' && op.spec.latex.includes('A+B+C'))).toBe(true);
+  });
+
   it('creates a complete directional causal loop and full argument structure', () => {
     const cycle = adaptSemanticScene(plan('causal_cycle', { labels: ['Evaporation', 'Condensation', 'Precipitation', 'Collection'] })).ops;
     expect(JSON.stringify(cycle)).toContain('edge-loop');

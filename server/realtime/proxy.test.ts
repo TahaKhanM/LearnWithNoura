@@ -42,8 +42,128 @@ describe('realtime proxy response annotation', () => {
     const client = new FakeClient();
     await connectRealtimeProxy(client as never, { apiKey: 'offline-fixture', model: 'gpt-realtime-2.1', repo, sessionId: session.id, createUpstream: () => new FakeUpstream() as never });
     FakeUpstream.latest.onopen?.();
-    const update = JSON.parse(FakeUpstream.latest.sent[0]) as { session: { audio: { input: { turn_detection: { interrupt_response: boolean } } } } };
+    const update = JSON.parse(FakeUpstream.latest.sent[0]) as { session: { audio: { input: { turn_detection: { eagerness: string; interrupt_response: boolean } } } } };
+    expect(update.session.audio.input.turn_detection.eagerness).toBe('medium');
     expect(update.session.audio.input.turn_detection.interrupt_response).toBe(false);
+  });
+
+  it('grounds the agent in released board state and suppresses exact raw redraws', async () => {
+    vi.stubGlobal('WebSocket', FakeUpstream);
+    const repo = new Repo(openTestDb());
+    const child = repo.createChild('Maya', 10);
+    const session = repo.createSession(child.id, 'angles');
+    repo.addEvent(session.id, 'board_ops', {
+      ops: [{ op: 'add', id: 'existing-line', spec: { kind: 'line', from: [10, 10], to: [90, 90] } }],
+    });
+    const client = new FakeClient();
+    await connectRealtimeProxy(client as never, { apiKey: 'offline-fixture', model: 'gpt-realtime-2.1', repo, sessionId: session.id, createUpstream: () => new FakeUpstream() as never });
+    const upstream = FakeUpstream.latest;
+    upstream.onopen?.();
+    const initial = JSON.parse(upstream.sent[0]) as { session: { instructions: string } };
+    expect(initial.session.instructions).toContain('existing-line');
+    expect(initial.session.instructions).toContain('Do not restart or redraw equivalent objects');
+
+    const active = { ...identity, sessionId: session.id };
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 0, 'hello', {})));
+    upstream.emit({ type: 'response.created', response: { id: 'response-redraw' } });
+    upstream.emit({
+      type: 'response.function_call_arguments.done', response_id: 'response-redraw', call_id: 'duplicate-call', name: 'board_ops',
+      arguments: JSON.stringify({ ops: [{ op: 'add', id: 'duplicate-line', spec: { kind: 'line', from: [10, 10], to: [90, 90] } }] }),
+    });
+    await flushProxy();
+    const toolOutput = upstream.sent.map((raw) => JSON.parse(raw) as { type: string; item?: { type?: string; output?: string } })
+      .find((event) => event.type === 'conversation.item.create' && event.item?.type === 'function_call_output');
+    const parsed = JSON.parse(toolOutput?.item?.output ?? '{}') as { applied?: number; skippedEquivalentRedraws?: unknown[]; board?: { visibleObjectIds?: string[] } };
+    expect(parsed.applied).toBe(0);
+    expect(parsed.skippedEquivalentRedraws).toHaveLength(1);
+    expect(parsed.board?.visibleObjectIds).toContain('existing-line');
+  });
+
+  it('uses high semantic endpointing for one confirmed voice interruption, then restores medium', async () => {
+    vi.stubGlobal('WebSocket', FakeUpstream);
+    const repo = new Repo(openTestDb());
+    const child = repo.createChild('Maya', 10);
+    const session = repo.createSession(child.id, 'fractions');
+    const client = new FakeClient();
+    await connectRealtimeProxy(client as never, { apiKey: 'offline-fixture', model: 'gpt-realtime-2.1', repo, sessionId: session.id, createUpstream: () => new FakeUpstream() as never });
+    const active = { ...identity, sessionId: session.id };
+    const upstream = FakeUpstream.latest;
+    upstream.onopen?.();
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 0, 'hello', {})));
+    upstream.emit({ type: 'response.created', response: { id: 'before-interruption' } });
+    await flushProxy();
+
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 1, 'interrupt', { reason: 'voice' })));
+    await flushProxy();
+    let updates = upstream.sent.map((raw) => JSON.parse(raw) as { type: string; session?: { audio?: { input?: { turn_detection?: { eagerness?: string } } } } })
+      .filter((event) => event.type === 'session.update');
+    expect(updates.map((event) => event.session?.audio?.input?.turn_detection?.eagerness)).toEqual(['medium', 'high']);
+
+    upstream.emit({ type: 'response.created', response: { id: 'after-interruption' } });
+    await flushProxy();
+    updates = upstream.sent.map((raw) => JSON.parse(raw) as { type: string; session?: { audio?: { input?: { turn_detection?: { eagerness?: string } } } } })
+      .filter((event) => event.type === 'session.update');
+    expect(updates.map((event) => event.session?.audio?.input?.turn_detection?.eagerness)).toEqual(['medium', 'high', 'medium']);
+  });
+
+  it('forwards a learner board image to Realtime and persists only sanitized replay ops', async () => {
+    vi.stubGlobal('WebSocket', FakeUpstream);
+    const repo = new Repo(openTestDb());
+    const child = repo.createChild('Maya', 10);
+    const session = repo.createSession(child.id, 'fractions');
+    const client = new FakeClient();
+    await connectRealtimeProxy(client as never, { apiKey: 'offline-fixture', model: 'gpt-realtime-2.1', repo, sessionId: session.id, createUpstream: () => new FakeUpstream() as never });
+    const active = { ...identity, sessionId: session.id };
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 0, 'hello', {})));
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 1, 'board_event', {
+      description: 'one learner stroke',
+      ops: [{ op: 'add', id: 'sketch-test', color: '#2C5BE0', spec: { kind: 'path', points: [[10, 10], [30, 30], [60, 20]] } }],
+      imageDataUrl: 'data:image/jpeg;base64,AAAA',
+      requestResponse: true,
+    })));
+    await flushProxy();
+
+    const upstream = FakeUpstream.latest.sent.map((raw) => JSON.parse(raw) as { type: string; session?: { instructions?: string }; item?: { content?: Array<{ type: string }> } });
+    const context = upstream.find((event) => event.type === 'conversation.item.create');
+    expect(context?.item?.content?.map((part) => part.type)).toEqual(['input_text', 'input_image']);
+    expect(upstream.some((event) => event.type === 'response.create')).toBe(true);
+    expect(upstream.find((event) => event.type === 'session.update')?.session?.instructions).toContain('sketch-test [learner]');
+    const stored = repo.listEvents(session.id);
+    expect(stored).toEqual([
+      expect.objectContaining({
+        type: 'learner_board',
+        payload: expect.objectContaining({ hasVisualContext: true, ops: [expect.objectContaining({ op: 'add', id: 'sketch-test' })] }),
+      }),
+    ]);
+    expect(JSON.stringify(stored)).not.toContain('data:image');
+    FakeUpstream.latest.emit({ type: 'session.updated' });
+    await flushProxy();
+    expect(client.sent.find((event) => event.type === 'learner_board_replay')?.payload).toMatchObject({
+      batches: [[expect.objectContaining({ op: 'add', id: 'sketch-test' })]],
+    });
+  });
+
+  it('adds board context without a duplicate response while a spoken turn is active', async () => {
+    vi.stubGlobal('WebSocket', FakeUpstream);
+    const repo = new Repo(openTestDb());
+    const child = repo.createChild('Maya', 10);
+    const session = repo.createSession(child.id, 'fractions');
+    const client = new FakeClient();
+    await connectRealtimeProxy(client as never, { apiKey: 'offline-fixture', model: 'gpt-realtime-2.1', repo, sessionId: session.id, createUpstream: () => new FakeUpstream() as never });
+    const active = { ...identity, sessionId: session.id };
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 0, 'hello', {})));
+    FakeUpstream.latest.emit({ type: 'input_audio_buffer.speech_started' });
+    await flushProxy();
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 1, 'board_event', {
+      description: 'drawing while explaining',
+      ops: [{ op: 'add', id: 'sketch-talk', spec: { kind: 'path', points: [[10, 10], [20, 20]] } }],
+      requestResponse: true,
+    })));
+    await flushProxy();
+
+    const sent = FakeUpstream.latest.sent.map((raw) => JSON.parse(raw) as { type: string });
+    expect(sent.some((event) => event.type === 'conversation.item.create')).toBe(true);
+    expect(sent.some((event) => event.type === 'response.create')).toBe(false);
   });
 
   it('maps raw transcript-before-audio events across the complete PCM segment', async () => {

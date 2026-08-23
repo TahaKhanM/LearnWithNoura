@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { BoardOp } from '../../shared/boardOps';
 import { adaptSemanticScene, VISUAL_PLAN_VERSION, type SemanticScenePlan } from '../../shared/semanticScene';
 import { BoardCanvas, type BoardHighlight } from '../board/BoardCanvas';
@@ -22,6 +22,7 @@ function semantic(
 
 const SCENES: Record<string, BoardOp[]> = {
   pythagorean: semantic('pythagorean_area_proof', 'geometry'),
+  'triangle-angles': semantic('triangle_angle_sum', 'geometry'),
   'unit-circle': semantic('unit_circle_projection', 'geometry', { angleDegrees: 60 }),
   slopes: semantic('slope_comparison', 'quantitative', { slopes: [1, 2, -1] }),
   fractions: semantic('fraction_comparison', 'quantitative', { values: [2 / 3, 3 / 5], labels: ['2/3', '3/5'] }),
@@ -34,6 +35,7 @@ const SCENES: Record<string, BoardOp[]> = {
 
 const SCENE_GROUPS: Record<string, string> = {
   pythagorean: 'group-pythagorean_area_proof',
+  'triangle-angles': 'group-triangle_angle_sum',
   'unit-circle': 'group-unit_circle_projection',
   slopes: 'group-slope_comparison',
   fractions: 'group-fraction_comparison',
@@ -66,6 +68,11 @@ export function BoardHarness() {
     });
   }, []);
 
+  useEffect(() => {
+    const requested = new URLSearchParams(window.location.search).get('scene');
+    if (requested && SCENES[requested]) load(requested);
+  }, [load]);
+
   const highlight = useCallback(() => {
     setScene((current) => {
       const first = current.items[0];
@@ -74,7 +81,9 @@ export function BoardHarness() {
     });
   }, []);
 
-  const buttons = useMemo(() => Object.keys(SCENES), []);
+  // The extra adversarial/canonical scene is addressable by URL for visual
+  // tests without perturbing every established fixture screenshot.
+  const buttons = useMemo(() => Object.keys(SCENES).filter((name) => name !== 'triangle-angles'), []);
   const activeGroup = SCENE_GROUPS[active];
   const viewCount = deriveSemanticViewports(scene, activeGroup, highlights.map((highlight) => highlight.id)).length;
   return (

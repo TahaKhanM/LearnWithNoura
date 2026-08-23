@@ -39,12 +39,14 @@ export async function installFakeRealtime(page: Page) {
       onerror: ((event: Event) => void) | null = null;
       identity: Identity | null = null;
       sequence = 0;
+      sent: Array<Identity & { type: string; payload?: Record<string, unknown> }> = [];
       constructor() {
         (window as typeof window & { __nouraFakeSocket?: FakeRealtimeSocket }).__nouraFakeSocket = this;
         setTimeout(() => { this.readyState = 1; this.onopen?.(new Event('open')); }, 0);
       }
       send(raw: string) {
         const event = JSON.parse(raw) as Identity & { type: string };
+        this.sent.push(event as Identity & { type: string; payload?: Record<string, unknown> });
         const changed = !this.identity || event.connectionEpoch !== this.identity.connectionEpoch || event.turnId !== this.identity.turnId || event.generationId !== this.identity.generationId;
         this.identity = { sessionId: event.sessionId, connectionEpoch: event.connectionEpoch, turnId: event.turnId, generationId: event.generationId };
         if (changed) this.sequence = 0;

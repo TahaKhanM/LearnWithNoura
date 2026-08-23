@@ -62,6 +62,7 @@ test('actual Lesson start, listening, thinking, speaking/visual, reduced-motion 
     socket.emit('transcript_done', { response_id: 'fake-response', text: 'Which fraction is farther right?' }, { audioSampleOffsets: { start: 0, end: 24_000 }, providerResponseId: 'fake-response' });
   });
   await expect(page.getByText('Speaking')).toBeVisible();
+  await expect(page.locator('[data-item="fraction-scale-main"]')).toBeVisible();
   await expect(page.getByLabel('Board section', { exact: true })).toHaveValue('fraction-scale');
   await assertActiveBoardTextContained(page, ['1/2', '3/4']);
   expect(await page.locator('.avatar').getAttribute('data-attention-target')).toBe('semantic_object');
@@ -92,8 +93,19 @@ test('actual Lesson start, listening, thinking, speaking/visual, reduced-motion 
   await page.mouse.move(boardBox!.x + boardBox!.width / 2, boardBox!.y + boardBox!.height / 2);
   await page.mouse.down();
   await expect(page.locator('.avatar[data-attention-target="interruption"]')).toBeVisible();
+  await page.mouse.move(boardBox!.x + boardBox!.width / 2 + 30, boardBox!.y + boardBox!.height / 2 + 20);
   await page.mouse.up();
   await expect(page.locator('[data-item="fraction-scale-future"]')).toHaveCount(0);
+  await expect(page.locator('[data-item="fraction-scale-main"]')).toBeVisible();
+  await expect(page.locator('[data-item^="sketch-"]')).toHaveCount(1);
+  await expect.poll(() => page.evaluate(() => {
+    const socket = (window as typeof window & { __nouraFakeSocket: { sent: Array<{ type: string; payload?: Record<string, unknown> }> } }).__nouraFakeSocket;
+    const event = [...socket.sent].reverse().find((candidate) => candidate.type === 'board_event');
+    return {
+      hasImage: typeof event?.payload?.imageDataUrl === 'string' && String(event.payload.imageDataUrl).startsWith('data:image/jpeg;base64,'),
+      opCount: Array.isArray(event?.payload?.ops) ? event.payload.ops.length : 0,
+    };
+  })).toEqual({ hasImage: true, opCount: 1 });
 
   const browserArtifactDir = resolve('artifacts/browser');
   mkdirSync(browserArtifactDir, { recursive: true });

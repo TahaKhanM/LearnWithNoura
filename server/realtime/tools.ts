@@ -32,7 +32,7 @@ export const REALTIME_TOOLS = [
               id: { type: 'string', minLength: 1, maxLength: 80 },
               label: { type: 'string', minLength: 1, maxLength: 160 },
               revealOrder: { type: 'array', minItems: 1, items: { type: 'string', enum: ['outline', 'relation', 'label', 'connector', 'emphasis'] } },
-              template: { type: 'string', enum: ['pythagorean_area_proof', 'unit_circle_projection', 'fraction_comparison', 'slope_comparison', 'causal_cycle', 'argument_structure', 'cause_effect', 'grammar_structure', 'table', 'timeline', 'no_board'] },
+              template: { type: 'string', enum: ['pythagorean_area_proof', 'triangle_angle_sum', 'unit_circle_projection', 'fraction_comparison', 'slope_comparison', 'causal_cycle', 'argument_structure', 'cause_effect', 'grammar_structure', 'table', 'timeline', 'no_board'] },
               parameters: { type: 'object' },
             },
             required: ['id', 'label', 'revealOrder', 'template', 'parameters'],
@@ -72,7 +72,7 @@ export const REALTIME_TOOLS = [
     type: 'function' as const,
     name: 'board_ops',
     description:
-      'Draw on the shared whiteboard. Call this right after saying the sentence the drawing belongs to. Each call should draw the marks for ONE idea.',
+      'Add one small increment to an existing shared-board visual. New diagrams should use semantic_visual_plan so code owns layout; use raw board_ops only when no semantic template fits.',
     parameters: {
       type: 'object',
       additionalProperties: false,

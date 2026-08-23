@@ -1,5 +1,5 @@
 import { WebSocket as NodeWebSocket, type WebSocket as ClientSocket } from 'ws';
-import { validateOps } from '../../shared/boardOps.js';
+import { normalizeColor, validateOps, validateSpec, type BoardOp } from '../../shared/boardOps.js';
 import {
   createRuntimeEvent,
   RuntimeEventEnvelopeSchema,
@@ -13,6 +13,7 @@ import { createLessonState, reduceLesson, responseHandoff } from '../lesson/orch
 import { ResponseTaxonomySchema, TeachingMoveSchema, type ResponseTaxonomy } from '../../shared/pedagogy.js';
 import { adaptSemanticScene } from '../../shared/semanticScene.js';
 import { ResponseSegmentAnnotator } from './segmentAnnotator.js';
+import { loadReleasedBoardContext } from './boardContext.js';
 import type { DomainRepository } from '../store/domain.js';
 
 /**
@@ -60,6 +61,13 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
     return;
   }
 
+  const baseInstructions = buildInstructions({
+    childName: child.name,
+    childAge: child.age,
+    goal: session.goal,
+  });
+  let boardContext = await loadReleasedBoardContext(repo, sessionId);
+
   const upstreamUrl = `${REALTIME_URL}?model=${encodeURIComponent(model)}`;
   const upstream = options.createUpstream?.(upstreamUrl, apiKey) ?? new NodeWebSocket(upstreamUrl, {
     headers: { Authorization: `Bearer ${apiKey}` },
@@ -78,7 +86,7 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
    */
   let childHoldsFloor = false;
   /** What the most recent response.create was for, to target retries. */
-  let lastCreateSource: 'tool' | 'user' | 'start' = 'start';
+  let lastCreateSource: 'tool' | 'user' | 'board' | 'start' = 'start';
   /** A user ask hit an active response; ask again once it finishes. */
   let retryCreateOnDone = false;
   let clientIdentity: GenerationIdentity | null = null;
@@ -90,7 +98,10 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
   const responseIdentities = new Map<string, GenerationIdentity>();
   const responseTranscript = new Map<string, string>();
   const responseSegments = new Map<string, ResponseSegmentAnnotator>();
+  const pendingBoardOps = new Map<number, BoardOp[]>();
   let activeResponseId: string | null = null;
+  let speechInProgress = false;
+  let endpointingEagerness: 'medium' | 'high' = 'medium';
   let lessonState = createLessonState(session.goal);
   let lastLearnerEventId: number | null = null;
   let upstreamWork = Promise.resolve();
@@ -133,6 +144,26 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
     if (upstream.readyState === NodeWebSocket.OPEN) upstream.send(JSON.stringify(payload));
   }
 
+  function setEndpointingEagerness(eagerness: 'medium' | 'high'): void {
+    if (endpointingEagerness === eagerness) return;
+    endpointingEagerness = eagerness;
+    sendUpstream({
+      type: 'session.update',
+      session: {
+        type: 'realtime',
+        audio: { input: { turn_detection: semanticTurnDetection(eagerness) } },
+      },
+    });
+  }
+
+  function currentInstructions(): string {
+    return `${baseInstructions}\n\n${boardContext.prompt()}`;
+  }
+
+  function refreshBoardInstructions(): void {
+    sendUpstream({ type: 'session.update', session: { type: 'realtime', instructions: currentInstructions() } });
+  }
+
   function responseSegment(responseId: string): ResponseSegmentAnnotator {
     const existing = responseSegments.get(responseId);
     if (existing) return existing;
@@ -172,25 +203,14 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
       session: {
         type: 'realtime',
         output_modalities: ['audio'],
-        instructions: buildInstructions({
-          childName: child.name,
-          childAge: child.age,
-          goal: session.goal,
-        }),
+        instructions: currentInstructions(),
         tools: REALTIME_TOOLS,
         tool_choice: 'auto',
         audio: {
           input: {
             format: { type: 'audio/pcm', rate: 24000 },
             transcription: { model: 'gpt-4o-mini-transcribe' },
-            turn_detection: {
-              type: 'semantic_vad',
-              eagerness: 'medium',
-              create_response: true,
-              // Client-side sustained-speech confirmation owns cancellation;
-              // provider VAD alone must not stop Noura on incidental noise.
-              interrupt_response: false,
-            },
+            turn_detection: semanticTurnDetection('medium'),
           },
           output: { voice: 'marin', format: { type: 'audio/pcm', rate: 24000 } },
         },
@@ -232,6 +252,11 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
       .map((e) => validateOps((e.payload as { ops?: unknown[] })?.ops).ops)
       .filter((ops) => ops.length > 0);
     if (batches.length > 0) sendClient({ type: 'board_replay', batches });
+    const learnerBatches = events
+      .filter((event) => event.type === 'learner_board' && event.released)
+      .map((event) => learnerBoardOps((event.payload as { ops?: unknown }).ops))
+      .filter((ops) => ops.length > 0);
+    if (learnerBatches.length > 0) sendClient({ type: 'learner_board_replay', batches: learnerBatches });
   }
 
   /** After a refresh the upstream model starts cold; hand it the story so far. */
@@ -269,6 +294,10 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
         // recovers from a false-positive local interrupt that VAD never
         // confirmed.
         childHoldsFloor = false;
+        speechInProgress = false;
+        // High eagerness is a one-turn barge-in accelerator. Ordinary turns
+        // retain medium semantic endpointing so a child can pause and think.
+        setEndpointingEagerness('medium');
         const response = event.response as { id?: string } | undefined;
         if (response?.id && clientIdentity) {
           activeResponseId = response.id;
@@ -331,11 +360,13 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
       case 'input_audio_buffer.speech_started':
         toolContinues = 0;
         childHoldsFloor = true;
+        speechInProgress = true;
         sendClient({ type: 'speech_started' });
         break;
 
       case 'input_audio_buffer.speech_stopped':
         // VAD will now create the next response itself.
+        speechInProgress = false;
         childHoldsFloor = false;
         sendClient({ type: 'speech_stopped' });
         break;
@@ -417,7 +448,7 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
         const alreadyActive =
           error?.code === 'conversation_already_has_active_response' ||
           /active response in progress/i.test(error?.message ?? '');
-        if (alreadyActive && lastCreateSource === 'user') retryCreateOnDone = true;
+        if (alreadyActive && ['user', 'board'].includes(lastCreateSource)) retryCreateOnDone = true;
         const benign = error?.code === 'response_cancel_not_active' || alreadyActive;
         log(`session ${sessionId}: upstream error ${JSON.stringify(event.error).slice(0, 300)}`);
         if (!benign) {
@@ -444,8 +475,20 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
       case 'semantic_visual_plan': {
         try {
           const { plan, ops, checkpoints } = adaptSemanticScene(args);
+          const equivalent = boardContext.equivalentTutorScene(ops);
+          if (equivalent.equivalent) {
+            finishTool(callId, responseId, {
+              ok: true,
+              accepted: false,
+              reason: 'An equivalent visual is already visible. Reuse its IDs and adapt it in place.',
+              equivalentObjects: equivalent.duplicates,
+              board: boardContext.toolSnapshot(),
+            });
+            break;
+          }
           for (const checkpoint of checkpoints) {
             const eventId = await repo.addEvent(sessionId, 'semantic_scene', { plan, ops: checkpoint.ops, checkpointId: checkpoint.id, reveal: checkpoint.reveal }, false);
+            pendingBoardOps.set(eventId, checkpoint.ops);
             responseSegment(responseId).addSemanticCue({
               type: 'board_ops',
               ops: checkpoint.ops,
@@ -464,6 +507,8 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
             applied: ops.length,
             checkpoints: checkpoints.length,
             noBoard: ops.length === 0,
+            acceptedPendingObjectIds: ops.filter((op) => op.op === 'add').map((op) => op.id),
+            board: boardContext.toolSnapshot(),
           });
         } catch (error) {
           finishTool(callId, responseId, {
@@ -495,7 +540,12 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
           responseSegment(responseId).addSemanticCue({ type: 'lesson_state', state }, {
             ...(lessonState.activeSemanticObjectId ? { semanticObjectId: lessonState.activeSemanticObjectId } : {}),
           });
-          finishTool(callId, responseId, { ok: true, legalPhase: lessonState.phase, owedAction: lessonState.owedAction });
+          finishTool(callId, responseId, {
+            ok: true,
+            legalPhase: lessonState.phase,
+            owedAction: lessonState.owedAction,
+            board: boardContext.toolSnapshot(),
+          });
         } catch (error) {
           finishTool(callId, responseId, { ok: false, error: String(error).slice(0, 220) });
         }
@@ -503,17 +553,22 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
       }
 
       case 'board_ops': {
-        const { ops, rejected } = validateOps(args.ops);
+        const validated = validateOps(args.ops);
+        const novel = boardContext.novelTutorOps(validated.ops);
+        const { ops } = novel;
         if (ops.length > 0) {
           const eventId = await repo.addEvent(sessionId, 'board_ops', { ops }, false);
+          pendingBoardOps.set(eventId, ops);
           responseSegment(responseId).addSemanticCue({ type: 'board_ops', ops, response_id: responseId, event_id: eventId });
         }
         finishTool(callId, responseId, {
-          ok: rejected.length === 0,
+          ok: validated.rejected.length === 0,
           applied: ops.length,
-          ...(rejected.length > 0
-            ? { rejected: rejected.map((r) => r.reason).slice(0, 5) }
+          ...(validated.rejected.length > 0
+            ? { rejected: validated.rejected.map((r) => r.reason).slice(0, 5) }
             : {}),
+          ...(novel.duplicates.length > 0 ? { skippedEquivalentRedraws: novel.duplicates } : {}),
+          board: boardContext.toolSnapshot(),
         });
         break;
       }
@@ -696,6 +751,7 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
         childHoldsFloor = true;
         if (activeResponseId) cancelledResponses.add(activeResponseId);
         lessonState = reduceLesson(lessonState, { type: 'INTERRUPTED' });
+        if (message.reason === 'voice') setEndpointingEagerness('high');
         sendUpstream({ type: 'response.cancel' });
         break;
       }
@@ -715,21 +771,34 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
 
       case 'board_event': {
         const description = String(message.description ?? '').trim().slice(0, 4000);
-        if (!description) break;
-        await repo.addEvent(sessionId, 'learner_board', { description });
+        const ops = learnerBoardOps(message.ops);
+        const imageDataUrl = safeBoardImage(message.imageDataUrl);
+        if (!description && ops.length === 0) break;
+        await repo.addEvent(sessionId, 'learner_board', { description, ops, hasVisualContext: Boolean(imageDataUrl) });
+        boardContext.apply(ops, 'learner');
+        refreshBoardInstructions();
+        const content: Array<Record<string, unknown>> = [{
+          type: 'input_text',
+          text: `[The learner changed the shared board. Treat this as visual context, not a spoken message.] ${description}`,
+        }];
+        if (imageDataUrl) content.push({ type: 'input_image', image_url: imageDataUrl, detail: 'high' });
         sendUpstream({
           type: 'conversation.item.create',
           item: {
             type: 'message',
             role: 'user',
-            content: [
-              {
-                type: 'input_text',
-                text: `[The learner just drew on the board — this is context, not a message] ${description}`,
-              },
-            ],
+            content,
           },
         });
+        // A board-only turn is a real learner turn, not passive telemetry.
+        // If speech is also active, semantic VAD will create the one response
+        // after speech stops and the image remains context for that turn.
+        if (message.requestResponse === true && !speechInProgress) {
+          childHoldsFloor = false;
+          toolContinues = 0;
+          lastCreateSource = 'board';
+          sendUpstream({ type: 'response.create' });
+        }
         break;
       }
 
@@ -737,6 +806,15 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
         // The child has actually seen this batch; it is now part of the board.
         if (typeof message.event_id === 'number') {
           await repo.markEventReleased(sessionId, message.event_id);
+          const ops = pendingBoardOps.get(message.event_id);
+          if (ops) {
+            boardContext.apply(ops, 'tutor');
+            pendingBoardOps.delete(message.event_id);
+          } else {
+            // Covers acknowledgement after an unusual connection handoff.
+            boardContext = await loadReleasedBoardContext(repo, sessionId);
+          }
+          refreshBoardInstructions();
         }
         break;
       }
@@ -765,4 +843,43 @@ function taxonomyFromLegacyVerdict(value: unknown): ResponseTaxonomy {
 function pcmSampleCount(base64: string): number {
   try { return Math.floor(Buffer.from(base64, 'base64').byteLength / 2); }
   catch { return 0; }
+}
+
+function learnerBoardOps(raw: unknown): BoardOp[] {
+  if (!Array.isArray(raw)) return [];
+  const ops: BoardOp[] = [];
+  for (const entry of raw.slice(0, 40)) {
+    if (typeof entry !== 'object' || entry === null) continue;
+    const candidate = entry as { op?: unknown; id?: unknown; color?: unknown; spec?: unknown };
+    const id = typeof candidate.id === 'string' && /^sketch-[\w-]{1,80}$/.test(candidate.id)
+      ? candidate.id
+      : null;
+    if (!id) continue;
+    if (candidate.op === 'erase') {
+      ops.push({ op: 'erase', id });
+      continue;
+    }
+    if (candidate.op !== 'add' || typeof candidate.spec !== 'object' || candidate.spec === null) continue;
+    const spec = validateSpec(candidate.spec as never);
+    if (spec?.kind !== 'path') continue;
+    const color = normalizeColor(candidate.color);
+    ops.push({ op: 'add', id, spec, ...(color ? { color } : {}) });
+  }
+  return ops;
+}
+
+function safeBoardImage(value: unknown): string | null {
+  if (typeof value !== 'string' || value.length > 320_000) return null;
+  return /^data:image\/(?:png|jpeg);base64,[a-z0-9+/=]+$/i.test(value) ? value : null;
+}
+
+function semanticTurnDetection(eagerness: 'medium' | 'high') {
+  return {
+    type: 'semantic_vad',
+    eagerness,
+    create_response: true,
+    // Client-side sustained-speech confirmation owns cancellation; provider
+    // VAD alone must not stop Noura on incidental noise.
+    interrupt_response: false,
+  } as const;
 }

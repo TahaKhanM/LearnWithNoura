@@ -15,6 +15,7 @@ interface SessionHarness {
   handleServer(raw: unknown): void;
   handleMicEnergy(rms: number): void;
   releasePending(): void;
+  ws?: { readyState: number; send(raw: string): void };
 }
 
 beforeEach(() => window.sessionStorage.clear());
@@ -73,6 +74,69 @@ describe('RealtimeSession sealed response release', () => {
     harness.handleServer(createRuntimeEvent(identity, 1, 'speech_started', {}));
     for (let frame = 0; frame < 3; frame += 1) harness.handleMicEnergy(0.12);
     expect(session.getIdentity()).toEqual(identity);
+  });
+
+  it('moves from speech end to thinking and measures the actual reply gap', () => {
+    const now = vi.spyOn(performance, 'now');
+    const session = new RealtimeSession('session');
+    const harness = session as unknown as SessionHarness;
+    harness.audioOut = {
+      speaking: false, append: () => {}, currentEnergy: () => 0, playedSamples: () => 0,
+      stop: () => [], close: async () => {},
+    };
+    const identity = session.getIdentity();
+
+    now.mockReturnValue(1_000);
+    harness.handleServer(createRuntimeEvent(identity, 0, 'speech_stopped', {}));
+    expect(session.getSnapshot().phase).toBe('thinking');
+
+    now.mockReturnValue(1_180);
+    harness.handleServer(createRuntimeEvent(identity, 1, 'response_started', { response_id: 'reply' }));
+    expect(session.getSnapshot().metrics.speechEndToResponseStartedMs).toBe(180);
+
+    now.mockReturnValue(1_450);
+    harness.handleServer(createRuntimeEvent(identity, 2, 'audio', {
+      response_id: 'reply', item_id: 'item-reply', delta: btoa('\0\0'),
+    }));
+    expect(session.getSnapshot().metrics.speechEndToFirstAudioMs).toBe(450);
+    expect(session.getSnapshot().phase).toBe('speaking');
+    now.mockRestore();
+  });
+
+  it('requests one response for a board-only turn but lets speech VAD own mixed speech and drawing', () => {
+    const session = new RealtimeSession('session');
+    const harness = session as unknown as SessionHarness;
+    const sent: Array<{ type: string; payload: Record<string, unknown> }> = [];
+    harness.ws = {
+      readyState: 1,
+      send: (raw) => sent.push(JSON.parse(raw) as { type: string; payload: Record<string, unknown> }),
+    };
+    harness.handleServer(createRuntimeEvent(session.getIdentity(), 0, 'ready', {}));
+    const beforeBoard = session.getIdentity();
+    session.beginLearnerActivity();
+    const boardTurn = session.getIdentity();
+    expect(boardTurn).not.toEqual(beforeBoard);
+    session.beginLearnerActivity();
+    expect(session.getIdentity()).toEqual(boardTurn);
+    session.sendBoardEvent({ description: 'one stroke', ops: [] });
+    expect(sent.at(-1)?.payload.requestResponse).toBe(true);
+
+    const identity = session.getIdentity();
+    harness.handleServer(createRuntimeEvent(identity, 0, 'speech_started', {}));
+    session.beginLearnerActivity();
+    session.sendBoardEvent({ description: 'stroke plus speech', ops: [] });
+    expect(sent.at(-1)?.payload.requestResponse).toBe(false);
+  });
+
+  it('replays persisted learner board operations through the learner-owned path', () => {
+    const session = new RealtimeSession('session');
+    const harness = session as unknown as SessionHarness;
+    const replay = vi.fn();
+    session.onLearnerBoardReplay = replay;
+    const identity = session.getIdentity();
+    const ops = [{ op: 'add', id: 'sketch-test', spec: { kind: 'path', points: [[1, 1], [2, 2]] } }];
+    harness.handleServer(createRuntimeEvent(identity, 0, 'learner_board_replay', { batches: [ops] }));
+    expect(replay).toHaveBeenCalledWith(ops);
   });
 
   it('rejects late sealed cues after interruption, reconnect identity replacement, and navigation cleanup', () => {
