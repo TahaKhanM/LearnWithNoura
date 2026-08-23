@@ -7,8 +7,10 @@ export default defineConfig({
   plugins: [react()],
   server: {
     proxy: {
-      '/api': 'http://localhost:8787',
-      '/ws': { target: 'ws://localhost:8787', ws: true },
+      '/api': process.env.NOURA_BACKEND_URL ?? `http://localhost:${process.env.NOURA_BACKEND_PORT ?? '8787'}`,
+      '/healthz': process.env.NOURA_BACKEND_URL ?? `http://localhost:${process.env.NOURA_BACKEND_PORT ?? '8787'}`,
+      '/version': process.env.NOURA_BACKEND_URL ?? `http://localhost:${process.env.NOURA_BACKEND_PORT ?? '8787'}`,
+      '/ws': { target: (process.env.NOURA_BACKEND_URL ?? `http://localhost:${process.env.NOURA_BACKEND_PORT ?? '8787'}`).replace(/^http/, 'ws'), ws: true },
     },
   },
   test: {
