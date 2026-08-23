@@ -4,7 +4,7 @@ import express from 'express';
 import OpenAI from 'openai';
 import { WebSocketServer } from 'ws';
 import { createApi } from './api.js';
-import { runFallbackTurn } from './fallbackTutor.js';
+import { fallbackTurns } from './fallbackTutor.js';
 import { connectRealtimeProxy } from './realtime/proxy.js';
 import { assertRealtimePromptReadable } from './realtime/instructions.js';
 import { readRuntimeConfig, productionReadinessErrors, EVENT_SCHEMA_VERSION } from './runtimeConfig.js';
@@ -66,8 +66,9 @@ app.post('/api/fallback-turn', async (req, res) => {
     res.status(503).json({ error: 'Noura is not configured for tutor responses.' });
     return;
   }
-  const { sessionId, text, idempotencyKey } = req.body as {
+  const { sessionId, text, idempotencyKey, connectionEpoch, turnId, generationId } = req.body as {
     sessionId?: unknown; text?: unknown; idempotencyKey?: unknown;
+    connectionEpoch?: unknown; turnId?: unknown; generationId?: unknown;
   };
   if (typeof sessionId !== 'string' || typeof text !== 'string' || !text.trim()) {
     res.status(400).json({ error: 'sessionId and text are required' });
@@ -93,22 +94,70 @@ app.post('/api/fallback-turn', async (req, res) => {
     res.status(400).json({ error: 'A valid idempotencyKey is required.' });
     return;
   }
+  if (!Number.isInteger(connectionEpoch) || Number(connectionEpoch) < 0 ||
+      typeof turnId !== 'string' || !turnId || turnId.length > 160 ||
+      typeof generationId !== 'string' || !generationId || generationId.length > 160) {
+    res.status(400).json({ error: 'Fallback generation identity is required.' });
+    return;
+  }
 
   res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
   res.setHeader('Cache-Control', 'no-cache, no-transform');
   res.flushHeaders();
   let aborted = false;
-  req.on('aborted', () => { aborted = true; });
+  const requestController = new AbortController();
+  req.on('aborted', () => { aborted = true; requestController.abort('request aborted'); });
+  res.on('close', () => {
+    if (!res.writableEnded) {
+      aborted = true;
+      requestController.abort('response closed');
+    }
+  });
   const send = (payload: unknown) => {
     if (!aborted && !res.writableEnded) res.write(`${JSON.stringify(payload)}\n`);
   };
   try {
-    await runFallbackTurn(openai, runtimeConfig.textModel, repo, sessionId, text.trim(), send);
-    send({ type: 'done' });
-  } catch {
-    send({ type: 'error', message: 'The tutor request failed.' });
+    const result = await fallbackTurns.run(openai, runtimeConfig.textModel, repo, {
+      sessionId,
+      userText: text.trim(),
+      idempotencyKey,
+      connectionEpoch: Number(connectionEpoch),
+      turnId,
+      generationId,
+    }, send, requestController.signal);
+    send({ type: 'stream_done', replayed: result === 'replayed' });
+  } catch (error) {
+    if (!requestController.signal.aborted && (error as Error).name !== 'AbortError') {
+      send({ type: 'stream_error', message: 'The tutor request failed.' });
+    }
   } finally {
     if (!res.writableEnded) res.end();
+  }
+});
+
+app.post('/api/fallback-checkpoint', (req, res) => {
+  const { sessionId, idempotencyKey, connectionEpoch, turnId, generationId, eventId } = req.body as Record<string, unknown>;
+  if (typeof sessionId !== 'string' || typeof idempotencyKey !== 'string' ||
+      !Number.isInteger(connectionEpoch) || typeof turnId !== 'string' ||
+      typeof generationId !== 'string' || !Number.isInteger(eventId)) {
+    res.status(400).json({ error: 'Fallback checkpoint identity is required.' });
+    return;
+  }
+  const session = repo.getSession(sessionId);
+  const authorization = req.headers.authorization ?? '';
+  const capability = authorization.startsWith('Lesson ') ? authorization.slice(7) : null;
+  const claim = security.verifyLessonCapability(capability, sessionId);
+  if (!session || !claim || claim.childId !== session.childId) {
+    res.status(403).json({ error: 'Lesson capability is invalid or expired.' });
+    return;
+  }
+  try {
+    repo.markFallbackEventReleased({
+      sessionId, idempotencyKey, connectionEpoch: Number(connectionEpoch), turnId, generationId,
+    }, Number(eventId));
+    res.status(204).end();
+  } catch {
+    res.status(409).json({ error: 'Fallback checkpoint is stale or unavailable.' });
   }
 });
 

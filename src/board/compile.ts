@@ -160,7 +160,7 @@ function unionBBox(boxes: BBox[]): BBox {
   return bboxOfPoints(points);
 }
 
-function nodeBBox(node: RenderNode): BBox {
+export function nodeBBox(node: RenderNode): BBox {
   if (node.type === 'text') {
     const x = node.anchor === 'middle' ? node.x - node.w / 2 : node.anchor === 'end' ? node.x - node.w : node.x;
     return { x, y: node.y - node.size, w: node.w, h: node.size * 1.25 };

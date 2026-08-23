@@ -12,9 +12,12 @@ import { applyOps, emptyScene, describeScene, type SceneState } from '../board/s
 import { inspectScene, repairSceneOnce } from '../board/inspection';
 import { BoardCanvas, type BoardHighlight, type BoardTool } from '../board/BoardCanvas';
 import type { BoardAnimator } from '../board/animator';
+import { deriveSemanticViewports } from '../board/semanticViewport';
 import { RealtimeSession } from './realtimeSession';
 import { Avatar } from './Avatar';
 import { attentionPriority, CharacterAttentionController, type AttentionTargetType } from './characterAttention';
+import { centerForItemIds, centerForSemanticObject } from './attentionIntegration';
+import type { VisualCueMetadata } from './realtimeSession';
 import { useRouter } from '../routerContext';
 import './Lesson.css';
 
@@ -35,6 +38,9 @@ export function LessonPage({ sessionId }: LessonPageProps) {
   const [highlights, setHighlights] = useState<BoardHighlight[]>([]);
   const [tool, setTool] = useState<BoardTool>('pointer');
   const [boardOverview, setBoardOverview] = useState(false);
+  const [visualGroups, setVisualGroups] = useState<Array<{ id: string; label: string }>>([]);
+  const [activeVisualGroupId, setActiveVisualGroupId] = useState<string | undefined>();
+  const [focusIndex, setFocusIndex] = useState(0);
   const [penColor, setPenColor] = useState<string>(PALETTE.blue);
   const [draft, setDraft] = useState('');
   const [ending, setEnding] = useState(false);
@@ -76,7 +82,7 @@ export function LessonPage({ sessionId }: LessonPageProps) {
     };
   }, [sessionId]);
 
-  const applyTutorOps = useCallback((ops: BoardOp[], animate: boolean, identity: GenerationIdentity) => {
+  const applyTutorOps = useCallback((ops: BoardOp[], animate: boolean, identity: GenerationIdentity, cue?: VisualCueMetadata) => {
     if (!animate) {
       const result = prepareScene(committedSceneRef.current, ops);
       if (!result) return Promise.resolve(false);
@@ -98,7 +104,21 @@ export function LessonPage({ sessionId }: LessonPageProps) {
       if (!inspection.accepted) return false;
       sceneRef.current = candidate;
       setScene(candidate);
-      if (applied.highlighted.length > 0) setHighlights(applied.highlighted.map((id) => ({ id, nonce: ++highlightNonce.current })));
+      if (applied.highlighted.length > 0) {
+        const center = centerForItemIds(candidate, applied.highlighted);
+        if (center) offerAttention(attention, identity, 'focused_object', center);
+        setHighlights(applied.highlighted.map((id) => ({ id, nonce: ++highlightNonce.current })));
+      }
+      if (cue?.semanticObjectId) {
+        setVisualGroups((current) => current.some((group) => group.id === cue.semanticObjectId)
+          ? current
+          : [...current, { id: cue.semanticObjectId as string, label: cue.groupLabel ?? cue.semanticObjectId as string }].slice(-8));
+        setActiveVisualGroupId(cue.semanticObjectId);
+        setFocusIndex(0);
+        setBoardOverview(false);
+        const center = centerForSemanticObject(candidate, cue.semanticObjectId);
+        offerAttention(attention, identity, 'semantic_object', center, cue.semanticObjectId);
+      }
       await nextPaint();
       if (!sameIdentity(session.getIdentity(), identity)) return false;
       const completed = await (animator.current?.whenIdle() ?? Promise.resolve(true));
@@ -112,7 +132,7 @@ export function LessonPage({ sessionId }: LessonPageProps) {
     });
     visualChain.current = transaction.catch(() => false);
     return transaction;
-  }, [session]);
+  }, [session, attention]);
 
   useEffect(() => {
     session.onBoardOps = applyTutorOps;
@@ -123,6 +143,11 @@ export function LessonPage({ sessionId }: LessonPageProps) {
       setScene(committedSceneRef.current);
       setHighlights([]);
     };
+    session.onGenerationActivated = (identity, reason) => {
+      attention.replaceGeneration(identity);
+      offerAttention(attention, identity, reason === 'interruption' ? 'interruption' : 'neutral_learner');
+    };
+    session.onCaptionQuestion = (identity) => offerAttention(attention, identity, 'caption_question');
     return () => {
       session.end();
       if (boardEventTimer.current !== null) window.clearTimeout(boardEventTimer.current);
@@ -132,10 +157,15 @@ export function LessonPage({ sessionId }: LessonPageProps) {
 
   useEffect(() => {
     attention.replaceGeneration(snap.identity);
-    if (snap.phase === 'thinking') offerAttention(attention, snap.identity, 'semantic_object');
+    if (snap.phase === 'thinking') {
+      const center = snap.lessonState.activeSemanticObjectId
+        ? centerForSemanticObject(sceneRef.current, snap.lessonState.activeSemanticObjectId)
+        : undefined;
+      offerAttention(attention, snap.identity, 'semantic_object', center, snap.lessonState.activeSemanticObjectId);
+    }
     else if (snap.phase === 'listening') offerAttention(attention, snap.identity, 'neutral_learner');
     else if (snap.phase === 'reconnecting' || snap.phase === 'failed') offerAttention(attention, snap.identity, 'neutral_learner');
-  }, [attention, snap.identity, snap.phase]);
+  }, [attention, snap.identity, snap.phase, snap.lessonState.activeSemanticObjectId]);
 
   const begin = useCallback(async () => {
     if (!info || info.session.status !== 'active') return;
@@ -224,6 +254,7 @@ export function LessonPage({ sessionId }: LessonPageProps) {
 
   const lastChildLine = [...snap.captions].reverse().find((c) => c.role === 'child');
   const lastTutorLine = [...snap.captions].reverse().find((c) => c.role === 'tutor');
+  const semanticViewCount = deriveSemanticViewports(scene, activeVisualGroupId, highlights.map((highlight) => highlight.id)).length;
 
   const statusLabel =
     snap.phase === 'connecting'
@@ -312,6 +343,9 @@ export function LessonPage({ sessionId }: LessonPageProps) {
             animatorRef={(a) => {
               animator.current = a;
             }}
+            focusSemanticObjectId={activeVisualGroupId}
+            focusIndex={focusIndex}
+            overview={boardOverview}
           />
           {!started && (
             <div className="lesson__start">
@@ -339,6 +373,32 @@ export function LessonPage({ sessionId }: LessonPageProps) {
             >
               <svg viewBox="0 0 24 24"><path d="m5 3 14 7-6 2-2 6z" /></svg>
             </button>
+            {visualGroups.length > 0 && (
+              <label className="lesson__group-picker">
+                <span>Board section</span>
+                <select
+                  aria-label="Board section"
+                  value={activeVisualGroupId}
+                  onChange={(event) => {
+                    setActiveVisualGroupId(event.target.value);
+                    setFocusIndex(0);
+                    setBoardOverview(false);
+                  }}
+                >
+                  {visualGroups.map((group) => <option key={group.id} value={group.id}>{group.label}</option>)}
+                </select>
+              </label>
+            )}
+            {activeVisualGroupId && !boardOverview && (
+              <>
+                <button className="lesson__tool lesson__pan-control" aria-label="Previous part of this board section" disabled={focusIndex <= 0} onClick={() => setFocusIndex((value) => Math.max(0, value - 1))}>
+                  <svg viewBox="0 0 24 24"><path d="m15 5-7 7 7 7" /></svg>
+                </button>
+                <button className="lesson__tool lesson__pan-control" aria-label="Next part of this board section" disabled={focusIndex >= semanticViewCount - 1} onClick={() => setFocusIndex((value) => Math.min(semanticViewCount - 1, value + 1))}>
+                  <svg viewBox="0 0 24 24"><path d="m9 5 7 7-7 7" /></svg>
+                </button>
+              </>
+            )}
             <button
               className="lesson__tool lesson__overview-toggle"
               aria-pressed={boardOverview}
@@ -456,15 +516,17 @@ function offerAttention(
   identity: GenerationIdentity,
   targetType: AttentionTargetType,
   boardCoordinates?: [number, number],
+  semanticObjectId?: string,
 ): void {
   const now = performance.now();
   controller.offer({
     ...identity,
     targetType,
     ...(boardCoordinates ? { boardCoordinates } : {}),
+    ...(semanticObjectId ? { semanticObjectId } : {}),
     priority: attentionPriority(targetType),
     startTime: now,
-    expiryTime: now + (targetType === 'interruption' ? 900 : targetType.includes('learner') || targetType === 'focused_object' ? 700 : 420),
+    expiryTime: now + (targetType === 'semantic_object' ? 3_000 : targetType === 'interruption' ? 900 : targetType.includes('learner') || targetType === 'focused_object' || targetType === 'caption_question' ? 700 : 420),
     smoothingProfile: targetType === 'interruption' ? 'immediate' : targetType === 'learner_pointer' ? 'gentle' : 'responsive',
     permittedInReducedMotion: ['interruption', 'semantic_object', 'neutral_learner', 'focused_object'].includes(targetType),
   });

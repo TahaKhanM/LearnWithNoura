@@ -1,5 +1,9 @@
 .board-harness__surface { overflow: auto; overscroll-behavior: contain; }
+.board-harness__focus-controls { display: none; }
 
 @media (max-width: 540px) {
-  .board-harness__surface .board__a11y-wrap { min-width: 720px; min-height: 432px; }
+  .board-harness__focus-controls { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px 12px 0; }
+  .board-harness__focus-controls label { display: grid; gap: 3px; flex: 1 1 150px; font-size: 13px; }
+  .board-harness__focus-controls button, .board-harness__focus-controls select { min-height: 44px; }
+  .board-harness__surface .board__a11y-wrap { min-width: 0; min-height: 0; }
 }

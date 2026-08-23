@@ -4,7 +4,7 @@ import type { SceneItem, SceneState } from './scene';
 
 const SAFE = { x: 24, y: 24, w: BOARD_W - 48, h: BOARD_H - 48 };
 const TOOLBAR = { x: 780, y: 0, w: 220, h: 92 };
-const TEXT_BEARING = new Set<ShapeSpec['kind']>(['text', 'equation', 'label', 'point', 'angle', 'plot', 'bars', 'numberline', 'box', 'table']);
+const TEXT_BEARING = new Set<ShapeSpec['kind']>(['text', 'equation', 'label', 'point', 'angle', 'bars', 'numberline', 'box', 'table']);
 
 export interface SceneInspection {
   accepted: boolean;
@@ -65,6 +65,19 @@ export function repairSceneOnce(scene: SceneState, inspection = inspectScene(sce
   return { ...scene, items };
 }
 
+export function countAvoidableConnectorCrossings(scene: SceneState): number {
+  const segments = scene.items.flatMap((item) => {
+    if (item.spec.kind === 'line' && item.spec.arrow === 'end') return [{ from: item.spec.from, to: item.spec.to }];
+    if (item.spec.kind === 'connector' && Array.isArray(item.spec.from) && Array.isArray(item.spec.to)) return [{ from: item.spec.from, to: item.spec.to }];
+    return [];
+  });
+  let crossings = 0;
+  for (let left = 0; left < segments.length; left += 1) for (let right = left + 1; right < segments.length; right += 1) {
+    if (!sharesEndpoint(segments[left], segments[right]) && segmentsCross(segments[left].from, segments[left].to, segments[right].from, segments[right].to)) crossings += 1;
+  }
+  return crossings;
+}
+
 function translateSpec(spec: ShapeSpec, dx: number, dy: number): ShapeSpec {
   const move = ([x, y]: Vec): Vec => [x + dx, y + dy];
   switch (spec.kind) {
@@ -93,4 +106,14 @@ function dependentPair(left: SceneItem, right: SceneItem): boolean {
   if (left.spec.kind === 'plot' && left.spec.axes === right.id) return true;
   if (right.spec.kind === 'plot' && right.spec.axes === left.id) return true;
   return false;
+}
+
+function sharesEndpoint(left: { from: Vec; to: Vec }, right: { from: Vec; to: Vec }): boolean {
+  return [left.from, left.to].some((a) => [right.from, right.to].some((b) => Math.hypot(a[0] - b[0], a[1] - b[1]) < 1));
+}
+
+function segmentsCross(a: Vec, b: Vec, c: Vec, d: Vec): boolean {
+  const orient = (p: Vec, q: Vec, r: Vec) => (q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0]);
+  const values = [orient(a, b, c), orient(a, b, d), orient(c, d, a), orient(c, d, b)];
+  return values[0] * values[1] < 0 && values[2] * values[3] < 0;
 }

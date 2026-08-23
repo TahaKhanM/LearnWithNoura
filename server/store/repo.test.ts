@@ -27,6 +27,15 @@ describe('Repo', () => {
     expect((events[0].payload as { text: string }).text).toBe('hello');
   });
 
+  it('excludes unreleased rows from generic reads unless the internal audit path is explicit', () => {
+    const r = repo();
+    const child = r.createChild('Sam', null);
+    const session = r.createSession(child.id, 'goal');
+    r.addEvent(session.id, 'semantic_scene', { ops: [] }, false);
+    expect(r.listEvents(session.id)).toEqual([]);
+    expect(r.listEventsForInternalAudit(session.id)).toEqual([expect.objectContaining({ type: 'semantic_scene', released: false })]);
+  });
+
   it('stores evidence and aggregates it per child', () => {
     const r = repo();
     const child = r.createChild('Ava', 10);

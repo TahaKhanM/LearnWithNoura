@@ -24,28 +24,76 @@ export const SemanticScenePlanSchema = z.object({
     domain: z.enum(['geometry', 'quantitative', 'process', 'argument', 'history', 'grammar', 'table', 'timeline', 'none']),
     noBoardReason: z.string().max(300).optional(),
   }),
-  groups: z.array(SemanticGroupSchema).max(1),
+  groups: z.array(SemanticGroupSchema).max(6),
 });
 
 export type SemanticScenePlan = z.infer<typeof SemanticScenePlanSchema>;
 
-export function adaptSemanticScene(input: unknown): { plan: SemanticScenePlan; ops: BoardOp[] } {
+export type SemanticReveal = SemanticScenePlan['groups'][number]['revealOrder'][number];
+export interface SemanticCheckpoint {
+  id: string;
+  semanticObjectId: string;
+  groupLabel: string;
+  reveal: SemanticReveal;
+  ops: BoardOp[];
+}
+
+export function adaptSemanticScene(input: unknown): { plan: SemanticScenePlan; ops: BoardOp[]; checkpoints: SemanticCheckpoint[] } {
   const plan = SemanticScenePlanSchema.parse(input);
-  const group = plan.groups[0];
-  if (!group || group.template === 'no_board') return { plan, ops: [] };
+  const ops: BoardOp[] = [];
+  const checkpoints: SemanticCheckpoint[] = [];
+  for (const group of plan.groups) {
+    if (group.template === 'no_board') continue;
+    const groupOps = opsForGroup(group);
+    const finalized = finalizePlan(plan, groupOps).ops;
+    ops.push(...finalized);
+    const buckets = new Map<SemanticReveal, BoardOp[]>();
+    for (const reveal of group.revealOrder) buckets.set(reveal, []);
+    for (const op of finalized) {
+      const requested = revealForOp(op);
+      const reveal = buckets.has(requested) ? requested : group.revealOrder[group.revealOrder.length - 1];
+      buckets.get(reveal)?.push(op);
+    }
+    for (const [index, reveal] of group.revealOrder.entries()) {
+      const checkpointOps = buckets.get(reveal) ?? [];
+      if (checkpointOps.length === 0) continue;
+      checkpoints.push({
+        id: `${plan.planId}:${group.id}:${index}:${reveal}`,
+        semanticObjectId: group.id,
+        groupLabel: group.label,
+        reveal,
+        ops: checkpointOps,
+      });
+    }
+  }
+  return { plan, ops, checkpoints };
+}
+
+function opsForGroup(group: SemanticScenePlan['groups'][number]): BoardOp[] {
   const prefix = group.id;
   switch (group.template) {
-    case 'pythagorean_area_proof': return finalizePlan(plan, pythagoreanProof(prefix));
-    case 'unit_circle_projection': return finalizePlan(plan, unitCircle(prefix, numberParam(group.parameters, 'angleDegrees', 60)));
-    case 'fraction_comparison': return finalizePlan(plan, fractionComparison(prefix, numberArray(group.parameters.values, [2 / 3, 3 / 5]), stringArray(group.parameters.labels, ['2/3', '3/5'])));
-    case 'slope_comparison': return finalizePlan(plan, slopeComparison(prefix, numberArray(group.parameters.slopes, [1, 2, -1])));
-    case 'causal_cycle': return finalizePlan(plan, layeredGraph(prefix, stringArray(group.parameters.labels, ['Stage 1', 'Stage 2', 'Stage 3', 'Stage 4']), true));
-    case 'argument_structure': return finalizePlan(plan, layeredGraph(prefix, stringArray(group.parameters.labels, ['Claim', 'Evidence', 'Reasoning']), false));
-    case 'cause_effect': return finalizePlan(plan, layeredGraph(prefix, stringArray(group.parameters.labels, ['Cause', 'Event', 'Effect']), false));
-    case 'grammar_structure': return finalizePlan(plan, layeredGraph(prefix, stringArray(group.parameters.labels, ['Subject', 'Verb', 'Object']), false));
-    case 'table': return finalizePlan(plan, [{ op: 'add', id: `${prefix}-table`, spec: { kind: 'table', at: [160, 130], rows: tableRows(group.parameters.rows), headerRow: true } }]);
-    case 'timeline': return finalizePlan(plan, timeline(prefix, stringArray(group.parameters.labels, ['Earlier', 'Middle', 'Later'])));
+    case 'pythagorean_area_proof': return pythagoreanProof(prefix);
+    case 'unit_circle_projection': return unitCircle(prefix, numberParam(group.parameters, 'angleDegrees', 60));
+    case 'fraction_comparison': return fractionComparison(prefix, numberArray(group.parameters.values, [2 / 3, 3 / 5]), stringArray(group.parameters.labels, ['2/3', '3/5']));
+    case 'slope_comparison': return slopeComparison(prefix, numberArray(group.parameters.slopes, [1, 2, -1]));
+    case 'causal_cycle': return layeredGraph(prefix, stringArray(group.parameters.labels, ['Stage 1', 'Stage 2', 'Stage 3', 'Stage 4']), true);
+    case 'argument_structure': return layeredGraph(prefix, stringArray(group.parameters.labels, ['Claim', 'Evidence', 'Reasoning']), false);
+    case 'cause_effect': return layeredGraph(prefix, stringArray(group.parameters.labels, ['Cause', 'Event', 'Effect']), false);
+    case 'grammar_structure': return layeredGraph(prefix, stringArray(group.parameters.labels, ['Subject', 'Verb', 'Object']), false);
+    case 'table': return [{ op: 'add', id: `${prefix}-table`, spec: { kind: 'table', at: [160, 130], rows: tableRows(group.parameters.rows), headerRow: true } }];
+    case 'timeline': return timeline(prefix, stringArray(group.parameters.labels, ['Earlier', 'Middle', 'Later']));
+    case 'no_board': return [];
   }
+}
+
+function revealForOp(op: BoardOp): SemanticReveal {
+  if (op.op === 'highlight' || op.op === 'update') return 'emphasis';
+  if (op.op !== 'add') return 'outline';
+  if (['text', 'equation', 'label'].includes(op.spec.kind)) return 'label';
+  if (op.spec.kind === 'connector') return 'connector';
+  if (['plot', 'angle', 'point'].includes(op.spec.kind)) return 'relation';
+  if (op.spec.kind === 'line' && op.spec.arrow) return 'connector';
+  return 'outline';
 }
 
 function finalizePlan(plan: SemanticScenePlan, rawOps: BoardOp[]): { plan: SemanticScenePlan; ops: BoardOp[] } {
@@ -82,8 +130,8 @@ function pythagoreanProof(prefix: string): BoardOp[] {
   ops.push({ op: 'add', id: `${prefix}-c-square`, color: 'green', spec: { kind: 'polygon', points: [[left + b, y], [left + side, y + b], [left + a, y + side], [left, y + a]], closed: true } });
   ops.push({ op: 'add', id: `${prefix}-a-square`, color: 'blue', spec: { kind: 'polygon', points: [[right, y], [right + a, y], [right + a, y + a], [right, y + a]], closed: true } });
   ops.push({ op: 'add', id: `${prefix}-b-square`, color: 'red', spec: { kind: 'polygon', points: [[right + a, y + a], [right + side, y + a], [right + side, y + side], [right + a, y + side]], closed: true } });
-  ops.push({ op: 'add', id: `${prefix}-label-c`, color: 'green', spec: { kind: 'text', at: [left + 150, 470], text: 'one c² square', size: 'big' } });
-  ops.push({ op: 'add', id: `${prefix}-label-ab`, color: 'blue', spec: { kind: 'text', at: [right + 150, 470], text: 'two squares: a² + b²' } });
+  ops.push({ op: 'add', id: `${prefix}-label-c`, color: 'green', spec: { kind: 'text', at: [left + 150, 470], text: 'c² square', size: 'big' } });
+  ops.push({ op: 'add', id: `${prefix}-label-ab`, color: 'blue', spec: { kind: 'text', at: [right, 470], text: 'a² + b² squares' } });
   ops.push({ op: 'add', id: `${prefix}-equivalence`, color: 'ink', spec: { kind: 'connector', from: [420, 270], to: [580, 270], label: 'same 4 triangles' } });
   ops.push({ op: 'add', id: `${prefix}-equation`, color: 'green', spec: { kind: 'equation', at: [440, 350], latex: 'c^2=a^2+b^2' } });
   return ops;
