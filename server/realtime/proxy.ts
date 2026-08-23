@@ -54,6 +54,16 @@ export function connectRealtimeProxy(client: ClientSocket, options: ProxyOptions
   /** response ids we know were cancelled by barge-in. */
   const cancelledResponses = new Set<string>();
   let started = false;
+  /**
+   * True from the moment the child takes the floor (speech started, or an
+   * explicit interrupt) until they finish their turn. While the child
+   * holds the floor, tool results must not spawn continuation responses.
+   */
+  let childHoldsFloor = false;
+  /** What the most recent response.create was for, to target retries. */
+  let lastCreateSource: 'tool' | 'user' | 'start' = 'start';
+  /** A user ask hit an active response; ask again once it finishes. */
+  let retryCreateOnDone = false;
 
   function sendClient(payload: unknown): void {
     if (client.readyState === client.OPEN) client.send(JSON.stringify(payload));
@@ -130,11 +140,13 @@ export function connectRealtimeProxy(client: ClientSocket, options: ProxyOptions
 
   function replayBoard(): void {
     // Only marks the child actually saw; ops cancelled mid-speech were
-    // never released and must not reappear after a refresh.
+    // never released and must not reappear after a refresh. Stored ops are
+    // re-validated so yesterday's data always meets today's rules.
     const batches = repo
       .listEvents(sessionId, 2000)
       .filter((e) => e.type === 'board_ops' && e.released)
-      .map((e) => (e.payload as { ops?: unknown[] })?.ops ?? []);
+      .map((e) => validateOps((e.payload as { ops?: unknown[] })?.ops).ops)
+      .filter((ops) => ops.length > 0);
     if (batches.length > 0) sendClient({ type: 'board_replay', batches });
   }
 
@@ -168,6 +180,11 @@ export function connectRealtimeProxy(client: ClientSocket, options: ProxyOptions
       }
 
       case 'response.created': {
+        // A response only starts when the child's turn is over (VAD or an
+        // explicit ask), so the floor is the tutor's again. This also
+        // recovers from a false-positive local interrupt that VAD never
+        // confirmed.
+        childHoldsFloor = false;
         const response = event.response as { id?: string } | undefined;
         sendClient({ type: 'response_started', response_id: response?.id });
         break;
@@ -213,10 +230,13 @@ export function connectRealtimeProxy(client: ClientSocket, options: ProxyOptions
 
       case 'input_audio_buffer.speech_started':
         toolContinues = 0;
+        childHoldsFloor = true;
         sendClient({ type: 'speech_started' });
         break;
 
       case 'input_audio_buffer.speech_stopped':
+        // VAD will now create the next response itself.
+        childHoldsFloor = false;
         sendClient({ type: 'speech_stopped' });
         break;
 
@@ -237,6 +257,13 @@ export function connectRealtimeProxy(client: ClientSocket, options: ProxyOptions
         const status = response?.status ?? 'unknown';
         if (status === 'cancelled' && response?.id) cancelledResponses.add(response.id);
         sendClient({ type: 'response_done', response_id: response?.id, status });
+        if (retryCreateOnDone) {
+          // The child asked something while a response was still running;
+          // their question must not be dropped.
+          retryCreateOnDone = false;
+          lastCreateSource = 'user';
+          sendUpstream({ type: 'response.create' });
+        }
         break;
       }
 
@@ -244,10 +271,11 @@ export function connectRealtimeProxy(client: ClientSocket, options: ProxyOptions
         const error = event.error as { message?: string; code?: string } | undefined;
         // Expected races, harmless: cancelling a turn that just finished, or
         // continuing after a tool call when VAD already started a response.
-        const benign =
-          error?.code === 'response_cancel_not_active' ||
+        const alreadyActive =
           error?.code === 'conversation_already_has_active_response' ||
           /active response in progress/i.test(error?.message ?? '');
+        if (alreadyActive && lastCreateSource === 'user') retryCreateOnDone = true;
+        const benign = error?.code === 'response_cancel_not_active' || alreadyActive;
         log(`session ${sessionId}: upstream error ${JSON.stringify(event.error).slice(0, 300)}`);
         if (!benign) {
           sendClient({ type: 'error', message: 'The tutor hit a snag — it will recover in a moment.' });
@@ -338,9 +366,10 @@ export function connectRealtimeProxy(client: ClientSocket, options: ProxyOptions
       type: 'conversation.item.create',
       item: { type: 'function_call_output', call_id: callId, output: JSON.stringify(output) },
     });
-    if (cancelledResponses.has(responseId)) return;
+    if (cancelledResponses.has(responseId) || childHoldsFloor) return;
     if (toolContinues >= MAX_TOOL_CONTINUES) return;
     toolContinues += 1;
+    lastCreateSource = 'tool';
     sendUpstream({ type: 'response.create' });
   }
 
@@ -382,6 +411,7 @@ export function connectRealtimeProxy(client: ClientSocket, options: ProxyOptions
           });
         }
         repo.addEvent(sessionId, 'session_started', { resumed: Boolean(resume) });
+        lastCreateSource = 'start';
         sendUpstream({ type: 'response.create' });
         break;
       }
@@ -390,18 +420,22 @@ export function connectRealtimeProxy(client: ClientSocket, options: ProxyOptions
         const text = String(message.text ?? '').trim().slice(0, 2000);
         if (!text) break;
         toolContinues = 0;
+        childHoldsFloor = false;
         repo.addEvent(sessionId, 'learner_said', { text, via: 'text' });
         sendClient({ type: 'user_transcript', text });
         sendUpstream({
           type: 'conversation.item.create',
           item: { type: 'message', role: 'user', content: [{ type: 'input_text', text }] },
         });
+        lastCreateSource = 'user';
         sendUpstream({ type: 'response.create' });
         break;
       }
 
       case 'interrupt': {
-        // The client already stopped local audio; make the model stop too.
+        // The client already stopped local audio; make the model stop too,
+        // and keep tool chains from restarting it while the child speaks.
+        childHoldsFloor = true;
         sendUpstream({ type: 'response.cancel' });
         break;
       }

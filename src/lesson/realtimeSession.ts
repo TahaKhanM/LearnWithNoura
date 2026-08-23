@@ -252,19 +252,25 @@ export class RealtimeSession {
     }
   }
 
+  private markResponseDead(responseId: string | null): void {
+    if (responseId === null) return;
+    this.deadResponses.add(responseId);
+    if (this.deadResponses.size > 24) {
+      this.deadResponses.delete(this.deadResponses.values().next().value as string);
+    }
+  }
+
   /** Stops sound and stale work now, without waiting for the server. */
   private interruptLocally(reason: 'voice' | 'text' | 'server'): void {
+    // Kill the current response even if its audio hasn't started yet —
+    // an interruption during the thinking gap must still cancel whatever
+    // that response goes on to produce.
+    this.markResponseDead(this.currentResponseId);
     if (!this.audioOut.speaking && this.pendingOps.length === 0 && this.pendingText.length === 0) {
       return;
     }
     const interruptedAt = performance.now();
     const heard = this.audioOut.stop();
-    if (this.currentResponseId !== null) {
-      this.deadResponses.add(this.currentResponseId);
-      if (this.deadResponses.size > 24) {
-        this.deadResponses.delete(this.deadResponses.values().next().value as string);
-      }
-    }
     this.pendingOps = [];
     this.pendingText = [];
     this.hotFrames = 0;
@@ -310,6 +316,7 @@ export class RealtimeSession {
         if (typeof message.delta !== 'string') break;
         const responseId = String(message.response_id ?? '');
         if (this.deadResponses.has(responseId)) break;
+        this.currentResponseId = responseId;
         const itemId = typeof message.item_id === 'string' ? message.item_id : null;
         if (!this.firstAudioSeen && this.askAt > 0) {
           this.firstAudioSeen = true;
@@ -427,6 +434,7 @@ export class RealtimeSession {
 
     while (this.pendingText.length > 0 && this.shouldRelease(this.pendingText[0], 120)) {
       const item = this.pendingText.shift() as StampedText;
+      if (this.deadResponses.has(item.responseId)) continue;
       if (this.liveLineResponse !== item.responseId) {
         // A new spoken segment begins: settle the previous caption line.
         this.commitTutorLine();
@@ -444,6 +452,7 @@ export class RealtimeSession {
 
   /** Puts a batch on the board and confirms it as seen, for honest replay. */
   private releaseOps(item: StampedOps): void {
+    if (this.deadResponses.has(item.responseId)) return;
     this.onBoardOps(item.ops, true);
     if (item.eventId !== null) this.send({ type: 'ops_shown', event_id: item.eventId });
   }
@@ -452,6 +461,7 @@ export class RealtimeSession {
     // Natural end of speech: flush what the stamps didn't quite release,
     // still respecting caption boundaries between spoken segments.
     for (const item of this.pendingText) {
+      if (this.deadResponses.has(item.responseId)) continue;
       if (this.liveLineResponse !== item.responseId) {
         this.commitTutorLine();
         this.liveLineResponse = item.responseId;

@@ -80,6 +80,7 @@ export function LessonPage({ sessionId }: LessonPageProps) {
     session.onBoardOps = applyTutorOps;
     return () => {
       session.end();
+      if (boardEventTimer.current !== null) window.clearTimeout(boardEventTimer.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session]);
