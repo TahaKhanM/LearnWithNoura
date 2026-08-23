@@ -82,8 +82,9 @@ afterEach(() => vi.unstubAllGlobals());
 
 describe('raw Realtime proxy to heard-sample session integration', () => {
   it.each(orderings)('$name releases every cue only at its derived heard-sample boundary', async ({ steps }) => {
-    const harness = createHarness();
+    const harness = await createHarness();
     emitResponse(harness.upstream, 'response-matrix', steps);
+    await flushProxy();
     harness.deliverProxyEnvelopes();
 
     const cueEnvelopes = harness.client.sent.filter((event) =>
@@ -131,9 +132,10 @@ describe('raw Realtime proxy to heard-sample session integration', () => {
     harness.session.end();
   });
 
-  it('drops raw cancelled responses and completed old-identity cues after interruption', () => {
-    const cancelled = createHarness();
+  it('drops raw cancelled responses and completed old-identity cues after interruption', async () => {
+    const cancelled = await createHarness();
     emitResponse(cancelled.upstream, 'cancelled-response', ['text-a', 'audio-small', 'audio-rest', 'board-tool', 'state-tool'], 'cancelled');
+    await flushProxy();
     cancelled.deliverProxyEnvelopes();
     cancelled.setPlayed('cancelled-response', 24_000);
     cancelled.release();
@@ -142,19 +144,22 @@ describe('raw Realtime proxy to heard-sample session integration', () => {
     expect(cancelled.boardReleases).toEqual([]);
     cancelled.session.end();
 
-    const interrupted = createHarness();
+    const interrupted = await createHarness();
     interrupted.upstream.emit({ type: 'response.created', response: { id: 'old-response' } });
     for (const step of ['text-a', 'text-b', 'audio-small', 'audio-rest', 'board-tool', 'state-tool'] as RawStep[]) {
       emitStep(interrupted.upstream, 'old-response', step);
     }
+    await flushProxy();
     interrupted.deliverProxyEnvelopes();
     const oldIdentity = interrupted.session.getIdentity();
     interrupted.upstream.emit({ type: 'input_audio_buffer.speech_started' });
+    await flushProxy();
     interrupted.deliverProxyEnvelopes();
     expect(interrupted.session.getIdentity()).not.toEqual(oldIdentity);
 
     for (const step of ['transcript-done', 'audio-done'] as RawStep[]) emitStep(interrupted.upstream, 'old-response', step);
     interrupted.upstream.emit({ type: 'response.done', response: { id: 'old-response', status: 'completed', output: [{ type: 'function_call' }] } });
+    await flushProxy();
     interrupted.deliverProxyEnvelopes();
     interrupted.setPlayed('old-response', 24_000);
     interrupted.release();
@@ -164,13 +169,15 @@ describe('raw Realtime proxy to heard-sample session integration', () => {
     interrupted.session.end();
   });
 
-  it('rejects pending and replayed stale envelopes after reconnect identity replacement and navigation', () => {
-    const harness = createHarness();
+  it('rejects pending and replayed stale envelopes after reconnect identity replacement and navigation', async () => {
+    const harness = await createHarness();
     emitResponse(harness.upstream, 'before-reconnect', orderings[0].steps);
+    await flushProxy();
     harness.deliverProxyEnvelopes();
     const staleEnvelopes = harness.client.sent.slice();
 
     harness.replaceForReconnect();
+    await flushProxy();
     harness.setPlayed('before-reconnect', 24_000);
     harness.release();
     for (const envelope of staleEnvelopes) harness.deliverDirect(envelope);
@@ -180,6 +187,7 @@ describe('raw Realtime proxy to heard-sample session integration', () => {
     expect(harness.boardReleases).toEqual([]);
 
     emitResponse(harness.upstream, 'before-navigation', orderings[2].steps);
+    await flushProxy();
     harness.deliverProxyEnvelopes();
     harness.session.end();
     harness.setPlayed('before-navigation', 24_000);
@@ -190,7 +198,7 @@ describe('raw Realtime proxy to heard-sample session integration', () => {
   });
 });
 
-function createHarness() {
+async function createHarness() {
   vi.stubGlobal('WebSocket', FakeUpstream);
   const repo = new Repo(openTestDb());
   const child = repo.createChild('Maya', 10);
@@ -213,7 +221,7 @@ function createHarness() {
     boardReleases.push(cue?.semanticObjectId ?? 'board');
     return true;
   };
-  connectRealtimeProxy(client as never, {
+  await connectRealtimeProxy(client as never, {
     apiKey: 'offline-fixture', model: 'gpt-realtime-2.1', repo, sessionId: storedSession.id,
   });
   client.emit('message', JSON.stringify(createRuntimeEvent(session.getIdentity(), 0, 'hello', {})));
@@ -237,6 +245,10 @@ function createHarness() {
       client.emit('message', JSON.stringify(createRuntimeEvent(session.getIdentity(), 0, 'hello', {})));
     },
   };
+}
+
+function flushProxy(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 function emitResponse(upstream: FakeUpstream, responseId: string, steps: RawStep[], status = 'completed') {

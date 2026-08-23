@@ -30,4 +30,31 @@ describe('runtime configuration', () => {
       'under-13 mode requires externally verified ZDR evidence',
     );
   });
+
+  it('keeps unverified database TLS outside the full Production boundary', () => {
+    const env = {
+      NOURA_DEPLOYMENT_MODE: 'production',
+      DATABASE_URL: 'postgres://fixture',
+      OPENAI_API_KEY: 'fixture',
+      NOURA_STORAGE_ADAPTER: 'postgres',
+      NOURA_LESSON_CAPABILITY_SECRET: 'test-secret-at-least-32-characters',
+      NOURA_DATABASE_SSL_REJECT_UNAUTHORIZED: 'false',
+    };
+    expect(productionReadinessErrors(readRuntimeConfig(env), env)).toContain(
+      'full Production requires verified database TLS',
+    );
+  });
+
+  it('opens only the explicit guest v0 boundary when provider, Postgres, and signing are configured', () => {
+    const env = {
+      NOURA_DEPLOYMENT_MODE: 'production-v0',
+      DATABASE_URL: 'postgres://fixture',
+      OPENAI_API_KEY: 'fixture',
+      NOURA_STORAGE_ADAPTER: 'postgres',
+      NOURA_LESSON_CAPABILITY_SECRET: 'test-secret-at-least-32-characters',
+    };
+    const config = readRuntimeConfig(env);
+    expect(config).toMatchObject({ production: true, v0: true, guestAccess: true, syntheticOnly: true });
+    expect(productionReadinessErrors(config, env)).toEqual([]);
+  });
 });

@@ -30,7 +30,23 @@ Preview is synthetic-only and storage-ephemeral. A 503 degraded `/healthz` for d
 
 The first CLI deployment is forcibly classified by Vercel as Production even when Preview was requested. Two accidentally classified tutor deployments were immediately removed. The surviving Production deployment is the static maintenance boundary `dpl_DPdMDbq9D69cSZyJX3VS4C7MbdeU`; it has no tutor API and no purchased-domain assignment. This seed allows subsequent explicit `--target=preview` deployments to remain Preview.
 
-## Production gate
+## Public v0 gate
+
+Public v0 is the real Noura product, not a scripted fixture. It uses managed Postgres, live provider calls, the Realtime WebSocket, captions-only fallback, semantic visuals, learner drawing, evidence, immutable ending and the Parent view. Its temporary identity boundary is a signed pseudonymous guest-parent cookie, and the UI remains explicit that only pretend learner details may be used.
+
+Before setting `NOURA_DEPLOYMENT_MODE=production-v0`, require:
+
+- `DATABASE_URL` using a serverless-suitable pooled connection, `NOURA_STORAGE_ADAPTER=postgres`, and migration 1 in the private `noura` schema;
+- `OPENAI_API_KEY`, reviewed runtime model identifiers and a strong `NOURA_LESSON_CAPABILITY_SECRET`;
+- exact apex/www origins, London Function placement beside the database, `/healthz` 200 and `/version` matching the tested revision;
+- a deployed REST → WSS → reconnect → fallback → end → Parent smoke using pretend learner details only;
+- a recorded rollback target before the custom domain is attached.
+
+The v0 boundary does not claim real-user readiness, legal compliance, ZDR, durable distributed rate limiting or external parent identity.
+
+The Supabase shared pooler encrypts the v0 database connection, but its certificate chain is not in Node's default CA store. Public v0 therefore sets `NOURA_DATABASE_SSL_REJECT_UNAUTHORIZED=false`. Before full Production, download and pin the project Server root certificate and restore certificate/hostname verification.
+
+## Full Production gate
 
 Do not use `--prod`, promote, or attach the domain until:
 
@@ -41,7 +57,7 @@ Do not use `--prod`, promote, or attach the domain until:
 - target-hardware permission/audio tests pass;
 - `/healthz` is 200 and `/version` matches the tested SHA.
 
-The current application intentionally throws during Production startup because the Postgres domain adapter gate is open.
+The application still intentionally throws in full `production` while these real-user gates are open. The narrower `production-v0` mode is separately fail-closed on provider, managed storage, storage-adapter and signing configuration.
 
 ## Rollback
 

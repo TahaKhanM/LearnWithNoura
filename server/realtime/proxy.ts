@@ -8,11 +8,12 @@ import {
 } from '../../shared/runtimeProtocol.js';
 import { buildInstructions } from './instructions.js';
 import { REALTIME_TOOLS } from './tools.js';
-import type { Repo, Confidence, Verdict } from '../store/repo.js';
+import type { Confidence, Verdict } from '../store/repo.js';
 import { createLessonState, reduceLesson, responseHandoff } from '../lesson/orchestrator.js';
 import { ResponseTaxonomySchema, TeachingMoveSchema, type ResponseTaxonomy } from '../../shared/pedagogy.js';
 import { adaptSemanticScene } from '../../shared/semanticScene.js';
 import { ResponseSegmentAnnotator } from './segmentAnnotator.js';
+import type { DomainRepository } from '../store/domain.js';
 
 /**
  * Bridges one browser lesson to one OpenAI Realtime session.
@@ -36,16 +37,16 @@ interface UpstreamEvent {
 export interface ProxyOptions {
   apiKey: string;
   model: string;
-  repo: Repo;
+  repo: DomainRepository;
   sessionId: string;
   log?: (line: string) => void;
 }
 
-export function connectRealtimeProxy(client: ClientSocket, options: ProxyOptions): void {
+export async function connectRealtimeProxy(client: ClientSocket, options: ProxyOptions): Promise<void> {
   const { apiKey, model, repo, sessionId } = options;
   const log = options.log ?? (() => {});
-  const session = repo.getSession(sessionId);
-  const child = session ? repo.getChild(session.childId) : null;
+  const session = await repo.getSession(sessionId);
+  const child = session ? await repo.getChild(session.childId) : null;
 
   if (!session || !child) {
     sendClient({ type: 'error', message: 'Unknown session.' });
@@ -91,6 +92,8 @@ export function connectRealtimeProxy(client: ClientSocket, options: ProxyOptions
   let activeResponseId: string | null = null;
   let lessonState = createLessonState(session.goal);
   let lastLearnerEventId: number | null = null;
+  let upstreamWork = Promise.resolve();
+  let clientWork = Promise.resolve();
 
   function sendClient(
     payload: Record<string, unknown>,
@@ -199,7 +202,12 @@ export function connectRealtimeProxy(client: ClientSocket, options: ProxyOptions
     } catch {
       return;
     }
-    handleUpstream(event);
+    upstreamWork = upstreamWork
+      .then(() => handleUpstream(event))
+      .catch((error) => {
+        log(`session ${sessionId}: upstream processing error ${String(error).slice(0, 240)}`);
+        sendClient({ type: 'error', message: 'Noura hit a snag — it will recover in a moment.' });
+      });
   };
 
   upstream.onerror = () => {
@@ -211,12 +219,12 @@ export function connectRealtimeProxy(client: ClientSocket, options: ProxyOptions
     teardown('upstream closed');
   };
 
-  function replayBoard(): void {
+  async function replayBoard(): Promise<void> {
     // Only marks the child actually saw; ops cancelled mid-speech were
     // never released and must not reappear after a refresh. Stored ops are
     // re-validated so yesterday's data always meets today's rules.
-    const batches = repo
-      .listEvents(sessionId, 2000)
+    const events = await repo.listEvents(sessionId, 2000);
+    const batches = events
       .filter((e) => ['board_ops', 'semantic_scene'].includes(e.type) && e.released)
       .map((e) => validateOps((e.payload as { ops?: unknown[] })?.ops).ops)
       .filter((ops) => ops.length > 0);
@@ -224,8 +232,8 @@ export function connectRealtimeProxy(client: ClientSocket, options: ProxyOptions
   }
 
   /** After a refresh the upstream model starts cold; hand it the story so far. */
-  function conversationContext(): string | null {
-    const events = repo.listEvents(sessionId, 2000);
+  async function conversationContext(): Promise<string | null> {
+    const events = await repo.listEvents(sessionId, 2000);
     const lines: string[] = [];
     for (const e of events) {
       const p = e.payload as { text?: string };
@@ -241,12 +249,12 @@ export function connectRealtimeProxy(client: ClientSocket, options: ProxyOptions
     ].join('\n');
   }
 
-  function handleUpstream(event: UpstreamEvent): void {
+  async function handleUpstream(event: UpstreamEvent): Promise<void> {
     switch (event.type) {
       case 'session.updated': {
         if (!upstreamReady) {
           upstreamReady = true;
-          replayBoard();
+          await replayBoard();
           sendClient({ type: 'ready' });
         }
         break;
@@ -300,7 +308,7 @@ export function connectRealtimeProxy(client: ClientSocket, options: ProxyOptions
         const text = String(event.transcript ?? '');
         const responseId = String(event.response_id ?? '');
         if (cancelledResponses.has(responseId)) break;
-        if (text.trim()) repo.addEvent(sessionId, 'tutor_said', { text });
+        if (text.trim()) await repo.addEvent(sessionId, 'tutor_said', { text });
         if (typeof event.response_id === 'string') responseTranscript.set(event.response_id, text);
         responseSegment(responseId).setFinalTranscript(text);
         break;
@@ -309,7 +317,7 @@ export function connectRealtimeProxy(client: ClientSocket, options: ProxyOptions
       case 'conversation.item.input_audio_transcription.completed': {
         const text = String(event.transcript ?? '').trim();
         if (text) {
-          lastLearnerEventId = repo.addEvent(sessionId, 'learner_said', { text });
+          lastLearnerEventId = await repo.addEvent(sessionId, 'learner_said', { text });
           sendClient({ type: 'user_transcript', text });
           try { lessonState = reduceLesson(lessonState, { type: 'LEARNER_RESPONSE_RECEIVED' }); }
           catch { /* unsolicited learner turns are still valid input; the next move re-orients */ }
@@ -330,7 +338,7 @@ export function connectRealtimeProxy(client: ClientSocket, options: ProxyOptions
         break;
 
       case 'response.function_call_arguments.done': {
-        handleToolCall(
+        await handleToolCall(
           String(event.name ?? ''),
           String(event.arguments ?? '{}'),
           String(event.call_id ?? ''),
@@ -386,7 +394,7 @@ export function connectRealtimeProxy(client: ClientSocket, options: ProxyOptions
               sendUpstream({ type: 'response.create' });
             } else if (decision === 'safe_question') {
               const safeQuestion = 'Tell me one thing you notice about the idea we just explored?';
-              repo.addEvent(sessionId, 'tutor_said', { text: safeQuestion, deterministic: true });
+              await repo.addEvent(sessionId, 'tutor_said', { text: safeQuestion, deterministic: true });
               sendClient({ type: 'safe_question', text: safeQuestion }, responseIdentity);
               lessonState = reduceLesson(lessonState, {
                 type: 'QUESTION_DELIVERED',
@@ -420,7 +428,7 @@ export function connectRealtimeProxy(client: ClientSocket, options: ProxyOptions
     }
   }
 
-  function handleToolCall(name: string, rawArgs: string, callId: string, responseId: string): void {
+  async function handleToolCall(name: string, rawArgs: string, callId: string, responseId: string): Promise<void> {
     let args: Record<string, unknown> = {};
     try {
       args = JSON.parse(rawArgs) as Record<string, unknown>;
@@ -434,7 +442,7 @@ export function connectRealtimeProxy(client: ClientSocket, options: ProxyOptions
         try {
           const { plan, ops, checkpoints } = adaptSemanticScene(args);
           for (const checkpoint of checkpoints) {
-            const eventId = repo.addEvent(sessionId, 'semantic_scene', { plan, ops: checkpoint.ops, checkpointId: checkpoint.id, reveal: checkpoint.reveal }, false);
+            const eventId = await repo.addEvent(sessionId, 'semantic_scene', { plan, ops: checkpoint.ops, checkpointId: checkpoint.id, reveal: checkpoint.reveal }, false);
             responseSegment(responseId).addSemanticCue({
               type: 'board_ops',
               ops: checkpoint.ops,
@@ -480,7 +488,7 @@ export function connectRealtimeProxy(client: ClientSocket, options: ProxyOptions
             activeSemanticObjectId: lessonState.activeSemanticObjectId,
             characterAttentionTarget: lessonState.characterAttentionTarget,
           };
-          repo.addEvent(sessionId, 'lesson_state', state);
+          await repo.addEvent(sessionId, 'lesson_state', state);
           responseSegment(responseId).addSemanticCue({ type: 'lesson_state', state }, {
             ...(lessonState.activeSemanticObjectId ? { semanticObjectId: lessonState.activeSemanticObjectId } : {}),
           });
@@ -494,7 +502,7 @@ export function connectRealtimeProxy(client: ClientSocket, options: ProxyOptions
       case 'board_ops': {
         const { ops, rejected } = validateOps(args.ops);
         if (ops.length > 0) {
-          const eventId = repo.addEvent(sessionId, 'board_ops', { ops }, false);
+          const eventId = await repo.addEvent(sessionId, 'board_ops', { ops }, false);
           responseSegment(responseId).addSemanticCue({ type: 'board_ops', ops, response_id: responseId, event_id: eventId });
         }
         finishTool(callId, responseId, {
@@ -542,8 +550,8 @@ export function connectRealtimeProxy(client: ClientSocket, options: ProxyOptions
         };
         if (entry.concept && entry.observation && entry.sourceEventIds.length > 0) {
           try {
-            const stored = repo.addEvidence(sessionId, entry);
-            repo.addEvent(sessionId, 'evidence', { evidenceId: stored.evidenceId, concept: stored.concept, verdict: stored.verdict });
+            const stored = await repo.addEvidence(sessionId, entry);
+            await repo.addEvent(sessionId, 'evidence', { evidenceId: stored.evidenceId, concept: stored.concept, verdict: stored.verdict });
             sendClient({ type: 'evidence', entry: stored }, identityForResponse(responseId));
             lessonState = reduceLesson(lessonState, { type: 'ASSESSED', classification, evidenceId: stored.evidenceId });
             finishTool(callId, responseId, { ok: true, evidenceId: stored.evidenceId });
@@ -562,7 +570,7 @@ export function connectRealtimeProxy(client: ClientSocket, options: ProxyOptions
           strategy: args.strategy ? String(args.strategy).slice(0, 160) : undefined,
           nextStep: args.next_step ? String(args.next_step).slice(0, 240) : undefined,
         };
-        repo.addEvent(sessionId, 'lesson_state', state);
+        await repo.addEvent(sessionId, 'lesson_state', state);
         responseSegment(responseId).addSemanticCue({ type: 'lesson_state', state });
         finishTool(callId, responseId, { ok: true });
         break;
@@ -591,40 +599,45 @@ export function connectRealtimeProxy(client: ClientSocket, options: ProxyOptions
   }
 
   client.on('message', (raw) => {
-    let decoded: unknown;
-    try { decoded = JSON.parse(String(raw)); }
-    catch { return; }
-    const parsed = RuntimeEventEnvelopeSchema.safeParse(decoded);
-    if (!parsed.success) return;
-    const envelope = parsed.data;
-    if (envelope.sessionId !== sessionId || seenClientEvents.has(envelope.eventId)) return;
-    if (clientIdentity && envelope.connectionEpoch < clientIdentity.connectionEpoch) return;
-    const identityChanged = !clientIdentity ||
-      envelope.connectionEpoch !== clientIdentity.connectionEpoch ||
-      envelope.turnId !== clientIdentity.turnId ||
-      envelope.generationId !== clientIdentity.generationId;
-    if (identityChanged) {
-      clientIdentity = {
-        sessionId: envelope.sessionId,
-        connectionEpoch: envelope.connectionEpoch,
-        turnId: envelope.turnId,
-        generationId: envelope.generationId,
-      };
-      clientSequence = 0;
-      lastClientSequence = -1;
-      flushPendingClientPayloads();
-    }
-    if (envelope.sequence <= lastClientSequence) return;
-    lastClientSequence = envelope.sequence;
-    seenClientEvents.add(envelope.eventId);
-    if (seenClientEvents.size > 1000) seenClientEvents.delete(seenClientEvents.values().next().value as string);
-    handleClient({ type: envelope.type, ...(envelope.payload as Record<string, unknown>) });
+    clientWork = clientWork.then(async () => {
+      let decoded: unknown;
+      try { decoded = JSON.parse(String(raw)); }
+      catch { return; }
+      const parsed = RuntimeEventEnvelopeSchema.safeParse(decoded);
+      if (!parsed.success) return;
+      const envelope = parsed.data;
+      if (envelope.sessionId !== sessionId || seenClientEvents.has(envelope.eventId)) return;
+      if (clientIdentity && envelope.connectionEpoch < clientIdentity.connectionEpoch) return;
+      const identityChanged = !clientIdentity ||
+        envelope.connectionEpoch !== clientIdentity.connectionEpoch ||
+        envelope.turnId !== clientIdentity.turnId ||
+        envelope.generationId !== clientIdentity.generationId;
+      if (identityChanged) {
+        clientIdentity = {
+          sessionId: envelope.sessionId,
+          connectionEpoch: envelope.connectionEpoch,
+          turnId: envelope.turnId,
+          generationId: envelope.generationId,
+        };
+        clientSequence = 0;
+        lastClientSequence = -1;
+        flushPendingClientPayloads();
+      }
+      if (envelope.sequence <= lastClientSequence) return;
+      lastClientSequence = envelope.sequence;
+      seenClientEvents.add(envelope.eventId);
+      if (seenClientEvents.size > 1000) seenClientEvents.delete(seenClientEvents.values().next().value as string);
+      await handleClient({ type: envelope.type, ...(envelope.payload as Record<string, unknown>) });
+    }).catch((error) => {
+      log(`session ${sessionId}: client processing error ${String(error).slice(0, 240)}`);
+      sendClient({ type: 'error', message: 'Noura could not save that turn. Please try again.' });
+    });
   });
 
   client.on('close', () => teardown('client closed'));
   client.on('error', () => teardown('client error'));
 
-  function handleClient(message: UpstreamEvent): void {
+  async function handleClient(message: UpstreamEvent): Promise<void> {
     switch (message.type) {
       case 'input_audio': {
         if (typeof message.audio === 'string' && message.audio.length < 400_000) {
@@ -637,7 +650,7 @@ export function connectRealtimeProxy(client: ClientSocket, options: ProxyOptions
         if (started) break;
         started = true;
         toolContinues = 0;
-        const resume = conversationContext();
+        const resume = await conversationContext();
         if (resume) {
           sendUpstream({
             type: 'conversation.item.create',
@@ -648,7 +661,7 @@ export function connectRealtimeProxy(client: ClientSocket, options: ProxyOptions
             },
           });
         }
-        repo.addEvent(sessionId, 'session_started', { resumed: Boolean(resume) });
+        await repo.addEvent(sessionId, 'session_started', { resumed: Boolean(resume) });
         lastCreateSource = 'start';
         sendUpstream({ type: 'response.create' });
         break;
@@ -663,7 +676,7 @@ export function connectRealtimeProxy(client: ClientSocket, options: ProxyOptions
         if (seenIdempotencyKeys.size > 500) seenIdempotencyKeys.delete(seenIdempotencyKeys.values().next().value as string);
         toolContinues = 0;
         childHoldsFloor = false;
-        lastLearnerEventId = repo.addEvent(sessionId, 'learner_said', { text, via: 'text' });
+        lastLearnerEventId = await repo.addEvent(sessionId, 'learner_said', { text, via: 'text' });
         sendClient({ type: 'user_transcript', text });
         sendUpstream({
           type: 'conversation.item.create',
@@ -692,7 +705,7 @@ export function connectRealtimeProxy(client: ClientSocket, options: ProxyOptions
             content_index: 0,
             audio_end_ms: Math.max(0, Math.floor(message.audio_end_ms)),
           });
-          repo.addEvent(sessionId, 'interrupted', { audio_end_ms: message.audio_end_ms });
+          await repo.addEvent(sessionId, 'interrupted', { audio_end_ms: message.audio_end_ms });
         }
         break;
       }
@@ -700,7 +713,7 @@ export function connectRealtimeProxy(client: ClientSocket, options: ProxyOptions
       case 'board_event': {
         const description = String(message.description ?? '').trim().slice(0, 4000);
         if (!description) break;
-        repo.addEvent(sessionId, 'learner_board', { description });
+        await repo.addEvent(sessionId, 'learner_board', { description });
         sendUpstream({
           type: 'conversation.item.create',
           item: {
@@ -720,14 +733,14 @@ export function connectRealtimeProxy(client: ClientSocket, options: ProxyOptions
       case 'ops_shown': {
         // The child has actually seen this batch; it is now part of the board.
         if (typeof message.event_id === 'number') {
-          repo.markEventReleased(sessionId, message.event_id);
+          await repo.markEventReleased(sessionId, message.event_id);
         }
         break;
       }
 
       case 'metric': {
         // Client-side latency marks, kept with the session for observability.
-        repo.addEvent(sessionId, 'metric', {
+        await repo.addEvent(sessionId, 'metric', {
           name: String(message.name ?? '').slice(0, 60),
           ms: Number(message.ms) || 0,
         });

@@ -1,6 +1,6 @@
 # Noura runtime architecture and decision record
 
-Date: 2026-08-23. Status: active, with explicit Production blockers.
+Date: 2026-08-23. Status: active, with a full-product public-v0 boundary and explicit real-user Production blockers.
 
 This ADR supersedes the historical live-tutor ADR in `docs/legacy/`. It preserves the semantic BoardOp DSL, exact compiler, safe expression parser, browser PCM clock, released-only replay, owner metadata, dry-erase identity, server-side provider key, and provider replaceability.
 
@@ -61,13 +61,13 @@ Local SQLite uses numbered migrations, foreign keys, latest-event pagination, im
 
 Evidence observations include UUID, child/session, normalized concept, taxonomy, observation, confidence basis, source event IDs, exact normalized excerpt/span, task/opportunity kind, retrieval lineage, independence, domain result, turn/generation, contradiction/supersession and time. `projectConceptHistories` is the single status projection used by summary validation, deterministic summary fallback and Parent concept history. One opportunity is identified by session, task and turn, so duplicate classifications of one answer count once. “Demonstrated” requires distinct independent positive opportunities, explanation/application, and a chronologically later retrieval whose `retrievalOf` names the earlier task. Latest negative or unresolved contradiction/misconception remains uncertain. Explicit correction resolves a misconception but is not confirmation; fresh independent application/explanation plus tied later retrieval is required afterward. Self-correction remains reduced-independence. Summary claims cite evidence IDs and carry a calibrated `progressing|demonstrated` label; invalid IDs, projection overclaims or invented quoted spans cause deterministic fallback.
 
-`PostgresStore` provides a pooled, transactional, versioned export/import contract and passes an offline Postgres-compatible test. It is not yet wired into all domain services, so Production startup always fails closed.
+The repository contract now has two implementations: synchronous SQLite for local work and asynchronous managed Postgres for deployed REST, Realtime, fallback, evidence and summary paths. Postgres uses a private `noura` schema, transactional fallback claims, staged reveal, immutable ending and the same evidence lineage projection. The portable export/import path targets that same schema. Public v0 uses a signed pseudonymous guest-parent scope; full Production still requires an external identity provider and the remaining privacy/safety gates.
 
 ## Vercel topology
 
 Vite builds to static output. `api/[...path].ts` exports the Express/REST server and `api/ws.ts` exports the native Node WebSocket server. The WebSocket Function duration is 300 seconds, matching the inspected Hobby maximum. Reconnect is mandatory. No in-memory state is considered durable.
 
-Native Vercel WebSockets are a 2026 public beta. Preview can run synthetic, ephemeral evaluation only; `/healthz` reports degraded durable storage there. Production cannot start until Postgres domain wiring, external parent identity, privacy/safety configuration and relevant account evidence pass.
+Native Vercel WebSockets are a 2026 public beta. Preview can run synthetic, ephemeral evaluation only; `/healthz` reports degraded durable storage there. `production-v0` may start only with the provider, managed Postgres adapter and lesson signing configured, and remains synthetic-only with guest identity. Full `production` additionally requires external parent identity, privacy/safety configuration and relevant account evidence.
 
 ## Rollback
 
