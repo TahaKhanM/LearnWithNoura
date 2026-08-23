@@ -9,7 +9,7 @@ import {
 import { PALETTE, type BoardOp, type Vec } from '../../shared/boardOps';
 import type { GenerationIdentity } from '../../shared/runtimeProtocol';
 import { emptyScene, describeScene, type SceneState } from '../board/scene';
-import { BoardCanvas, type BoardCaptureOptions, type BoardHighlight, type BoardTool } from '../board/BoardCanvas';
+import { BoardCanvas, type BoardAnimationRequest, type BoardCaptureOptions, type BoardHighlight, type BoardTool } from '../board/BoardCanvas';
 import type { BoardAnimator } from '../board/animator';
 import { BoardSceneCoordinator } from '../board/sceneCoordinator';
 import { groupItemCount, sceneForGroup } from '../board/sceneGroups';
@@ -38,6 +38,7 @@ export function LessonPage({ sessionId }: LessonPageProps) {
   const [infoError, setInfoError] = useState<string | null>(null);
   const [scene, setScene] = useState<SceneState>(emptyScene);
   const [highlights, setHighlights] = useState<BoardHighlight[]>([]);
+  const [boardAnimation, setBoardAnimation] = useState<BoardAnimationRequest | null>(null);
   const [tool, setTool] = useState<BoardTool>('pointer');
   const [boardOverview, setBoardOverview] = useState(false);
   const [visualGroups, setVisualGroups] = useState<Array<{ id: string; label: string }>>([]);
@@ -52,6 +53,7 @@ export function LessonPage({ sessionId }: LessonPageProps) {
   const boardState = useRef(new BoardSceneCoordinator());
   const visualChain = useRef<Promise<boolean>>(Promise.resolve(true));
   const highlightNonce = useRef(0);
+  const animationNonce = useRef(0);
   const boardEventTimer = useRef<number | null>(null);
   const pendingBoardNote = useRef<string[]>([]);
   const pendingBoardOps = useRef<BoardOp[]>([]);
@@ -115,9 +117,11 @@ export function LessonPage({ sessionId }: LessonPageProps) {
     if (!animate) {
       const result = boardState.current.applyReplay(ops, 'tutor', cue?.semanticObjectId);
       if (!result) return Promise.resolve(false);
+      // Replays are already-committed board truth, never a new performance.
+      animator.current?.finishAll();
+      setBoardAnimation(null);
       setScene(result.scene);
       registerVisualGroup(cue);
-      requestAnimationFrame(() => animator.current?.finishAll());
       return Promise.resolve(true);
     }
     const transaction = visualChain.current.then(async () => {
@@ -128,6 +132,17 @@ export function LessonPage({ sessionId }: LessonPageProps) {
       const applied = boardState.current.applyTutorCheckpoint(ops, cue?.semanticObjectId);
       if (!applied) return false;
       const candidate = applied.scene;
+      const expectedGroup = cue?.semanticObjectId ?? activeVisualGroupRef.current;
+      const visibleIds = new Set(sceneForGroup(candidate, expectedGroup).items.map((item) => item.id));
+      const animatedItemIds = applied.added.filter((id) => visibleIds.has(id));
+      const request: BoardAnimationRequest | null = animatedItemIds.length > 0 ? {
+        id: `${identity.generationId}:${++animationNonce.current}`,
+        itemIds: animatedItemIds,
+      } : null;
+      if (request) {
+        animator.current?.beginTransaction(request.id);
+        setBoardAnimation(request);
+      }
       setScene(candidate);
       if (applied.highlighted.length > 0) {
         const center = centerForItemIds(candidate, applied.highlighted);
@@ -145,7 +160,13 @@ export function LessonPage({ sessionId }: LessonPageProps) {
       await nextPaint();
       // Completion acknowledges durable replay. It no longer decides whether
       // an already-visible checkpoint remains on screen.
-      return finishBoardAnimationWithin(animator.current, 2_400);
+      const completed = request
+        ? await finishBoardAnimationWithin(animator.current, 3_600)
+        : true;
+      if (request) {
+        setBoardAnimation((current) => current?.id === request.id ? null : current);
+      }
+      return completed;
     });
     visualChain.current = transaction.catch(() => false);
     return transaction;
@@ -162,6 +183,7 @@ export function LessonPage({ sessionId }: LessonPageProps) {
       // A checkpoint reaches this surface only after its audio cue is heard.
       // Finish that visible checkpoint instead of making it disappear.
       animator.current?.finishAll();
+      setBoardAnimation(null);
       attention.cancelGeneration(identity);
       setHighlights([]);
     };
@@ -389,6 +411,7 @@ export function LessonPage({ sessionId }: LessonPageProps) {
           <BoardCanvas
             scene={visibleScene}
             highlights={highlights}
+            animationRequest={boardAnimation}
             tool={tool}
             penColor={penColor}
             interactive={started}

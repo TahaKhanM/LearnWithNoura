@@ -10,6 +10,31 @@ test('released AI drawing survives normal re-renders, animation, and learner dra
   await expect(page.getByText(/Type below — Noura is ready|Listening/)).toBeVisible();
 
   await page.evaluate(() => {
+    type AnimationTrace = {
+      first: { dashOffset: string; opacity: string } | null;
+      removals: number;
+      present: boolean;
+      observer: MutationObserver;
+    };
+    const trace = { first: null, removals: 0, present: false } as Omit<AnimationTrace, 'observer'>;
+    const sample = () => {
+      const path = document.querySelector<SVGPathElement>('[data-item="durable-tutor-line"] path');
+      const present = Boolean(path);
+      if (path && !trace.first) {
+        trace.first = {
+          dashOffset: path.style.strokeDashoffset,
+          opacity: getComputedStyle(path).opacity,
+        };
+      }
+      if (trace.present && !present) trace.removals += 1;
+      trace.present = present;
+    };
+    const observer = new MutationObserver(sample);
+    observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['style'] });
+    (window as typeof window & { __nouraAnimationTrace: AnimationTrace }).__nouraAnimationTrace = Object.assign(trace, { observer });
+  });
+
+  await page.evaluate(() => {
     const socket = (window as typeof window & { __nouraFakeSocket: { emit(type: string, payload: Record<string, unknown>, optional?: Record<string, unknown>): void } }).__nouraFakeSocket;
     socket.emit('response_started', { response_id: 'drawing-response' });
     socket.emit('audio', {
@@ -24,6 +49,13 @@ test('released AI drawing survives normal re-renders, animation, and learner dra
 
   const tutorLine = page.locator('[data-item="durable-tutor-line"]');
   await expect(tutorLine).toHaveCount(1);
+  await expect.poll(() => page.evaluate(() => (
+    window as typeof window & { __nouraAnimationTrace: { first: { dashOffset: string; opacity: string } | null } }
+  ).__nouraAnimationTrace.first)).not.toBeNull();
+  const firstFrame = await page.evaluate(() => (
+    window as typeof window & { __nouraAnimationTrace: { first: { dashOffset: string; opacity: string } } }
+  ).__nouraAnimationTrace.first);
+  expect(Number.parseFloat(firstFrame.dashOffset)).toBeGreaterThan(0);
   // Phase/energy and pen updates re-render the lesson repeatedly while the
   // line animates. None may be interpreted as canvas teardown.
   await page.waitForTimeout(120);
@@ -42,6 +74,9 @@ test('released AI drawing survives normal re-renders, animation, and learner dra
   await page.waitForTimeout(800);
   await expect(tutorLine).toHaveCount(1);
   await expect(tutorLine.locator('path')).toHaveCSS('stroke-dashoffset', '0px');
+  await expect.poll(() => page.evaluate(() => (
+    window as typeof window & { __nouraAnimationTrace: { removals: number } }
+  ).__nouraAnimationTrace.removals)).toBe(0);
   await expect.poll(() => page.evaluate(() => {
     const socket = (window as typeof window & { __nouraFakeSocket: { sent: Array<{ type: string; payload?: Record<string, unknown> }> } }).__nouraFakeSocket;
     return [...socket.sent].reverse().find((event) => event.type === 'board_event')?.payload?.requestResponse;
@@ -50,6 +85,95 @@ test('released AI drawing survives normal re-renders, animation, and learner dra
     const socket = (window as typeof window & { __nouraFakeSocket: { sent: Array<{ type: string; payload?: Record<string, unknown> }> } }).__nouraFakeSocket;
     return socket.sent.some((event) => event.type === 'ops_shown' && event.payload?.event_id === 701);
   })).toBe(true);
+});
+
+test('durable board replay renders once as committed state without animation', async ({ page, request }) => {
+  const { session, lessonCapability } = await createSyntheticSession(request, `board-replay-${Date.now().toString(36)}`);
+  await installFakeRealtime(page);
+  await setLessonCapability(page, session.id, lessonCapability);
+  await page.goto(`/lesson/${session.id}`);
+  await page.getByRole('button', { name: 'Begin' }).click();
+  await expect(page.getByText(/Type below — Noura is ready|Listening/)).toBeVisible();
+
+  await page.evaluate(() => {
+    const socket = (window as typeof window & { __nouraFakeSocket: { emit(type: string, payload: Record<string, unknown>): void } }).__nouraFakeSocket;
+    socket.emit('board_replay', {
+      batches: [{
+        semanticObjectId: 'replay-section',
+        groupLabel: 'Earlier work',
+        ops: [{ op: 'add', id: 'replayed-line', spec: { kind: 'line', from: [140, 220], to: [860, 220], width: 5 } }],
+      }],
+    });
+  });
+
+  const replayedPath = page.locator('[data-item="replayed-line"] path');
+  await expect(replayedPath).toHaveCount(1);
+  await expect(replayedPath).toHaveCSS('stroke-dashoffset', '0px');
+  await expect(page.locator('[data-item="replayed-line"]')).not.toHaveAttribute('data-animation-pending', 'true');
+  await expect(page.locator('.board__svg')).toHaveAttribute('data-animation-request', '');
+  await page.waitForTimeout(250);
+  await expect(replayedPath).toHaveCount(1);
+  await expect(replayedPath).toHaveCSS('stroke-dashoffset', '0px');
+});
+
+test('back-to-back drawing checkpoints stay ordered and never remount', async ({ page, request }) => {
+  const { session, lessonCapability } = await createSyntheticSession(request, `board-queue-${Date.now().toString(36)}`);
+  await installFakeRealtime(page);
+  await setLessonCapability(page, session.id, lessonCapability);
+  await page.goto(`/lesson/${session.id}`);
+  await page.getByRole('button', { name: 'Begin' }).click();
+  await expect(page.getByText(/Type below — Noura is ready|Listening/)).toBeVisible();
+
+  await page.evaluate(() => {
+    type Trace = Record<string, { firstDashOffset: string | null; removals: number; present: boolean }>;
+    const trace: Trace = {
+      'queued-line-one': { firstDashOffset: null, removals: 0, present: false },
+      'queued-line-two': { firstDashOffset: null, removals: 0, present: false },
+    };
+    const sample = () => {
+      for (const [id, item] of Object.entries(trace)) {
+        const path = document.querySelector<SVGPathElement>(`[data-item="${id}"] path`);
+        const present = Boolean(path);
+        if (path && item.firstDashOffset === null) item.firstDashOffset = path.style.strokeDashoffset;
+        if (item.present && !present) item.removals += 1;
+        item.present = present;
+      }
+    };
+    const observer = new MutationObserver(sample);
+    observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['style'] });
+    (window as typeof window & { __nouraQueueTrace: Trace & { observer?: MutationObserver } }).__nouraQueueTrace = trace;
+    (window as typeof window & { __nouraQueueObserver: MutationObserver }).__nouraQueueObserver = observer;
+
+    const socket = (window as typeof window & { __nouraFakeSocket: { emit(type: string, payload: Record<string, unknown>, optional?: Record<string, unknown>): void } }).__nouraFakeSocket;
+    socket.emit('response_started', { response_id: 'queued-response' });
+    socket.emit('board_ops', {
+      response_id: 'queued-response', event_id: 901,
+      ops: [{ op: 'add', id: 'queued-line-one', spec: { kind: 'line', from: [140, 210], to: [860, 210], width: 5 } }],
+    }, { audioSampleOffsets: { start: 0, end: 0 }, semanticObjectId: 'queued-section', providerResponseId: 'queued-response' });
+    socket.emit('board_ops', {
+      response_id: 'queued-response', event_id: 902,
+      ops: [{ op: 'add', id: 'queued-line-two', spec: { kind: 'line', from: [140, 360], to: [860, 360], width: 5 } }],
+    }, { audioSampleOffsets: { start: 0, end: 0 }, semanticObjectId: 'queued-section', providerResponseId: 'queued-response' });
+  });
+
+  for (const id of ['queued-line-one', 'queued-line-two']) {
+    const path = page.locator(`[data-item="${id}"] path`);
+    await expect(path).toHaveCount(1);
+    await expect.poll(() => page.evaluate((itemId) => (
+      window as typeof window & { __nouraQueueTrace: Record<string, { firstDashOffset: string | null }> }
+    ).__nouraQueueTrace[itemId].firstDashOffset, id)).not.toBeNull();
+    const firstOffset = await page.evaluate((itemId) => (
+      window as typeof window & { __nouraQueueTrace: Record<string, { firstDashOffset: string }> }
+    ).__nouraQueueTrace[itemId].firstDashOffset, id);
+    expect(Number.parseFloat(firstOffset)).toBeGreaterThan(0);
+    await expect(path).toHaveCSS('stroke-dashoffset', '0px');
+  }
+
+  await expect(page.locator('.board__svg')).toHaveAttribute('data-animation-request', '');
+  const removals = await page.evaluate(() => Object.values((
+    window as typeof window & { __nouraQueueTrace: Record<string, { removals: number }> }
+  ).__nouraQueueTrace).map((item) => item.removals));
+  expect(removals).toEqual([0, 0]);
 });
 
 test('speech stop immediately exposes a thinking state before reply audio', async ({ page, request }) => {
