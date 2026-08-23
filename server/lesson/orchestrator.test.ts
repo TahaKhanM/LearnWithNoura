@@ -1,5 +1,21 @@
 import { describe, expect, it } from 'vitest';
-import { createLessonState, reduceLesson, responseHandoff } from './orchestrator';
+import type { LessonBlueprint } from '../../shared/pedagogy';
+import { createLessonState, currentStage, reduceLesson, responseHandoff } from './orchestrator';
+
+const blueprint: LessonBlueprint = {
+  blueprintId: 'blueprint-1',
+  goal: 'Compare two fractions on one number line',
+  mode: 'board_led',
+  successCriteria: ['Learner places fractions on one shared scale', 'Learner explains which is larger'],
+  anchor: { semanticGroupId: 'lesson-anchor', template: 'fraction_comparison', instructionalQuestion: 'Which fraction is larger?', invariantObjectIds: [] },
+  stages: [
+    { id: 'orient', kind: 'orient', objective: 'Recall what a fraction shows', boardPurpose: 'establish_anchor', allowedBoardMutation: 'establish', learnerOpportunity: 'Say what the parts mean', evidenceExpected: 'recall' },
+    { id: 'model', kind: 'model', objective: 'Place the fractions on the scale', boardPurpose: 'reveal_relation', allowedBoardMutation: 'extend', learnerOpportunity: 'Predict which mark is farther right', evidenceExpected: 'comparison reasoning' },
+    { id: 'check', kind: 'guided_check', objective: 'Compare the marks', boardPurpose: 'elicit_learner_work', allowedBoardMutation: 'emphasize', learnerOpportunity: 'Circle the larger fraction', evidenceExpected: 'correct identification' },
+  ],
+  currentStageIndex: 0,
+  detourStack: [],
+};
 
 describe('lesson orchestrator', () => {
   it('forbids waiting without a delivered question or task', () => {
@@ -18,10 +34,99 @@ describe('lesson orchestrator', () => {
     expect(state.conceptEvidenceIds).toEqual(['evidence-1']);
   });
 
-  it('issues continuation instead of silently listening after an unresolved promise', () => {
+  it('never injects a question after an explanation; only a promised question continues once', () => {
     const state = createLessonState('water cycle', 'generation-1');
-    expect(responseHandoff(state, 'Next, we will connect evaporation to clouds.')).toBe('bounded_continuation');
-    expect(responseHandoff({ ...state, continuationAttempts: 1 }, 'Next, we will connect it.')).toBe('safe_question');
+    // A plain explanation without a promised question simply waits — the
+    // tutor is not forced to end every response with a question.
+    expect(responseHandoff(state, 'Next, we will connect evaporation to clouds.')).toBe('wait');
+    // A question the model explicitly promised but failed to ask continues
+    // exactly once, and never a second time.
+    const promisedQuestion = { ...state, owedAction: 'question' as const };
+    expect(responseHandoff(promisedQuestion, 'Evaporation lifts the water.')).toBe('bounded_continuation');
+    expect(responseHandoff({ ...promisedQuestion, continuationAttempts: 1 }, 'Evaporation lifts the water.')).toBe('wait');
     expect(responseHandoff(state, 'Where does the water go next?')).toBe('wait');
+  });
+
+  it('holds one durable blueprint: no regeneration, no stage jumps, no anchor changes', () => {
+    let state = createLessonState('fractions', 'generation-1');
+    state = reduceLesson(state, { type: 'BLUEPRINT_CREATED', blueprint });
+    expect(currentStage(state)?.id).toBe('orient');
+    expect(state.activeSemanticObjectId).toBe('lesson-anchor');
+    // The blueprint is created once; a second one is illegal.
+    expect(() => reduceLesson(state, { type: 'BLUEPRINT_CREATED', blueprint: { ...blueprint, blueprintId: 'blueprint-2' } })).toThrow(/already exists/i);
+    // A move naming a non-current stage is an illegal jump.
+    expect(() => reduceLesson(state, {
+      type: 'MOVE_PROPOSED',
+      move: { rationale: 'skip', microObjective: 'closure', strategy: 'jump', childFacingText: 'Done!', proposedAction: 'explain', blueprintId: 'blueprint-1', stageId: 'check' },
+    })).toThrow(/illegal stage jump/i);
+    // The anchor representation cannot change mid-lesson.
+    expect(() => reduceLesson(state, {
+      type: 'MOVE_PROPOSED',
+      move: { rationale: 'new picture', microObjective: 'new diagram', strategy: 'restart', childFacingText: 'New board!', proposedAction: 'visual', anchorGroupId: 'other-anchor' },
+    })).toThrow(/anchor/i);
+    // A visual move with no board purpose is decorative and rejected.
+    expect(() => reduceLesson(state, {
+      type: 'MOVE_PROPOSED',
+      move: { rationale: 'decoration', microObjective: 'a picture', strategy: 'draw', childFacingText: 'Look!', proposedAction: 'visual', boardPurpose: 'none' },
+    })).toThrow(/board purpose/i);
+    // Executing the current stage is legal and advances only via evidence.
+    state = reduceLesson(state, {
+      type: 'MOVE_PROPOSED',
+      move: { rationale: 'orient', microObjective: 'Recall what a fraction shows', strategy: 'anchor first', childFacingText: 'Here is our scale.', proposedAction: 'explain', blueprintId: 'blueprint-1', stageId: 'orient', boardPurpose: 'establish_anchor' },
+    });
+    expect(currentStage(state)?.id).toBe('orient');
+  });
+
+  it('advances stages on correct evidence, detours on missing prerequisites, and returns afterwards', () => {
+    let state = createLessonState('fractions', 'generation-1');
+    state = reduceLesson(state, { type: 'BLUEPRINT_CREATED', blueprint });
+    state = reduceLesson(state, { type: 'QUESTION_DELIVERED', taskId: 'task-1', text: 'What does the bottom number mean?' });
+    state = reduceLesson(state, { type: 'LEARNER_RESPONSE_RECEIVED' });
+    state = reduceLesson(state, { type: 'ASSESSED', classification: 'correct', evidenceId: 'evidence-1' });
+    expect(currentStage(state)?.id).toBe('model');
+
+    // A partial answer stays on the stage — the tactic changes, not the plan.
+    state = reduceLesson(state, { type: 'QUESTION_DELIVERED', taskId: 'task-2', text: 'Where does one half go?' });
+    state = reduceLesson(state, { type: 'LEARNER_RESPONSE_RECEIVED' });
+    state = reduceLesson(state, { type: 'ASSESSED', classification: 'partially_correct', evidenceId: 'evidence-2' });
+    expect(currentStage(state)?.id).toBe('model');
+
+    // A missing prerequisite records a bounded detour and returns to the
+    // recorded stage when resolved — the goal is never replaced.
+    state = reduceLesson(state, { type: 'QUESTION_DELIVERED', taskId: 'task-3', text: 'Which is farther right?' });
+    state = reduceLesson(state, { type: 'LEARNER_RESPONSE_RECEIVED' });
+    state = reduceLesson(state, { type: 'ASSESSED', classification: 'missing_prerequisite', evidenceId: 'evidence-3' });
+    expect(state.blueprint?.detourStack).toHaveLength(1);
+    expect(currentStage(state)?.id).toBe('model');
+    state = reduceLesson(state, { type: 'QUESTION_DELIVERED', taskId: 'task-4', text: 'What does the bottom number count?' });
+    state = reduceLesson(state, { type: 'LEARNER_RESPONSE_RECEIVED' });
+    state = reduceLesson(state, { type: 'ASSESSED', classification: 'correct', evidenceId: 'evidence-4' });
+    expect(state.blueprint?.detourStack).toHaveLength(0);
+    expect(currentStage(state)?.id).toBe('model');
+  });
+
+  it('refuses completion before the blueprint route and evidence exist', () => {
+    let state = createLessonState('fractions', 'generation-1');
+    state = reduceLesson(state, { type: 'BLUEPRINT_CREATED', blueprint });
+    expect(() => reduceLesson(state, { type: 'COMPLETE' })).toThrow(/final stage/i);
+    state = { ...state, blueprint: { ...blueprint, currentStageIndex: 2 } };
+    expect(() => reduceLesson(state, { type: 'COMPLETE' })).toThrow(/evidence/i);
+    state = { ...state, conceptEvidenceIds: ['evidence-1', 'evidence-2'] };
+    expect(reduceLesson(state, { type: 'COMPLETE' }).phase).toBe('COMPLETE');
+    // An open detour also blocks completion.
+    const detoured = { ...state, blueprint: { ...state.blueprint as LessonBlueprint, detourStack: [{ reason: 'gap', returnStageIndex: 2 }] } };
+    expect(() => reduceLesson(detoured, { type: 'COMPLETE' })).toThrow(/detour/i);
+  });
+
+  it('treats an imperative drawing task as a delivered handoff with an explicit submit policy', () => {
+    let state = createLessonState('angles', 'generation-1');
+    state = reduceLesson(state, { type: 'QUESTION_DELIVERED', taskId: 'circle-acute', text: 'Circle the acute angle.', responseMode: 'draw' });
+    expect(state.phase).toBe('AWAIT_LEARNER');
+    expect(state.turnOwner).toBe('learner');
+    expect(state.deliveredResponseMode).toBe('draw');
+    expect(state.deliveredSubmitPolicy).toBe('explicit');
+    // Once the task is delivered, a completed explanation response waits for
+    // the learner instead of injecting another question.
+    expect(responseHandoff(state, 'Take your time.')).toBe('wait');
   });
 });

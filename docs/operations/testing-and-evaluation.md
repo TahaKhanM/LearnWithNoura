@@ -6,7 +6,13 @@ Run the commands in README. Unit/property coverage includes state transitions, r
 
 Browser suites use a dedicated synthetic SQLite directory and separate ports. Visual baselines cover Noura Home at 1440×900, 834×1112, 390×844 and 844×390 plus every canonical semantic scene at desktop, tablet and mobile-focus widths.
 
-Voice-interruption unit/integration rows cover short loud noise plus server VAD, sustained local energy without server confirmation, adaptive room-noise calibration, and sustained speech with both detectors. These deterministic checks prevent false cancellation regressions but do not replace physical-room microphone testing.
+Voice-interruption unit/integration rows cover short loud noise plus server VAD, sustained local energy without server confirmation, adaptive room-noise calibration, sustained speech with both detectors, one-turn high-eagerness endpointing with medium restoration, the `speech_stopped → thinking` phase, and speech-end-to-response/audio metrics. These deterministic checks prevent false cancellation and turn-latency lifecycle regressions but do not replace physical-room microphone testing.
+
+The actual Lesson browser rows require an animated tutor object to survive callback/phase re-renders and mid-animation learner interruption, finish visibly, emit replay acknowledgement after identity replacement, retain the learner stroke, and send a board-only response request with sanitized path operations plus a size-bounded JPEG board context. Another adversarial browser row reconstructs the reported triangle/text overlap, requires the annotation coordinate to move, samples the rendered triangle path every two board units and fails if any stroke enters the padded text box. A separate row verifies the visible thinking state at speech stop before reply audio.
+
+Board Intelligence v2 tests reconstruct released tutor and learner objects while excluding unheard events; require reusable section/object IDs in Realtime/fallback context; enforce relevance/action/density policy; suppress exact raw redraws and mostly equivalent semantic scenes; preserve learner marks across section clear/replace; and feed client quality rejection back to the agent. Learner-sketch tests cover line/underline/circle features, bounds, nearest/touched tutor objects, section ownership and the 960×576 full-board/detail composite. These features do not prove learner intent.
+
+Canonical geometry includes every exact subject template plus relationship-map, worked-step, comparison and proportional part–whole grammars at desktop, tablet and mobile-focus sizes. Compact traversal must expose every required annotation/equation without clipping. The real Lesson has desktop/mobile board-awareness baselines; adversarial browser coverage verifies section isolation, section-bound learner marks, specific highlight de-emphasis, status semantics and the original triangle/text stroke collision.
 
 ## Live-provider budget
 
@@ -22,6 +28,8 @@ Record device, OS, browser, headphones/speakers, noise condition, autoplay, perm
 - detector → stop scheduled;
 - scheduled stop → recorded acoustic silence;
 - provider cancellation confirmation;
+- provider speech end → response start;
+- provider speech end → first reply audio;
 - caption phrase and visual cue error;
 - avatar mouth/gaze/pen timestamps;
 - frame intervals and long tasks.

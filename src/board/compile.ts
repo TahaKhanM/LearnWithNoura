@@ -166,7 +166,15 @@ export function nodeBBox(node: RenderNode): BBox {
     return { x, y: node.y - node.size, w: node.w, h: node.size * 1.25 };
   }
   if (node.type === 'katex') {
-    return { x: node.x, y: node.y, w: node.w, h: node.h };
+    // Keep layout/focus geometry identical to the foreignObject rendered by
+    // KatexBlock. The previous estimate under-reported both dimensions and
+    // allowed equations to be clipped in compact semantic viewports.
+    return {
+      x: node.x,
+      y: node.y,
+      w: Math.min(BOARD_W - node.x, node.w * 1.6 + 40),
+      h: node.h * 1.6 + 20,
+    };
   }
   if (node.bbox) return node.bbox;
   // Parse coordinates out of the path data for a conservative bound.
@@ -1102,6 +1110,9 @@ export function compileScene(items: SceneItem[]): CompiledItem[] {
     for (const node of nodes) {
       if (node.type !== 'path') ctx.occupied.push(nodeBBox(node));
     }
+    // Solid/container geometry participates in node-label and edge-label
+    // spacing. Stroke-only diagrams remain available for nearby annotations.
+    if (['box', 'table', 'bars'].includes(item.spec.kind)) ctx.occupied.push(bbox);
     compiled.push({ id: item.id, owner: item.owner, revision: item.revision, nodes, bbox });
   }
   return compiled;

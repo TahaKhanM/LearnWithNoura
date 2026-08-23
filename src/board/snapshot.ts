@@ -1,0 +1,148 @@
+import { BOARD_H, BOARD_W } from '../../shared/boardOps';
+import { compileScene, type BBox, type RenderNode } from './compile';
+import { FONT_HAND } from './measure';
+import type { SceneState } from './scene';
+
+/**
+ * Canonical, revision-bound board capture.
+ *
+ * The image is rendered from immutable scene data — never by cloning the
+ * mounted responsive SVG — so the same scene produces the same snapshot on
+ * desktop and mobile regardless of the current focus viewport, compact-mode
+ * text hiding, highlights, pen position, or in-flight animations.
+ */
+
+export interface SceneSnapshotOptions {
+  /** A detail crop (board coordinates) composed beside the full board. */
+  focusBox?: BBox;
+}
+
+const SNAPSHOT_BACKGROUND = '#fcfbf7';
+
+/** Deterministic markup for one scene at the full 1000×600 board viewBox. */
+export function sceneToCanonicalSvg(scene: SceneState): string {
+  const compiled = compileScene(scene.items);
+  const body = compiled
+    .map((item) => `<g data-item="${escapeXml(item.id)}">${item.nodes.map(nodeMarkup).join('')}</g>`)
+    .join('');
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${BOARD_W}" height="${BOARD_H}" viewBox="0 0 ${BOARD_W} ${BOARD_H}">` +
+    `<rect x="0" y="0" width="${BOARD_W}" height="${BOARD_H}" fill="${SNAPSHOT_BACKGROUND}"/>${body}</svg>`;
+}
+
+function nodeMarkup(node: RenderNode): string {
+  if (node.type === 'path') {
+    return `<path d="${escapeXml(node.d)}" stroke="${escapeXml(node.color)}" stroke-width="${node.width}"` +
+      ` stroke-linecap="round" stroke-linejoin="round" fill="${escapeXml(node.fill ?? 'none')}"` +
+      `${node.dash ? ' stroke-dasharray="7 7"' : ''}/>`;
+  }
+  if (node.type === 'text') {
+    return `<text x="${node.x}" y="${node.y}" font-size="${node.size}" fill="${escapeXml(node.color)}"` +
+      ` text-anchor="${node.anchor}" font-family="${escapeXml(FONT_HAND)}" font-weight="600">${escapeXml(node.text)}</text>`;
+  }
+  // Equations render as deterministic plain math text. KaTeX HTML needs its
+  // external stylesheet, which a serialized snapshot cannot rely on; readable
+  // math text keeps the equation legible for vision instead of dropping it.
+  return `<text x="${node.x}" y="${node.y + node.h}" font-size="${node.fontSize}" fill="${escapeXml(node.color)}"` +
+    ` font-family="${escapeXml(FONT_HAND)}" font-weight="600">${escapeXml(latexToPlainText(node.latex))}</text>`;
+}
+
+/** Best-effort readable text for LaTeX in snapshots. Deterministic. */
+export function latexToPlainText(latex: string): string {
+  return latex
+    .replace(/\\frac\s*\{([^{}]*)\}\s*\{([^{}]*)\}/g, '($1)/($2)')
+    .replace(/\\sqrt\s*\{([^{}]*)\}/g, '√($1)')
+    .replace(/\^\s*\{?\\circ\}?/g, '°')
+    .replace(/\\circ/g, '°')
+    .replace(/\\degree/g, '°')
+    .replace(/\\times/g, '×')
+    .replace(/\\div/g, '÷')
+    .replace(/\\cdot/g, '·')
+    .replace(/\\pi/g, 'π')
+    .replace(/\\le(?:q)?/g, '≤')
+    .replace(/\\ge(?:q)?/g, '≥')
+    .replace(/\\ne(?:q)?/g, '≠')
+    .replace(/\\pm/g, '±')
+    .replace(/\\[a-zA-Z]+/g, ' ')
+    .replace(/[{}]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Rasterizes the canonical scene into the shared full-board + detail-crop
+ * JPEG composition used as model vision context. Because the input is an
+ * immutable scene value, a capture can never observe newer strokes, focus
+ * changes, or animation state than the revision it was asked to render.
+ */
+export async function renderSceneImage(scene: SceneState, options: SceneSnapshotOptions = {}): Promise<string | null> {
+  const markup = sceneToCanonicalSvg(scene);
+  const url = URL.createObjectURL(new Blob([markup], { type: 'image/svg+xml' }));
+  try {
+    const image = new Image();
+    await new Promise<void>((resolve, reject) => {
+      image.onload = () => resolve();
+      image.onerror = () => reject(new Error('board snapshot could not be rendered'));
+      image.src = url;
+    });
+    const canvas = document.createElement('canvas');
+    canvas.width = 960;
+    canvas.height = 576;
+    const context = canvas.getContext('2d');
+    if (!context) return null;
+    context.fillStyle = SNAPSHOT_BACKGROUND;
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    if (options.focusBox) {
+      // One image carries both global context and a legible detail crop. This
+      // preserves spatial grounding while giving Realtime vision enough pixels
+      // to inspect a small learner mark.
+      context.drawImage(image, 0, 0, BOARD_W, BOARD_H, 0, 96, 640, 384);
+      context.strokeStyle = '#d9d4ca';
+      context.lineWidth = 2;
+      context.strokeRect(0, 96, 640, 384);
+      context.fillStyle = '#26231f';
+      context.font = '600 18px sans-serif';
+      context.fillText('Full board', 16, 78);
+      context.fillText('Learner’s drawing', 668, 78);
+
+      const crop = normalizedCrop(options.focusBox);
+      const target = fitInside(crop.w, crop.h, 276, 430);
+      const dx = 660 + (284 - target.w) / 2;
+      const dy = 96 + (430 - target.h) / 2;
+      context.drawImage(image, crop.x, crop.y, crop.w, crop.h, dx, dy, target.w, target.h);
+      context.strokeStyle = '#2c5be0';
+      context.strokeRect(dx - 4, dy - 4, target.w + 8, target.h + 8);
+    } else {
+      context.drawImage(image, 0, 0, BOARD_W, BOARD_H, 0, 0, canvas.width, canvas.height);
+    }
+    for (const quality of [0.82, 0.68, 0.54, 0.4]) {
+      const dataUrl = canvas.toDataURL('image/jpeg', quality);
+      if (dataUrl.length <= 300_000) return dataUrl;
+    }
+    return null;
+  } catch {
+    return null;
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+function normalizedCrop(box: BBox): BBox {
+  const x = Math.max(0, Math.min(BOARD_W - 1, box.x));
+  const y = Math.max(0, Math.min(BOARD_H - 1, box.y));
+  return {
+    x,
+    y,
+    w: Math.max(1, Math.min(BOARD_W - x, box.w)),
+    h: Math.max(1, Math.min(BOARD_H - y, box.h)),
+  };
+}
+
+function fitInside(width: number, height: number, maxWidth: number, maxHeight: number): { w: number; h: number } {
+  const scale = Math.min(maxWidth / width, maxHeight / height);
+  return { w: width * scale, h: height * scale };
+}
+
+function escapeXml(value: string): string {
+  return value.replace(/[<>&'"]/g, (char) =>
+    char === '<' ? '&lt;' : char === '>' ? '&gt;' : char === '&' ? '&amp;' : char === "'" ? '&apos;' : '&quot;');
+}

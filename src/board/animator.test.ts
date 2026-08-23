@@ -18,4 +18,30 @@ describe('BoardAnimator cancellation', () => {
     await expect(idle).resolves.toBe(false);
     expect(path.style.strokeDashoffset).toBe('100');
   });
+
+  it('does not report idle between a released transaction and its DOM queue', async () => {
+    const animator = new BoardAnimator();
+    animator.beginTransaction('checkpoint-1');
+    let settled = false;
+    const idle = animator.whenIdle().then((completed) => {
+      settled = true;
+      return completed;
+    });
+
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    animator.commitTransaction('checkpoint-1');
+
+    await expect(idle).resolves.toBe(true);
+  });
+
+  it('finishing a transaction releases its pre-paint hold', async () => {
+    const animator = new BoardAnimator();
+    animator.beginTransaction('checkpoint-2');
+    const idle = animator.whenIdle();
+
+    animator.finishAll();
+
+    await expect(idle).resolves.toBe(true);
+  });
 });
