@@ -34,6 +34,18 @@ const identity: GenerationIdentity = { sessionId: 'placeholder', connectionEpoch
 afterEach(() => vi.unstubAllGlobals());
 
 describe('realtime proxy response annotation', () => {
+  it('leaves response cancellation to the client sustained-speech gate', async () => {
+    vi.stubGlobal('WebSocket', FakeUpstream);
+    const repo = new Repo(openTestDb());
+    const child = repo.createChild('Maya', 10);
+    const session = repo.createSession(child.id, 'fractions');
+    const client = new FakeClient();
+    await connectRealtimeProxy(client as never, { apiKey: 'offline-fixture', model: 'gpt-realtime-2.1', repo, sessionId: session.id, createUpstream: () => new FakeUpstream() as never });
+    FakeUpstream.latest.onopen?.();
+    const update = JSON.parse(FakeUpstream.latest.sent[0]) as { session: { audio: { input: { turn_detection: { interrupt_response: boolean } } } } };
+    expect(update.session.audio.input.turn_detection.interrupt_response).toBe(false);
+  });
+
   it('maps raw transcript-before-audio events across the complete PCM segment', async () => {
     vi.stubGlobal('WebSocket', FakeUpstream);
     const repo = new Repo(openTestDb());

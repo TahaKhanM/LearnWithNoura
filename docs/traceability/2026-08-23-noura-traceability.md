@@ -10,7 +10,7 @@ Line references are to this working revision and are refreshed at handoff.
 | --- | --- | --- | --- | --- |
 | AUD-P0-01 | No deployment/version signal — FAIL | `server/app.ts` health/version; `api/`; `vercel.json`; project runbook | Vercel local build; Preview smoke row below | Public-v0 wiring complete locally; managed database and live deployment pending. PARTIAL |
 | AUD-P1-01 | Global visual bounds/collision unsafe — FAIL | `src/board/inspection.ts`; long-word splitting; semantic adapters | `inspection.test.ts`; canonical visual baselines | Actual DOM/KaTeX repair is bounded to one pass. PARTIAL |
-| AUD-P1-02 | Misleading interruption metric — FAIL | Detector-to-stop-scheduled and provider confirmation are separate; README removes acoustic claim | runtime/property tests | Acoustic onset-to-silence hardware run missing. UNVERIFIED |
+| AUD-P1-02 | Misleading interruption metric — FAIL | Detector-to-stop-scheduled and provider confirmation are separate; fused sustained-speech gate rejects noise/VAD-only cancellation; README removes acoustic claim | runtime/property/noise-gate tests | Acoustic onset-to-silence hardware run missing. UNVERIFIED |
 | AUD-P1-03 | Interruption finished stale drawing — FAIL | `BoardAnimator.cancelAll`; transient scene rollback; ack after idle | `animator.test.ts`; generation cancellation | Browser recorded interruption evidence not yet captured. PASS (deterministic), UNVERIFIED (hardware) |
 | AUD-P1-04 | Reconnect/fallback stale/drop/zombie risks — FAIL | 8s timeout, two retries, newest queued ask; durable fallback claim, supersession abort, composed timeout/request signal, scoped writes and replay | fallback concurrency/error/duplicate/stale tests; cue reconnect/navigation tests | Deterministic PASS; deployed provider/network fault test remains UNVERIFIED. |
 | AUD-P1-05 | Unauthenticated child data/paid WS — FAIL | parent-scoped rows/routes, signed lesson capability, signed pseudonymous v0 parent cookie, exact Origin, rate bounds | `api.auth.test.ts`, `security.test.ts` | Public-v0 guest boundary PASS locally; real identity provider and distributed limiter absent. BLOCKED for full Production |
@@ -113,7 +113,7 @@ Line references are to this working revision and are refreshed at handoff.
 | Environment | URL / deployment ID | SHA | Health/version/REST/WSS/log/persistence result |
 | --- | --- | --- | --- |
 | Preview | `https://noura-preview-mtk2982007.vercel.app` (final deployment ID in handoff) | `/version` must match final HEAD | Standard-protected; Home/deep routes/config/version pass; health 503 degraded; lessons disabled; logs clean |
-| Public v0 | `https://learnwithnoura.com` / `dpl_k7yESkTnLV7jBNavcqrgwdgCa4ff` | `9a92844bcf1d17d7679b9ef18b6a38c8f1ca2e1a` | Health/version/config pass; nested REST and Parent persistence pass; WSS ready/live PCM/interruption pass; fallback tools/board/evidence/summary/immutable end pass; synthetic rows cleaned |
+| Public v0 | `https://learnwithnoura.com` / `dpl_2YhuiyzmUqyX53J7XTqkPiyrpWfu` | `c8963e7c9968d2a89ca523662dae96d2fcb4b02e` | Health/version/config pass; nested REST and Parent persistence pass; WSS ready/live PCM pass; short loud tone did not cancel output; fused speech interruption tests pass; fallback tools/board/evidence/summary/immutable end pass; named smoke row cleaned |
 | Full Production | — | — | Real-user auth/privacy/ZDR/CA/target-hardware gates remain blocked |
 
 ## Manual/recorded evidence still required

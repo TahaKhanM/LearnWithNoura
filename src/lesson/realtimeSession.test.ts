@@ -13,6 +13,7 @@ interface SessionHarness {
     close(): Promise<void>;
   };
   handleServer(raw: unknown): void;
+  handleMicEnergy(rms: number): void;
   releasePending(): void;
 }
 
@@ -60,6 +61,20 @@ describe('RealtimeSession sealed response release', () => {
     expect(session.getSnapshot().lessonState).toMatchObject({ activeConcept: 'future concept', characterAttentionTarget: 'semantic_object' });
   });
 
+  it('does not interrupt on server VAD or a short local noise burst alone', () => {
+    const session = new RealtimeSession('session');
+    const harness = session as unknown as SessionHarness;
+    harness.audioOut = {
+      speaking: true, append: () => {}, currentEnergy: () => 0, playedSamples: () => 0,
+      stop: () => [], close: async () => {},
+    };
+    const identity = session.getIdentity();
+    harness.handleServer(createRuntimeEvent(identity, 0, 'response_started', { response_id: 'response' }));
+    harness.handleServer(createRuntimeEvent(identity, 1, 'speech_started', {}));
+    for (let frame = 0; frame < 3; frame += 1) harness.handleMicEnergy(0.12);
+    expect(session.getIdentity()).toEqual(identity);
+  });
+
   it('rejects late sealed cues after interruption, reconnect identity replacement, and navigation cleanup', () => {
     const session = new RealtimeSession('session');
     const harness = session as unknown as SessionHarness;
@@ -70,6 +85,8 @@ describe('RealtimeSession sealed response release', () => {
     const oldIdentity = session.getIdentity();
     harness.handleServer(createRuntimeEvent(oldIdentity, 0, 'response_started', { response_id: 'old' }));
     harness.handleServer(createRuntimeEvent(oldIdentity, 1, 'speech_started', {}));
+    for (let frame = 0; frame < 7; frame += 1) harness.handleMicEnergy(0.09);
+    expect(session.getIdentity()).not.toEqual(oldIdentity);
     const stale = createRuntimeEvent(oldIdentity, 2, 'transcript_delta', { response_id: 'old', delta: 'stale future' }, { audioSampleOffsets: { start: 0, end: 24_000 } });
     harness.handleServer(stale as RuntimeEventEnvelope<Record<string, unknown>>);
     harness.releasePending();
