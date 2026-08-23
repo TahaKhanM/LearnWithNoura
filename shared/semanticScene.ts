@@ -10,7 +10,30 @@ export const VisualTemplateSchema = z.enum([
 ]);
 
 export const VisualRelevanceSchema = z.enum(['essential', 'supportive', 'none']);
-export const VisualActionSchema = z.enum(['create', 'reuse', 'replace', 'skip']);
+/**
+ * Live model-facing actions are additive only: establish | extend |
+ * emphasize | compare | none. The legacy create/reuse/replace/skip values
+ * remain parseable for stored plans and older callers; `replace` is never a
+ * live action — visible tutor work does not disappear.
+ */
+export const VisualActionSchema = z.enum([
+  'establish', 'extend', 'emphasize', 'compare', 'none',
+  'create', 'reuse', 'replace', 'skip',
+]);
+export type VisualAction = z.infer<typeof VisualActionSchema>;
+export type NormalizedVisualAction = 'establish' | 'extend' | 'emphasize' | 'compare' | 'none' | 'replace';
+
+/** Maps legacy action names onto the additive action model. `replace` stays
+ * distinct so policy code can reject it explicitly. */
+export function normalizeVisualAction(action: VisualAction): NormalizedVisualAction {
+  switch (action) {
+    case 'create': return 'establish';
+    case 'reuse': return 'extend';
+    case 'skip': return 'none';
+    case 'replace': return 'replace';
+    default: return action;
+  }
+}
 
 export const SemanticGroupSchema = z.object({
   id: z.string().min(1).max(80).regex(/^[a-z0-9][a-z0-9_-]*$/i),
@@ -31,17 +54,20 @@ export const SemanticScenePlanSchema = z.object({
     rationale: z.string().min(1).max(400).default('A visual representation supports the current teaching move.'),
     action: VisualActionSchema.default('create'),
     targetGroupId: z.string().min(1).max(160).optional(),
+    targetObjectIds: z.array(z.string().min(1).max(160)).max(12).optional(),
     density: z.enum(['minimal', 'standard']).default('minimal'),
     noBoardReason: z.string().max(300).optional(),
   }),
   groups: z.array(SemanticGroupSchema).max(1),
 }).superRefine((plan, context) => {
+  const action = normalizeVisualAction(plan.intent.action);
   const noBoard = plan.groups.length === 0 || plan.groups.every((group) => group.template === 'no_board');
   if (plan.intent.relevance === 'none' && !noBoard) context.addIssue({ code: 'custom', path: ['groups'], message: 'A non-relevant visual must not create a board group.' });
-  if (['skip', 'reuse'].includes(plan.intent.action) && !noBoard) context.addIssue({ code: 'custom', path: ['groups'], message: 'Skip/reuse decisions do not create a new visual group.' });
-  if (plan.intent.action === 'reuse' && !plan.intent.targetGroupId) context.addIssue({ code: 'custom', path: ['intent', 'targetGroupId'], message: 'Reuse requires a visible target group id.' });
-  if (plan.intent.action === 'replace' && (!plan.intent.targetGroupId || plan.groups[0]?.id !== plan.intent.targetGroupId)) context.addIssue({ code: 'custom', path: ['intent', 'targetGroupId'], message: 'Replace requires the visible target group id and a group with that same id.' });
-  if (['create', 'replace'].includes(plan.intent.action) && plan.intent.relevance !== 'none' && noBoard) context.addIssue({ code: 'custom', path: ['groups'], message: 'A create/replace decision requires one non-empty visual group.' });
+  if (['none', 'extend', 'emphasize'].includes(action) && !noBoard) context.addIssue({ code: 'custom', path: ['groups'], message: 'None/extend/emphasize decisions do not create a new visual group.' });
+  if (action === 'extend' && !plan.intent.targetGroupId) context.addIssue({ code: 'custom', path: ['intent', 'targetGroupId'], message: 'Extend requires a visible target group id.' });
+  if (action === 'emphasize' && (plan.intent.targetObjectIds?.length ?? 0) === 0) context.addIssue({ code: 'custom', path: ['intent', 'targetObjectIds'], message: 'Emphasize requires visible target object ids.' });
+  if (action === 'replace' && (!plan.intent.targetGroupId || plan.groups[0]?.id !== plan.intent.targetGroupId)) context.addIssue({ code: 'custom', path: ['intent', 'targetGroupId'], message: 'Replace requires the visible target group id and a group with that same id.' });
+  if (['establish', 'compare', 'replace'].includes(action) && plan.intent.relevance !== 'none' && noBoard) context.addIssue({ code: 'custom', path: ['groups'], message: 'An establish/compare decision requires one non-empty visual group.' });
 });
 
 export type SemanticScenePlan = z.infer<typeof SemanticScenePlanSchema>;

@@ -105,6 +105,19 @@ export class BoardContextTracker {
     return this.items.some((item) => item.semanticGroupId === id && item.owner === 'learner');
   }
 
+  hasObject(id: string): boolean {
+    return this.items.some((item) => item.id === id);
+  }
+
+  groupOfObject(id: string): string | null {
+    return this.items.find((item) => item.id === id)?.semanticGroupId ?? null;
+  }
+
+  groupLabelOf(groupId: string | null | undefined): string | null {
+    if (!groupId) return null;
+    return this.items.find((item) => item.semanticGroupId === groupId && item.semanticGroupLabel)?.semanticGroupLabel ?? null;
+  }
+
   /** Applies an atomic section replacement: scoped clear plus the new ops. */
   applyReplacement(ops: BoardOp[], semanticGroupId: string, semanticGroupLabel?: string): void {
     this.apply([{ op: 'clear' }], 'tutor', semanticGroupId);

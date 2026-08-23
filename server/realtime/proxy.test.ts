@@ -31,6 +31,33 @@ class FakeClient extends EventEmitter {
 
 const identity: GenerationIdentity = { sessionId: 'placeholder', connectionEpoch: 1, turnId: 'turn-1', generationId: 'generation-1' };
 
+const blueprintArgs = {
+  goal: 'Compare two fractions on one number line',
+  mode: 'board_led',
+  successCriteria: ['Learner places fractions on one shared scale', 'Learner explains which is larger and why'],
+  anchorTemplate: 'fraction_comparison',
+  anchorQuestion: 'Which fraction is larger?',
+  stages: [
+    { id: 'orient', kind: 'orient', objective: 'Recall what a fraction shows', boardPurpose: 'establish_anchor', allowedBoardMutation: 'establish', learnerOpportunity: 'Say what the parts of a fraction mean', evidenceExpected: 'recall of fraction meaning' },
+    { id: 'model', kind: 'model', objective: 'Place both fractions on the shared scale', boardPurpose: 'reveal_relation', allowedBoardMutation: 'extend', learnerOpportunity: 'Predict which mark is farther right', evidenceExpected: 'comparison reasoning' },
+    { id: 'check', kind: 'guided_check', objective: 'Compare the visible marks', boardPurpose: 'elicit_learner_work', allowedBoardMutation: 'emphasize', learnerOpportunity: 'Circle the larger fraction', evidenceExpected: 'correct identification with reason' },
+  ],
+};
+
+function createBlueprint(upstream: FakeUpstream, suffix = 'default'): void {
+  upstream.emit({ type: 'response.created', response: { id: `blueprint-response-${suffix}` } });
+  upstream.emit({
+    type: 'response.function_call_arguments.done', response_id: `blueprint-response-${suffix}`,
+    call_id: `blueprint-call-${suffix}`, name: 'create_lesson_blueprint', arguments: JSON.stringify(blueprintArgs),
+  });
+}
+
+function toolOutput(upstream: FakeUpstream, callId: string): Record<string, unknown> {
+  const event = upstream.sent.map((raw) => JSON.parse(raw) as { type: string; item?: { call_id?: string; output?: string } })
+    .find((candidate) => candidate.type === 'conversation.item.create' && candidate.item?.call_id === callId);
+  return JSON.parse(event?.item?.output ?? '{}') as Record<string, unknown>;
+}
+
 afterEach(() => vi.unstubAllGlobals());
 
 describe('realtime proxy response annotation', () => {
@@ -102,22 +129,22 @@ describe('realtime proxy response annotation', () => {
       .find((event) => event.type === 'conversation.item.create' && event.item?.call_id === 'inspect-call');
     expect(JSON.parse(inspectOutput?.item?.output ?? '{}')).toMatchObject({ board: { visibleGroups: [{ id: 'existing-proof', objectCount: 1 }] } });
 
+    createBlueprint(upstream, 'density');
+    await flushProxy();
     upstream.emit({ type: 'response.created', response: { id: 'dense-response' } });
     upstream.emit({
       type: 'response.function_call_arguments.done', response_id: 'dense-response', call_id: 'dense-call', name: 'semantic_visual_plan',
       arguments: JSON.stringify({
         schemaVersion: '2.0.0', planId: 'dense-proof',
-        intent: { objective: 'Pythagorean proof', domain: 'geometry', relevance: 'essential', questionAnswered: 'Why does the theorem work?', rationale: 'The rearrangement is spatial.', action: 'create', density: 'minimal' },
+        intent: { objective: 'Pythagorean proof', domain: 'geometry', relevance: 'essential', questionAnswered: 'Why does the theorem work?', rationale: 'The rearrangement is spatial.', action: 'establish', density: 'minimal' },
         groups: [{ id: 'dense-proof', label: 'Pythagorean proof', revealOrder: ['outline', 'label', 'connector'], template: 'pythagorean_area_proof', parameters: {} }],
       }),
     });
     await flushProxy();
-    const denseOutput = upstream.sent.map((raw) => JSON.parse(raw) as { type: string; item?: { call_id?: string; output?: string } })
-      .find((event) => event.type === 'conversation.item.create' && event.item?.call_id === 'dense-call');
-    expect(JSON.parse(denseOutput?.item?.output ?? '{}')).toMatchObject({ ok: false, accepted: false, reason: expect.stringContaining('density budget') });
+    expect(toolOutput(upstream, 'dense-call')).toMatchObject({ ok: false, accepted: false, reason: expect.stringContaining('density budget') });
   });
 
-  it('reuses the visible section and routes a learner-question adaptation into it', async () => {
+  it('answers an extend request with guidance and routes the adaptation into the visible section', async () => {
     vi.stubGlobal('WebSocket', FakeUpstream);
     const repo = new Repo(openTestDb());
     const child = repo.createChild('Maya', 10);
@@ -135,10 +162,10 @@ describe('realtime proxy response annotation', () => {
     });
     await flushProxy();
     upstream.emit({
-      type: 'response.function_call_arguments.done', response_id: 'adapt-response', call_id: 'reuse-call', name: 'semantic_visual_plan',
+      type: 'response.function_call_arguments.done', response_id: 'adapt-response', call_id: 'extend-call', name: 'semantic_visual_plan',
       arguments: JSON.stringify({
-        schemaVersion: '2.0.0', planId: 'reuse-fraction-model',
-        intent: { objective: 'Answer on the existing line', domain: 'quantitative', relevance: 'essential', questionAnswered: 'Where is three quarters?', rationale: 'The visible line already supplies the scale.', action: 'reuse', targetGroupId: 'fraction-model', density: 'minimal' },
+        schemaVersion: '2.0.0', planId: 'extend-fraction-model',
+        intent: { objective: 'Answer on the existing line', domain: 'quantitative', relevance: 'essential', questionAnswered: 'Where is three quarters?', rationale: 'The visible line already supplies the scale.', action: 'extend', targetGroupId: 'fraction-model', density: 'minimal' },
         groups: [],
       }),
     });
@@ -148,9 +175,9 @@ describe('realtime proxy response annotation', () => {
     });
     await flushProxy();
 
-    const reuseOutput = upstream.sent.map((raw) => JSON.parse(raw) as { type: string; item?: { call_id?: string; output?: string } })
-      .find((event) => event.type === 'conversation.item.create' && event.item?.call_id === 'reuse-call');
-    expect(JSON.parse(reuseOutput?.item?.output ?? '{}')).toMatchObject({ accepted: true, action: 'reuse' });
+    // Extensions stay in the anchor section as small increments — the model
+    // never opens a new section for an adaptation.
+    expect(toolOutput(upstream, 'extend-call')).toMatchObject({ ok: true, accepted: false, action: 'extend', reason: expect.stringContaining('board_ops') });
     expect(repo.listEventsForInternalAudit(session.id).find((event) => event.type === 'board_ops' && !event.released)?.payload).toMatchObject({ semanticObjectId: 'fraction-model', ops: [{ op: 'highlight', id: 'fraction-line' }] });
   });
 
@@ -380,7 +407,7 @@ describe('realtime proxy response annotation', () => {
     expect(JSON.stringify(staged?.payload)).not.toContain('"clear"');
   });
 
-  it('runs a complete-plan preflight in the browser before accepting a semantic visual', async () => {
+  it('fails a plan closed when the browser rejects or never confirms the preflight', async () => {
     vi.stubGlobal('WebSocket', FakeUpstream);
     const repo = new Repo(openTestDb());
     const child = repo.createChild('Maya', 10);
@@ -388,47 +415,61 @@ describe('realtime proxy response annotation', () => {
     const client = new FakeClient();
     await connectRealtimeProxy(client as never, {
       apiKey: 'offline-fixture', model: 'gpt-realtime-2.1', repo, sessionId: session.id,
-      createUpstream: () => new FakeUpstream() as never, preflightTimeoutMs: 400,
+      createUpstream: () => new FakeUpstream() as never, preflightTimeoutMs: 120,
     });
     const active = { ...identity, sessionId: session.id };
     client.emit('message', JSON.stringify(createRuntimeEvent(active, 0, 'hello', {})));
     const upstream = FakeUpstream.latest;
+    createBlueprint(upstream, 'preflight');
+    await flushProxy();
     upstream.emit({ type: 'response.created', response: { id: 'plan-response' } });
     upstream.emit({
       type: 'response.function_call_arguments.done', response_id: 'plan-response', call_id: 'plan-call', name: 'semantic_visual_plan',
       arguments: JSON.stringify({
         schemaVersion: '2.0.0', planId: 'fractions-preflight',
-        intent: { objective: 'Compare fractions', domain: 'quantitative', relevance: 'essential', questionAnswered: 'Which is larger?', rationale: 'One scale.', action: 'create', density: 'minimal' },
+        intent: { objective: 'Compare fractions', domain: 'quantitative', relevance: 'essential', questionAnswered: 'Which is larger?', rationale: 'One scale.', action: 'establish', density: 'minimal' },
         groups: [{ id: 'fraction-scale', label: 'Fraction number line', revealOrder: ['outline', 'label'], template: 'fraction_comparison', parameters: { values: [0.5, 0.75], labels: ['1/2', '3/4'] } }],
       }),
     });
     await flushProxy();
 
-    // The browser is asked to compile the complete candidate offscreen.
+    // The browser is asked to compile the complete candidate offscreen; the
+    // server assigned the blueprint anchor section, not the model's name.
     const preflight = client.sent.find((event) => event.type === 'visual_preflight');
-    expect(preflight?.payload).toMatchObject({ semanticObjectId: 'fraction-scale' });
+    expect(preflight?.payload).toMatchObject({ semanticObjectId: 'lesson-anchor' });
     // The browser rejects it; the model must be told nothing was drawn.
     client.emit('message', JSON.stringify(createRuntimeEvent(active, 1, 'visual_preflight_result', {
       preflight_id: (preflight!.payload as { preflight_id?: string }).preflight_id,
       accepted: false,
-      reasons: ['collision:fraction-scale-scale'],
+      reasons: ['collision:lesson-anchor-scale'],
     })));
     await flushProxy();
     await flushProxy();
-    const output = upstream.sent.map((raw) => JSON.parse(raw) as { type: string; item?: { call_id?: string; output?: string } })
-      .find((event) => event.type === 'conversation.item.create' && event.item?.call_id === 'plan-call');
-    expect(JSON.parse(output?.item?.output ?? '{}')).toMatchObject({ ok: false, accepted: false, reason: expect.stringContaining('preflight') });
-    // A rejected preflight stages no checkpoints at all.
+    expect(toolOutput(upstream, 'plan-call')).toMatchObject({ ok: false, accepted: false, reason: expect.stringContaining('preflight') });
+    expect(repo.listEventsForInternalAudit(session.id).filter((event) => event.type === 'semantic_scene')).toEqual([]);
+
+    // A silent browser is missing evidence, never acceptance: the retry
+    // (allowed once after a failure) times out closed and stages nothing.
+    upstream.emit({ type: 'response.created', response: { id: 'plan-response-2' } });
+    upstream.emit({
+      type: 'response.function_call_arguments.done', response_id: 'plan-response-2', call_id: 'plan-call-2', name: 'semantic_visual_plan',
+      arguments: JSON.stringify({
+        schemaVersion: '2.0.0', planId: 'fractions-preflight-retry',
+        intent: { objective: 'Compare fractions', domain: 'quantitative', relevance: 'essential', questionAnswered: 'Which is larger?', rationale: 'One scale.', action: 'establish', density: 'minimal' },
+        groups: [{ id: 'fraction-scale', label: 'Fraction number line', revealOrder: ['outline'], template: 'fraction_comparison', parameters: { values: [0.5], labels: ['1/2'] } }],
+      }),
+    });
+    await new Promise((resolve) => setTimeout(resolve, 220));
+    expect(toolOutput(upstream, 'plan-call-2')).toMatchObject({ ok: false, accepted: false, reason: expect.stringContaining('preflight') });
     expect(repo.listEventsForInternalAudit(session.id).filter((event) => event.type === 'semantic_scene')).toEqual([]);
   });
 
-  it('forks a new section version instead of replacing geometry under learner marks', async () => {
+  it('rejects every live replace request: visible tutor work never disappears', async () => {
     vi.stubGlobal('WebSocket', FakeUpstream);
     const repo = new Repo(openTestDb());
     const child = repo.createChild('Maya', 10);
     const session = repo.createSession(child.id, 'fractions');
     repo.addEvent(session.id, 'board_ops', { semanticObjectId: 'working-model', groupLabel: 'Working model', ops: [{ op: 'add', id: 'model-box', spec: { kind: 'box', at: [500, 300], text: 'Old model' } }] });
-    repo.addEvent(session.id, 'learner_board', { semanticObjectId: 'working-model', ops: [{ op: 'add', id: 'sketch-owned', spec: { kind: 'path', points: [[10, 10], [30, 30]] } }] });
     const client = new FakeClient();
     await connectRealtimeProxy(client as never, {
       apiKey: 'offline-fixture', model: 'gpt-realtime-2.1', repo, sessionId: session.id,
@@ -437,6 +478,7 @@ describe('realtime proxy response annotation', () => {
     const active = { ...identity, sessionId: session.id };
     client.emit('message', JSON.stringify(createRuntimeEvent(active, 0, 'hello', {})));
     const upstream = FakeUpstream.latest;
+    upstream.onopen?.();
     upstream.emit({ type: 'response.created', response: { id: 'replace-response' } });
     upstream.emit({
       type: 'response.function_call_arguments.done', response_id: 'replace-response', call_id: 'replace-call', name: 'semantic_visual_plan',
@@ -447,48 +489,255 @@ describe('realtime proxy response annotation', () => {
       }),
     });
     await flushProxy();
-    await new Promise((resolve) => setTimeout(resolve, 60));
-    const output = upstream.sent.map((raw) => JSON.parse(raw) as { type: string; item?: { call_id?: string; output?: string } })
-      .find((event) => event.type === 'conversation.item.create' && event.item?.call_id === 'replace-call');
-    const parsed = JSON.parse(output?.item?.output ?? '{}') as { accepted?: boolean; forkedFrom?: string; forkedTo?: string };
-    expect(parsed.accepted).toBe(true);
-    expect(parsed.forkedFrom).toBe('working-model');
-    expect(parsed.forkedTo).toBe('working-model-v2');
-    const staged = repo.listEventsForInternalAudit(session.id).filter((event) => event.type === 'semantic_scene');
-    expect(staged.length).toBeGreaterThan(0);
-    expect(staged.every((event) => (event.payload as { semanticObjectId?: string }).semanticObjectId === 'working-model-v2')).toBe(true);
-    expect(staged.every((event) => !(event.payload as { replacesGroup?: string }).replacesGroup)).toBe(true);
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    expect(toolOutput(upstream, 'replace-call')).toMatchObject({ ok: false, accepted: false, reason: expect.stringContaining('never disappears') });
+    // No clear is staged and no visible object is removed.
+    expect(repo.listEventsForInternalAudit(session.id).filter((event) => event.type === 'semantic_scene')).toEqual([]);
+    const instructions = upstream.sent.map((raw) => JSON.parse(raw) as { type: string; session?: { instructions?: string } })
+      .filter((event) => event.type === 'session.update').at(-1)?.session?.instructions ?? '';
+    expect(instructions).toContain('model-box');
   });
 
-  it('rejects a section replacement while the learner is drawing', async () => {
+  it('accepts one plan per tutor turn, waits for on-screen confirmation, then reports the visible board', async () => {
     vi.stubGlobal('WebSocket', FakeUpstream);
     const repo = new Repo(openTestDb());
     const child = repo.createChild('Maya', 10);
     const session = repo.createSession(child.id, 'fractions');
-    repo.addEvent(session.id, 'board_ops', { semanticObjectId: 'working-model', ops: [{ op: 'add', id: 'model-box', spec: { kind: 'box', at: [500, 300], text: 'Old model' } }] });
     const client = new FakeClient();
     await connectRealtimeProxy(client as never, {
       apiKey: 'offline-fixture', model: 'gpt-realtime-2.1', repo, sessionId: session.id,
-      createUpstream: () => new FakeUpstream() as never, preflightTimeoutMs: 20,
+      createUpstream: () => new FakeUpstream() as never, preflightTimeoutMs: 400, visibilityTimeoutMs: 800,
     });
     const active = { ...identity, sessionId: session.id };
     client.emit('message', JSON.stringify(createRuntimeEvent(active, 0, 'hello', {})));
-    client.emit('message', JSON.stringify(createRuntimeEvent(active, 1, 'draft_state', { open: true, draftId: 'draft-replace-guard' })));
-    await flushProxy();
     const upstream = FakeUpstream.latest;
-    upstream.emit({ type: 'response.created', response: { id: 'replace-draft-response' } });
+    createBlueprint(upstream, 'barrier');
+    await flushProxy();
+    upstream.emit({ type: 'response.created', response: { id: 'anchor-response' } });
     upstream.emit({
-      type: 'response.function_call_arguments.done', response_id: 'replace-draft-response', call_id: 'replace-draft-call', name: 'semantic_visual_plan',
+      type: 'response.function_call_arguments.done', response_id: 'anchor-response', call_id: 'anchor-call', name: 'semantic_visual_plan',
       arguments: JSON.stringify({
-        schemaVersion: '2.0.0', planId: 'replace-while-drawing',
-        intent: { objective: 'Correct the model', domain: 'process', relevance: 'essential', questionAnswered: 'What is the right order?', rationale: 'The old order misleads.', action: 'replace', targetGroupId: 'working-model', density: 'minimal' },
-        groups: [{ id: 'working-model', label: 'Corrected model', revealOrder: ['outline'], template: 'worked_steps', parameters: { steps: ['First', 'Second'] } }],
+        schemaVersion: '2.0.0', planId: 'anchor-plan',
+        intent: { objective: 'Compare fractions', domain: 'quantitative', relevance: 'essential', questionAnswered: 'Which is larger?', rationale: 'One scale.', action: 'establish', density: 'minimal' },
+        groups: [{ id: 'anything', label: 'Fraction number line', revealOrder: ['outline', 'label'], template: 'fraction_comparison', parameters: { values: [0.5, 0.75], labels: ['1/2', '3/4'] } }],
       }),
     });
     await flushProxy();
-    const output = upstream.sent.map((raw) => JSON.parse(raw) as { type: string; item?: { call_id?: string; output?: string } })
-      .find((event) => event.type === 'conversation.item.create' && event.item?.call_id === 'replace-draft-call');
-    expect(JSON.parse(output?.item?.output ?? '{}')).toMatchObject({ ok: false, accepted: false, reason: expect.stringContaining('drawing right now') });
+    const preflight = client.sent.find((event) => event.type === 'visual_preflight');
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 1, 'visual_preflight_result', {
+      preflight_id: (preflight!.payload as { preflight_id?: string }).preflight_id,
+      accepted: true,
+      reasons: [],
+    })));
+    // Seal the response so the staged cues reach the browser.
+    upstream.emit({ type: 'response.done', response: { id: 'anchor-response', status: 'completed', output: [{ type: 'function_call' }] } });
+    await flushProxy();
+    await flushProxy();
+
+    // Visibility barrier: the tool result is withheld until the browser
+    // confirms the plan is actually on screen.
+    expect(toolOutput(upstream, 'anchor-call')).toEqual({});
+    const staged = client.sent.filter((event) => event.type === 'board_ops');
+    expect(staged.length).toBeGreaterThan(0);
+    let sequence = 2;
+    for (const cue of staged) {
+      client.emit('message', JSON.stringify(createRuntimeEvent(active, sequence++, 'ops_shown', { event_id: (cue.payload as { event_id?: number }).event_id })));
+    }
+    await flushProxy();
+    await flushProxy();
+    const output = toolOutput(upstream, 'anchor-call') as { ok?: boolean; visible?: boolean; semanticGroupId?: string; board?: { visibleObjectIds?: string[] } };
+    expect(output.ok).toBe(true);
+    expect(output.visible).toBe(true);
+    // The result contains the now-authoritative visible board, in the
+    // server-assigned anchor section.
+    expect(output.semanticGroupId).toBe('lesson-anchor');
+    expect(output.board?.visibleObjectIds).toContain('lesson-anchor-scale');
+
+    // A second structural plan in the same tutor turn is rejected with the
+    // current anchor.
+    upstream.emit({ type: 'response.created', response: { id: 'second-plan-response' } });
+    upstream.emit({
+      type: 'response.function_call_arguments.done', response_id: 'second-plan-response', call_id: 'second-plan-call', name: 'semantic_visual_plan',
+      arguments: JSON.stringify({
+        schemaVersion: '2.0.0', planId: 'second-plan',
+        intent: { objective: 'Another idea', domain: 'process', relevance: 'essential', questionAnswered: 'What next?', rationale: 'More structure.', action: 'establish', density: 'minimal' },
+        groups: [{ id: 'second-section', label: 'Second idea', revealOrder: ['outline'], template: 'worked_steps', parameters: { steps: ['One', 'Two'] } }],
+      }),
+    });
+    await flushProxy();
+    expect(toolOutput(upstream, 'second-plan-call')).toMatchObject({
+      ok: false,
+      accepted: false,
+      reason: expect.stringContaining('One visual plan per teaching turn'),
+      anchorGroupId: 'lesson-anchor',
+    });
+
+    // A learner turn resets the budget; the anchor itself can never be
+    // re-established, so the next legal structural action is a comparison.
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, sequence++, 'user_text', { text: 'I think three quarters is bigger.', idempotencyKey: 'turn-reset-key-1' })));
+    await flushProxy();
+    upstream.emit({ type: 'response.created', response: { id: 'compare-response' } });
+    upstream.emit({
+      type: 'response.function_call_arguments.done', response_id: 'compare-response', call_id: 'compare-call', name: 'semantic_visual_plan',
+      arguments: JSON.stringify({
+        schemaVersion: '2.0.0', planId: 'compare-plan',
+        intent: { objective: 'Contrast with equal fractions', domain: 'quantitative', relevance: 'essential', questionAnswered: 'What if they were equal?', rationale: 'A contrast case.', action: 'compare', density: 'minimal' },
+        groups: [{ id: 'anything-else', label: 'Equal fractions case', revealOrder: ['outline'], template: 'fraction_comparison', parameters: { values: [0.5, 0.5], labels: ['1/2', '2/4'] } }],
+      }),
+    });
+    await flushProxy();
+    const comparePreflight = [...client.sent].reverse().find((event) => event.type === 'visual_preflight');
+    // The comparison is additive, beside the anchor, in an announced section.
+    expect(comparePreflight?.payload).toMatchObject({ semanticObjectId: 'lesson-anchor-alt1' });
+  });
+
+  it('erase is rejected in the turn that created the object; earlier work persists across later moves', async () => {
+    vi.stubGlobal('WebSocket', FakeUpstream);
+    const repo = new Repo(openTestDb());
+    const child = repo.createChild('Maya', 10);
+    const session = repo.createSession(child.id, 'fractions');
+    const client = new FakeClient();
+    await connectRealtimeProxy(client as never, { apiKey: 'offline-fixture', model: 'gpt-realtime-2.1', repo, sessionId: session.id, createUpstream: () => new FakeUpstream() as never });
+    const active = { ...identity, sessionId: session.id };
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 0, 'hello', {})));
+    const upstream = FakeUpstream.latest;
+
+    upstream.emit({ type: 'response.created', response: { id: 'first-move' } });
+    upstream.emit({
+      type: 'response.function_call_arguments.done', response_id: 'first-move', call_id: 'add-call', name: 'board_ops',
+      arguments: JSON.stringify({ ops: [{ op: 'add', id: 'kept-line', spec: { kind: 'line', from: [100, 100], to: [400, 100] } }] }),
+    });
+    await flushProxy();
+    // Erasing what was just taught, in the same turn, is rejected.
+    upstream.emit({
+      type: 'response.function_call_arguments.done', response_id: 'first-move', call_id: 'erase-call', name: 'board_ops',
+      arguments: JSON.stringify({ ops: [{ op: 'erase', id: 'kept-line' }] }),
+    });
+    await flushProxy();
+    expect(toolOutput(upstream, 'erase-call')).toMatchObject({ ok: false, applied: 0, rejected: [expect.stringContaining('created this turn')] });
+
+    // The object survives the acknowledgement, later moves, and the next
+    // learner response.
+    const stagedAdd = repo.listEventsForInternalAudit(session.id).find((event) => event.type === 'board_ops');
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 1, 'ops_shown', { event_id: stagedAdd?.id })));
+    await flushProxy();
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 2, 'user_text', { text: 'What does that line mean?', idempotencyKey: 'perm-key-0001' })));
+    await flushProxy();
+    upstream.emit({ type: 'response.created', response: { id: 'second-move' } });
+    upstream.emit({
+      type: 'response.function_call_arguments.done', response_id: 'second-move', call_id: 'later-call', name: 'board_ops',
+      arguments: JSON.stringify({ ops: [{ op: 'add', id: 'later-label', spec: { kind: 'text', at: [120, 160], text: 'still here' } }] }),
+    });
+    await flushProxy();
+    const instructions = upstream.sent.map((raw) => JSON.parse(raw) as { type: string; session?: { instructions?: string } })
+      .filter((event) => event.type === 'session.update').at(-1)?.session?.instructions ?? '';
+    expect(instructions).toContain('kept-line');
+  });
+
+  it('restores the blueprint stage after a reconnect and rejects stage jumps against it', async () => {
+    vi.stubGlobal('WebSocket', FakeUpstream);
+    const repo = new Repo(openTestDb());
+    const child = repo.createChild('Maya', 10);
+    const session = repo.createSession(child.id, 'fractions');
+    const storedBlueprint = {
+      blueprintId: 'blueprint-restored',
+      goal: 'Compare two fractions on one number line',
+      mode: 'board_led',
+      successCriteria: ['Learner compares fractions on one scale'],
+      anchor: { semanticGroupId: 'lesson-anchor', template: 'fraction_comparison', instructionalQuestion: 'Which fraction is larger?', invariantObjectIds: [] },
+      stages: blueprintArgs.stages,
+      currentStageIndex: 0,
+      detourStack: [],
+    };
+    repo.addEvent(session.id, 'lesson_blueprint', { blueprint: storedBlueprint });
+    repo.addEvent(session.id, 'blueprint_progress', { blueprintId: 'blueprint-restored', currentStageIndex: 1, detourStack: [] });
+    const client = new FakeClient();
+    await connectRealtimeProxy(client as never, { apiKey: 'offline-fixture', model: 'gpt-realtime-2.1', repo, sessionId: session.id, createUpstream: () => new FakeUpstream() as never });
+    const active = { ...identity, sessionId: session.id };
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 0, 'hello', {})));
+    const upstream = FakeUpstream.latest;
+    upstream.emit({ type: 'session.updated' });
+    await flushProxy();
+
+    // A second blueprint cannot replace the restored one.
+    createBlueprint(upstream, 'duplicate');
+    await flushProxy();
+    expect(toolOutput(upstream, 'blueprint-call-duplicate')).toMatchObject({ ok: false, error: expect.stringContaining('already exists'), blueprintId: 'blueprint-restored' });
+
+    // A stage jump against the restored current stage is rejected.
+    upstream.emit({ type: 'response.created', response: { id: 'jump-response' } });
+    upstream.emit({
+      type: 'response.function_call_arguments.done', response_id: 'jump-response', call_id: 'jump-call', name: 'propose_teaching_move',
+      arguments: JSON.stringify({
+        rationale: 'Skip ahead', microObjective: 'closure early', strategy: 'jump', childFacingText: 'Let us finish.',
+        proposedAction: 'explain', blueprintId: 'blueprint-restored', stageId: 'check',
+      }),
+    });
+    await flushProxy();
+    expect(toolOutput(upstream, 'jump-call')).toMatchObject({ ok: false, error: expect.stringContaining('Illegal stage jump') });
+
+    // Executing the restored current stage succeeds and reports it.
+    upstream.emit({
+      type: 'response.function_call_arguments.done', response_id: 'jump-response', call_id: 'legal-call', name: 'propose_teaching_move',
+      arguments: JSON.stringify({
+        rationale: 'Continue modelling', microObjective: 'Place both fractions on the shared scale', strategy: 'model on anchor', childFacingText: 'Watch the scale.',
+        proposedAction: 'explain', blueprintId: 'blueprint-restored', stageId: 'model', goalLink: 'Placing the marks advances the modelling stage.', boardPurpose: 'reveal_relation',
+      }),
+    });
+    await flushProxy();
+    expect(toolOutput(upstream, 'legal-call')).toMatchObject({ ok: true, blueprintId: 'blueprint-restored', currentStage: { id: 'model' } });
+  });
+
+  it('requires board-led check questions to name visible target objects', async () => {
+    vi.stubGlobal('WebSocket', FakeUpstream);
+    const repo = new Repo(openTestDb());
+    const child = repo.createChild('Maya', 10);
+    const session = repo.createSession(child.id, 'fractions');
+    repo.addEvent(session.id, 'lesson_blueprint', {
+      blueprint: {
+        blueprintId: 'blueprint-check',
+        goal: 'Compare two fractions on one number line',
+        mode: 'board_led',
+        successCriteria: ['Learner compares fractions on one scale'],
+        anchor: { semanticGroupId: 'lesson-anchor', template: 'fraction_comparison', instructionalQuestion: 'Which fraction is larger?', invariantObjectIds: [] },
+        stages: blueprintArgs.stages,
+        currentStageIndex: 0,
+        detourStack: [],
+      },
+    });
+    repo.addEvent(session.id, 'blueprint_progress', { blueprintId: 'blueprint-check', currentStageIndex: 2, detourStack: [] });
+    repo.addEvent(session.id, 'board_ops', { semanticObjectId: 'lesson-anchor', groupLabel: 'Fraction number line', ops: [{ op: 'add', id: 'lesson-anchor-scale', spec: { kind: 'numberline', at: [130, 300], w: 740, min: 0, max: 1 } }] });
+    const client = new FakeClient();
+    await connectRealtimeProxy(client as never, { apiKey: 'offline-fixture', model: 'gpt-realtime-2.1', repo, sessionId: session.id, createUpstream: () => new FakeUpstream() as never });
+    const active = { ...identity, sessionId: session.id };
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 0, 'hello', {})));
+    const upstream = FakeUpstream.latest;
+    upstream.emit({ type: 'session.updated' });
+    await flushProxy();
+
+    upstream.emit({ type: 'response.created', response: { id: 'check-response' } });
+    upstream.emit({
+      type: 'response.function_call_arguments.done', response_id: 'check-response', call_id: 'vague-call', name: 'propose_teaching_move',
+      arguments: JSON.stringify({
+        rationale: 'Check understanding', microObjective: 'Compare the visible marks', strategy: 'diagnostic question', childFacingText: 'Which is larger?',
+        questionOrTask: 'Which fraction is larger?', taskId: 'compare-check', proposedAction: 'question', blueprintId: 'blueprint-check', stageId: 'check',
+      }),
+    });
+    await flushProxy();
+    // A check question with no named visible targets is not answerable by
+    // inspecting the board — rejected.
+    expect(toolOutput(upstream, 'vague-call')).toMatchObject({ ok: false, error: expect.stringContaining('name visible board objects') });
+
+    upstream.emit({
+      type: 'response.function_call_arguments.done', response_id: 'check-response', call_id: 'targeted-call', name: 'propose_teaching_move',
+      arguments: JSON.stringify({
+        rationale: 'Check understanding', microObjective: 'Compare the visible marks', strategy: 'diagnostic question', childFacingText: 'Look at the scale.',
+        questionOrTask: 'Which mark on the scale is farther right?', taskId: 'compare-check', proposedAction: 'question',
+        blueprintId: 'blueprint-check', stageId: 'check', targetObjectIds: ['lesson-anchor-scale'],
+      }),
+    });
+    await flushProxy();
+    expect(toolOutput(upstream, 'targeted-call')).toMatchObject({ ok: true, currentStage: { id: 'check', kind: 'guided_check' } });
   });
 
   it('feeds client board-quality rejection back into the model context', async () => {

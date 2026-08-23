@@ -53,8 +53,6 @@ Shared types live in `shared/lessonTurn.ts` (`DeliveredTask`,
 6. **Prepared visuals.** Accepted semantic plans are compile-checked as a
    complete candidate scene in the browser (`visual_preflight`) before the
    model is told they are usable; a rejected preflight stages nothing.
-   Replacement is a single atomic checkpoint (see v2 invariant 5), is refused
-   while a draft is open, and forks a new section version over learner marks.
 7. **Stable learner view.** Tutor checkpoints never switch the active section
    or reset the part position while the learner is composing, highlights do
    not steer the viewport, compact mode shows "Part X of Y", tools never
@@ -64,6 +62,47 @@ Shared types live in `shared/lessonTurn.ts` (`DeliveredTask`,
    vector analysis and scene description to `/api/board-submission` (no image
    claim is made for the text model); failures surface with a retry and never
    fail silently.
+
+## v3.1 correction: tutor continuity and lesson coherence
+
+Live use of the first v3 cut showed tutor visuals still disappearing (atomic
+replacement and auto-switching sections both *look* like erasure) and lessons
+wandering (no persisted plan). The follow-up review
+(`2026-08-23-whiteboard-follow-up-review-and-devin-prompt.md`) corrected the
+governing product model:
+
+1. **Visible tutor work is permanent.** `replace` is removed from the live
+   tool surface, prompt, and policy; every live replace request is rejected
+   with nothing staged. Raw `clear` remains rejected, and a tutor object
+   cannot be erased in the same logical turn that created it. Legacy
+   committed replacements replay as historical truth only.
+2. **New sections never hide the current board.** Only the first anchor
+   section auto-activates. Later sections are announced in the lesson UI
+   ("Noura added a new board section … Open it") and are reachable via the
+   picker; the learner's active view never switches automatically, including
+   while a draft is open.
+3. **One durable lesson blueprint.** `create_lesson_blueprint` runs before
+   the first substantive explanation: mode chosen once
+   (`board_led|conversation_led`), success criteria, one anchor
+   representation, and 3–5 stages. Moves carry `stageId`/`goalLink` and are
+   validated: stage jumps, anchor changes, decorative visuals, and premature
+   completion are rejected; correct answers advance the stage, partial ones
+   change tactic only, missing prerequisites push a bounded detour that
+   returns to the recorded stage. Blueprint and stage progress persist as
+   `lesson_blueprint`/`blueprint_progress` events and restore on reconnect.
+4. **Server-owned board actions.** The model states intent with
+   `establish | extend | emphasize | compare | none`; the server assigns
+   sections (`lesson-anchor`, announced `lesson-anchor-altN` comparisons),
+   builds emphasize highlights from visible ids, and routes extensions into
+   the anchor. At most one structural plan per logical tutor turn (one retry
+   after a failure); the budget resets only when a learner turn begins.
+5. **Visibility barrier.** A plan's successful tool result is withheld until
+   the browser confirms every checkpoint on screen (`ops_shown`); the result
+   then carries the authoritative visible board, so continuation speech can
+   only describe what the learner actually sees. Preflight fails closed: no
+   connected browser or a timeout is "not shown", never acceptance.
+6. **Board-led questions depend on the board.** Guided/independent checks
+   must name visible `targetObjectIds` or they are rejected.
 
 ## Deliberately unchanged
 
@@ -85,6 +124,16 @@ both repositories persist it without schema migrations.
 - The `/api/board-submission` fallback endpoint mirrors `/api/fallback-turn`
   and is exercised by type checks and client tests, not yet by an endpoint
   integration test.
-- Live-provider behavior (real multi-stroke sessions with long pauses,
-  reuse-versus-replace) remains an evaluation task; nothing here claims
-  physical-device or real-child readiness.
+- Stage/objective relatedness is enforced structurally (blueprint id, stage
+  id, anchor id, visible target ids), not semantically; a model could still
+  write a weak `goalLink` sentence.
+- The fallback (captions-only) tutor validates actions and rejects
+  replacement but does not enforce the blueprint or the visibility barrier;
+  it has no realtime board round-trip.
+- **The live-behavior fix is unverified.** All evidence here is from offline
+  deterministic and browser-automation tests. No live-provider synthetic
+  lesson has been run against this code, and any previously deployed
+  environment (e.g. learnwithnoura.com) does not contain these changes until
+  they are deployed. Resolution of the user-observed live defects requires
+  at least one short authorized synthetic live run recording tool order,
+  group ids, `ops_shown` timing, active-section changes, and the transcript.

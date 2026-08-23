@@ -61,6 +61,8 @@ export function LessonPage({ sessionId }: LessonPageProps) {
   const draftHintTimer = useRef<number | null>(null);
   const [draftHint, setDraftHint] = useState(false);
   const [boardActivity, setBoardActivity] = useState<'idle' | 'noura' | 'learner'>('idle');
+  const [sectionNotice, setSectionNotice] = useState<{ id: string; label: string } | null>(null);
+  const sectionNoticeTimer = useRef<number | null>(null);
   const activeVisualGroupRef = useRef<string | undefined>(undefined);
   const visualGroupsRef = useRef<Array<{ id: string; label: string }>>([]);
 
@@ -106,15 +108,29 @@ export function LessonPage({ sessionId }: LessonPageProps) {
     setVisualGroups((current) => current.some((group) => group.id === cue.semanticObjectId)
       ? current.map((group) => group.id === cue.semanticObjectId ? { ...group, label: cue.groupLabel ?? group.label } : group)
       : [...current, { id: cue.semanticObjectId as string, label: cue.groupLabel ?? cue.semanticObjectId as string }].slice(-12));
-    // Never steal the learner's view: tutor checkpoints do not switch the
-    // active section or reset the focus position while the learner is
-    // composing a drawing, and a checkpoint for the already-active section
-    // keeps the learner's current part instead of snapping to the first one.
-    if (draftRef.current.isOpen) return;
     if (activeVisualGroupRef.current === cue.semanticObjectId) return;
-    setActiveVisualGroupId(cue.semanticObjectId);
+    // Only the first anchor section may take the view automatically. A later
+    // section never silently hides what the learner is looking at: it is
+    // announced and reachable, and the view switches only when the learner
+    // (or an explicit navigation action) chooses it.
+    if (!activeVisualGroupRef.current && !draftRef.current.isOpen) {
+      activeVisualGroupRef.current = cue.semanticObjectId;
+      setActiveVisualGroupId(cue.semanticObjectId);
+      setFocusIndex(0);
+      setBoardOverview(false);
+      return;
+    }
+    setSectionNotice({ id: cue.semanticObjectId, label: cue.groupLabel ?? cue.semanticObjectId });
+    if (sectionNoticeTimer.current !== null) window.clearTimeout(sectionNoticeTimer.current);
+    sectionNoticeTimer.current = window.setTimeout(() => setSectionNotice(null), 12_000);
+  }, []);
+
+  const openSection = useCallback((groupId: string) => {
+    activeVisualGroupRef.current = groupId;
+    setActiveVisualGroupId(groupId);
     setFocusIndex(0);
     setBoardOverview(false);
+    setSectionNotice((current) => current?.id === groupId ? null : current);
   }, []);
 
   const signalBoardActivity = useCallback((kind: 'noura' | 'learner', durationMs = 1_500) => {
@@ -227,6 +243,7 @@ export function LessonPage({ sessionId }: LessonPageProps) {
       if (boardSignalTimer.current !== null) window.clearTimeout(boardSignalTimer.current);
       if (highlightTimer.current !== null) window.clearTimeout(highlightTimer.current);
       if (draftHintTimer.current !== null) window.clearTimeout(draftHintTimer.current);
+      if (sectionNoticeTimer.current !== null) window.clearTimeout(sectionNoticeTimer.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session, applyTutorOps, attention]);
@@ -253,11 +270,11 @@ export function LessonPage({ sessionId }: LessonPageProps) {
     if (restored) {
       const result = boardState.current.applyLearner(restored.ops, restored.semanticGroupId);
       setScene(result.scene);
-      if (restored.semanticGroupId) setActiveVisualGroupId(restored.semanticGroupId);
+      if (restored.semanticGroupId) openSection(restored.semanticGroupId);
       setTool('draw');
       session.notifyDraftState(true, restored.draftId);
     }
-  }, [info, session]);
+  }, [info, session, openSection]);
 
   /** Opens the draft on the first edit; later edits join the same draft. */
   const ensureDraftOpen = useCallback((): string => {
@@ -575,11 +592,7 @@ export function LessonPage({ sessionId }: LessonPageProps) {
                 <select
                   aria-label="Board section"
                   value={activeVisualGroupId}
-                  onChange={(event) => {
-                    setActiveVisualGroupId(event.target.value);
-                    setFocusIndex(0);
-                    setBoardOverview(false);
-                  }}
+                  onChange={(event) => openSection(event.target.value)}
                 >
                   {visualGroups.map((group) => <option key={group.id} value={group.id}>{group.label}</option>)}
                 </select>
@@ -692,6 +705,14 @@ export function LessonPage({ sessionId }: LessonPageProps) {
         {started && (draftSnap.error || (draftHint && draftSnap.status === 'open')) && (
           <p className={`lesson__draft-note${draftSnap.error ? ' lesson__draft-note--error' : ''}`} role={draftSnap.error ? 'alert' : 'status'}>
             {draftSnap.error ?? 'Take your time — press Done when you’re ready.'}
+          </p>
+        )}
+        {started && sectionNotice && (
+          <p className="lesson__section-notice" role="status" data-testid="section-notice">
+            Noura added a new board section: <strong>{sectionNotice.label}</strong>. Your current board stays put.
+            <button className="lesson__section-open" onClick={() => openSection(sectionNotice.id)}>
+              Open it
+            </button>
           </p>
         )}
       </main>

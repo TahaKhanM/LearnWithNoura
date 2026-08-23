@@ -1,6 +1,6 @@
 import type OpenAI from 'openai';
 import { createRuntimeEvent, type GenerationIdentity, type RuntimeEventEnvelope } from '../shared/runtimeProtocol.js';
-import { adaptSemanticScene } from '../shared/semanticScene.js';
+import { adaptSemanticScene, normalizeVisualAction } from '../shared/semanticScene.js';
 import { ResponseTaxonomySchema, TeachingMoveSchema, type ResponseTaxonomy } from '../shared/pedagogy.js';
 import { createLessonState, reduceLesson, responseHandoff } from './lesson/orchestrator.js';
 import { buildInstructions } from './realtime/instructions.js';
@@ -175,12 +175,24 @@ async function executeFallbackTurn(
         } else if (call.function.name === 'semantic_visual_plan') {
           try {
             const { plan, ops, checkpoints } = adaptSemanticScene(args);
-            if (plan.intent.action === 'reuse' || plan.intent.action === 'skip') {
-              const targetAvailable = plan.intent.action !== 'reuse' || Boolean(plan.intent.targetGroupId && boardContext.hasGroup(plan.intent.targetGroupId));
+            const action = normalizeVisualAction(plan.intent.action);
+            // Visible tutor work never disappears — in fallback mode too.
+            if (action === 'replace') {
+              output = {
+                ok: false,
+                accepted: false,
+                reason: 'Visible board work never disappears. Replacement is not available: extend or emphasize instead, or add a comparison beside it.',
+                board: boardContext.toolSnapshot(),
+              };
+              messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(output) });
+              continue;
+            }
+            if (action === 'none' || action === 'extend' || action === 'emphasize') {
+              const targetAvailable = action !== 'extend' || Boolean(plan.intent.targetGroupId && boardContext.hasGroup(plan.intent.targetGroupId));
               output = {
                 ok: targetAvailable,
                 accepted: targetAvailable,
-                action: plan.intent.action,
+                action,
                 relevance: plan.intent.relevance,
                 questionAnswered: plan.intent.questionAnswered,
                 ...(!targetAvailable ? { reason: 'The requested board section is not visible. Inspect the board first.' } : {}),
@@ -197,11 +209,6 @@ async function executeFallbackTurn(
                 reason: `The ${plan.intent.density} visual exceeds its ${densityLimit}-object density budget. Simplify or split the move.`,
                 board: boardContext.toolSnapshot(),
               };
-              messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(output) });
-              continue;
-            }
-            if (plan.intent.action === 'replace' && (!plan.intent.targetGroupId || !boardContext.hasGroup(plan.intent.targetGroupId))) {
-              output = { ok: false, accepted: false, reason: 'The replacement target is not visible. Inspect the board first.', board: boardContext.toolSnapshot() };
               messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(output) });
               continue;
             }

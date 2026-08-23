@@ -382,6 +382,34 @@
   font-weight: 600;
 }
 
+.lesson__section-notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  margin: 6px 2px 0;
+  font-size: 14px;
+  color: var(--ink-soft);
+}
+
+.lesson__section-notice strong {
+  color: var(--ink);
+}
+
+.lesson__section-open {
+  appearance: none;
+  border: 1px solid var(--rail-line);
+  border-radius: 9px;
+  background: var(--board);
+  color: var(--blue);
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 650;
+  min-height: 44px;
+  padding: 0 14px;
+  cursor: pointer;
+}
+
 .lesson__color {
   appearance: none;
   border: 0;

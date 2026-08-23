@@ -69,19 +69,41 @@ describe('BoardSceneCoordinator', () => {
     expect(board.current.items).toHaveLength(31);
   });
 
-  it('replaces one section atomically in a single commit, preserving other sections and learner marks', () => {
+  it('object permanence: later live checkpoints never remove earlier visible tutor work', () => {
     const board = new BoardSceneCoordinator();
-    board.applyTutorCheckpoint([{ op: 'add', id: 'model-box', spec: { kind: 'box', at: [500, 300], text: 'Old model' } }], 'working-model');
-    board.applyTutorCheckpoint([{ op: 'add', id: 'other-box', spec: { kind: 'box', at: [500, 300], text: 'Other page' } }], 'other-section');
+    board.applyTutorCheckpoint([{ op: 'add', id: 'anchor-box', spec: { kind: 'box', at: [500, 300], text: 'Anchor idea' } }], 'lesson-anchor');
+    board.applyLearner([{ op: 'add', id: 'sketch-kept', spec: { kind: 'path', points: [[120, 140], [180, 160]] } }], 'lesson-anchor');
+
+    // Three later teaching moves: an extension, an emphasis, and an
+    // announced comparison section. Every earlier object survives them all.
+    expect(board.applyTutorCheckpoint([
+      { op: 'add', id: 'anchor-note', spec: { kind: 'label', target: 'anchor-box', side: 'below', text: 'still here' } },
+    ], 'lesson-anchor')).not.toBeNull();
+    expect(board.applyTutorCheckpoint([{ op: 'highlight', id: 'anchor-box' }], 'lesson-anchor')).not.toBeNull();
+    expect(board.applyTutorCheckpoint([
+      { op: 'add', id: 'alt-box', spec: { kind: 'box', at: [500, 300], text: 'Comparison case' } },
+    ], 'lesson-anchor-alt1')).not.toBeNull();
+
+    const ids = board.current.items.map((item) => item.id);
+    expect(ids).toContain('anchor-box');
+    expect(ids).toContain('anchor-note');
+    expect(ids).toContain('sketch-kept');
+    expect(ids).toContain('alt-box');
+  });
+
+  it('replays a legacy committed replacement without touching learner marks or other sections', () => {
+    // Historical sessions may contain committed replacements. Replay honors
+    // that visible truth; the live tool surface can no longer produce it.
+    const board = new BoardSceneCoordinator();
+    board.applyReplay([{ op: 'add', id: 'model-box', spec: { kind: 'box', at: [500, 300], text: 'Old model' } }], 'tutor', 'working-model');
+    board.applyReplay([{ op: 'add', id: 'other-box', spec: { kind: 'box', at: [500, 300], text: 'Other page' } }], 'tutor', 'other-section');
     board.applyLearner([{ op: 'add', id: 'sketch-kept', spec: { kind: 'path', points: [[120, 140], [180, 160]] } }], 'working-model');
 
-    const applied = board.applyTutorCheckpoint([
+    const replayed = board.applyReplay([
       { op: 'add', id: 'new-model-box', spec: { kind: 'box', at: [500, 300], text: 'New model' } },
-    ], 'working-model', 'working-model');
-    // The committed scene simultaneously drops the old tutor content and
-    // shows the replacement — the swap is one state, never a blank interim.
-    expect(applied).not.toBeNull();
-    const ids = applied?.scene.items.map((item) => item.id);
+    ], 'tutor', 'working-model', 'working-model');
+    expect(replayed).not.toBeNull();
+    const ids = board.current.items.map((item) => item.id);
     expect(ids).not.toContain('model-box');
     expect(ids).toContain('new-model-box');
     expect(ids).toContain('other-box');

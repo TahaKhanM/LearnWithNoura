@@ -113,7 +113,10 @@ describe('semantic visual adapters', () => {
     expect(reuse.ops).toEqual([]);
   });
 
-  it('replaces one board section as a single atomic checkpoint without a standalone clear', () => {
+  // Live callers (proxy and fallback) reject `replace` outright — visible
+  // tutor work never disappears. The adapter keeps parsing legacy replace
+  // plans only so historical committed events replay their visible truth.
+  it('legacy replay: parses a stored replace plan as one atomic checkpoint without a standalone clear', () => {
     let scene = applyOps(emptyScene, [{ op: 'add', id: 'old-model', spec: { kind: 'box', at: [500, 300], text: 'Old model' } }], 'tutor', 'working-model').scene;
     scene = applyOps(scene, [{ op: 'add', id: 'sketch-kept', spec: { kind: 'path', points: [[10, 10], [20, 20], [30, 15]] } }], 'learner', 'working-model').scene;
     const replacement = adaptSemanticScene({

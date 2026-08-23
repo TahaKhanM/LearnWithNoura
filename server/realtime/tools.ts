@@ -6,6 +6,40 @@
 export const REALTIME_TOOLS = [
   {
     type: 'function' as const,
+    name: 'create_lesson_blueprint',
+    description:
+      'Create the one durable lesson plan before the first substantive explanation. Choose board_led or conversation_led once. Three to five stages (orient, model, guided_check, independent_check, closure) with one anchor representation for board_led goals. The application persists it; later moves execute the current stage — the blueprint is never regenerated turn by turn.',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        goal: { type: 'string', minLength: 1, maxLength: 300 },
+        mode: { type: 'string', enum: ['board_led', 'conversation_led'], description: 'board_led when the goal is spatial, quantitative, structural, procedural, or comparative. Chosen once.' },
+        successCriteria: { type: 'array', minItems: 1, maxItems: 4, items: { type: 'string', minLength: 1, maxLength: 240 } },
+        anchorTemplate: { type: 'string', maxLength: 80, description: 'For board_led: the semantic template of the single anchor representation (e.g. triangle_angle_sum, fraction_comparison).' },
+        anchorQuestion: { type: 'string', maxLength: 300, description: 'For board_led: the instructional question the anchor representation answers.' },
+        stages: {
+          type: 'array', minItems: 3, maxItems: 5,
+          items: {
+            type: 'object', additionalProperties: false,
+            properties: {
+              id: { type: 'string', minLength: 1, maxLength: 80 },
+              kind: { type: 'string', enum: ['orient', 'model', 'guided_check', 'independent_check', 'closure'] },
+              objective: { type: 'string', minLength: 1, maxLength: 240 },
+              boardPurpose: { type: 'string', enum: ['establish_anchor', 'reveal_relation', 'demonstrate_change', 'compare_cases', 'elicit_learner_work', 'test_prediction', 'summarize', 'none'] },
+              allowedBoardMutation: { type: 'string', enum: ['establish', 'extend', 'emphasize', 'compare', 'none'] },
+              learnerOpportunity: { type: 'string', minLength: 1, maxLength: 300 },
+              evidenceExpected: { type: 'string', minLength: 1, maxLength: 240 },
+            },
+            required: ['id', 'kind', 'objective', 'boardPurpose', 'allowedBoardMutation', 'learnerOpportunity', 'evidenceExpected'],
+          },
+        },
+      },
+      required: ['goal', 'mode', 'successCriteria', 'stages'],
+    },
+  },
+  {
+    type: 'function' as const,
     name: 'inspect_board',
     description:
       'Read the authoritative visible board sections, reusable object IDs, density, and recent learner-mark observations. Call before adapting an existing visual or whenever the learner refers to “this”, “that”, or their drawing.',
@@ -21,7 +55,7 @@ export const REALTIME_TOOLS = [
     type: 'function' as const,
     name: 'semantic_visual_plan',
     description:
-      'Decide whether a visual earns its place, then describe at most one semantic board section. Code owns composition, exact geometry, spacing, inspection, reveal order, and acceptance. Reuse/skip creates no new section; use no_board when speech is clearer.',
+      'Stage the one board change for this teaching turn, before speaking about it. Actions are additive only — visible work never disappears: establish (build the blueprint anchor, once), extend (small additions belong in board_ops), emphasize (highlight named visible objects), compare (an announced side case; the learner view does not switch), none. Trigger: the current blueprint stage needs its board purpose fulfilled. Exception: never call this twice in one tutor turn, and never before the blueprint exists. The application assigns sections, owns geometry and acceptance, and confirms visibility before you may describe the result.',
     parameters: {
       type: 'object',
       additionalProperties: false,
@@ -33,11 +67,12 @@ export const REALTIME_TOOLS = [
           properties: {
             objective: { type: 'string', minLength: 1, maxLength: 300 },
             domain: { type: 'string', enum: ['geometry', 'quantitative', 'algebra', 'comparison', 'process', 'argument', 'history', 'grammar', 'table', 'timeline', 'none'] },
-            relevance: { type: 'string', enum: ['essential', 'supportive', 'none'] },
+            relevance: { type: 'string', enum: ['essential', 'none'], description: 'A visual is either essential to this stage or not drawn at all.' },
             questionAnswered: { type: 'string', minLength: 1, maxLength: 300 },
             rationale: { type: 'string', minLength: 1, maxLength: 400 },
-            action: { type: 'string', enum: ['create', 'reuse', 'replace', 'skip'] },
+            action: { type: 'string', enum: ['establish', 'extend', 'emphasize', 'compare', 'none'] },
             targetGroupId: { type: 'string', minLength: 1, maxLength: 160 },
+            targetObjectIds: { type: 'array', maxItems: 12, items: { type: 'string', minLength: 1, maxLength: 160 }, description: 'For emphasize: the visible object ids to highlight.' },
             density: { type: 'string', enum: ['minimal', 'standard'] },
             noBoardReason: { type: 'string', maxLength: 300 },
           },
@@ -65,7 +100,7 @@ export const REALTIME_TOOLS = [
     type: 'function' as const,
     name: 'propose_teaching_move',
     description:
-      'Propose the next pedagogical move in structured form. Deterministic lesson code validates the move and owns whether waiting is legal.',
+      'Propose the next pedagogical move executing the CURRENT blueprint stage. Deterministic lesson code validates stage legality, anchor stability, and whether waiting is legal. Trigger: before each teaching move. Exception: a stage other than the current one is rejected unless you record a prerequisite detour.',
     parameters: {
       type: 'object',
       additionalProperties: false,
@@ -88,6 +123,16 @@ export const REALTIME_TOOLS = [
           description: 'How the learner should answer questionOrTask. Use "draw" (or "mixed" for draw-and-explain) for board tasks: the learner then composes freely and presses Done; you will receive exactly one complete submitted drawing.',
         },
         proposedAction: { type: 'string', enum: ['explain', 'visual', 'question', 'wait', 'feedback', 'practice', 'reteach', 'advance', 'complete'] },
+        blueprintId: { type: 'string', minLength: 1, maxLength: 120 },
+        stageId: { type: 'string', minLength: 1, maxLength: 80, description: 'The current blueprint stage this move executes.' },
+        goalLink: { type: 'string', minLength: 1, maxLength: 300, description: 'One sentence: why this move advances the current stage.' },
+        boardPurpose: { type: 'string', enum: ['establish_anchor', 'reveal_relation', 'demonstrate_change', 'compare_cases', 'elicit_learner_work', 'test_prediction', 'summarize', 'none'] },
+        anchorGroupId: { type: 'string', minLength: 1, maxLength: 160 },
+        targetObjectIds: { type: 'array', maxItems: 12, items: { type: 'string', minLength: 1, maxLength: 160 }, description: 'The visible board objects this move refers to or asks about.' },
+        learnerOpportunityId: { type: 'string', minLength: 1, maxLength: 160 },
+        expectedEvidence: { type: 'string', minLength: 1, maxLength: 240 },
+        detourReason: { type: 'string', minLength: 1, maxLength: 240, description: 'Record a bounded prerequisite detour; the lesson returns to the recorded stage afterwards.' },
+        returnStageId: { type: 'string', minLength: 1, maxLength: 80 },
       },
       required: ['rationale', 'microObjective', 'strategy', 'childFacingText', 'proposedAction'],
     },

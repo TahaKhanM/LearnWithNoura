@@ -15,6 +15,65 @@ export const ResponseTaxonomySchema = z.enum([
 ]);
 export type ResponseTaxonomy = z.infer<typeof ResponseTaxonomySchema>;
 
+export const LessonStageKindSchema = z.enum(['orient', 'model', 'guided_check', 'independent_check', 'closure']);
+export type LessonStageKind = z.infer<typeof LessonStageKindSchema>;
+
+export const BoardPurposeSchema = z.enum([
+  'establish_anchor', 'reveal_relation', 'demonstrate_change', 'compare_cases',
+  'elicit_learner_work', 'test_prediction', 'summarize', 'none',
+]);
+export type BoardPurpose = z.infer<typeof BoardPurposeSchema>;
+
+export const BoardMutationSchema = z.enum(['establish', 'extend', 'emphasize', 'compare', 'none']);
+export type BoardMutation = z.infer<typeof BoardMutationSchema>;
+
+/**
+ * One durable plan for one small lesson goal. It is the coherence boundary:
+ * adaptation changes the route through these stages, never the objective on
+ * every turn. Three to five stages; structure, not a scripted lecture.
+ */
+export const LessonBlueprintSchema = z.object({
+  blueprintId: z.string().min(1).max(120),
+  goal: z.string().min(1).max(300),
+  mode: z.enum(['board_led', 'conversation_led']),
+  successCriteria: z.array(z.string().min(1).max(240)).min(1).max(4),
+  anchor: z.object({
+    semanticGroupId: z.string().min(1).max(160),
+    template: z.string().min(1).max(80),
+    instructionalQuestion: z.string().min(1).max(300),
+    invariantObjectIds: z.array(z.string().min(1).max(160)).max(24).default([]),
+  }).nullable(),
+  stages: z.array(z.object({
+    id: z.string().min(1).max(80),
+    kind: LessonStageKindSchema,
+    objective: z.string().min(1).max(240),
+    boardPurpose: BoardPurposeSchema,
+    allowedBoardMutation: BoardMutationSchema,
+    learnerOpportunity: z.string().min(1).max(300),
+    evidenceExpected: z.string().min(1).max(240),
+  })).min(3).max(5),
+  currentStageIndex: z.number().int().nonnegative().default(0),
+  detourStack: z.array(z.object({
+    reason: z.string().min(1).max(240),
+    returnStageIndex: z.number().int().nonnegative(),
+  })).max(4).default([]),
+}).superRefine((blueprint, context) => {
+  if (blueprint.mode === 'board_led' && !blueprint.anchor) {
+    context.addIssue({ code: 'custom', path: ['anchor'], message: 'A board-led lesson requires one anchor representation.' });
+  }
+  const ids = blueprint.stages.map((stage) => stage.id);
+  if (new Set(ids).size !== ids.length) {
+    context.addIssue({ code: 'custom', path: ['stages'], message: 'Stage ids must be unique.' });
+  }
+  if (blueprint.mode === 'board_led' && !blueprint.stages.some((stage) => stage.allowedBoardMutation === 'establish')) {
+    context.addIssue({ code: 'custom', path: ['stages'], message: 'A board-led lesson needs a stage that establishes the anchor.' });
+  }
+  if (blueprint.currentStageIndex >= blueprint.stages.length) {
+    context.addIssue({ code: 'custom', path: ['currentStageIndex'], message: 'currentStageIndex is out of range.' });
+  }
+});
+export type LessonBlueprint = z.infer<typeof LessonBlueprintSchema>;
+
 export const TeachingMoveSchema = z.object({
   classification: ResponseTaxonomySchema.optional(),
   rationale: z.string().min(1).max(600),
@@ -28,6 +87,17 @@ export const TeachingMoveSchema = z.object({
   /** How the learner is expected to answer the questionOrTask. */
   responseMode: ResponseModeSchema.optional(),
   proposedAction: z.enum(['explain', 'visual', 'question', 'wait', 'feedback', 'practice', 'reteach', 'advance', 'complete']),
+  /** Blueprint linkage: which persisted stage this move executes and why. */
+  blueprintId: z.string().min(1).max(120).optional(),
+  stageId: z.string().min(1).max(80).optional(),
+  goalLink: z.string().min(1).max(300).optional(),
+  boardPurpose: BoardPurposeSchema.optional(),
+  anchorGroupId: z.string().min(1).max(160).optional(),
+  targetObjectIds: z.array(z.string().min(1).max(160)).max(12).optional(),
+  learnerOpportunityId: z.string().min(1).max(160).optional(),
+  expectedEvidence: z.string().min(1).max(240).optional(),
+  detourReason: z.string().min(1).max(240).optional(),
+  returnStageId: z.string().min(1).max(80).optional(),
 });
 export type TeachingMove = z.infer<typeof TeachingMoveSchema>;
 

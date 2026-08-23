@@ -9,9 +9,9 @@ import {
 import { buildInstructions } from './instructions.js';
 import { REALTIME_TOOLS } from './tools.js';
 import type { Confidence, Verdict } from '../store/repo.js';
-import { createLessonState, reduceLesson, responseHandoff } from '../lesson/orchestrator.js';
-import { ResponseTaxonomySchema, TeachingMoveSchema, type ResponseTaxonomy, type TeachingMove } from '../../shared/pedagogy.js';
-import { adaptSemanticScene } from '../../shared/semanticScene.js';
+import { createLessonState, currentStage, reduceLesson, responseHandoff } from '../lesson/orchestrator.js';
+import { LessonBlueprintSchema, ResponseTaxonomySchema, TeachingMoveSchema, type LessonBlueprint, type ResponseTaxonomy, type TeachingMove } from '../../shared/pedagogy.js';
+import { adaptSemanticScene, normalizeVisualAction, VisualActionSchema, type SemanticCheckpoint, type SemanticScenePlan } from '../../shared/semanticScene.js';
 import { BoardSubmissionSchema, DeliveredTaskSchema, submitPolicyForMode, type DeliveredTask } from '../../shared/lessonTurn.js';
 import { ResponseSegmentAnnotator } from './segmentAnnotator.js';
 import { loadReleasedBoardContext } from './boardContext.js';
@@ -45,6 +45,8 @@ export interface ProxyOptions {
   createUpstream?: (url: string, apiKey: string) => NodeWebSocket;
   /** How long to wait for the browser to compile-check a full visual plan. */
   preflightTimeoutMs?: number;
+  /** How long to wait for the browser to confirm a staged plan is visible. */
+  visibilityTimeoutMs?: number;
 }
 
 export async function connectRealtimeProxy(client: ClientSocket, options: ProxyOptions): Promise<void> {
@@ -64,6 +66,7 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
     return;
   }
 
+  const lessonGoal = session.goal;
   const baseInstructions = buildInstructions({
     childName: child.name,
     childAge: child.age,
@@ -119,8 +122,24 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
   /** A task the model proposed but has not yet finished speaking. */
   let pendingDeliveredTask: DeliveredTask | null = null;
   const preflightTimeoutMs = options.preflightTimeoutMs ?? 1_200;
+  const visibilityTimeoutMs = options.visibilityTimeoutMs ?? 15_000;
   let preflightCounter = 0;
   const pendingPreflights = new Map<string, (result: { accepted: boolean; reasons: string[] }) => void>();
+  /**
+   * Logical tutor-turn visual budget. At most one semantic plan may be
+   * prepared per tutor turn; the budget resets only when a genuine learner
+   * turn (voice, text, or board submission) starts the next teaching turn.
+   */
+  let visualPlanState: 'none' | 'preparing' | 'rendering' | 'visible' | 'failed' = 'none';
+  let planStagedThisTurn = false;
+  /** A failed plan may retry once with a simpler plan; never more. */
+  let planAttemptsThisTurn = 0;
+  /** Tutor objects created in the current logical turn may not be erased. */
+  let objectsCreatedThisTurn = new Set<string>();
+  /** Resolvers waiting for the browser to confirm a checkpoint on screen. */
+  const pendingVisibility = new Map<number, (shown: boolean) => void>();
+  /** Count of announced comparison sections beside the anchor. */
+  let comparisonSectionCounter = 0;
 
   function sendClient(
     payload: Record<string, unknown>,
@@ -173,18 +192,54 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
     childHoldsFloor = false;
     toolContinues = 0;
     lastCreateSource = source;
+    // A genuine learner turn starts the next teaching turn: the one-plan
+    // visual budget and the erase guard reset here and nowhere else.
+    planStagedThisTurn = false;
+    planAttemptsThisTurn = 0;
+    if (visualPlanState !== 'rendering') visualPlanState = 'none';
+    objectsCreatedThisTurn = new Set();
     sendUpstream({ type: 'response.create' });
     return true;
   }
 
-  /** Asks the browser to compile-check a complete candidate plan offscreen. */
+  /** Resolves when the browser has confirmed every staged checkpoint is
+   * actually on screen (`ops_shown`), or fails closed on rejection/timeout. */
+  function waitForCheckpointVisibility(eventIds: number[]): Promise<boolean> {
+    if (eventIds.length === 0) return Promise.resolve(true);
+    return new Promise((resolve) => {
+      let remaining = eventIds.length;
+      let settled = false;
+      const timer = setTimeout(() => finish(false), visibilityTimeoutMs);
+      const finish = (shown: boolean) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        for (const eventId of eventIds) pendingVisibility.delete(eventId);
+        resolve(shown);
+      };
+      for (const eventId of eventIds) {
+        pendingVisibility.set(eventId, (shown) => {
+          if (!shown) { finish(false); return; }
+          remaining -= 1;
+          if (remaining <= 0) finish(true);
+        });
+      }
+    });
+  }
+
+  /**
+   * Asks the browser to compile-check a complete candidate plan offscreen.
+   * Fails closed: no connected client or a timeout means "not shown" — the
+   * model may continue without a visual or retry a simpler plan, but missing
+   * evidence is never turned into acceptance.
+   */
   function preflightWithClient(input: { ops: BoardOp[]; semanticGroupId: string; groupLabel?: string; replacesGroup?: string }): Promise<{ accepted: boolean; reasons: string[] }> {
-    if (!clientIdentity || client.readyState !== client.OPEN) return Promise.resolve({ accepted: true, reasons: ['no client connected; accepted optimistically'] });
+    if (!clientIdentity || client.readyState !== client.OPEN) return Promise.resolve({ accepted: false, reasons: ['no browser is connected to validate the plan'] });
     const preflightId = `preflight-${++preflightCounter}`;
     return new Promise((resolve) => {
       const timer = setTimeout(() => {
         pendingPreflights.delete(preflightId);
-        resolve({ accepted: true, reasons: ['preflight timed out; accepted optimistically'] });
+        resolve({ accepted: false, reasons: ['the browser did not confirm the plan in time'] });
       }, preflightTimeoutMs);
       pendingPreflights.set(preflightId, (result) => {
         clearTimeout(timer);
@@ -200,6 +255,129 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
         ...(input.replacesGroup ? { replacesGroup: input.replacesGroup } : {}),
       });
     });
+  }
+
+  function anchorGroupId(): string | null {
+    return lessonState.blueprint?.anchor?.semanticGroupId ?? null;
+  }
+
+  /**
+   * The visibility barrier for board-led moves: validate → preflight (fail
+   * closed) → stage exactly one plan → wait until the browser confirms it is
+   * actually on screen (`ops_shown`) → only then return the successful tool
+   * result (with the now-authoritative visible board) so continuation speech
+   * can refer to what the learner can really see.
+   */
+  function stageAndConfirmPlan(callId: string, responseId: string, input: {
+    ops: BoardOp[];
+    checkpoints: SemanticCheckpoint[];
+    action: string;
+    plan?: SemanticScenePlan;
+    announcement?: string;
+    skipPreflight?: boolean;
+  }): void {
+    const groupId = input.checkpoints[0]?.semanticObjectId ?? '';
+    const groupLabel = input.checkpoints[0]?.groupLabel;
+    const structural = ['establish', 'compare'].includes(input.action);
+    if (structural) {
+      planStagedThisTurn = true;
+      planAttemptsThisTurn += 1;
+      visualPlanState = 'preparing';
+    }
+    // Captured synchronously: staging may finish after this response seals,
+    // in which case cues are delivered directly at its final audio boundary.
+    const planSegment = responseSegment(responseId);
+    void (async () => {
+      if (!input.skipPreflight && input.ops.length > 0 && groupId) {
+        const preflight = await preflightWithClient({ ops: input.ops, semanticGroupId: groupId, groupLabel });
+        if (!preflight.accepted) {
+          if (structural) visualPlanState = 'failed';
+          boardContext.observeBoardRejection(preflight.reasons.join('; ').slice(0, 300) || 'Complete-plan preflight failed.');
+          refreshBoardInstructions();
+          finishTool(callId, responseId, {
+            ok: false,
+            accepted: false,
+            reason: `The complete visual failed deterministic layout preflight: ${preflight.reasons.join('; ').slice(0, 240)}. Nothing was drawn. Continue without the visual or retry once with a simpler plan.`,
+            board: boardContext.toolSnapshot(),
+          });
+          return;
+        }
+      }
+      if (structural) visualPlanState = 'rendering';
+      const eventIds: number[] = [];
+      for (const checkpoint of input.checkpoints) {
+        const eventId = await repo.addEvent(sessionId, 'semantic_scene', {
+          ...(input.plan ? { plan: input.plan } : {}),
+          ops: checkpoint.ops,
+          checkpointId: checkpoint.id,
+          reveal: checkpoint.reveal,
+          semanticObjectId: checkpoint.semanticObjectId,
+          groupLabel: checkpoint.groupLabel,
+        }, false);
+        eventIds.push(eventId);
+        pendingBoardOps.set(eventId, {
+          ops: checkpoint.ops,
+          semanticGroupId: checkpoint.semanticObjectId,
+          groupLabel: checkpoint.groupLabel,
+        });
+        const cuePayload = {
+          type: 'board_ops',
+          ops: checkpoint.ops,
+          response_id: responseId,
+          event_id: eventId,
+          groupLabel: checkpoint.groupLabel,
+          checkpoint: checkpoint.reveal,
+        };
+        const cueOptional = {
+          visualCueId: checkpoint.id,
+          semanticObjectId: checkpoint.semanticObjectId,
+        };
+        if (!planSegment.isSealed()) planSegment.addSemanticCue(cuePayload, cueOptional);
+        else if (!cancelledResponses.has(responseId)) {
+          const total = planSegment.totalSamples();
+          sendClient(cuePayload, identityForResponse(responseId), { ...cueOptional, audioSampleOffsets: { start: total, end: total } });
+        }
+      }
+      for (const op of input.ops) if (op.op === 'add') objectsCreatedThisTurn.add(op.id);
+      const visible = await waitForCheckpointVisibility(eventIds);
+      if (!visible) {
+        if (structural) visualPlanState = 'failed';
+        for (const eventId of eventIds) pendingBoardOps.delete(eventId);
+        finishTool(callId, responseId, {
+          ok: false,
+          accepted: false,
+          reason: 'The visual was not confirmed on the learner’s screen. It is not visible; do not refer to it. Continue without it or retry once with a simpler plan.',
+          board: boardContext.toolSnapshot(),
+        });
+        return;
+      }
+      if (structural) visualPlanState = 'visible';
+      // The board context was advanced by the acknowledgements, so this
+      // snapshot is the authoritative, actually-visible board.
+      finishTool(callId, responseId, {
+        ok: true,
+        accepted: true,
+        visible: true,
+        applied: input.ops.length,
+        checkpoints: input.checkpoints.length,
+        action: input.action,
+        visibleObjectIds: input.ops.filter((op) => op.op === 'add').map((op) => op.id),
+        ...(groupId ? { semanticGroupId: groupId } : {}),
+        ...(input.announcement ? { announcement: input.announcement } : {}),
+        board: boardContext.toolSnapshot(),
+      });
+    })().catch((error) => {
+      if (structural) visualPlanState = 'failed';
+      log(`session ${sessionId}: semantic plan staging error ${String(error).slice(0, 200)}`);
+      finishTool(callId, responseId, { ok: false, accepted: false, error: String(error).slice(0, 260) });
+    });
+  }
+
+  /** The server, not the model, decides which section a plan builds. */
+  function assignSectionToPlan(rawArgs: Record<string, unknown>, groupId: string): Record<string, unknown> {
+    const source = rawArgs as { groups?: Array<Record<string, unknown>> };
+    const groups = (source.groups ?? []).map((group, index) => index === 0 ? { ...group, id: groupId } : group);
+    return { ...rawArgs, groups };
   }
 
   function setEndpointingEagerness(eagerness: 'medium' | 'high'): void {
@@ -335,7 +513,42 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
       })
       .filter((batch) => batch.ops.length > 0);
     if (learnerBatches.length > 0) sendClient({ type: 'learner_board_replay', batches: learnerBatches });
+    restoreBlueprint(events);
     await restoreDeliveredTask(events);
+  }
+
+  /** A refresh resumes the same blueprint at the same stage; the lesson plan
+   * is durable and never regenerated by reconnecting. */
+  function restoreBlueprint(events: Awaited<ReturnType<DomainRepository['listEvents']>>): void {
+    if (lessonState.blueprint) return;
+    let blueprint: LessonBlueprint | null = null;
+    let progress: { currentStageIndex: number; detourStack: LessonBlueprint['detourStack'] } | null = null;
+    for (const event of events) {
+      if (event.type === 'lesson_blueprint') {
+        const parsed = LessonBlueprintSchema.safeParse((event.payload as { blueprint?: unknown }).blueprint);
+        if (parsed.success) { blueprint = parsed.data; progress = null; }
+      } else if (event.type === 'blueprint_progress' && blueprint) {
+        const payload = event.payload as { currentStageIndex?: unknown; detourStack?: unknown };
+        if (typeof payload.currentStageIndex === 'number') {
+          progress = {
+            currentStageIndex: Math.max(0, Math.min(blueprint.stages.length - 1, payload.currentStageIndex)),
+            detourStack: Array.isArray(payload.detourStack)
+              ? (payload.detourStack as LessonBlueprint['detourStack']).slice(-4)
+              : [],
+          };
+        }
+      }
+    }
+    if (!blueprint) return;
+    try {
+      lessonState = reduceLesson(lessonState, { type: 'BLUEPRINT_CREATED', blueprint });
+      if (progress) {
+        lessonState = {
+          ...lessonState,
+          blueprint: { ...blueprint, currentStageIndex: progress.currentStageIndex, detourStack: progress.detourStack },
+        };
+      }
+    } catch { /* restoring an old blueprint never breaks the live lesson */ }
   }
 
   /** After a refresh, an unanswered task must survive: restore the contract
@@ -587,6 +800,66 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
     }
 
     switch (name) {
+      case 'create_lesson_blueprint': {
+        if (lessonState.blueprint) {
+          const stage = currentStage(lessonState);
+          finishTool(callId, responseId, {
+            ok: false,
+            error: 'A lesson blueprint already exists; execute its current stage instead of regenerating it.',
+            blueprintId: lessonState.blueprint.blueprintId,
+            ...(stage ? { currentStage: { id: stage.id, kind: stage.kind, objective: stage.objective } } : {}),
+          });
+          break;
+        }
+        const mode = args.mode === 'conversation_led' ? 'conversation_led' : 'board_led';
+        const candidate = {
+          blueprintId: `blueprint-${globalThis.crypto.randomUUID()}`,
+          goal: (typeof args.goal === 'string' && args.goal.trim() ? args.goal.trim() : lessonGoal).slice(0, 300),
+          mode,
+          successCriteria: Array.isArray(args.successCriteria)
+            ? args.successCriteria.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0).map((entry) => entry.slice(0, 240)).slice(0, 4)
+            : [],
+          anchor: mode === 'board_led'
+            ? {
+                // The server assigns the anchor section id; the model never
+                // invents a new group per micro-objective.
+                semanticGroupId: 'lesson-anchor',
+                template: String(args.anchorTemplate ?? 'relationship_map').slice(0, 80),
+                instructionalQuestion: String(args.anchorQuestion ?? lessonGoal).slice(0, 300),
+                invariantObjectIds: [],
+              }
+            : null,
+          stages: args.stages,
+          currentStageIndex: 0,
+          detourStack: [],
+        };
+        const parsedBlueprint = LessonBlueprintSchema.safeParse(candidate);
+        if (!parsedBlueprint.success) {
+          finishTool(callId, responseId, {
+            ok: false,
+            error: `Blueprint failed validation: ${parsedBlueprint.error.issues.slice(0, 3).map((issue) => issue.message).join('; ')}`.slice(0, 300),
+          });
+          break;
+        }
+        try {
+          lessonState = reduceLesson(lessonState, { type: 'BLUEPRINT_CREATED', blueprint: parsedBlueprint.data });
+          await repo.addEvent(sessionId, 'lesson_blueprint', { blueprint: parsedBlueprint.data });
+          const stage = currentStage(lessonState);
+          finishTool(callId, responseId, {
+            ok: true,
+            blueprintId: parsedBlueprint.data.blueprintId,
+            mode: parsedBlueprint.data.mode,
+            ...(parsedBlueprint.data.anchor ? { anchorGroupId: parsedBlueprint.data.anchor.semanticGroupId } : {}),
+            stages: parsedBlueprint.data.stages.map((entry) => ({ id: entry.id, kind: entry.kind })),
+            ...(stage ? { currentStage: { id: stage.id, kind: stage.kind, objective: stage.objective, boardPurpose: stage.boardPurpose } } : {}),
+            board: boardContext.toolSnapshot(),
+          });
+        } catch (error) {
+          finishTool(callId, responseId, { ok: false, error: String(error).slice(0, 220) });
+        }
+        break;
+      }
+
       case 'inspect_board': {
         const focus = typeof args.focus === 'string' ? args.focus.slice(0, 160) : undefined;
         finishTool(callId, responseId, {
@@ -599,40 +872,118 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
 
       case 'semantic_visual_plan': {
         try {
-          let forkedFrom: string | null = null;
-          let planInput = args;
-          const requestedAction = (args as { intent?: { action?: unknown; targetGroupId?: unknown } }).intent?.action;
-          const requestedTarget = (args as { intent?: { targetGroupId?: unknown } }).intent?.targetGroupId;
-          if (requestedAction === 'replace' && typeof requestedTarget === 'string' && boardContext.groupHasLearnerMarks(requestedTarget)) {
-            // The learner drew on that section; never replace geometry under
-            // their marks. Fork a new version of the section instead.
-            const fork = forkSectionPlan(args, requestedTarget);
-            planInput = fork.plan;
-            forkedFrom = requestedTarget;
-          }
-          const { plan, ops, checkpoints } = adaptSemanticScene(planInput);
-          if (plan.intent.action === 'reuse' || plan.intent.action === 'skip') {
-            const targetAvailable = plan.intent.action !== 'reuse' || Boolean(plan.intent.targetGroupId && boardContext.hasGroup(plan.intent.targetGroupId));
-            finishTool(callId, responseId, {
-              ok: targetAvailable,
-              accepted: targetAvailable,
-              action: plan.intent.action,
-              relevance: plan.intent.relevance,
-              questionAnswered: plan.intent.questionAnswered,
-              ...(!targetAvailable ? { reason: 'The requested board section is not visible. Inspect the board and choose an existing group or create a new visual.' } : {}),
-              board: boardContext.toolSnapshot(),
-            });
-            break;
-          }
-          if (plan.intent.action === 'replace' && draftOpen) {
+          const requestedAction = (args as { intent?: { action?: unknown } }).intent?.action;
+          const normalizedAction = normalizeVisualAction(VisualActionSchema.catch('establish').parse(requestedAction ?? 'establish'));
+          // Object permanence: visible tutor work never disappears. Replace
+          // is not a live action in any form.
+          if (normalizedAction === 'replace') {
             finishTool(callId, responseId, {
               ok: false,
               accepted: false,
-              reason: 'The learner is drawing right now. Wait for them to press Done before replacing any section; adapt with highlight/update instead.',
+              reason: 'Visible board work never disappears. Replacement is not available: extend or emphasize the anchor, or add an announced comparison beside it.',
               board: boardContext.toolSnapshot(),
             });
             break;
           }
+          if (normalizedAction === 'none') {
+            finishTool(callId, responseId, {
+              ok: true,
+              accepted: true,
+              action: 'none',
+              noBoard: true,
+              board: boardContext.toolSnapshot(),
+            });
+            break;
+          }
+          // One visual plan per logical tutor turn. The budget resets only
+          // when a genuine learner turn begins the next teaching turn; a
+          // failed attempt may retry exactly once with a simpler plan.
+          const planActiveThisTurn = planStagedThisTurn && visualPlanState !== 'failed';
+          if ((planActiveThisTurn || planAttemptsThisTurn >= 2) && ['establish', 'compare'].includes(normalizedAction)) {
+            finishTool(callId, responseId, {
+              ok: false,
+              accepted: false,
+              reason: 'One visual plan per teaching turn. Teach with what is on the board now, then wait for the learner.',
+              visualPlanState,
+              anchorGroupId: anchorGroupId(),
+              board: boardContext.toolSnapshot(),
+            });
+            break;
+          }
+          const blueprint = lessonState.blueprint;
+          if (!blueprint && ['establish', 'compare'].includes(normalizedAction)) {
+            finishTool(callId, responseId, {
+              ok: false,
+              accepted: false,
+              reason: 'Create the lesson blueprint first; board changes execute blueprint stages.',
+              board: boardContext.toolSnapshot(),
+            });
+            break;
+          }
+          if (normalizedAction === 'extend') {
+            // Extensions are small, incremental, and belong in board_ops so
+            // they attach to existing visible objects rather than a template.
+            finishTool(callId, responseId, {
+              ok: true,
+              accepted: false,
+              action: 'extend',
+              reason: 'Extend the anchor with small board_ops increments that reference visible IDs; no new section is created.',
+              anchorGroupId: anchorGroupId(),
+              board: boardContext.toolSnapshot(),
+            });
+            break;
+          }
+          if (normalizedAction === 'emphasize') {
+            const requestedIds = (args as { intent?: { targetObjectIds?: unknown } }).intent?.targetObjectIds;
+            const targets = Array.isArray(requestedIds)
+              ? requestedIds.filter((id): id is string => typeof id === 'string' && boardContext.hasObject(id)).slice(0, 12)
+              : [];
+            if (targets.length === 0) {
+              finishTool(callId, responseId, {
+                ok: false,
+                accepted: false,
+                reason: 'Emphasize needs visible target object ids. Inspect the board and name the objects to highlight.',
+                board: boardContext.toolSnapshot(),
+              });
+              break;
+            }
+            const group = boardContext.groupOfObject(targets[0]) ?? anchorGroupId() ?? undefined;
+            stageAndConfirmPlan(callId, responseId, {
+              ops: targets.map((id) => ({ op: 'highlight', id } as BoardOp)),
+              checkpoints: [{
+                id: `emphasize-${responseId}-${targets.join('-')}`.slice(0, 120),
+                semanticObjectId: group ?? 'board',
+                groupLabel: boardContext.groupLabelOf(group) ?? 'Board',
+                reveal: 'emphasis',
+                ops: targets.map((id) => ({ op: 'highlight', id } as BoardOp)),
+              }],
+              action: 'emphasize',
+              skipPreflight: true,
+            });
+            break;
+          }
+          // establish | compare: the server, not the model, assigns the
+          // section. The anchor is established once; comparisons are added
+          // beside it in an announced side section that never auto-switches
+          // the learner's view.
+          const anchor = anchorGroupId() ?? 'lesson-anchor';
+          let assignedGroupId = anchor;
+          if (normalizedAction === 'establish') {
+            if (boardContext.hasGroup(anchor)) {
+              finishTool(callId, responseId, {
+                ok: false,
+                accepted: false,
+                reason: `The anchor section ${anchor} is already on the board. Extend or emphasize it; do not rebuild it.`,
+                anchorGroupId: anchor,
+                board: boardContext.toolSnapshot(),
+              });
+              break;
+            }
+          } else {
+            assignedGroupId = `${anchor}-alt${++comparisonSectionCounter}`;
+          }
+          const planInput = assignSectionToPlan(args, assignedGroupId);
+          const { plan, ops, checkpoints } = adaptSemanticScene(planInput);
           const densityLimit = plan.intent.density === 'minimal' ? 14 : 30;
           if (ops.length > densityLimit) {
             finishTool(callId, responseId, {
@@ -640,15 +991,6 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
               accepted: false,
               reason: `The ${plan.intent.density} visual exceeds its ${densityLimit}-object density budget. Simplify or split the teaching move.`,
               questionAnswered: plan.intent.questionAnswered,
-              board: boardContext.toolSnapshot(),
-            });
-            break;
-          }
-          if (plan.intent.action === 'replace' && (!plan.intent.targetGroupId || !boardContext.hasGroup(plan.intent.targetGroupId))) {
-            finishTool(callId, responseId, {
-              ok: false,
-              accepted: false,
-              reason: 'The section requested for replacement is not visible. Inspect the board before replacing it.',
               board: boardContext.toolSnapshot(),
             });
             break;
@@ -664,82 +1006,12 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
             });
             break;
           }
-          // Two-phase acceptance: the browser compiles and inspects the
-          // complete candidate scene offscreen before the model is told the
-          // plan is usable. Nothing becomes visible until the reveal cues.
-          const groupId = checkpoints[0]?.semanticObjectId ?? plan.groups[0]?.id ?? '';
-          const groupLabel = checkpoints[0]?.groupLabel;
-          const replacesGroup = plan.intent.action === 'replace' ? plan.intent.targetGroupId : undefined;
-          // Captured synchronously: preflight may finish after this response
-          // seals, in which case the cues are delivered directly at its
-          // final audio boundary instead of being silently dropped.
-          const planSegment = responseSegment(responseId);
-          void (async () => {
-            if (ops.length > 0 && groupId) {
-              const preflight = await preflightWithClient({ ops, semanticGroupId: groupId, groupLabel, ...(replacesGroup ? { replacesGroup } : {}) });
-              if (!preflight.accepted) {
-                boardContext.observeBoardRejection(preflight.reasons.join('; ').slice(0, 300) || 'Complete-plan preflight failed.');
-                refreshBoardInstructions();
-                finishTool(callId, responseId, {
-                  ok: false,
-                  accepted: false,
-                  reason: `The complete visual failed deterministic layout preflight: ${preflight.reasons.join('; ').slice(0, 240)}. Nothing was drawn. Simplify or reuse existing objects.`,
-                  board: boardContext.toolSnapshot(),
-                });
-                return;
-              }
-            }
-            for (const checkpoint of checkpoints) {
-              const eventId = await repo.addEvent(sessionId, 'semantic_scene', {
-                plan,
-                ops: checkpoint.ops,
-                checkpointId: checkpoint.id,
-                reveal: checkpoint.reveal,
-                semanticObjectId: checkpoint.semanticObjectId,
-                groupLabel: checkpoint.groupLabel,
-                ...(checkpoint.replacesGroup ? { replacesGroup: checkpoint.replacesGroup } : {}),
-              }, false);
-              pendingBoardOps.set(eventId, {
-                ops: checkpoint.ops,
-                semanticGroupId: checkpoint.semanticObjectId,
-                groupLabel: checkpoint.groupLabel,
-                ...(checkpoint.replacesGroup ? { replacesGroup: checkpoint.replacesGroup } : {}),
-              });
-              const cuePayload = {
-                type: 'board_ops',
-                ops: checkpoint.ops,
-                response_id: responseId,
-                event_id: eventId,
-                groupLabel: checkpoint.groupLabel,
-                checkpoint: checkpoint.reveal,
-                ...(checkpoint.replacesGroup ? { replacesGroup: checkpoint.replacesGroup } : {}),
-              };
-              const cueOptional = {
-                visualCueId: checkpoint.id,
-                semanticObjectId: checkpoint.semanticObjectId,
-              };
-              if (!planSegment.isSealed()) planSegment.addSemanticCue(cuePayload, cueOptional);
-              else if (!cancelledResponses.has(responseId)) {
-                const total = planSegment.totalSamples();
-                sendClient(cuePayload, identityForResponse(responseId), { ...cueOptional, audioSampleOffsets: { start: total, end: total } });
-              }
-            }
-            finishTool(callId, responseId, {
-              ok: true,
-              accepted: true,
-              applied: ops.length,
-              checkpoints: checkpoints.length,
-              noBoard: ops.length === 0,
-              action: plan.intent.action,
-              relevance: plan.intent.relevance,
-              questionAnswered: plan.intent.questionAnswered,
-              acceptedPendingObjectIds: ops.filter((op) => op.op === 'add').map((op) => op.id),
-              ...(forkedFrom ? { forkedFrom, forkedTo: groupId, note: 'The learner has marks on the requested section, so a new version was created beside it instead of replacing under their work.' } : {}),
-              board: boardContext.toolSnapshot(),
-            });
-          })().catch((error) => {
-            log(`session ${sessionId}: semantic plan staging error ${String(error).slice(0, 200)}`);
-            finishTool(callId, responseId, { ok: false, accepted: false, error: String(error).slice(0, 260) });
+          stageAndConfirmPlan(callId, responseId, {
+            ops,
+            checkpoints,
+            action: normalizedAction,
+            plan,
+            ...(normalizedAction === 'compare' ? { announcement: `A comparison was added beside the anchor as section ${assignedGroupId}. Tell the learner it is there; their view does not switch automatically.` } : {}),
           });
         } catch (error) {
           finishTool(callId, responseId, {
@@ -757,6 +1029,21 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
           finishTool(callId, responseId, { ok: false, error: 'teaching move failed schema validation' });
           break;
         }
+        // Board-led diagnostic questions must be answerable by inspecting or
+        // manipulating named visible objects — never by speech alone.
+        const stageBefore = currentStage(lessonState);
+        if (lessonState.blueprint?.mode === 'board_led' && stageBefore &&
+            ['guided_check', 'independent_check'].includes(stageBefore.kind) && parsed.data.questionOrTask) {
+          const visibleTargets = (parsed.data.targetObjectIds ?? []).filter((id) => boardContext.hasObject(id));
+          if (visibleTargets.length === 0) {
+            finishTool(callId, responseId, {
+              ok: false,
+              error: `A ${stageBefore.kind} question in a board-led lesson must name visible board objects it asks about (targetObjectIds). Inspect the board and reference real ids.`,
+              board: boardContext.toolSnapshot(),
+            });
+            break;
+          }
+        }
         try {
           lessonState = reduceLesson(lessonState, { type: 'MOVE_PROPOSED', move: parsed.data });
           const task = taskFromMove(parsed.data, responseId);
@@ -773,10 +1060,17 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
           responseSegment(responseId).addSemanticCue({ type: 'lesson_state', state }, {
             ...(lessonState.activeSemanticObjectId ? { semanticObjectId: lessonState.activeSemanticObjectId } : {}),
           });
+          const stage = currentStage(lessonState);
           finishTool(callId, responseId, {
             ok: true,
             legalPhase: lessonState.phase,
             owedAction: lessonState.owedAction,
+            ...(lessonState.blueprint ? {
+              blueprintId: lessonState.blueprint.blueprintId,
+              anchorGroupId: lessonState.blueprint.anchor?.semanticGroupId ?? null,
+              detourDepth: lessonState.blueprint.detourStack.length,
+            } : {}),
+            ...(stage ? { currentStage: { id: stage.id, kind: stage.kind, objective: stage.objective, boardPurpose: stage.boardPurpose, allowedBoardMutation: stage.allowedBoardMutation } } : {}),
             board: boardContext.toolSnapshot(),
           });
         } catch (error) {
@@ -787,17 +1081,27 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
 
       case 'board_ops': {
         const validated = validateOps(args.ops);
-        // Raw destructive clears are not available to the model. Replacement
-        // is a staged, preflighted semantic_visual_plan decision.
+        // Raw destructive clears are not available to the model: visible
+        // tutor work never disappears during the ordinary lesson flow.
         const clears = validated.ops.filter((op) => op.op === 'clear');
         if (clears.length > 0) {
           validated.ops = validated.ops.filter((op) => op.op !== 'clear');
-          validated.rejected.push({ reason: 'clear is not available; use semantic_visual_plan with action "replace", or start a new section', raw: { op: 'clear' } });
+          validated.rejected.push({ reason: 'clear is not available; visible work persists — extend or emphasize instead', raw: { op: 'clear' } });
         }
-        const semanticGroupId = lessonState.activeSemanticObjectId ?? `freeform-${identityForResponse(responseId)?.turnId ?? 'board'}`;
+        // Objects created in this logical turn cannot be erased in the same
+        // turn; the learner must get to see what was just taught.
+        const sameTurnErases = validated.ops.filter((op) => op.op === 'erase' && objectsCreatedThisTurn.has(op.id));
+        if (sameTurnErases.length > 0) {
+          validated.ops = validated.ops.filter((op) => !(op.op === 'erase' && objectsCreatedThisTurn.has(op.id)));
+          validated.rejected.push({ reason: `erase rejected for objects created this turn (${sameTurnErases.map((op) => op.op === 'erase' ? op.id : '').join(', ')}); visible work persists through the next learner opportunity`, raw: { op: 'erase' } });
+        }
+        // Raw increments join the active section or the lesson anchor; they
+        // never open a fresh freeform section once an anchor exists.
+        const semanticGroupId = lessonState.activeSemanticObjectId ?? anchorGroupId() ?? `freeform-${identityForResponse(responseId)?.turnId ?? 'board'}`;
         const novel = boardContext.novelTutorOps(validated.ops, semanticGroupId);
         const { ops } = novel;
         if (ops.length > 0) {
+          for (const op of ops) if (op.op === 'add') objectsCreatedThisTurn.add(op.id);
           const eventId = await repo.addEvent(sessionId, 'board_ops', {
             ops,
             semanticObjectId: semanticGroupId,
@@ -862,8 +1166,25 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
             const stored = await repo.addEvidence(sessionId, entry);
             await repo.addEvent(sessionId, 'evidence', { evidenceId: stored.evidenceId, concept: stored.concept, verdict: stored.verdict });
             sendClient({ type: 'evidence', entry: stored }, identityForResponse(responseId));
+            const progressBefore = lessonState.blueprint ? `${lessonState.blueprint.currentStageIndex}:${lessonState.blueprint.detourStack.length}` : null;
             lessonState = reduceLesson(lessonState, { type: 'ASSESSED', classification, evidenceId: stored.evidenceId });
-            finishTool(callId, responseId, { ok: true, evidenceId: stored.evidenceId });
+            const blueprint = lessonState.blueprint;
+            if (blueprint && progressBefore !== `${blueprint.currentStageIndex}:${blueprint.detourStack.length}`) {
+              // Stage progress and detours are durable: a refresh resumes the
+              // lesson at the same point of the same blueprint.
+              await repo.addEvent(sessionId, 'blueprint_progress', {
+                blueprintId: blueprint.blueprintId,
+                currentStageIndex: blueprint.currentStageIndex,
+                detourStack: blueprint.detourStack,
+              });
+            }
+            const stage = currentStage(lessonState);
+            finishTool(callId, responseId, {
+              ok: true,
+              evidenceId: stored.evidenceId,
+              ...(stage ? { currentStage: { id: stage.id, kind: stage.kind, objective: stage.objective } } : {}),
+              ...(lessonState.blueprint ? { detourDepth: lessonState.blueprint.detourStack.length } : {}),
+            });
           } catch (error) {
             finishTool(callId, responseId, { ok: false, error: String(error).slice(0, 220) });
           }
@@ -1130,13 +1451,18 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
             boardContext = await loadReleasedBoardContext(repo, sessionId);
           }
           refreshBoardInstructions();
+          // The visibility barrier: a staged plan's tool result waits here.
+          pendingVisibility.get(message.event_id)?.(true);
         }
         break;
       }
 
       case 'ops_rejected': {
         const eventId = typeof message.event_id === 'number' ? message.event_id : null;
-        if (eventId !== null) pendingBoardOps.delete(eventId);
+        if (eventId !== null) {
+          pendingBoardOps.delete(eventId);
+          pendingVisibility.get(eventId)?.(false);
+        }
         const reason = String(message.reason ?? 'The board checkpoint failed client layout validation.').slice(0, 300);
         await repo.addEvent(sessionId, 'board_rejected', { eventId, reason });
         boardContext.observeBoardRejection(reason);
@@ -1238,21 +1564,4 @@ function taskFromMove(move: TeachingMove, responseId: string): DeliveredTask | n
   return parsed.success ? parsed.data : null;
 }
 
-/**
- * The learner has marks on the section the model asked to replace. Instead of
- * destroying the geometry under their work, create the next version of the
- * section beside it.
- */
-function forkSectionPlan(args: Record<string, unknown>, target: string): { plan: Record<string, unknown>; forkedTo: string } {
-  const source = args as { intent?: Record<string, unknown>; groups?: Array<Record<string, unknown>> };
-  const match = /^(.*?)(?:-v(\d+))?$/.exec(target);
-  const base = match?.[1] ?? target;
-  const version = (match?.[2] ? Number(match[2]) : 1) + 1;
-  const forkedTo = `${base}-v${version}`.slice(0, 80);
-  const groups = (source.groups ?? []).map((group, index) => index === 0
-    ? { ...group, id: forkedTo, label: typeof group.label === 'string' ? `${group.label}`.slice(0, 160) : forkedTo }
-    : group);
-  const intent = { ...(source.intent ?? {}), action: 'create' };
-  delete (intent as { targetGroupId?: unknown }).targetGroupId;
-  return { plan: { ...args, intent, groups }, forkedTo };
-}
+

@@ -344,7 +344,7 @@ test('raw explanatory text is moved away from triangle strokes instead of accept
   expect(strokeHitsAnnotation).toBe(false);
 });
 
-test('semantic groups are separate board sections and learner marks stay with their section', async ({ page, request }) => {
+test('a new tutor section never hides the current board: it is announced and reachable, not auto-selected', async ({ page, request }) => {
   const { session, lessonCapability } = await createSyntheticSession(request, `sections-${Date.now().toString(36)}`);
   await installFakeRealtime(page);
   await setLessonCapability(page, session.id, lessonCapability);
@@ -365,12 +365,22 @@ test('semantic groups are separate board sections and learner marks stay with th
     }, { audioSampleOffsets: { start: 0, end: 0 }, semanticObjectId: 'group-two', providerResponseId: 'section-response' });
   });
 
+  // The first anchor section takes the view; the second one must NOT steal
+  // it — the drawing the learner is looking at stays exactly where it is.
   const picker = page.getByLabel('Board section', { exact: true });
+  await expect(page.locator('[data-item="group-one-box"]')).toBeVisible();
+  await expect(picker).toHaveValue('group-one');
+  await expect(page.locator('[data-item="group-two-box"]')).toHaveCount(0);
+
+  // The new section is announced and reachable, with an explicit control.
+  const notice = page.getByTestId('section-notice');
+  await expect(notice).toContainText('Second idea');
+  await expect(page.locator('[data-item="group-one-box"]')).toBeVisible();
+  await notice.getByRole('button', { name: 'Open it' }).click();
   await expect(picker).toHaveValue('group-two');
   await expect(page.locator('[data-item="group-two-box"]')).toBeVisible();
-  await expect(page.locator('[data-item="group-one-box"]')).toHaveCount(0);
-  await expect(page.getByRole('status')).toContainText('Second idea');
 
+  // The first section remains reachable and intact — nothing disappeared.
   await picker.selectOption('group-one');
   await expect(page.locator('[data-item="group-one-box"]')).toBeVisible();
   await expect(page.locator('[data-item="group-two-box"]')).toHaveCount(0);
@@ -385,6 +395,18 @@ test('semantic groups are separate board sections and learner marks stay with th
   await page.mouse.up();
   await expect(page.locator('[data-item^="sketch-"]')).toHaveCount(1);
 
+  // While the learner draws, another tutor section still cannot move them.
+  await page.evaluate(() => {
+    const socket = (window as typeof window & { __nouraFakeSocket: { emit(type: string, payload: Record<string, unknown>, optional?: Record<string, unknown>): void } }).__nouraFakeSocket;
+    socket.emit('board_ops', {
+      response_id: 'section-response', groupLabel: 'Third idea',
+      ops: [{ op: 'add', id: 'group-three-box', spec: { kind: 'box', at: [500, 300], text: 'Third idea' } }],
+    }, { audioSampleOffsets: { start: 0, end: 0 }, semanticObjectId: 'group-three', providerResponseId: 'section-response' });
+  });
+  await expect(picker).toHaveValue('group-one');
+  await expect(page.locator('[data-item^="sketch-"]')).toHaveCount(1);
+
+  // Learner marks stay with their section across explicit navigation.
   await picker.selectOption('group-two');
   await expect(page.locator('[data-item^="sketch-"]')).toHaveCount(0);
   await picker.selectOption('group-one');
