@@ -187,7 +187,9 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
               type: 'semantic_vad',
               eagerness: 'medium',
               create_response: true,
-              interrupt_response: true,
+              // Client-side sustained-speech confirmation owns cancellation;
+              // provider VAD alone must not stop Noura on incidental noise.
+              interrupt_response: false,
             },
           },
           output: { voice: 'marin', format: { type: 'audio/pcm', rate: 24000 } },

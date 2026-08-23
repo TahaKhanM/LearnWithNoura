@@ -10,6 +10,7 @@ import { AudioOut } from './audioOut';
 import { AudioIn } from './audioIn';
 import { GenerationScope } from './generationScope';
 import { ResponseCueTimeline, type ResponseCue } from './responseTimeline';
+import { VoiceInterruptionGate } from './voiceInterruption';
 
 export type Phase = 'connecting' | 'listening' | 'thinking' | 'speaking' | 'reconnecting' | 'fallback' | 'failed' | 'ended';
 export interface CaptionLine { role: 'tutor' | 'child'; text: string; live: boolean; responseId?: string }
@@ -53,7 +54,7 @@ export class RealtimeSession {
   private reconnectAttempts = 0;
   private closedByUs = false;
   private started = false;
-  private hotFrames = 0;
+  private voiceInterruption = new VoiceInterruptionGate();
   private askAt = 0;
   private cancelRequestedAt = 0;
   private firstAudioSeen = false;
@@ -205,6 +206,7 @@ export class RealtimeSession {
 
   setMuted(muted: boolean): void {
     if (this.audioIn) this.audioIn.muted = muted;
+    if (muted) this.voiceInterruption.reset();
     this.update({ muted });
   }
 
@@ -220,14 +222,20 @@ export class RealtimeSession {
     const nextEnergy = this.snapshot.micEnergy * 0.7 + rms * 0.3;
     if (Math.abs(nextEnergy - this.snapshot.micEnergy) > 0.002) this.update({ micEnergy: nextEnergy });
     if (this.snapshot.muted) return;
-    if (this.audioOut.speaking && rms > 0.03) {
-      this.hotFrames += 1;
-      if (this.hotFrames === 4) {
-        this.interruptLocally('voice');
-        this.turnCounter += 1;
-        this.activateScope(true);
-      }
-    } else this.hotFrames = 0;
+    if (this.voiceInterruption.observeEnergy(rms, this.tutorTurnActive(), performance.now())) {
+      this.confirmVoiceInterruption();
+    }
+  }
+
+  private tutorTurnActive(): boolean {
+    return this.audioOut.speaking || ['speaking', 'thinking'].includes(this.snapshot.phase);
+  }
+
+  private confirmVoiceInterruption(): void {
+    if (!this.tutorTurnActive() || this.snapshot.muted) return;
+    this.interruptLocally('voice');
+    this.turnCounter += 1;
+    this.activateScope(true);
   }
 
   private markResponseDead(responseId: string | null): void {
@@ -244,7 +252,7 @@ export class RealtimeSession {
     const detectorToStopScheduledMs = Math.max(0, performance.now() - detectorAt);
     this.timeline.cancel(identity);
     this.phraseBuffers.clear();
-    this.hotFrames = 0;
+    this.voiceInterruption.reset();
     this.interruptionPending = true;
     this.cancelGeneration(`interrupted by ${reason}`);
     for (const item of heard) {
@@ -358,10 +366,13 @@ export class RealtimeSession {
         break;
       }
       case 'speech_started': {
-        this.interruptLocally('server');
-        this.turnCounter += 1;
-        this.activateScope(true);
-        this.update({ phase: 'listening' });
+        if (this.voiceInterruption.confirmServerSpeech(this.tutorTurnActive(), performance.now())) {
+          this.confirmVoiceInterruption();
+        }
+        break;
+      }
+      case 'speech_stopped': {
+        this.voiceInterruption.endServerSpeech();
         break;
       }
       case 'lesson_state': {
