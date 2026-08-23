@@ -256,10 +256,10 @@ export class PostgresRepo implements DomainRepository, ManagedDomainRepository {
     await this.initialize();
     return this.transaction(async (client) => {
       const result = await client.query(
-        `UPDATE noura.fallback_turns SET status = $6, steps_json = $7, updated_at = $8
+        `UPDATE noura.fallback_turns SET status = $6, steps_json = $7::jsonb, updated_at = $8
          WHERE session_id = $1 AND idempotency_key = $2 AND connection_epoch = $3
            AND turn_id = $4 AND generation_id = $5 AND status = 'active'`,
-        [...identityValues(identity), status, status === 'completed' ? steps : null, Date.now()],
+        [...identityValues(identity), status, status === 'completed' ? JSON.stringify(steps) : null, Date.now()],
       );
       if (result.rowCount !== 1) return false;
       if (status === 'completed') {
