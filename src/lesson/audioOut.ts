@@ -37,6 +37,8 @@ export class AudioOut {
   private cursor = 0;
   private sources = new Set<ActiveSource>();
   private timelines: Timeline[] = [];
+  /** Responses whose timeline was evicted: their audio is long past. */
+  private retired = new Set<string>();
   onPlaybackEnd: () => void = () => {};
 
   private context(): AudioContext {
@@ -85,7 +87,13 @@ export class AudioOut {
     if (!timeline || timeline.responseId !== responseId) {
       timeline = { responseId, itemId, start: at, scheduledSec: 0, energy: [] };
       this.timelines.push(timeline);
-      if (this.timelines.length > 8) this.timelines.shift();
+      if (this.timelines.length > 8) {
+        const evicted = this.timelines.shift() as Timeline;
+        this.retired.add(evicted.responseId);
+        if (this.retired.size > 64) {
+          this.retired.delete(this.retired.values().next().value as string);
+        }
+      }
     }
     if (!timeline.itemId && itemId) timeline.itemId = itemId;
 
@@ -114,7 +122,11 @@ export class AudioOut {
   playedMs(responseId: string): number {
     const ctx = this.ctx;
     const timeline = this.findTimeline(responseId);
-    if (!ctx || !timeline) return 0;
+    if (!ctx || !timeline) {
+      // A retired response finished playing long ago; anything stamped
+      // against it should release rather than wait on a clock that's gone.
+      return this.retired.has(responseId) ? Number.MAX_SAFE_INTEGER : 0;
+    }
     const played = (ctx.currentTime - timeline.start) * 1000;
     return Math.max(0, Math.min(played, timeline.scheduledSec * 1000));
   }

@@ -1,48 +1,23 @@
-# Seneca — manual demo script (~4 minutes)
+# Noura — private synthetic demo script
 
-Prep: `npm run dev`, open http://localhost:5173 in Chrome, allow the
-microphone when asked. Headphones recommended.
+This script is for localhost or an access-gated Preview. Use a fresh synthetic learner, headphones, and no real child data.
 
-1. **Home.** Add a learner (name + age) or pick one. Type a goal — use
-   something you haven't rehearsed, e.g. *"Why do heavier things not fall
-   faster?"* — and press **Start lesson**.
+1. **Parent setup.** Show the explicit parent role, AI/data disclosure, visible Name and Age labels, and configuration boundary. Create “Demo Learner”, age 10.
+2. **Goal and handoff.** Choose “Compare 2/3 and 3/5 visually using the same scale.” Select **Hand to Demo Learner**. Explain that the second gesture belongs to the child because it unlocks sound and microphone permission.
+3. **Child begins.** The child taps **Begin**. Noura introduces itself and completes one coherent move ending in one small question.
+4. **Adaptation.** Give one wrong answer, then a partial answer. Show the response taxonomy, calm correction, changed next move, exact shared number line, and evidence observation.
+5. **Interruption, only if hardware-verified.** Interrupt once with headphones. Say only that Noura schedules local cancellation without a network round trip. Do not claim an acoustic latency number unless the target-hardware report exists.
+6. **Shared board.** Add one learner stroke or point to a meaningful board object. Noura’s eyes may follow the active mark, but Noura does not infer its meaning from movement alone.
+7. **End.** End the session, open the Parent Area, and show the immutable session cutoff, evidence IDs, uncertainty, contradiction/history, and recommended next action.
+8. **Continuation.** Show that continuing creates a new linked session rather than mutating the ended one.
 
-2. **Live teaching.** Press **Start the lesson**. Seneca greets the child
-   by name and begins the goal immediately, speaking short sentences and
-   drawing as it goes. Point out: the pen follows the stroke being drawn,
-   marks land in sync with the words about them, and the "Now:" chip
-   tracks the concept.
+Safe visual encore: the canonical 60° unit-circle fixture or Pythagorean area-rearrangement fixture under `/dev/board`.
 
-3. **Interrupt it.** While it is mid-sentence, just start talking:
-   *"Wait, stop — I don't get that part."* The voice stops instantly,
-   the caption freezes exactly where the child stopped hearing, and
-   Seneca answers the actual question — usually changing its visual
-   approach rather than repeating itself.
+Fallbacks:
 
-4. **Answer a question (or answer it wrong).** Seneca asks small
-   diagnostic questions as it teaches. Give a wrong answer on purpose.
-   It should probe or re-teach differently, and quietly record evidence.
+- microphone denied → type; do not imply Noura is hearing;
+- Realtime unavailable → wait for the labelled captions-only mode;
+- provider unavailable → stop the live lesson and use the reviewed synthetic fixtures;
+- deployment/storage/auth gate degraded → remain on localhost and state the limitation.
 
-5. **Draw on the board.** Pick the pen (top right), sketch something
-   near its diagram, then ask *"what could my drawing be in your
-   picture?"* Seneca sees a description of the board, including your
-   marks, and folds them in.
-
-6. **Refresh the page** mid-lesson (optional but strong): the board
-   replays exactly what was shown and Seneca resumes in context instead
-   of starting over.
-
-7. **End lesson.** Press **End lesson**. You land on the parent
-   dashboard: a headline, what was worked on, strengths and struggles
-   each backed by what the child actually said, a recommended next step,
-   and an honest note about how much evidence the session produced.
-   Open **Details** on the session for the full timeline — including the
-   moments the child interrupted.
-
-Failure-mode encores, if asked:
-
-- Block the microphone in site settings and reload → typing still works,
-  Seneca still speaks.
-- Restart the backend with `OPENAI_REALTIME_MODEL=gpt-bogus-model` →
-  the lesson announces text mode and keeps teaching with captions and
-  live drawings.
+Do not promise Production child readiness, arbitrary-topic visual perfection, verified target-hardware latency, camera awareness, ZDR, or durable Vercel persistence.

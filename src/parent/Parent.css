@@ -1,13 +1,56 @@
 .parent {
   min-height: 100vh;
   background: var(--rail);
-  overflow: auto;
 }
 
 .parent--empty {
   display: grid;
   place-items: center;
   color: var(--ink-soft);
+}
+
+.parent__empty-card {
+  width: min(440px, calc(100% - 32px));
+  padding: 24px;
+  border: 1px solid var(--rail-line);
+  border-radius: 16px;
+  background: var(--board);
+  text-align: center;
+}
+
+.parent__head-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.parent__eyebrow {
+  margin: 18px 0 -4px;
+  color: var(--blue-deep);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.parent__switch-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink-soft);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.parent__switch-label select {
+  min-height: 40px;
+  border: 1px solid var(--rail-line);
+  border-radius: 9px;
+  background: var(--board);
+  color: var(--ink);
+  font: inherit;
+  padding: 0 30px 0 10px;
 }
 
 .parent__page {
@@ -42,7 +85,8 @@
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
-  padding: 0;
+  min-height: 44px;
+  padding: 8px 2px;
 }
 
 .parent__link:hover {
@@ -64,7 +108,7 @@
   margin: 0 0 8px;
   font-size: 13.5px;
   font-weight: 600;
-  color: var(--ink-faint);
+  color: var(--ink-soft);
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
@@ -154,14 +198,14 @@
 }
 
 .parent__confidence {
-  color: var(--ink-faint);
+  color: var(--ink-soft);
   font-size: 13px !important;
 }
 
 .parent__note {
   margin: 0 0 12px;
   font-size: 13px;
-  color: var(--ink-faint);
+  color: var(--ink-soft);
 }
 
 .parent__concepts {
@@ -209,6 +253,21 @@
   background: rgba(225, 75, 60, 0.12);
 }
 
+.parent__verdict--demonstrated {
+  color: #075c46;
+  background: rgba(12, 122, 93, 0.14);
+}
+
+.parent__verdict--uncertain {
+  color: var(--blue-deep);
+  background: var(--blue-wash);
+}
+
+.parent__verdict--misunderstood {
+  color: #8e2e27;
+  background: rgba(196, 62, 51, 0.12);
+}
+
 .parent__concept-name {
   margin: 0;
   font-weight: 600;
@@ -229,8 +288,18 @@
 .parent__concept-meta {
   margin: 2px 0 0;
   font-size: 12.5px;
-  color: var(--ink-faint);
+  color: var(--ink-soft);
 }
+
+.parent__history { margin-top: 7px; color: var(--ink-soft); font-size: 13px; }
+.parent__history summary { min-height: 28px; cursor: pointer; color: var(--blue-deep); font-weight: 600; }
+.parent__history p { margin: 7px 0 0; padding-left: 12px; border-left: 2px solid var(--rail-line); }
+
+.parent__claim-source { display: block; margin-top: 4px; color: var(--ink-soft); font-size: 12px; font-weight: 650; }
+.parent__claim-source--demonstrated { color: #075c46; }
+.parent__claim-source--misunderstood { color: #8e2e27; }
+
+.parent__primary { min-height: 44px; border: 0; border-radius: 10px; padding: 0 16px; background: var(--blue); color: white; font: inherit; font-weight: 650; cursor: pointer; }
 
 .parent__session {
   border-top: 1px solid var(--rail-line);
@@ -250,6 +319,7 @@
   gap: 12px;
   font: inherit;
   text-align: left;
+  min-height: 52px;
   padding: 12px 2px;
   cursor: pointer;
 }
@@ -265,7 +335,7 @@
 }
 
 .parent__session-when {
-  color: var(--ink-faint);
+  color: var(--ink-soft);
   font-size: 13px;
   white-space: nowrap;
 }
@@ -295,13 +365,21 @@
 }
 
 .parent__line--marker {
-  color: var(--ink-faint);
+  color: var(--ink-soft);
   font-size: 12.5px;
   font-style: italic;
 }
+
+.parent__timeline-error { margin: 6px 0; color: #8e2e27; font-size: 14px; }
+.parent__timeline-error button { border: 0; background: transparent; color: inherit; font: inherit; font-weight: 700; text-decoration: underline; cursor: pointer; }
 
 @media (max-width: 640px) {
   .parent__columns {
     grid-template-columns: 1fr;
   }
+  .parent__head-row { align-items: flex-start; flex-direction: column; gap: 4px; }
+  .parent__switch-label { width: 100%; justify-content: space-between; }
+  .parent__session-row { display: grid; grid-template-columns: 1fr auto; }
+  .parent__session-when { grid-column: 1; white-space: normal; }
+  .parent__session-toggle { grid-column: 2; grid-row: 1 / span 2; align-self: center; }
 }

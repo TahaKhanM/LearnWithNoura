@@ -53,6 +53,7 @@ export function applyOps(scene: SceneState, ops: BoardOp[], owner: Owner): Appli
           items = [...items, item];
           added.push(op.id);
         } else {
+          if (items[index].owner !== owner) break;
           // Re-adding an existing id replaces it in place, keeping z-order.
           items = items.map((existing, i) =>
             i === index ? { ...item, revision: existing.revision + 1 } : existing,
@@ -62,7 +63,7 @@ export function applyOps(scene: SceneState, ops: BoardOp[], owner: Owner): Appli
       }
       case 'update': {
         items = items.map((existing) =>
-          existing.id === op.id
+          existing.id === op.id && existing.owner === owner
             ? {
                 ...existing,
                 spec: applyUpdate(existing.spec, op.props),
@@ -77,12 +78,14 @@ export function applyOps(scene: SceneState, ops: BoardOp[], owner: Owner): Appli
         break;
       case 'erase': {
         items = items.filter(
-          (existing) => existing.id !== op.id && !dependsOn(existing.spec, op.id),
+          (existing) =>
+            existing.owner !== owner ||
+            (existing.id !== op.id && !dependsOn(existing.spec, op.id)),
         );
         break;
       }
       case 'clear':
-        items = [];
+        items = items.filter((existing) => existing.owner !== owner);
         epoch += 1;
         break;
     }

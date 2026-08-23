@@ -1,0 +1,17 @@
+{
+  "name": "Noura",
+  "short_name": "Noura",
+  "description": "A voice-first tutor that talks and draws while children learn.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ede9df",
+  "theme_color": "#fcfbf7",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

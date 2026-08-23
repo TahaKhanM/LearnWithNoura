@@ -5,6 +5,9 @@
   display: grid;
   place-items: center;
   flex-shrink: 0;
+  --gaze-x: 0;
+  --gaze-y: 0;
+  --ring-scale: 1;
 }
 
 .avatar__face {
@@ -19,6 +22,7 @@
   inset: 0;
   border-radius: 50%;
   border: 2.5px solid rgba(44, 91, 224, 0.28);
+  transform: scale(var(--ring-scale));
   transition: transform 0.12s ease-out, border-color 0.3s ease;
 }
 
@@ -36,8 +40,38 @@
   border-color: rgba(225, 75, 60, 0.55);
 }
 
-.avatar__eye {
-  transition: cy 0.2s ease;
+.avatar__rig {
+  transform-origin: 374px 281px;
+  transition: transform 180ms ease-out;
+}
+
+.avatar__pupils {
+  transform: translate(calc(var(--gaze-x) * 2.8px), calc(var(--gaze-y) * 2.5px));
+}
+
+.avatar__eyes {
+  transform-origin: 374px 269px;
+  animation: avatar-blink 5.6s ease-in-out infinite;
+}
+
+.avatar__brow {
+  fill: none;
+  stroke: var(--board);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  opacity: 0.82;
+}
+
+.avatar--thinking .avatar__brow--left,
+.avatar--thinking .avatar__brow--right { transform: translateY(-1px); }
+.avatar--speaking .avatar__rig { transform: rotate(calc(var(--gaze-x) * 1.5deg)); }
+.avatar--reconnecting .avatar__rig { transform: translateY(1px); opacity: 0.82; }
+.avatar--fallback .avatar__rig { opacity: 0.8; }
+.avatar--ended .avatar__ring { border-color: rgba(12, 122, 93, 0.45); }
+
+@keyframes avatar-blink {
+  0%, 44%, 48%, 100% { transform: scaleY(1); }
+  46% { transform: scaleY(0.08); }
 }
 
 .avatar--thinking .avatar__face,
@@ -91,4 +125,7 @@
   .avatar__dots i {
     animation: none;
   }
+  .avatar__eyes { animation: none; }
+  .avatar__rig { transition: none; transform: none !important; }
+  .avatar__pupils { transform: translate(calc(var(--gaze-x) * 1.2px), calc(var(--gaze-y) * 1px)); }
 }

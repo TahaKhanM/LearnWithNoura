@@ -8,7 +8,7 @@ const TARGET_RATE = 24000;
 const CHUNK_SAMPLES = 960; // 40ms at 24kHz
 
 const WORKLET_SOURCE = `
-class SenecaCapture extends AudioWorkletProcessor {
+class NouraCapture extends AudioWorkletProcessor {
   constructor(options) {
     super();
     this.ratio = sampleRate / ${TARGET_RATE};
@@ -38,7 +38,7 @@ class SenecaCapture extends AudioWorkletProcessor {
     return true;
   }
 }
-registerProcessor('seneca-capture', SenecaCapture);
+registerProcessor('noura-capture', NouraCapture);
 `;
 
 export interface MicHandlers {
@@ -85,7 +85,7 @@ export class AudioIn {
       URL.revokeObjectURL(workletUrl);
     }
     const source = this.ctx.createMediaStreamSource(this.stream);
-    this.node = new AudioWorkletNode(this.ctx, 'seneca-capture');
+    this.node = new AudioWorkletNode(this.ctx, 'noura-capture');
     this.node.port.onmessage = (event: MessageEvent<Float32Array>) => {
       const samples = event.data;
       let sum = 0;
