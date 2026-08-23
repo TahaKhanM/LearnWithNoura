@@ -75,9 +75,17 @@ export function repairSceneOnce(scene: SceneState, inspection = inspectScene(sce
 }
 
 export function countAvoidableConnectorCrossings(scene: SceneState): number {
+  const compiled = new Map(compileScene(scene.items).map((item) => [item.id, item]));
   const segments = scene.items.flatMap((item) => {
     if (item.spec.kind === 'line' && item.spec.arrow === 'end') return [{ from: item.spec.from, to: item.spec.to }];
     if (item.spec.kind === 'connector' && Array.isArray(item.spec.from) && Array.isArray(item.spec.to)) return [{ from: item.spec.from, to: item.spec.to }];
+    if (item.spec.kind === 'connector') {
+      const path = compiled.get(item.id)?.nodes.find((node) => node.type === 'path');
+      if (path?.type === 'path') {
+        const coords = path.d.match(/-?\d+(?:\.\d+)?/g)?.map(Number) ?? [];
+        if (coords.length >= 4) return [{ from: [coords[0], coords[1]] as Vec, to: [coords[coords.length - 2], coords[coords.length - 1]] as Vec }];
+      }
+    }
     return [];
   });
   let crossings = 0;

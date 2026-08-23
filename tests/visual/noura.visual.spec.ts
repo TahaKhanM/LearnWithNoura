@@ -10,6 +10,10 @@ const KEY_EDUCATIONAL_TEXT: Record<string, string> = {
   argument: 'Claim',
   history: 'New trade route',
   grammar: 'The curious fox',
+  'relationship-map': 'Claim',
+  'worked-steps': 'Collect like terms',
+  comparison: 'Solid',
+  'part-whole': '3+2=5',
 };
 
 for (const viewport of [
@@ -26,12 +30,13 @@ for (const viewport of [
   });
 }
 
-for (const scene of ['pythagorean', 'triangle-angles', 'unit-circle', 'slopes', 'fractions', 'water-cycle', 'argument', 'history', 'grammar', 'no-board']) {
+for (const scene of ['pythagorean', 'triangle-angles', 'unit-circle', 'slopes', 'fractions', 'water-cycle', 'argument', 'history', 'grammar', 'relationship-map', 'worked-steps', 'comparison', 'part-whole', 'no-board']) {
   test(`canonical ${scene} scene`, async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.emulateMedia({ reducedMotion: 'reduce' });
-    await page.goto(scene === 'triangle-angles' ? '/dev/board?scene=triangle-angles' : '/dev/board');
-    if (scene !== 'triangle-angles') await page.getByRole('button', { name: scene, exact: true }).click();
+    const hiddenScene = ['triangle-angles', 'relationship-map', 'worked-steps', 'comparison', 'part-whole'].includes(scene);
+    await page.goto(hiddenScene ? `/dev/board?scene=${scene}` : '/dev/board');
+    if (!hiddenScene) await page.getByRole('button', { name: scene, exact: true }).click();
     await expect(page.locator('[data-active-scene]')).toContainText(scene);
     await expect(page).toHaveScreenshot(`scene-${scene}.png`, { animations: 'disabled' });
   });
@@ -43,8 +48,9 @@ for (const scene of ['pythagorean', 'triangle-angles', 'unit-circle', 'slopes', 
     test(`canonical ${scene} scene ${viewport.name}`, async ({ page }) => {
       await page.setViewportSize(viewport);
       await page.emulateMedia({ reducedMotion: 'reduce' });
-      await page.goto(scene === 'triangle-angles' ? '/dev/board?scene=triangle-angles' : '/dev/board');
-      if (scene !== 'triangle-angles') await page.getByRole('button', { name: scene, exact: true }).click();
+      const hiddenScene = ['triangle-angles', 'relationship-map', 'worked-steps', 'comparison', 'part-whole'].includes(scene);
+      await page.goto(hiddenScene ? `/dev/board?scene=${scene}` : '/dev/board');
+      if (!hiddenScene) await page.getByRole('button', { name: scene, exact: true }).click();
       await expect(page.locator('[data-active-scene]')).toContainText(scene);
       if (viewport.name === 'mobile-focus' && scene !== 'no-board') {
         const requiredKeys = await page.locator('[data-required-text-key]').evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-required-text-key')));

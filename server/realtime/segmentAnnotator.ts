@@ -59,6 +59,10 @@ export class ResponseSegmentAnnotator {
 
   totalSamples(): number { return this.samples; }
 
+  /** A sealed segment silently ignores new cues; callers that stage cues
+   * asynchronously must check this and deliver directly instead. */
+  isSealed(): boolean { return this.sealed; }
+
   seal(): AnnotatedSegmentCue[] {
     if (this.sealed) return [];
     this.sealed = true;

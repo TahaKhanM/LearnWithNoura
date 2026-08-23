@@ -1,6 +1,6 @@
 import type OpenAI from 'openai';
 import { createRuntimeEvent, type GenerationIdentity, type RuntimeEventEnvelope } from '../shared/runtimeProtocol.js';
-import { adaptSemanticScene } from '../shared/semanticScene.js';
+import { adaptSemanticScene, normalizeVisualAction } from '../shared/semanticScene.js';
 import { ResponseTaxonomySchema, TeachingMoveSchema, type ResponseTaxonomy } from '../shared/pedagogy.js';
 import { createLessonState, reduceLesson, responseHandoff } from './lesson/orchestrator.js';
 import { buildInstructions } from './realtime/instructions.js';
@@ -14,7 +14,7 @@ import type { FallbackTurnIdentity } from './store/repo.js';
 
 const MAX_ROUNDS = 10;
 const DEFAULT_TIMEOUT_MS = 20_000;
-const ALLOWED_TOOLS = new Set(['semantic_visual_plan', 'propose_teaching_move', 'record_evidence']);
+const ALLOWED_TOOLS = new Set(['inspect_board', 'semantic_visual_plan', 'propose_teaching_move', 'record_evidence']);
 const FALLBACK_TOOLS: OpenAI.Chat.ChatCompletionTool[] = REALTIME_TOOLS
   .filter((tool) => ALLOWED_TOOLS.has(tool.name))
   .map((tool) => ({
@@ -170,9 +170,48 @@ async function executeFallbackTurn(
         catch { /* handled by tool result */ }
         let output: Record<string, unknown> = { ok: false };
 
-        if (call.function.name === 'semantic_visual_plan') {
+        if (call.function.name === 'inspect_board') {
+          output = { ok: true, board: boardContext.toolSnapshot(typeof args.focus === 'string' ? args.focus.slice(0, 160) : undefined) };
+        } else if (call.function.name === 'semantic_visual_plan') {
           try {
             const { plan, ops, checkpoints } = adaptSemanticScene(args);
+            const action = normalizeVisualAction(plan.intent.action);
+            // Visible tutor work never disappears — in fallback mode too.
+            if (action === 'replace') {
+              output = {
+                ok: false,
+                accepted: false,
+                reason: 'Visible board work never disappears. Replacement is not available: extend or emphasize instead, or add a comparison beside it.',
+                board: boardContext.toolSnapshot(),
+              };
+              messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(output) });
+              continue;
+            }
+            if (action === 'none' || action === 'extend' || action === 'emphasize') {
+              const targetAvailable = action !== 'extend' || Boolean(plan.intent.targetGroupId && boardContext.hasGroup(plan.intent.targetGroupId));
+              output = {
+                ok: targetAvailable,
+                accepted: targetAvailable,
+                action,
+                relevance: plan.intent.relevance,
+                questionAnswered: plan.intent.questionAnswered,
+                ...(!targetAvailable ? { reason: 'The requested board section is not visible. Inspect the board first.' } : {}),
+                board: boardContext.toolSnapshot(),
+              };
+              messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(output) });
+              continue;
+            }
+            const densityLimit = plan.intent.density === 'minimal' ? 14 : 30;
+            if (ops.length > densityLimit) {
+              output = {
+                ok: false,
+                accepted: false,
+                reason: `The ${plan.intent.density} visual exceeds its ${densityLimit}-object density budget. Simplify or split the move.`,
+                board: boardContext.toolSnapshot(),
+              };
+              messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(output) });
+              continue;
+            }
             const equivalent = boardContext.equivalentTutorScene(ops);
             if (equivalent.equivalent) {
               output = {
@@ -190,6 +229,8 @@ async function executeFallbackTurn(
                   ops: checkpoint.ops,
                   checkpointId: checkpoint.id,
                   reveal: checkpoint.reveal,
+                  semanticObjectId: checkpoint.semanticObjectId,
+                  groupLabel: checkpoint.groupLabel,
                 }, false);
                 await emit('board_ops', {
                   ops: checkpoint.ops,
@@ -205,6 +246,9 @@ async function executeFallbackTurn(
                 applied: ops.length,
                 checkpoints: checkpoints.length,
                 noBoard: ops.length === 0,
+                action: plan.intent.action,
+                relevance: plan.intent.relevance,
+                questionAnswered: plan.intent.questionAnswered,
                 acceptedPendingObjectIds: ops.filter((op) => op.op === 'add').map((op) => op.id),
                 board: boardContext.toolSnapshot(),
               };
@@ -277,18 +321,12 @@ async function executeFallbackTurn(
         lessonState = reduceLesson(lessonState, { type: 'QUESTION_DELIVERED', taskId: `fallback-question-${request.turnId}`, text: delivered });
         break;
       }
+      // Explanations are allowed to end without an injected question; only a
+      // promised-but-undelivered question move earns one bounded continuation.
       const handoff = responseHandoff(lessonState, delivered);
       if (handoff === 'wait') break;
-      if (handoff === 'bounded_continuation') {
-        lessonState = { ...lessonState, continuationAttempts: lessonState.continuationAttempts + 1 };
-        messages.push({ role: 'system', content: 'Complete the promised teaching move now. End with exactly one short, concrete question or small task, then wait.' });
-        continue;
-      }
-      const safeQuestion = 'Tell me one thing you notice about the idea we just explored?';
-      await ensureLearnerEvent();
-      await repo.addFallbackEvent(identity, 'tutor_said', { text: safeQuestion, deterministic: true });
-      await emit('safe_question', { text: safeQuestion });
-      break;
+      lessonState = { ...lessonState, continuationAttempts: lessonState.continuationAttempts + 1 };
+      messages.push({ role: 'system', content: 'You proposed asking a question but have not asked it yet. Ask that one short, concrete question or small task now, then wait.' });
     }
     await assertActive();
     if (!(await repo.finishFallbackTurn(identity, 'completed', steps))) throw abortError('superseded before completion');

@@ -58,6 +58,7 @@ function revealNode(el: SVGElement, kind: 'path' | 'text' | 'katex'): void {
 
 export class BoardAnimator {
   private queue: AnimTask[] = [];
+  private pendingTransactions = new Set<string>();
   private running = false;
   private raf = 0;
   private currentResolve: ((completed: boolean) => void) | null = null;
@@ -66,6 +67,24 @@ export class BoardAnimator {
   onPen: (pos: PenPosition | null) => void = () => {};
   /** Called when the animation queue drains. */
   onIdle: () => void = () => {};
+
+  /**
+   * Keeps `whenIdle` pending while React commits and the canvas compiles a
+   * released visual checkpoint. Without this hold, a fast caller can observe
+   * an empty queue between `setScene` and the canvas layout effect.
+   */
+  beginTransaction(id: string): void {
+    this.pendingTransactions.add(id);
+  }
+
+  /** Releases the pre-paint hold after every node in the checkpoint is queued. */
+  commitTransaction(id: string): void {
+    if (!this.pendingTransactions.delete(id)) return;
+    if (!this.running && this.queue.length === 0 && !this.currentTask && this.pendingTransactions.size === 0) {
+      this.onIdle();
+      this.resolveIdle(true);
+    }
+  }
 
   enqueue(task: AnimTask): void {
     if (prefersReducedMotion()) {
@@ -77,7 +96,9 @@ export class BoardAnimator {
   }
 
   whenIdle(): Promise<boolean> {
-    if (!this.running && this.queue.length === 0 && !this.currentTask) return Promise.resolve(true);
+    if (!this.running && this.queue.length === 0 && !this.currentTask && this.pendingTransactions.size === 0) {
+      return Promise.resolve(true);
+    }
     return new Promise((resolve) => this.idleWaiters.add(resolve));
   }
 
@@ -92,6 +113,7 @@ export class BoardAnimator {
     }
     for (const task of this.queue) for (const node of task.nodes) hideForAnimation(node.el, node.kind, node.length);
     this.queue = [];
+    this.pendingTransactions.clear();
     if (this.currentResolve) {
       const resolve = this.currentResolve;
       this.currentResolve = null;
@@ -120,6 +142,7 @@ export class BoardAnimator {
       for (const node of task.nodes) revealNode(node.el, node.kind);
     }
     this.queue = [];
+    this.pendingTransactions.clear();
     this.onPen(null);
     this.resolveIdle(true);
   }
@@ -138,8 +161,10 @@ export class BoardAnimator {
     }
     this.running = false;
     this.onPen(null);
-    this.onIdle();
-    this.resolveIdle(true);
+    if (this.pendingTransactions.size === 0) {
+      this.onIdle();
+      this.resolveIdle(true);
+    }
   }
 
   private animateNode(node: AnimTask['nodes'][number]): Promise<boolean> {

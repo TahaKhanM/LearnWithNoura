@@ -1,8 +1,8 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import katex from 'katex';
 import 'katex/dist/katex.min.css';
 import { BOARD_W, BOARD_H, type Vec } from '../../shared/boardOps';
-import { compileScene, nodeBBox, type CompiledItem, type RenderNode, type BBox } from './compile';
+import { compileScene, nodeBBox, type RenderNode, type BBox } from './compile';
 import type { SceneState } from './scene';
 import { BoardAnimator, hideForAnimation, type PenPosition } from './animator';
 import { contains, deriveSemanticViewport } from './semanticViewport';
@@ -16,10 +16,17 @@ export interface BoardHighlight {
   nonce: number;
 }
 
+/** A released tutor checkpoint whose new objects should draw on once. */
+export interface BoardAnimationRequest {
+  id: string;
+  itemIds: string[];
+}
+
 interface BoardCanvasProps {
   scene: SceneState;
   /** IDs the tutor just added; they get draw-on animation in this order. */
   highlights: BoardHighlight[];
+  animationRequest?: BoardAnimationRequest | null;
   tool: BoardTool;
   penColor: string;
   interactive: boolean;
@@ -34,7 +41,6 @@ interface BoardCanvasProps {
   focusSemanticObjectId?: string;
   focusIndex?: number;
   overview?: boolean;
-  onCaptureReady?: (capture: () => Promise<string | null>) => void;
 }
 
 function KatexBlock({ node }: { node: Extract<RenderNode, { type: 'katex' }> }) {
@@ -66,11 +72,13 @@ const NodeView = memo(function NodeView({
   refCallback,
   hiddenInFocus,
   textKey,
+  animationPending,
 }: {
   node: RenderNode;
   refCallback: (el: SVGElement | null) => void;
   hiddenInFocus: boolean;
   textKey: string;
+  animationPending: boolean;
 }) {
   if (node.type === 'path') {
     return (
@@ -83,6 +91,11 @@ const NodeView = memo(function NodeView({
         strokeLinejoin="round"
         fill={node.fill ?? 'none'}
         strokeDasharray={node.dash ? '7 7' : undefined}
+        style={animationPending ? {
+          strokeDasharray: `${Math.max(1, node.length)}`,
+          strokeDashoffset: `${Math.max(1, node.length)}`,
+          fillOpacity: 0,
+        } : undefined}
         className="board__stroke"
       />
     );
@@ -103,6 +116,7 @@ const NodeView = memo(function NodeView({
         data-required-text={node.text}
         data-required-text-key={textKey}
         data-focus-contained={hiddenInFocus ? 'false' : 'true'}
+        style={animationPending ? { opacity: 0 } : undefined}
       >
         {node.text}
       </text>
@@ -115,6 +129,7 @@ const NodeView = memo(function NodeView({
       data-required-text={node.latex}
       data-required-text-key={textKey}
       data-focus-contained={hiddenInFocus ? 'false' : 'true'}
+      style={animationPending ? { opacity: 0 } : undefined}
     >
       <KatexBlock node={node} />
     </g>
@@ -145,6 +160,7 @@ function Pen({ pos }: { pos: PenPosition | null }) {
 export function BoardCanvas({
   scene,
   highlights,
+  animationRequest,
   tool,
   penColor,
   interactive,
@@ -158,15 +174,13 @@ export function BoardCanvas({
   focusSemanticObjectId,
   focusIndex = 0,
   overview = false,
-  onCaptureReady,
 }: BoardCanvasProps) {
   const svgRef = useRef<SVGSVGElement>(null);
   const animator = useMemo(() => new BoardAnimator(), []);
   const [pen, setPen] = useState<PenPosition | null>(null);
   const onTutorPenRef = useRef(onTutorPen);
   const nodeEls = useRef(new Map<string, (SVGElement | null)[]>());
-  const animatedIds = useRef(new Set<string>());
-  const lastEpoch = useRef(scene.epoch);
+  const enqueuedAnimationRequests = useRef(new Set<string>());
   const [liveStroke, setLiveStroke] = useState<Vec[] | null>(null);
   const [fontsReady, setFontsReady] = useState(() => !document.fonts);
   const [compact, setCompact] = useState(() => window.matchMedia?.('(max-width: 540px), (max-height: 500px)').matches ?? false);
@@ -195,11 +209,6 @@ export function BoardCanvas({
   }, [animator, animatorRef]);
 
   useEffect(() => {
-    if (!onCaptureReady) return;
-    onCaptureReady(() => captureBoardImage(svgRef.current));
-  }, [onCaptureReady]);
-
-  useEffect(() => {
     let cancelled = false;
     if (!document.fonts) return;
     void document.fonts.ready.then(() => { if (!cancelled) setFontsReady(true); });
@@ -216,32 +225,34 @@ export function BoardCanvas({
   }, []);
 
   const compiled = useMemo(() => fontsReady ? compileScene(scene.items) : [], [scene.items, fontsReady]);
+  const pendingAnimationIds = useMemo(
+    () => new Set(animationRequest?.itemIds ?? []),
+    [animationRequest],
+  );
+  // Highlights deliberately do not steer the viewport: a temporary emphasis
+  // pulse must never move the learner's view and snap it back moments later.
   const semanticViewport = useMemo(
     () => overview || !compact
       ? { x: 0, y: 0, w: BOARD_W, h: BOARD_H, itemIds: [] }
-      : deriveSemanticViewport(scene, focusSemanticObjectId, focusIndex, highlights.map((highlight) => highlight.id)),
-    [scene, focusSemanticObjectId, focusIndex, overview, compact, highlights],
+      : deriveSemanticViewport(scene, focusSemanticObjectId, focusIndex),
+    [scene, focusSemanticObjectId, focusIndex, overview, compact],
   );
 
-  // A clear resets animation memory so re-used ids animate again.
-  if (scene.epoch !== lastEpoch.current) {
-    lastEpoch.current = scene.epoch;
-    animatedIds.current = new Set();
-  }
+  // Animation is an explicit released-checkpoint transaction. The nodes are
+  // already hidden declaratively in this commit, and this layout effect queues
+  // them before the browser can paint. This prevents visible -> hidden ->
+  // visible flashes and stops unrelated re-renders/replays from reanimating.
+  useLayoutEffect(() => {
+    if (!animationRequest || enqueuedAnimationRequests.current.has(animationRequest.id)) return;
+    const requested = new Set(animationRequest.itemIds);
+    const fresh = compiled.filter((item) => requested.has(item.id));
+    // Compilation can legitimately wait for fonts. Keep the animator's
+    // transaction hold open until every requested object has DOM nodes.
+    if (fresh.length !== requested.size) return;
 
-  // After render: hide and enqueue newly-added tutor items, in scene order.
-  useEffect(() => {
-    const fresh: CompiledItem[] = [];
-    for (const item of compiled) {
-      const key = `${item.id}@${scene.epoch}`;
-      if (item.owner === 'tutor' && !animatedIds.current.has(key)) {
-        animatedIds.current.add(key);
-        if (item.revision === 0) fresh.push(item);
-      }
-    }
-    for (const item of fresh) {
+    const tasks = fresh.map((item) => {
       const els = nodeEls.current.get(item.id);
-      if (!els) continue;
+      if (!els || els.length !== item.nodes.length) return null;
       const nodes = item.nodes
         .map((node, i) => {
           const el = els[i];
@@ -253,9 +264,20 @@ export function BoardCanvas({
           return { el, kind, length };
         })
         .filter((n): n is NonNullable<typeof n> => n !== null);
-      if (nodes.length > 0) animator.enqueue({ itemId: item.id, nodes });
+      return nodes.length > 0 ? { itemId: item.id, nodes } : null;
+    });
+    // Validate the whole checkpoint before enqueuing any part of it. A partial
+    // ref commit must not duplicate earlier objects when React completes it.
+    if (tasks.some((task) => task === null)) return;
+    for (const task of tasks) animator.enqueue(task as NonNullable<typeof task>);
+    enqueuedAnimationRequests.current.add(animationRequest.id);
+    // Bound diagnostic memory during very long lessons.
+    if (enqueuedAnimationRequests.current.size > 64) {
+      const oldest = enqueuedAnimationRequests.current.values().next().value;
+      if (oldest) enqueuedAnimationRequests.current.delete(oldest);
     }
-  }, [compiled, scene.epoch, animator]);
+    animator.commitTransaction(animationRequest.id);
+  }, [animationRequest, compiled, animator]);
 
   const boardPoint = useCallback((clientX: number, clientY: number): Vec => {
     const svg = svgRef.current;
@@ -336,6 +358,7 @@ export function BoardCanvas({
       .map((h) => ({ ...h, bbox: byId.get(h.id) }))
       .filter((h): h is BoardHighlight & { bbox: BBox } => Boolean(h.bbox));
   }, [highlights, compiled]);
+  const highlightedIds = useMemo(() => new Set(highlights.map((highlight) => highlight.id)), [highlights]);
 
   return (
     <div className="board__a11y-wrap">
@@ -343,6 +366,7 @@ export function BoardCanvas({
       ref={svgRef}
       className={`board__svg board__svg--${tool}`}
       data-fonts-ready={fontsReady}
+      data-animation-request={animationRequest?.id ?? ''}
       viewBox={`${semanticViewport.x} ${semanticViewport.y} ${semanticViewport.w} ${semanticViewport.h}`}
       data-semantic-object={focusSemanticObjectId ?? ''}
       data-viewbox={`${semanticViewport.x},${semanticViewport.y},${semanticViewport.w},${semanticViewport.h}`}
@@ -372,13 +396,21 @@ export function BoardCanvas({
         nodeEls.current.set(item.id, els);
         return (
           <g
-            key={`${item.id}@${scene.epoch}`}
+            // Keyed by stable id: a scoped section replacement or clear must
+            // never remount preserved learner strokes in other sections.
+            key={item.id}
             data-item={item.id}
+            data-animation-pending={pendingAnimationIds.has(item.id) ? 'true' : undefined}
             onPointerDown={eraseTarget(item.id, item.owner)}
-            className={
-              tool === 'erase' && item.owner === 'learner' ? 'board__item board__item--erasable' : 'board__item'
-            }
-            tabIndex={interactive ? 0 : undefined}
+            className={[
+              'board__item',
+              tool === 'erase' && item.owner === 'learner' ? 'board__item--erasable' : '',
+              highlightedIds.size > 0 && item.owner === 'tutor' && !highlightedIds.has(item.id) ? 'board__item--deemphasized' : '',
+            ].filter(Boolean).join(' ')}
+            // Only genuinely operable items enter the tab order: learner
+            // marks can be erased; static tutor geometry is described by the
+            // board's long description instead of dozens of empty tab stops.
+            tabIndex={interactive && item.owner === 'learner' ? 0 : undefined}
             onFocus={() => onLearnerAttention?.([
               item.bbox.x + item.bbox.w / 2,
               item.bbox.y + item.bbox.h / 2,
@@ -389,6 +421,7 @@ export function BoardCanvas({
                 key={`${i}-${item.revision}`}
                 node={node}
                 textKey={`${item.id}:${i}`}
+                animationPending={pendingAnimationIds.has(item.id)}
                 hiddenInFocus={Boolean(
                   compact && !overview && focusSemanticObjectId &&
                   (node.type === 'text' || node.type === 'katex') &&
@@ -432,38 +465,4 @@ export function BoardCanvas({
   );
 }
 
-async function captureBoardImage(svg: SVGSVGElement | null): Promise<string | null> {
-  if (!svg) return null;
-  const clone = svg.cloneNode(true) as SVGSVGElement;
-  clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
-  clone.setAttribute('width', String(BOARD_W));
-  clone.setAttribute('height', String(BOARD_H));
-  clone.setAttribute('viewBox', `0 0 ${BOARD_W} ${BOARD_H}`);
-  const markup = new XMLSerializer().serializeToString(clone);
-  const url = URL.createObjectURL(new Blob([markup], { type: 'image/svg+xml' }));
-  try {
-    const image = new Image();
-    await new Promise<void>((resolve, reject) => {
-      image.onload = () => resolve();
-      image.onerror = () => reject(new Error('board image could not be rendered'));
-      image.src = url;
-    });
-    const canvas = document.createElement('canvas');
-    canvas.width = 768;
-    canvas.height = Math.round((768 * BOARD_H) / BOARD_W);
-    const context = canvas.getContext('2d');
-    if (!context) return null;
-    context.fillStyle = '#fcfbf7';
-    context.fillRect(0, 0, canvas.width, canvas.height);
-    context.drawImage(image, 0, 0, canvas.width, canvas.height);
-    for (const quality of [0.8, 0.65, 0.5]) {
-      const dataUrl = canvas.toDataURL('image/jpeg', quality);
-      if (dataUrl.length <= 300_000) return dataUrl;
-    }
-    return null;
-  } catch {
-    return null;
-  } finally {
-    URL.revokeObjectURL(url);
-  }
-}
+

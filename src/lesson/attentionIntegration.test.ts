@@ -17,6 +17,14 @@ describe('runtime character attention integration', () => {
     expect(highlighted).toBeDefined();
   });
 
+  it('maps raw ids through explicit semantic section metadata', () => {
+    const scene = applyOps(emptyScene, [
+      { op: 'add', id: 'raw-id-without-prefix', spec: { kind: 'point', at: [820, 160], label: 'P' } },
+    ], 'tutor', 'geometry-section').scene;
+    expect(centerForSemanticObject(scene, 'geometry-section')).toEqual(expect.arrayContaining([expect.any(Number), expect.any(Number)]));
+    expect(centerForSemanticObject(scene, 'geometry-section')?.[0]).toBeGreaterThan(750);
+  });
+
   it('adopts interruption immediately and highlight/revision on the next frame under 200ms', () => {
     const controller = new CharacterAttentionController(identity);
     expect(controller.offer({ ...identity, targetType: 'interruption', priority: attentionPriority('interruption'), startTime: 0, expiryTime: 900, smoothingProfile: 'immediate', permittedInReducedMotion: true })).toBe(true);

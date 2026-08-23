@@ -1,12 +1,39 @@
 import { z } from 'zod';
 import { validateOps, type BoardOp, type Vec } from './boardOps.js';
 
-export const VISUAL_PLAN_VERSION = '1.0.0' as const;
+export const VISUAL_PLAN_VERSION = '2.0.0' as const;
 export const VisualTemplateSchema = z.enum([
   'pythagorean_area_proof', 'triangle_angle_sum', 'unit_circle_projection', 'fraction_comparison',
   'slope_comparison', 'causal_cycle', 'argument_structure', 'cause_effect',
-  'grammar_structure', 'table', 'timeline', 'no_board',
+  'grammar_structure', 'relationship_map', 'worked_steps', 'comparison', 'part_whole',
+  'table', 'timeline', 'no_board',
 ]);
+
+export const VisualRelevanceSchema = z.enum(['essential', 'supportive', 'none']);
+/**
+ * Live model-facing actions are additive only: establish | extend |
+ * emphasize | compare | none. The legacy create/reuse/replace/skip values
+ * remain parseable for stored plans and older callers; `replace` is never a
+ * live action — visible tutor work does not disappear.
+ */
+export const VisualActionSchema = z.enum([
+  'establish', 'extend', 'emphasize', 'compare', 'none',
+  'create', 'reuse', 'replace', 'skip',
+]);
+export type VisualAction = z.infer<typeof VisualActionSchema>;
+export type NormalizedVisualAction = 'establish' | 'extend' | 'emphasize' | 'compare' | 'none' | 'replace';
+
+/** Maps legacy action names onto the additive action model. `replace` stays
+ * distinct so policy code can reject it explicitly. */
+export function normalizeVisualAction(action: VisualAction): NormalizedVisualAction {
+  switch (action) {
+    case 'create': return 'establish';
+    case 'reuse': return 'extend';
+    case 'skip': return 'none';
+    case 'replace': return 'replace';
+    default: return action;
+  }
+}
 
 export const SemanticGroupSchema = z.object({
   id: z.string().min(1).max(80).regex(/^[a-z0-9][a-z0-9_-]*$/i),
@@ -17,14 +44,30 @@ export const SemanticGroupSchema = z.object({
 });
 
 export const SemanticScenePlanSchema = z.object({
-  schemaVersion: z.literal(VISUAL_PLAN_VERSION),
+  schemaVersion: z.enum(['1.0.0', VISUAL_PLAN_VERSION]),
   planId: z.string().min(1).max(120),
   intent: z.object({
     objective: z.string().min(1).max(300),
-    domain: z.enum(['geometry', 'quantitative', 'process', 'argument', 'history', 'grammar', 'table', 'timeline', 'none']),
+    domain: z.enum(['geometry', 'quantitative', 'algebra', 'comparison', 'process', 'argument', 'history', 'grammar', 'table', 'timeline', 'none']),
+    relevance: VisualRelevanceSchema.default('essential'),
+    questionAnswered: z.string().min(1).max(300).default('Show the current idea spatially.'),
+    rationale: z.string().min(1).max(400).default('A visual representation supports the current teaching move.'),
+    action: VisualActionSchema.default('create'),
+    targetGroupId: z.string().min(1).max(160).optional(),
+    targetObjectIds: z.array(z.string().min(1).max(160)).max(12).optional(),
+    density: z.enum(['minimal', 'standard']).default('minimal'),
     noBoardReason: z.string().max(300).optional(),
   }),
-  groups: z.array(SemanticGroupSchema).max(6),
+  groups: z.array(SemanticGroupSchema).max(1),
+}).superRefine((plan, context) => {
+  const action = normalizeVisualAction(plan.intent.action);
+  const noBoard = plan.groups.length === 0 || plan.groups.every((group) => group.template === 'no_board');
+  if (plan.intent.relevance === 'none' && !noBoard) context.addIssue({ code: 'custom', path: ['groups'], message: 'A non-relevant visual must not create a board group.' });
+  if (['none', 'extend', 'emphasize'].includes(action) && !noBoard) context.addIssue({ code: 'custom', path: ['groups'], message: 'None/extend/emphasize decisions do not create a new visual group.' });
+  if (action === 'extend' && !plan.intent.targetGroupId) context.addIssue({ code: 'custom', path: ['intent', 'targetGroupId'], message: 'Extend requires a visible target group id.' });
+  if (action === 'emphasize' && (plan.intent.targetObjectIds?.length ?? 0) === 0) context.addIssue({ code: 'custom', path: ['intent', 'targetObjectIds'], message: 'Emphasize requires visible target object ids.' });
+  if (action === 'replace' && (!plan.intent.targetGroupId || plan.groups[0]?.id !== plan.intent.targetGroupId)) context.addIssue({ code: 'custom', path: ['intent', 'targetGroupId'], message: 'Replace requires the visible target group id and a group with that same id.' });
+  if (['establish', 'compare', 'replace'].includes(action) && plan.intent.relevance !== 'none' && noBoard) context.addIssue({ code: 'custom', path: ['groups'], message: 'An establish/compare decision requires one non-empty visual group.' });
 });
 
 export type SemanticScenePlan = z.infer<typeof SemanticScenePlanSchema>;
@@ -36,7 +79,17 @@ export interface SemanticCheckpoint {
   groupLabel: string;
   reveal: SemanticReveal;
   ops: BoardOp[];
+  /**
+   * When set, this checkpoint atomically replaces the named section: the
+   * client clears that section and applies these ops in one visible commit,
+   * with no intermediate blank frame and no draw-on animation gap.
+   */
+  replacesGroup?: string;
 }
+
+/** Dependency rank owned by code: targets always reveal before their labels,
+ * relations, and connectors, regardless of the order the model requested. */
+const CANONICAL_REVEAL_ORDER: SemanticReveal[] = ['outline', 'relation', 'label', 'connector', 'emphasis'];
 
 export function adaptSemanticScene(input: unknown): { plan: SemanticScenePlan; ops: BoardOp[]; checkpoints: SemanticCheckpoint[] } {
   const plan = SemanticScenePlanSchema.parse(input);
@@ -44,17 +97,27 @@ export function adaptSemanticScene(input: unknown): { plan: SemanticScenePlan; o
   const checkpoints: SemanticCheckpoint[] = [];
   for (const group of plan.groups) {
     if (group.template === 'no_board') continue;
-    const groupOps = opsForGroup(group);
-    const finalized = finalizePlan(plan, groupOps).ops;
+    const finalized = finalizePlan(plan, opsForGroup(group)).ops;
     ops.push(...finalized);
-    const buckets = new Map<SemanticReveal, BoardOp[]>();
-    for (const reveal of group.revealOrder) buckets.set(reveal, []);
-    for (const op of finalized) {
-      const requested = revealForOp(op);
-      const reveal = buckets.has(requested) ? requested : group.revealOrder[group.revealOrder.length - 1];
-      buckets.get(reveal)?.push(op);
+    if (plan.intent.action === 'replace') {
+      // A replacement is one atomic checkpoint. A standalone clear must
+      // never reach the board ahead of the content that replaces it.
+      checkpoints.push({
+        id: `${plan.planId}:${group.id}:0:replace`,
+        semanticObjectId: group.id,
+        groupLabel: group.label,
+        reveal: 'outline',
+        ops: finalized,
+        replacesGroup: group.id,
+      });
+      continue;
     }
-    for (const [index, reveal] of group.revealOrder.entries()) {
+    const buckets = new Map<SemanticReveal, BoardOp[]>();
+    for (const op of finalized) {
+      const reveal = revealForOp(op);
+      buckets.set(reveal, [...(buckets.get(reveal) ?? []), op]);
+    }
+    for (const [index, reveal] of CANONICAL_REVEAL_ORDER.entries()) {
       const checkpointOps = buckets.get(reveal) ?? [];
       if (checkpointOps.length === 0) continue;
       checkpoints.push({
@@ -81,6 +144,10 @@ function opsForGroup(group: SemanticScenePlan['groups'][number]): BoardOp[] {
     case 'argument_structure': return layeredGraph(prefix, stringArray(group.parameters.labels, ['Claim', 'Evidence', 'Reasoning']), false);
     case 'cause_effect': return layeredGraph(prefix, stringArray(group.parameters.labels, ['Cause', 'Event', 'Effect']), false);
     case 'grammar_structure': return layeredGraph(prefix, stringArray(group.parameters.labels, ['Subject', 'Verb', 'Object']), false);
+    case 'relationship_map': return relationshipMap(prefix, group.parameters);
+    case 'worked_steps': return workedSteps(prefix, stringArray(group.parameters.steps, ['First step', 'Next step', 'Result']));
+    case 'comparison': return comparisonTable(prefix, group.parameters);
+    case 'part_whole': return partWhole(prefix, group.parameters);
     case 'table': return [{ op: 'add', id: `${prefix}-table`, spec: { kind: 'table', at: [160, 130], rows: tableRows(group.parameters.rows), headerRow: true } }];
     case 'timeline': return timeline(prefix, stringArray(group.parameters.labels, ['Earlier', 'Middle', 'Later']));
     case 'no_board': return [];
@@ -210,9 +277,139 @@ function timeline(prefix: string, labels: string[]): BoardOp[] {
   return ops;
 }
 
+function relationshipMap(prefix: string, parameters: Record<string, unknown>): BoardOp[] {
+  const nodes = nodeRecords(parameters.nodes);
+  const edges = edgeRecords(parameters.edges, nodes);
+  const layout = ['hierarchy', 'flow', 'cycle'].includes(String(parameters.layout)) ? String(parameters.layout) : 'flow';
+  const positions = layout === 'cycle'
+    ? radialPositions(nodes.length)
+    : layout === 'hierarchy'
+      ? hierarchyPositions(nodes, edges)
+      : flowPositions(nodes.length);
+  const ops: BoardOp[] = nodes.map((node, index) => ({
+    op: 'add', id: `${prefix}-node-${node.id}`, color: index === 0 ? 'blue' : index === nodes.length - 1 ? 'green' : 'amber',
+    spec: { kind: 'box', at: positions[index], text: node.label },
+  }));
+  for (const [index, edge] of edges.entries()) ops.push({
+    op: 'add', id: `${prefix}-edge-${index}`, color: 'ink',
+    spec: {
+      kind: 'connector',
+      from: `${prefix}-node-${edge.from}`,
+      to: `${prefix}-node-${edge.to}`,
+      ...(edge.label ? { label: edge.label } : {}),
+    },
+  });
+  return ops;
+}
+
+function workedSteps(prefix: string, steps: string[]): BoardOp[] {
+  const safe = steps.slice(0, 6);
+  const twoColumns = safe.length > 4;
+  const positions: Vec[] = safe.map((_, index) => twoColumns
+    ? [index % 2 === 0 ? 285 : 715, 135 + Math.floor(index / 2) * 180]
+    : [500, 115 + index * (390 / Math.max(1, safe.length - 1))]);
+  const ops: BoardOp[] = safe.map((step, index) => ({ op: 'add', id: `${prefix}-step-${index}`, color: index === safe.length - 1 ? 'green' : 'blue', spec: { kind: 'box', at: positions[index], w: twoColumns ? 300 : 420, text: step } }));
+  for (let index = 1; index < safe.length; index += 1) ops.push({ op: 'add', id: `${prefix}-flow-${index - 1}`, color: 'amber', spec: { kind: 'connector', from: `${prefix}-step-${index - 1}`, to: `${prefix}-step-${index}` } });
+  return ops;
+}
+
+function comparisonTable(prefix: string, parameters: Record<string, unknown>): BoardOp[] {
+  const leftTitle = stringParam(parameters, 'leftTitle', 'Option A');
+  const rightTitle = stringParam(parameters, 'rightTitle', 'Option B');
+  const left = stringArray(parameters.leftItems, ['First feature', 'Second feature']);
+  const right = stringArray(parameters.rightItems, ['First feature', 'Second feature']);
+  const rows = [[leftTitle, rightTitle]];
+  const count = Math.max(left.length, right.length);
+  for (let index = 0; index < count; index += 1) rows.push([left[index] ?? '—', right[index] ?? '—']);
+  return [{ op: 'add', id: `${prefix}-comparison`, color: 'blue', spec: { kind: 'table', at: [300, 165], rows, headerRow: true } }];
+}
+
+function partWhole(prefix: string, parameters: Record<string, unknown>): BoardOp[] {
+  const labels = stringArray(parameters.labels, ['Part A', 'Part B']);
+  const values = numberArray(parameters.values, [1, 1]);
+  const parts = labels.slice(0, 6).map((label, index) => ({ label, value: Math.max(0.01, values[index] ?? 0.01) }));
+  const total = parts.reduce((sum, part) => sum + part.value, 0);
+  const colors = ['blue', 'amber', 'green', 'red', 'violet'] as const;
+  const ops: BoardOp[] = [{ op: 'add', id: `${prefix}-whole-label`, color: 'ink', spec: { kind: 'text', at: [500, 175], text: stringParam(parameters, 'wholeLabel', 'The whole'), size: 'big', align: 'middle' } }];
+  let x = 150;
+  parts.forEach((part, index) => {
+    const width = (part.value / total) * 700;
+    const compact = width < 140;
+    ops.push({
+      op: 'add', id: `${prefix}-part-${index}`, color: colors[index % colors.length],
+      spec: { kind: 'box', at: [x + width / 2, 310], w: width, h: 150, text: compact ? formatPartValue(part.value) : `${part.label}: ${formatPartValue(part.value)}` },
+    });
+    if (compact) ops.push({
+      op: 'add', id: `${prefix}-part-label-${index}`, color: colors[index % colors.length],
+      spec: { kind: 'label', target: `${prefix}-part-${index}`, side: 'below', text: `${part.label}: ${formatPartValue(part.value)}` },
+    });
+    x += width;
+  });
+  ops.push({ op: 'add', id: `${prefix}-total`, color: 'green', spec: { kind: 'equation', at: [400, 430], latex: `${parts.map((part) => formatPartValue(part.value)).join('+')}=${formatPartValue(total)}`, size: 'big' } });
+  return ops;
+}
+
+interface RelationshipNode { id: string; label: string }
+interface RelationshipEdge { from: string; to: string; label?: string }
+
+function nodeRecords(value: unknown): RelationshipNode[] {
+  if (!Array.isArray(value)) return [{ id: 'start', label: 'Start' }, { id: 'result', label: 'Result' }];
+  const nodes: RelationshipNode[] = [];
+  for (const [index, raw] of value.slice(0, 8).entries()) {
+    if (typeof raw !== 'object' || raw === null) continue;
+    const candidate = raw as { id?: unknown; label?: unknown };
+    const id = String(candidate.id ?? `node-${index}`).replace(/[^a-z0-9_-]/gi, '-').slice(0, 40) || `node-${index}`;
+    const label = String(candidate.label ?? id).trim().slice(0, 90);
+    if (label && !nodes.some((node) => node.id === id)) nodes.push({ id, label });
+  }
+  return nodes.length > 0 ? nodes : [{ id: 'start', label: 'Start' }, { id: 'result', label: 'Result' }];
+}
+
+function edgeRecords(value: unknown, nodes: RelationshipNode[]): RelationshipEdge[] {
+  const ids = new Set(nodes.map((node) => node.id));
+  if (!Array.isArray(value)) return nodes.slice(1).map((node, index) => ({ from: nodes[index].id, to: node.id }));
+  return value.slice(0, 12).flatMap((raw): RelationshipEdge[] => {
+    if (typeof raw !== 'object' || raw === null) return [];
+    const candidate = raw as { from?: unknown; to?: unknown; label?: unknown };
+    const from = String(candidate.from ?? ''); const to = String(candidate.to ?? '');
+    if (!ids.has(from) || !ids.has(to) || from === to) return [];
+    const label = String(candidate.label ?? '').trim().slice(0, 70);
+    return [{ from, to, ...(label ? { label } : {}) }];
+  });
+}
+
+function radialPositions(count: number): Vec[] {
+  return Array.from({ length: count }, (_, index) => {
+    const angle = -Math.PI / 2 + (index / Math.max(1, count)) * Math.PI * 2;
+    return [500 + Math.cos(angle) * 300, 300 + Math.sin(angle) * 195];
+  });
+}
+
+function flowPositions(count: number): Vec[] {
+  if (count <= 4) return Array.from({ length: count }, (_, index) => [160 + index * (680 / Math.max(1, count - 1)), 300]);
+  return Array.from({ length: count }, (_, index) => [180 + (index % 4) * 215, index < 4 ? 190 : 420]);
+}
+
+function hierarchyPositions(nodes: RelationshipNode[], edges: RelationshipEdge[]): Vec[] {
+  const rank = new Map(nodes.map((node) => [node.id, 0]));
+  for (let pass = 0; pass < nodes.length; pass += 1) for (const edge of edges) {
+    const next = Math.min(3, (rank.get(edge.from) ?? 0) + 1);
+    if (next > (rank.get(edge.to) ?? 0)) rank.set(edge.to, next);
+  }
+  const maxRank = Math.max(...rank.values(), 0);
+  return nodes.map((node) => {
+    const level = rank.get(node.id) ?? 0;
+    const peers = nodes.filter((candidate) => (rank.get(candidate.id) ?? 0) === level);
+    const index = peers.findIndex((candidate) => candidate.id === node.id);
+    return [180 + (index + 0.5) * (640 / peers.length), 120 + level * (360 / Math.max(1, maxRank))];
+  });
+}
+
 function numberParam(parameters: Record<string, unknown>, key: string, fallback: number): number { const value = parameters[key]; return typeof value === 'number' && Number.isFinite(value) ? value : fallback; }
 function numberArray(value: unknown, fallback: number[]): number[] { return Array.isArray(value) ? value.filter((item): item is number => typeof item === 'number' && Number.isFinite(item)).slice(0, 6) : fallback; }
 function stringArray(value: unknown, fallback: string[]): string[] { return Array.isArray(value) ? value.map(String).filter(Boolean).map((item) => item.slice(0, 80)).slice(0, 6) : fallback; }
+function stringParam(parameters: Record<string, unknown>, key: string, fallback: string): string { const value = String(parameters[key] ?? '').trim(); return value ? value.slice(0, 90) : fallback; }
+function formatPartValue(value: number): string { return Number.isInteger(value) ? String(value) : String(Math.round(value * 100) / 100); }
 function tableRows(value: unknown): string[][] { return Array.isArray(value) ? value.slice(0, 8).map((row) => Array.isArray(row) ? row.slice(0, 6).map((cell) => String(cell).slice(0, 60)) : []).filter((row) => row.length > 0) : [['Idea', 'Evidence'], ['—', '—']]; }
 function edgePoints(from: Vec, to: Vec): [Vec, Vec] {
   const dx = to[0] - from[0];

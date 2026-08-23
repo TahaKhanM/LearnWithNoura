@@ -9,6 +9,8 @@ export type Owner = 'tutor' | 'learner';
 export interface SceneItem {
   id: string;
   owner: Owner;
+  /** Semantic board section/page that owns this item. */
+  semanticGroupId?: string;
   color?: string;
   spec: ShapeSpec;
   /** Bumped on update so the renderer knows to recompile without replaying. */
@@ -32,7 +34,7 @@ export interface AppliedOps {
 }
 
 /** Applies validated ops to the scene. Pure, so React state stays simple. */
-export function applyOps(scene: SceneState, ops: BoardOp[], owner: Owner): AppliedOps {
+export function applyOps(scene: SceneState, ops: BoardOp[], owner: Owner, semanticGroupId?: string): AppliedOps {
   let items = scene.items;
   let epoch = scene.epoch;
   const added: string[] = [];
@@ -41,14 +43,16 @@ export function applyOps(scene: SceneState, ops: BoardOp[], owner: Owner): Appli
   for (const op of ops) {
     switch (op.op) {
       case 'add': {
+        const index = items.findIndex((existing) => existing.id === op.id);
+        const previous = index >= 0 ? items[index] : undefined;
         const item: SceneItem = {
           id: op.id,
           owner,
           spec: op.spec,
           revision: 0,
+          ...((semanticGroupId ?? previous?.semanticGroupId) ? { semanticGroupId: semanticGroupId ?? previous?.semanticGroupId } : {}),
           ...(op.color ? { color: op.color } : {}),
         };
-        const index = items.findIndex((existing) => existing.id === op.id);
         if (index === -1) {
           items = [...items, item];
           added.push(op.id);
@@ -85,7 +89,7 @@ export function applyOps(scene: SceneState, ops: BoardOp[], owner: Owner): Appli
         break;
       }
       case 'clear':
-        items = items.filter((existing) => existing.owner !== owner);
+        items = items.filter((existing) => existing.owner !== owner || (semanticGroupId ? existing.semanticGroupId !== semanticGroupId : false));
         epoch += 1;
         break;
     }
@@ -111,41 +115,42 @@ export function describeScene(scene: SceneState): string {
   const lines = scene.items.slice(-60).map((item) => {
     const s = item.spec;
     const who = item.owner === 'learner' ? ' (drawn by the learner)' : '';
+    const group = item.semanticGroupId ? ` [section ${item.semanticGroupId}]` : '';
     switch (s.kind) {
       case 'line':
-        return `${item.id}: line from (${s.from}) to (${s.to})${who}`;
+        return `${item.id}${group}: line from (${s.from}) to (${s.to})${who}`;
       case 'polygon':
-        return `${item.id}: polygon ${s.points.map((p) => `(${p})`).join(' ')}${who}`;
+        return `${item.id}${group}: polygon ${s.points.map((p) => `(${p})`).join(' ')}${who}`;
       case 'circle':
-        return `${item.id}: circle center (${s.center}) r=${s.r}${who}`;
+        return `${item.id}${group}: circle center (${s.center}) r=${s.r}${who}`;
       case 'ellipse':
-        return `${item.id}: ellipse center (${s.center}) rx=${s.rx} ry=${s.ry}${who}`;
+        return `${item.id}${group}: ellipse center (${s.center}) rx=${s.rx} ry=${s.ry}${who}`;
       case 'point':
-        return `${item.id}: point at (${s.at})${s.label ? ` "${s.label}"` : ''}${who}`;
+        return `${item.id}${group}: point at (${s.at})${s.label ? ` "${s.label}"` : ''}${who}`;
       case 'angle':
-        return `${item.id}: angle at (${s.vertex})${s.label ? ` "${s.label}"` : ''}${who}`;
+        return `${item.id}${group}: angle at (${s.vertex})${s.label ? ` "${s.label}"` : ''}${who}`;
       case 'text':
-        return `${item.id}: text "${s.text}" at (${s.at})${who}`;
+        return `${item.id}${group}: text "${s.text}" at (${s.at})${who}`;
       case 'equation':
-        return `${item.id}: equation "${s.latex}" at (${s.at})${who}`;
+        return `${item.id}${group}: equation "${s.latex}" at (${s.at})${who}`;
       case 'label':
-        return `${item.id}: label "${s.text}" on ${s.target}${who}`;
+        return `${item.id}${group}: label "${s.text}" on ${s.target}${who}`;
       case 'axes':
-        return `${item.id}: axes at (${s.at}) ${s.w}x${s.h} x:[${s.xRange}] y:[${s.yRange}]${who}`;
+        return `${item.id}${group}: axes at (${s.at}) ${s.w}x${s.h} x:[${s.xRange}] y:[${s.yRange}]${who}`;
       case 'plot':
-        return `${item.id}: plot ${s.expr ? `y=${s.expr}` : 'data'} on ${s.axes}${who}`;
+        return `${item.id}${group}: plot ${s.expr ? `y=${s.expr}` : 'data'} on ${s.axes}${who}`;
       case 'bars':
-        return `${item.id}: bar chart ${s.items.map((b) => `${b.label}=${b.value}`).join(', ')}${who}`;
+        return `${item.id}${group}: bar chart ${s.items.map((b) => `${b.label}=${b.value}`).join(', ')}${who}`;
       case 'numberline':
-        return `${item.id}: number line ${s.min}..${s.max} at (${s.at})${who}`;
+        return `${item.id}${group}: number line ${s.min}..${s.max} at (${s.at})${who}`;
       case 'box':
-        return `${item.id}: box "${s.text}" at (${s.at})${who}`;
+        return `${item.id}${group}: box "${s.text}" at (${s.at})${who}`;
       case 'connector':
-        return `${item.id}: arrow ${JSON.stringify(s.from)} -> ${JSON.stringify(s.to)}${s.label ? ` "${s.label}"` : ''}${who}`;
+        return `${item.id}${group}: arrow ${JSON.stringify(s.from)} -> ${JSON.stringify(s.to)}${s.label ? ` "${s.label}"` : ''}${who}`;
       case 'table':
-        return `${item.id}: table ${s.rows.length}x${s.rows[0]?.length ?? 0} at (${s.at})${who}`;
+        return `${item.id}${group}: table ${s.rows.length}x${s.rows[0]?.length ?? 0} at (${s.at})${who}`;
       case 'path':
-        return `${item.id}: freehand stroke, ${s.points.length} points${who}`;
+        return `${item.id}${group}: freehand stroke, ${s.points.length} points${who}`;
     }
   });
   return `Objects on the board now:\n${lines.join('\n')}`;

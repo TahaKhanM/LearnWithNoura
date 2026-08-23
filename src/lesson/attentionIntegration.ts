@@ -3,8 +3,9 @@ import { compileScene } from '../board/compile';
 import type { SceneState } from '../board/scene';
 
 export function centerForSemanticObject(scene: SceneState, semanticObjectId: string): Vec | undefined {
+  const sources = new Map(scene.items.map((item) => [item.id, item]));
   const items = compileScene(scene.items).filter((item) =>
-    item.id === semanticObjectId || item.id.startsWith(`${semanticObjectId}-`),
+    sources.get(item.id)?.semanticGroupId === semanticObjectId || item.id === semanticObjectId || item.id.startsWith(`${semanticObjectId}-`),
   );
   return centerForBoxes(items.map((item) => item.bbox));
 }

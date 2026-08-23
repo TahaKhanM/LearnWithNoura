@@ -137,6 +137,96 @@ app.post('/api/fallback-turn', async (req, res) => {
   }
 });
 
+app.post('/api/board-submission', async (req, res) => {
+  // Fallback-mode drawing submission. Voice is unavailable, so the learner's
+  // Done posts the committed vector analysis and scene description here; it
+  // is persisted and answered through the same fallback turn coordinator.
+  // The configured fallback text model has no image input contract, so the
+  // submission is degraded (vector + description, no picture) and says so.
+  if (!openai) {
+    res.status(503).json({ error: 'Noura is not configured for tutor responses.' });
+    return;
+  }
+  const { sessionId, submissionId, description, ops, analysis, connectionEpoch, turnId, generationId } = req.body as Record<string, unknown>;
+  if (typeof sessionId !== 'string' || typeof submissionId !== 'string' || !/^[\w-]{8,160}$/.test(submissionId)) {
+    res.status(400).json({ error: 'sessionId and a valid submissionId are required' });
+    return;
+  }
+  const session = await repo.getSession(sessionId);
+  if (!session) { res.status(404).json({ error: 'Unknown session.' }); return; }
+  if (session.status !== 'active') { res.status(409).json({ error: 'This lesson has ended and is read-only.' }); return; }
+  const authorization = req.headers.authorization ?? '';
+  const capability = authorization.startsWith('Lesson ') ? authorization.slice(7) : null;
+  const claim = security.verifyLessonCapability(capability, sessionId);
+  if (!claim || claim.childId !== session.childId) {
+    res.status(403).json({ error: 'Lesson capability is invalid or expired.' });
+    return;
+  }
+  if (!Number.isInteger(connectionEpoch) || Number(connectionEpoch) < 0 ||
+      typeof turnId !== 'string' || !turnId || turnId.length > 160 ||
+      typeof generationId !== 'string' || !generationId || generationId.length > 160) {
+    res.status(400).json({ error: 'Fallback generation identity is required.' });
+    return;
+  }
+  const cleanDescription = typeof description === 'string' ? description.trim().slice(0, 4000) : '';
+  const summary = typeof (analysis as { summary?: unknown } | undefined)?.summary === 'string'
+    ? String((analysis as { summary: string }).summary).slice(0, 2000)
+    : '';
+  if (!cleanDescription && !summary) {
+    res.status(400).json({ error: 'A drawing description is required.' });
+    return;
+  }
+  const alreadyStored = (await repo.listEvents(sessionId, 2000)).some((event) =>
+    event.type === 'learner_board' && (event.payload as { submissionId?: unknown }).submissionId === submissionId);
+  if (!alreadyStored) {
+    await repo.addEvent(sessionId, 'learner_board', {
+      description: cleanDescription,
+      ops: Array.isArray(ops) ? ops.slice(0, 80) : [],
+      submissionId,
+      hasVisualContext: false,
+      via: 'fallback',
+      ...(summary ? { analysis: { summary } } : {}),
+    });
+  }
+  res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.flushHeaders();
+  let aborted = false;
+  const requestController = new AbortController();
+  req.on('aborted', () => { aborted = true; requestController.abort('request aborted'); });
+  res.on('close', () => {
+    if (!res.writableEnded) {
+      aborted = true;
+      requestController.abort('response closed');
+    }
+  });
+  const send = (payload: unknown) => {
+    if (!aborted && !res.writableEnded) res.write(`${JSON.stringify(payload)}\n`);
+  };
+  try {
+    const result = await fallbackTurns.run(openai, runtimeConfig.textModel, repo, {
+      sessionId,
+      userText: [
+        '[The learner finished a drawing on the shared board and pressed Done. Voice and images are unavailable; interpret this deterministic description of their drawing.]',
+        cleanDescription,
+        summary ? `Deterministic vector analysis: ${summary}` : '',
+        'If the meaning is ambiguous, ask the learner what they intended instead of guessing.',
+      ].filter(Boolean).join(' '),
+      idempotencyKey: submissionId,
+      connectionEpoch: Number(connectionEpoch),
+      turnId,
+      generationId,
+    }, send, requestController.signal);
+    send({ type: 'stream_done', replayed: result === 'replayed' });
+  } catch (error) {
+    if (!requestController.signal.aborted && (error as Error).name !== 'AbortError') {
+      send({ type: 'stream_error', message: 'The tutor request failed.' });
+    }
+  } finally {
+    if (!res.writableEnded) res.end();
+  }
+});
+
 app.post('/api/fallback-checkpoint', async (req, res) => {
   const { sessionId, idempotencyKey, connectionEpoch, turnId, generationId, eventId } = req.body as Record<string, unknown>;
   if (typeof sessionId !== 'string' || typeof idempotencyKey !== 'string' ||

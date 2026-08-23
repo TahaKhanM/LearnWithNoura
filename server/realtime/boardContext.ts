@@ -1,4 +1,5 @@
 import { applyUpdate, normalizeColor, validateOps, validateSpec, type BoardOp, type ShapeSpec } from '../../shared/boardOps.js';
+import { LearnerBoardAnalysisSchema, type LearnerBoardAnalysis } from '../../shared/learnerBoard.js';
 import type { DomainRepository } from '../store/domain.js';
 
 type BoardOwner = 'tutor' | 'learner';
@@ -6,6 +7,8 @@ type BoardOwner = 'tutor' | 'learner';
 interface BoardContextItem {
   id: string;
   owner: BoardOwner;
+  semanticGroupId?: string;
+  semanticGroupLabel?: string;
   spec: ShapeSpec;
   color?: string;
 }
@@ -17,15 +20,26 @@ interface BoardContextItem {
  */
 export class BoardContextTracker {
   private items: BoardContextItem[];
+  private learnerObservations: string[] = [];
+  private rejectionObservations: string[] = [];
 
   constructor(items: BoardContextItem[] = []) {
     this.items = items;
   }
 
-  apply(ops: BoardOp[], owner: BoardOwner): void {
+  apply(ops: BoardOp[], owner: BoardOwner, semanticGroupId?: string, semanticGroupLabel?: string): void {
     for (const op of ops) {
       if (op.op === 'add') {
-        const next: BoardContextItem = { id: op.id, owner, spec: op.spec, ...(op.color ? { color: op.color } : {}) };
+        const existing = this.items.find((item) => item.id === op.id);
+        const group = semanticGroupId ?? existing?.semanticGroupId;
+        const next: BoardContextItem = {
+          id: op.id,
+          owner,
+          spec: op.spec,
+          ...(group ? { semanticGroupId: group } : {}),
+          ...((semanticGroupLabel ?? existing?.semanticGroupLabel) ? { semanticGroupLabel: semanticGroupLabel ?? existing?.semanticGroupLabel } : {}),
+          ...(op.color ? { color: op.color } : {}),
+        };
         const index = this.items.findIndex((item) => item.id === op.id);
         if (index < 0) this.items.push(next);
         else if (this.items[index].owner === owner) this.items[index] = next;
@@ -36,15 +50,17 @@ export class BoardContextTracker {
       } else if (op.op === 'erase') {
         this.items = this.items.filter((item) => item.owner !== owner || (item.id !== op.id && !dependsOn(item.spec, op.id)));
       } else if (op.op === 'clear') {
-        this.items = this.items.filter((item) => item.owner !== owner);
+        this.items = this.items.filter((item) => item.owner !== owner || (semanticGroupId ? item.semanticGroupId !== semanticGroupId : false));
       }
     }
   }
 
   /** Drops exact redraws under a new ID while preserving updates by ID. */
-  novelTutorOps(ops: BoardOp[]): { ops: BoardOp[]; duplicates: Array<{ requestedId: string; existingId: string }> } {
+  novelTutorOps(ops: BoardOp[], semanticGroupId?: string): { ops: BoardOp[]; duplicates: Array<{ requestedId: string; existingId: string }> } {
     const signatures = new Map(
-      this.items.filter((item) => item.owner === 'tutor').map((item) => [itemSignature(item.spec, item.color), item.id]),
+      this.items
+        .filter((item) => item.owner === 'tutor' && (!semanticGroupId || !item.semanticGroupId || item.semanticGroupId === semanticGroupId))
+        .map((item) => [itemSignature(item.spec, item.color), item.id]),
     );
     const accepted: BoardOp[] = [];
     const duplicates: Array<{ requestedId: string; existingId: string }> = [];
@@ -74,25 +90,87 @@ export class BoardContextTracker {
     };
   }
 
-  toolSnapshot(): { visibleObjectIds: string[]; summary: string; guidance: string } {
+  observeLearnerAnalysis(analysis: LearnerBoardAnalysis): void {
+    if (!analysis.summary) return;
+    this.learnerObservations.push(analysis.summary);
+    this.learnerObservations = this.learnerObservations.slice(-8);
+  }
+
+  hasGroup(id: string): boolean {
+    return this.items.some((item) => item.semanticGroupId === id);
+  }
+
+  /** Learner marks in a section make destructive replacement illegal. */
+  groupHasLearnerMarks(id: string): boolean {
+    return this.items.some((item) => item.semanticGroupId === id && item.owner === 'learner');
+  }
+
+  hasObject(id: string): boolean {
+    return this.items.some((item) => item.id === id);
+  }
+
+  groupOfObject(id: string): string | null {
+    return this.items.find((item) => item.id === id)?.semanticGroupId ?? null;
+  }
+
+  groupLabelOf(groupId: string | null | undefined): string | null {
+    if (!groupId) return null;
+    return this.items.find((item) => item.semanticGroupId === groupId && item.semanticGroupLabel)?.semanticGroupLabel ?? null;
+  }
+
+  /** Applies an atomic section replacement: scoped clear plus the new ops. */
+  applyReplacement(ops: BoardOp[], semanticGroupId: string, semanticGroupLabel?: string): void {
+    this.apply([{ op: 'clear' }], 'tutor', semanticGroupId);
+    this.apply(ops, 'tutor', semanticGroupId, semanticGroupLabel);
+  }
+
+  observeBoardRejection(reason: string): void {
+    if (!reason) return;
+    this.rejectionObservations.push(reason.slice(0, 300));
+    this.rejectionObservations = this.rejectionObservations.slice(-5);
+  }
+
+  toolSnapshot(focus?: string): { visibleObjectIds: string[]; visibleGroups: Array<{ id: string; label?: string; objectCount: number; learnerMarkCount: number }>; recentLearnerObservations: string[]; recentRejections: string[]; summary: string; guidance: string } {
+    const selected = focus
+      ? this.items.filter((item) => item.id === focus || item.semanticGroupId === focus || item.id.includes(focus))
+      : this.items;
+    const visibleItems = selected.length > 0 ? selected : this.items;
+    const groupIds = [...new Set(visibleItems.map((item) => item.semanticGroupId).filter((id): id is string => Boolean(id)))];
     return {
-      visibleObjectIds: this.items.slice(-60).map((item) => item.id),
-      summary: this.summary(),
+      visibleObjectIds: visibleItems.slice(-60).map((item) => item.id),
+      visibleGroups: groupIds.map((id) => ({
+        id,
+        ...(visibleItems.find((item) => item.semanticGroupId === id)?.semanticGroupLabel ? { label: visibleItems.find((item) => item.semanticGroupId === id)?.semanticGroupLabel } : {}),
+        objectCount: visibleItems.filter((item) => item.semanticGroupId === id).length,
+        learnerMarkCount: visibleItems.filter((item) => item.semanticGroupId === id && item.owner === 'learner').length,
+      })),
+      recentLearnerObservations: [...this.learnerObservations],
+      recentRejections: [...this.rejectionObservations],
+      summary: this.summary(visibleItems),
       guidance: 'Extend this board. Prefer highlight/update/erase with visible IDs; do not redraw equivalent objects under new IDs.',
     };
   }
 
   prompt(): string {
+    const learnerContext = this.learnerObservations.length
+      ? `Recent deterministic learner-mark observations (shape/location hints, not semantic conclusions):\n${this.learnerObservations.map((observation) => `- ${observation}`).join('\n')}`
+      : 'No recent learner-mark observations.';
+    const rejectionContext = this.rejectionObservations.length
+      ? `Recent rejected visual checkpoints (not visible):\n${this.rejectionObservations.map((observation) => `- ${observation}`).join('\n')}`
+      : 'No recent rejected visual checkpoints.';
     return [
       '## Current shared board (authoritative visible state)',
       this.summary(),
+      learnerContext,
+      rejectionContext,
       'Treat these object IDs as reusable handles. When the learner asks a question, adapt this diagram with highlight, update, erase, or a small addition. Do not restart or redraw equivalent objects. Learner-owned marks must remain intact.',
+      'Use deterministic stroke observations for spatial grounding and the attached board image for visual interpretation. If meaning is ambiguous, ask what the learner intended instead of guessing.',
     ].join('\n');
   }
 
-  private summary(): string {
-    if (this.items.length === 0) return 'The board is empty.';
-    const lines = this.items.slice(-60).map((item) => `${item.id}${item.owner === 'learner' ? ' [learner]' : ''}: ${describeSpec(item.spec)}`);
+  private summary(items: BoardContextItem[] = this.items): string {
+    if (items.length === 0) return 'The board is empty.';
+    const lines = items.slice(-60).map((item) => `${item.id}${item.semanticGroupId ? ` [section ${item.semanticGroupId}]` : ''}${item.owner === 'learner' ? ' [learner]' : ''}: ${describeSpec(item.spec)}`);
     return `Visible objects now:\n${lines.join('\n')}`.slice(0, 8_000);
   }
 }
@@ -101,11 +179,31 @@ export async function loadReleasedBoardContext(repo: DomainRepository, sessionId
   const tracker = new BoardContextTracker();
   const events = await repo.listEvents(sessionId, 2_000);
   for (const event of events) {
+    if (event.type === 'board_rejected') {
+      const reason = String((event.payload as { reason?: unknown }).reason ?? '').trim();
+      if (reason) tracker.observeBoardRejection(reason);
+      continue;
+    }
     if (!['board_ops', 'semantic_scene', 'learner_board'].includes(event.type)) continue;
     const owner = event.type === 'learner_board' ? 'learner' : 'tutor';
-    const raw = (event.payload as { ops?: unknown }).ops;
+    const payload = event.payload as { ops?: unknown; semanticObjectId?: unknown; groupLabel?: unknown; replacesGroup?: unknown; plan?: { groups?: Array<{ id?: unknown; label?: unknown }> } };
+    const raw = payload.ops;
     const ops = owner === 'learner' ? releasedLearnerOps(raw) : validateOps(raw).ops;
-    tracker.apply(ops, owner);
+    const semanticGroupId = typeof payload.semanticObjectId === 'string'
+      ? payload.semanticObjectId
+      : typeof payload.plan?.groups?.[0]?.id === 'string'
+        ? payload.plan.groups[0].id
+        : undefined;
+    const semanticGroupLabel = typeof payload.groupLabel === 'string'
+      ? payload.groupLabel
+      : typeof payload.plan?.groups?.[0]?.label === 'string' ? payload.plan.groups[0].label : undefined;
+    if (owner === 'tutor' && typeof payload.replacesGroup === 'string' && payload.replacesGroup) {
+      tracker.applyReplacement(ops, payload.replacesGroup, semanticGroupLabel);
+    } else tracker.apply(ops, owner, semanticGroupId, semanticGroupLabel);
+    if (owner === 'learner') {
+      const parsedAnalysis = LearnerBoardAnalysisSchema.safeParse((event.payload as { analysis?: unknown }).analysis);
+      if (parsedAnalysis.success) tracker.observeLearnerAnalysis(parsedAnalysis.data);
+    }
   }
   return tracker;
 }

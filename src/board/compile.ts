@@ -1110,6 +1110,9 @@ export function compileScene(items: SceneItem[]): CompiledItem[] {
     for (const node of nodes) {
       if (node.type !== 'path') ctx.occupied.push(nodeBBox(node));
     }
+    // Solid/container geometry participates in node-label and edge-label
+    // spacing. Stroke-only diagrams remain available for nearby annotations.
+    if (['box', 'table', 'bars'].includes(item.spec.kind)) ctx.occupied.push(bbox);
     compiled.push({ id: item.id, owner: item.owner, revision: item.revision, nodes, bbox });
   }
   return compiled;

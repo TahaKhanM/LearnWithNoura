@@ -22,6 +22,9 @@
   pointer-events: none;
 }
 
+.board__item { transition: opacity 180ms ease; }
+.board__item--deemphasized { opacity: 0.58; }
+
 .board__katex {
   overflow: visible;
   pointer-events: none;
@@ -94,6 +97,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .board__item { transition: none; }
   .board__highlight {
     animation: none;
     opacity: 0.85;

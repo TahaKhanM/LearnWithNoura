@@ -205,7 +205,7 @@ describe('fallback generation coordinator', () => {
     expect(ended.repo.listEvidence(ended.session.id)).toEqual([]);
   });
 
-  it('uses semantic checkpoints and the orchestrator wait guard', async () => {
+  it('uses semantic checkpoints and never injects a question after a plain explanation', async () => {
     const { repo, session } = fixture();
     let call = 0;
     const provider = client(async () => {
@@ -218,18 +218,19 @@ describe('fallback generation coordinator', () => {
           }) },
         }] } }],
       };
-      if (call === 2) return answer('The marks share one scale.');
-      return answer('Which mark is farther right?');
+      return answer('The marks share one scale.');
     });
     const events: FallbackEvent[] = [];
     await new FallbackTurnCoordinator().run(provider, 'gpt-5.6-terra', repo, request(session.id, 'semantic'), (event) => events.push(event));
 
     expect(events.some((event) => event.type === 'board_ops' && event.visualCueId && event.semanticObjectId === 'fraction-scale')).toBe(true);
+    // The explanation is allowed to end without a forced question; the turn
+    // simply waits for the learner.
     expect(events.filter((event) => event.type === 'fallback_caption').map((event) => event.payload.text)).toEqual([
       'The marks share one scale.',
-      'Which mark is farther right?',
     ]);
-    expect(call).toBe(3);
+    expect(events.some((event) => event.type === 'safe_question')).toBe(false);
+    expect(call).toBe(2);
   });
 
   it('rejects a stale scoped mutation after a newer claim', () => {

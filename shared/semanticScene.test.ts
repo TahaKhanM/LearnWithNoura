@@ -1,9 +1,25 @@
 import { describe, expect, it } from 'vitest';
 import { adaptSemanticScene, VISUAL_PLAN_VERSION, type SemanticScenePlan } from './semanticScene';
 import { validateOps } from './boardOps';
+import { applyOps, emptyScene } from '../src/board/scene';
 
 function plan(template: SemanticScenePlan['groups'][number]['template'], parameters: Record<string, unknown> = {}): SemanticScenePlan {
-  return { schemaVersion: VISUAL_PLAN_VERSION, planId: `plan-${template}`, intent: { objective: template, domain: template === 'no_board' ? 'none' : 'geometry' }, groups: template === 'no_board' ? [{ id: 'group', label: 'No board', revealOrder: ['outline'], template, parameters }] : [{ id: 'group', label: template, revealOrder: ['outline', 'relation', 'label'], template, parameters }] };
+  const noBoard = template === 'no_board';
+  return {
+    schemaVersion: VISUAL_PLAN_VERSION,
+    planId: `plan-${template}`,
+    intent: {
+      objective: template,
+      domain: noBoard ? 'none' : 'geometry',
+      relevance: noBoard ? 'none' : 'essential',
+      questionAnswered: noBoard ? 'No visual question.' : `What does ${template} show?`,
+      rationale: noBoard ? 'Speech is clearer.' : 'The spatial relationship is essential.',
+      action: noBoard ? 'skip' : 'create',
+      density: 'minimal',
+      ...(noBoard ? { noBoardReason: 'No diagram improves this move.' } : {}),
+    },
+    groups: noBoard ? [{ id: 'group', label: 'No board', revealOrder: ['outline'], template, parameters }] : [{ id: 'group', label: template, revealOrder: ['outline', 'relation', 'label'], template, parameters }],
+  };
 }
 
 describe('semantic visual adapters', () => {
@@ -11,8 +27,25 @@ describe('semantic visual adapters', () => {
     const { ops, checkpoints } = adaptSemanticScene(plan('pythagorean_area_proof'));
     expect(ops.filter((op) => op.op === 'add' && op.spec.kind === 'polygon').length).toBeGreaterThanOrEqual(10);
     expect(JSON.stringify(ops)).toContain('same 4 triangles');
-    expect(checkpoints.map((checkpoint) => checkpoint.reveal)).toEqual(['outline', 'label']);
+    // Reveal order is dependency-owned by code: connectors can never appear
+    // before the objects they join, regardless of what the model requested.
+    expect(checkpoints.map((checkpoint) => checkpoint.reveal)).toEqual(['outline', 'label', 'connector']);
     expect(new Set(checkpoints.flatMap((checkpoint) => checkpoint.ops).map((op) => 'id' in op ? op.id : ''))).toEqual(new Set(ops.map((op) => 'id' in op ? op.id : '')));
+  });
+
+  it('normalizes duplicate or dependency-inverted reveal requests without duplicating ops', () => {
+    const requested = plan('triangle_angle_sum');
+    requested.groups[0].revealOrder = ['label', 'label', 'outline', 'outline', 'relation'];
+    const { ops, checkpoints } = adaptSemanticScene(requested);
+    const reveals = checkpoints.map((checkpoint) => checkpoint.reveal);
+    // Canonical dependency order, deduplicated: outlines first, then
+    // relations, then labels — never the model's inverted request.
+    expect(reveals).toEqual([...new Set(reveals)]);
+    expect(reveals.indexOf('outline')).toBeLessThan(reveals.indexOf('label'));
+    expect(reveals.indexOf('outline')).toBeLessThan(reveals.indexOf('relation'));
+    const revealedIds = checkpoints.flatMap((checkpoint) => checkpoint.ops).map((op) => 'id' in op ? op.id : 'clear');
+    expect(revealedIds).toHaveLength(new Set(revealedIds).size);
+    expect(revealedIds).toHaveLength(ops.length);
   });
 
   it('keeps fractions on one exact scale and distinguishes slopes by colour', () => {
@@ -45,6 +78,61 @@ describe('semantic visual adapters', () => {
     expect(JSON.stringify(argument)).toContain('Claim');
     expect(JSON.stringify(argument)).toContain('Evidence');
     expect(JSON.stringify(argument)).toContain('Reasoning');
+  });
+
+  it('provides general code-owned grammars for relationships, steps, comparisons, and part-whole models', () => {
+    const relationship = adaptSemanticScene(plan('relationship_map', {
+      layout: 'hierarchy',
+      nodes: [{ id: 'claim', label: 'Claim' }, { id: 'evidence', label: 'Evidence' }, { id: 'reason', label: 'Reasoning' }],
+      edges: [{ from: 'claim', to: 'evidence', label: 'supported by' }, { from: 'evidence', to: 'reason' }],
+    })).ops;
+    expect(relationship.filter((op) => op.op === 'add' && op.spec.kind === 'box')).toHaveLength(3);
+    expect(relationship.filter((op) => op.op === 'add' && op.spec.kind === 'connector')).toHaveLength(2);
+    expect(adaptSemanticScene(plan('worked_steps', { steps: ['Collect like terms', 'Divide both sides', 'Check'] })).ops.some((op) => op.op === 'add' && op.spec.kind === 'box')).toBe(true);
+    expect(adaptSemanticScene(plan('comparison', { leftTitle: 'Solid', rightTitle: 'Liquid' })).ops[0]).toMatchObject({ op: 'add', spec: { kind: 'table' } });
+    const partWhole = adaptSemanticScene(plan('part_whole', { labels: ['Known', 'Unknown'], values: [3, 2] })).ops;
+    expect(partWhole.filter((op) => op.op === 'add' && op.spec.kind === 'box')).toHaveLength(2);
+    expect(partWhole.some((op) => op.op === 'add' && op.spec.kind === 'equation' && op.spec.latex === '3+2=5')).toBe(true);
+  });
+
+  it('enforces explicit relevance and reuse decisions in v2 plans', () => {
+    expect(() => adaptSemanticScene({
+      ...plan('fraction_comparison'),
+      intent: { ...plan('fraction_comparison').intent, relevance: 'none' },
+    })).toThrow(/non-relevant visual/i);
+    const reuse = adaptSemanticScene({
+      schemaVersion: VISUAL_PLAN_VERSION,
+      planId: 'reuse-plan',
+      intent: {
+        objective: 'Reuse the fraction line', domain: 'quantitative', relevance: 'essential',
+        questionAnswered: 'Where is three quarters?', rationale: 'The existing scale already answers it.',
+        action: 'reuse', targetGroupId: 'fraction-scale', density: 'minimal',
+      },
+      groups: [],
+    });
+    expect(reuse.ops).toEqual([]);
+  });
+
+  // Live callers (proxy and fallback) reject `replace` outright — visible
+  // tutor work never disappears. The adapter keeps parsing legacy replace
+  // plans only so historical committed events replay their visible truth.
+  it('legacy replay: parses a stored replace plan as one atomic checkpoint without a standalone clear', () => {
+    let scene = applyOps(emptyScene, [{ op: 'add', id: 'old-model', spec: { kind: 'box', at: [500, 300], text: 'Old model' } }], 'tutor', 'working-model').scene;
+    scene = applyOps(scene, [{ op: 'add', id: 'sketch-kept', spec: { kind: 'path', points: [[10, 10], [20, 20], [30, 15]] } }], 'learner', 'working-model').scene;
+    const replacement = adaptSemanticScene({
+      schemaVersion: VISUAL_PLAN_VERSION, planId: 'replace-model',
+      intent: { objective: 'Replace the model', domain: 'process', relevance: 'essential', questionAnswered: 'What is the corrected order?', rationale: 'The old sequence is misleading.', action: 'replace', targetGroupId: 'working-model', density: 'minimal' },
+      groups: [{ id: 'working-model', label: 'Corrected model', revealOrder: ['outline', 'connector'], template: 'worked_steps', parameters: { steps: ['First', 'Second'] } }],
+    });
+    // No model-visible clear op, and the whole replacement is one checkpoint
+    // so the swap commits atomically — never a blank board between clears.
+    expect(replacement.ops.some((op) => op.op === 'clear')).toBe(false);
+    expect(replacement.checkpoints).toHaveLength(1);
+    expect(replacement.checkpoints[0].replacesGroup).toBe('working-model');
+    scene = applyOps(scene, [{ op: 'clear' }, ...replacement.checkpoints[0].ops], 'tutor', 'working-model').scene;
+    expect(scene.items.some((item) => item.id === 'old-model')).toBe(false);
+    expect(scene.items.some((item) => item.id === 'sketch-kept')).toBe(true);
+    expect(scene.items.some((item) => item.id === 'working-model-step-0')).toBe(true);
   });
 
   it('covers history, grammar, timeline, and NoBoard semantics without decorative substitutes', () => {
