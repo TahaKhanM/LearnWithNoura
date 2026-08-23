@@ -1,4 +1,4 @@
-import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import type { NextFunction, Request, Response } from 'express';
 import type { ApiSecurity } from './api.js';
 import type { RuntimeConfig } from './runtimeConfig.js';
@@ -10,6 +10,7 @@ export class SecurityBoundary {
   private readonly secret: string;
   private readonly allowedOrigins: Set<string>;
   private buckets = new Map<string, { count: number; resetAt: number }>();
+  private requestParents = new WeakMap<Request, string>();
 
   constructor(private readonly runtime: RuntimeConfig, env: NodeJS.ProcessEnv = process.env) {
     this.secret = env.NOURA_LESSON_CAPABILITY_SECRET || env.NOURA_AUTH_SECRET || localSecret;
@@ -32,15 +33,35 @@ export class SecurityBoundary {
 
   parentId(request: Request): string | null {
     if (!this.runtime.production) return 'local-synthetic-parent';
+    const attached = this.requestParents.get(request);
+    if (attached) return attached;
     const token = parseCookies(request.headers.cookie ?? '').noura_parent;
     const payload = token ? this.verify(token, 'parent') : null;
     return payload?.sub ?? null;
   }
 
   issueParentSession(parentId: string): { value: string; attributes: string } {
-    const value = this.sign({ aud: 'parent', sub: parentId, exp: Date.now() + 30 * 60 * 1000, nonce: randomBytes(12).toString('base64url') });
-    return { value, attributes: 'Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=1800' };
+    const maxAge = this.runtime.guestAccess ? 30 * 24 * 60 * 60 : 30 * 60;
+    const value = this.sign({ aud: 'parent', sub: parentId, exp: Date.now() + maxAge * 1000, nonce: randomBytes(12).toString('base64url') });
+    return { value, attributes: `Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${maxAge}` };
   }
+
+  /** Gives the v0 a durable pseudonymous parent scope without adding signup. */
+  attachParentIdentity = (request: Request, response: Response, next: NextFunction): void => {
+    if (!this.runtime.guestAccess) {
+      next();
+      return;
+    }
+    const token = parseCookies(request.headers.cookie ?? '').noura_parent;
+    const existing = token ? this.verify(token, 'parent') : null;
+    const parentId = existing?.sub ?? `guest-${randomUUID()}`;
+    this.requestParents.set(request, parentId);
+    if (!existing) {
+      const session = this.issueParentSession(parentId);
+      response.appendHeader('Set-Cookie', `noura_parent=${encodeURIComponent(session.value)}; ${session.attributes}`);
+    }
+    next();
+  };
 
   verifyLessonCapability(token: string | null, sessionId: string): SignedPayload | null {
     if (!token) return null;

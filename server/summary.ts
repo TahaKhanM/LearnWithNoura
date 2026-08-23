@@ -1,7 +1,8 @@
 import type OpenAI from 'openai';
 import { z } from 'zod';
 import { projectConceptHistories, type ConceptEvidenceHistoryInput } from '../shared/pedagogy.js';
-import type { EvidenceRow, Repo, SessionSummary } from './store/repo.js';
+import type { DomainRepository } from './store/domain.js';
+import type { EvidenceRow, SessionSummary } from './store/repo.js';
 
 const ClaimSchema = z.object({
   concept: z.string().min(1).max(160),
@@ -46,13 +47,13 @@ Reply with JSON only:
   "confidenceNote": "how much independent evidence exists"
 }`;
 
-export async function summarizeSession(client: OpenAI, model: string, repo: Repo, sessionId: string): Promise<SessionSummary | null> {
-  const session = repo.getSession(sessionId);
-  const child = session ? repo.getChild(session.childId) : null;
+export async function summarizeSession(client: OpenAI, model: string, repo: DomainRepository, sessionId: string): Promise<SessionSummary | null> {
+  const session = await repo.getSession(sessionId);
+  const child = session ? await repo.getChild(session.childId) : null;
   if (!session || !child || session.status !== 'ended') return null;
   const throughEventId = session.endedEventId;
-  const events = repo.listEvents(sessionId, 1000, throughEventId);
-  const evidence = repo.listEvidence(sessionId);
+  const events = await repo.listEvents(sessionId, 1000, throughEventId);
+  const evidence = await repo.listEvidence(sessionId);
   const transcript = events
     .filter((event) => ['tutor_said', 'learner_said', 'interrupted'].includes(event.type))
     .map((event) => {
