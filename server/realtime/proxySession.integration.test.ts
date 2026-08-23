@@ -223,6 +223,7 @@ async function createHarness() {
   };
   await connectRealtimeProxy(client as never, {
     apiKey: 'offline-fixture', model: 'gpt-realtime-2.1', repo, sessionId: storedSession.id,
+    createUpstream: () => new FakeUpstream() as never,
   });
   client.emit('message', JSON.stringify(createRuntimeEvent(session.getIdentity(), 0, 'hello', {})));
 

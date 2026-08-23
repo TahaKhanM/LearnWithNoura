@@ -40,7 +40,7 @@ describe('realtime proxy response annotation', () => {
     const child = repo.createChild('Maya', 10);
     const session = repo.createSession(child.id, 'fractions');
     const client = new FakeClient();
-    await connectRealtimeProxy(client as never, { apiKey: 'offline-fixture', model: 'gpt-realtime-2.1', repo, sessionId: session.id });
+    await connectRealtimeProxy(client as never, { apiKey: 'offline-fixture', model: 'gpt-realtime-2.1', repo, sessionId: session.id, createUpstream: () => new FakeUpstream() as never });
     const active = { ...identity, sessionId: session.id };
     client.emit('message', JSON.stringify(createRuntimeEvent(active, 0, 'hello', {})));
 
@@ -71,7 +71,7 @@ describe('realtime proxy response annotation', () => {
     const child = repo.createChild('Maya', 10);
     const session = repo.createSession(child.id, 'fractions');
     const client = new FakeClient();
-    await connectRealtimeProxy(client as never, { apiKey: 'offline-fixture', model: 'gpt-realtime-2.1', repo, sessionId: session.id });
+    await connectRealtimeProxy(client as never, { apiKey: 'offline-fixture', model: 'gpt-realtime-2.1', repo, sessionId: session.id, createUpstream: () => new FakeUpstream() as never });
     client.emit('message', JSON.stringify(createRuntimeEvent({ ...identity, sessionId: session.id }, 0, 'hello', {})));
     const upstream = FakeUpstream.latest;
     upstream.emit({ type: 'response.created', response: { id: 'cancelled' } });
@@ -88,7 +88,7 @@ describe('realtime proxy response annotation', () => {
     const child = repo.createChild('Maya', 10);
     const session = repo.createSession(child.id, 'fractions');
     const client = new FakeClient();
-    await connectRealtimeProxy(client as never, { apiKey: 'offline-fixture', model: 'gpt-realtime-2.1', repo, sessionId: session.id });
+    await connectRealtimeProxy(client as never, { apiKey: 'offline-fixture', model: 'gpt-realtime-2.1', repo, sessionId: session.id, createUpstream: () => new FakeUpstream() as never });
     client.emit('message', JSON.stringify(createRuntimeEvent({ ...identity, sessionId: session.id }, 0, 'hello', {})));
     const upstream = FakeUpstream.latest;
     const move = JSON.stringify({

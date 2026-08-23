@@ -1,4 +1,4 @@
-import type { WebSocket as ClientSocket } from 'ws';
+import { WebSocket as NodeWebSocket, type WebSocket as ClientSocket } from 'ws';
 import { validateOps } from '../../shared/boardOps.js';
 import {
   createRuntimeEvent,
@@ -40,6 +40,7 @@ export interface ProxyOptions {
   repo: DomainRepository;
   sessionId: string;
   log?: (line: string) => void;
+  createUpstream?: (url: string, apiKey: string) => NodeWebSocket;
 }
 
 export async function connectRealtimeProxy(client: ClientSocket, options: ProxyOptions): Promise<void> {
@@ -59,10 +60,10 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
     return;
   }
 
-  const upstream = new WebSocket(`${REALTIME_URL}?model=${encodeURIComponent(model)}`, {
-    // Node's fetch-based WebSocket accepts headers here.
+  const upstreamUrl = `${REALTIME_URL}?model=${encodeURIComponent(model)}`;
+  const upstream = options.createUpstream?.(upstreamUrl, apiKey) ?? new NodeWebSocket(upstreamUrl, {
     headers: { Authorization: `Bearer ${apiKey}` },
-  } as unknown as string[]);
+  });
 
   let upstreamReady = false;
   let closed = false;
@@ -129,7 +130,7 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
   }
 
   function sendUpstream(payload: unknown): void {
-    if (upstream.readyState === WebSocket.OPEN) upstream.send(JSON.stringify(payload));
+    if (upstream.readyState === NodeWebSocket.OPEN) upstream.send(JSON.stringify(payload));
   }
 
   function responseSegment(responseId: string): ResponseSegmentAnnotator {
