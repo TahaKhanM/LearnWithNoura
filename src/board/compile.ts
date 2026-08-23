@@ -629,8 +629,10 @@ function compileSpec(
         const tail = lastSegment[lastSegment.length - 1];
         const size = TEXT_SIZES.small;
         const w = measureText(spec.label, size);
+        // Above and clear of the curve's tail, so the label never sits on
+        // the stroke it names.
         const placed = placeNear(
-          { x: tail[0] + 8, y: tail[1] - size, w, h: size * 1.25 },
+          { x: tail[0] + 10, y: tail[1] - size * 1.9, w, h: size * 1.25 },
           tail,
           ctx.occupied,
         );

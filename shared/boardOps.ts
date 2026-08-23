@@ -242,7 +242,9 @@ function num(v: unknown): number | null {
 }
 
 function clamp(v: number, lo: number, hi: number): number {
-  return Math.min(hi, Math.max(lo, v));
+  const clamped = Math.min(hi, Math.max(lo, v));
+  // Normalize -0 so clamped coordinates compare cleanly.
+  return clamped === 0 ? 0 : clamped;
 }
 
 function vec(v: unknown, pad = 0): Vec | null {
