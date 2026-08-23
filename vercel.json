@@ -12,6 +12,8 @@
     }
   },
   "rewrites": [
+    { "source": "/healthz", "destination": "/api/healthz" },
+    { "source": "/version", "destination": "/api/version" },
     { "source": "/ws/lesson", "destination": "/api/ws" },
     { "source": "/lesson/:path*", "destination": "/index.html" },
     { "source": "/parent", "destination": "/index.html" },
