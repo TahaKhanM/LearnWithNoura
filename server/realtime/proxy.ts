@@ -129,9 +129,11 @@ export function connectRealtimeProxy(client: ClientSocket, options: ProxyOptions
   };
 
   function replayBoard(): void {
+    // Only marks the child actually saw; ops cancelled mid-speech were
+    // never released and must not reappear after a refresh.
     const batches = repo
       .listEvents(sessionId, 2000)
-      .filter((e) => e.type === 'board_ops')
+      .filter((e) => e.type === 'board_ops' && e.released)
       .map((e) => (e.payload as { ops?: unknown[] })?.ops ?? []);
     if (batches.length > 0) sendClient({ type: 'board_replay', batches });
   }
@@ -271,8 +273,8 @@ export function connectRealtimeProxy(client: ClientSocket, options: ProxyOptions
       case 'board_ops': {
         const { ops, rejected } = validateOps(args.ops);
         if (ops.length > 0) {
-          repo.addEvent(sessionId, 'board_ops', { ops });
-          sendClient({ type: 'board_ops', ops, response_id: responseId });
+          const eventId = repo.addEvent(sessionId, 'board_ops', { ops }, false);
+          sendClient({ type: 'board_ops', ops, response_id: responseId, event_id: eventId });
         }
         finishTool(callId, responseId, {
           ok: rejected.length === 0,
@@ -434,6 +436,14 @@ export function connectRealtimeProxy(client: ClientSocket, options: ProxyOptions
             ],
           },
         });
+        break;
+      }
+
+      case 'ops_shown': {
+        // The child has actually seen this batch; it is now part of the board.
+        if (typeof message.event_id === 'number') {
+          repo.markEventReleased(sessionId, message.event_id);
+        }
         break;
       }
 

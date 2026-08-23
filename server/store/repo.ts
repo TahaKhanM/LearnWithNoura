@@ -48,6 +48,7 @@ export interface EventRow {
   ts: number;
   type: string;
   payload: unknown;
+  released: boolean;
 }
 
 export class Repo {
@@ -142,21 +143,37 @@ export class Repo {
       .run(Date.now(), summary ? JSON.stringify(summary) : null, id);
   }
 
-  addEvent(sessionId: string, type: string, payload: unknown): void {
+  /**
+   * Records a session event. Events that only become true once the child
+   * actually sees them (board marks synchronised to speech) are inserted
+   * unreleased and confirmed later, so a replay never shows work that an
+   * interruption cancelled.
+   */
+  addEvent(sessionId: string, type: string, payload: unknown, released = true): number {
+    const result = this.db
+      .prepare('INSERT INTO events (session_id, ts, type, payload, released) VALUES (?, ?, ?, ?, ?)')
+      .run(sessionId, Date.now(), type, JSON.stringify(payload ?? {}), released ? 1 : 0);
+    return Number(result.lastInsertRowid);
+  }
+
+  markEventReleased(sessionId: string, eventId: number): void {
     this.db
-      .prepare('INSERT INTO events (session_id, ts, type, payload) VALUES (?, ?, ?, ?)')
-      .run(sessionId, Date.now(), type, JSON.stringify(payload ?? {}));
+      .prepare('UPDATE events SET released = 1 WHERE id = ? AND session_id = ?')
+      .run(eventId, sessionId);
   }
 
   listEvents(sessionId: string, limit = 500): EventRow[] {
     const rows = this.db
-      .prepare('SELECT id, session_id, ts, type, payload FROM events WHERE session_id = ? ORDER BY id LIMIT ?')
+      .prepare(
+        'SELECT id, session_id, ts, type, payload, released FROM events WHERE session_id = ? ORDER BY id LIMIT ?',
+      )
       .all(sessionId, limit) as unknown as {
       id: number;
       session_id: string;
       ts: number;
       type: string;
       payload: string;
+      released: number;
     }[];
     return rows.map((r) => ({
       id: r.id,
@@ -164,6 +181,7 @@ export class Repo {
       ts: r.ts,
       type: r.type,
       payload: safeParse(r.payload),
+      released: r.released === 1,
     }));
   }
 

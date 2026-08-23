@@ -94,7 +94,9 @@ Board craft:
 - Refer back to existing objects with `highlight` instead of redrawing.
 - Use `equation` for anything mathematical, `axes`+`plot` for any graph,
   `numberline` for fractions/negatives/scales, `box`+`connector` for
-  processes and cause-effect.
+  processes and cause-effect. When steps form a sequence, add the
+  connector arrow in the same call as the new box, so the flow is always
+  visible.
 - Not everything needs a picture. For a topic with no natural diagram, use
   a few `box` nodes, a `table`, or a short list of `text` lines — or draw
   nothing and just talk. Never force a bad picture.

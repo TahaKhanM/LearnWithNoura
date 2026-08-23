@@ -68,6 +68,7 @@ interface StampedOps {
   responseId: string;
   ops: BoardOp[];
   arrivedAt: number;
+  eventId: number | null;
 }
 
 interface StampedText {
@@ -341,6 +342,7 @@ export class RealtimeSession {
           responseId,
           ops: message.ops as BoardOp[],
           arrivedAt: performance.now(),
+          eventId: typeof message.event_id === 'number' ? message.event_id : null,
         });
         break;
       }
@@ -430,8 +432,14 @@ export class RealtimeSession {
 
     while (this.pendingOps.length > 0 && this.shouldRelease(this.pendingOps[0], 60)) {
       const item = this.pendingOps.shift() as StampedOps;
-      this.onBoardOps(item.ops, true);
+      this.releaseOps(item);
     }
+  }
+
+  /** Puts a batch on the board and confirms it as seen, for honest replay. */
+  private releaseOps(item: StampedOps): void {
+    this.onBoardOps(item.ops, true);
+    if (item.eventId !== null) this.send({ type: 'ops_shown', event_id: item.eventId });
   }
 
   private handlePlaybackEnd(): void {
@@ -446,7 +454,7 @@ export class RealtimeSession {
     }
     this.pendingText = [];
     this.showTutorLine();
-    for (const item of this.pendingOps) this.onBoardOps(item.ops, true);
+    for (const item of this.pendingOps) this.releaseOps(item);
     this.pendingOps = [];
     if (this.snapshot.phase === 'speaking') {
       this.commitTutorLine();

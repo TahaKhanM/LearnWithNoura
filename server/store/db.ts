@@ -55,9 +55,20 @@ function migrate(database: DatabaseSync): void {
       session_id TEXT NOT NULL REFERENCES sessions(id),
       ts INTEGER NOT NULL,
       type TEXT NOT NULL,
-      payload TEXT NOT NULL
+      payload TEXT NOT NULL,
+      released INTEGER NOT NULL DEFAULT 1
     );
     CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id, id);
+  `);
+
+  // Older local databases predate the released flag.
+  try {
+    database.exec('ALTER TABLE events ADD COLUMN released INTEGER NOT NULL DEFAULT 1');
+  } catch {
+    /* column already exists */
+  }
+
+  database.exec(`
 
     CREATE TABLE IF NOT EXISTS evidence (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
