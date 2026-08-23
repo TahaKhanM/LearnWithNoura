@@ -77,14 +77,112 @@ test('released AI drawing survives normal re-renders, animation, and learner dra
   await expect.poll(() => page.evaluate(() => (
     window as typeof window & { __nouraAnimationTrace: { removals: number } }
   ).__nouraAnimationTrace.removals)).toBe(0);
-  await expect.poll(() => page.evaluate(() => {
-    const socket = (window as typeof window & { __nouraFakeSocket: { sent: Array<{ type: string; payload?: Record<string, unknown> }> } }).__nouraFakeSocket;
-    return [...socket.sent].reverse().find((event) => event.type === 'board_event')?.payload?.requestResponse;
-  })).toBe(true);
+  // A stroke opens a draft; nothing is submitted and no response is
+  // requested until the learner explicitly presses Done.
+  expect(await page.evaluate(() => {
+    const socket = (window as typeof window & { __nouraFakeSocket: { sent: Array<{ type: string }> } }).__nouraFakeSocket;
+    return socket.sent.filter((event) => ['board_event', 'board_submission'].includes(event.type)).length;
+  })).toBe(0);
+  await expect(page.getByTestId('draft-done')).toBeEnabled();
   await expect.poll(() => page.evaluate(() => {
     const socket = (window as typeof window & { __nouraFakeSocket: { sent: Array<{ type: string; payload?: Record<string, unknown> }> } }).__nouraFakeSocket;
     return socket.sent.some((event) => event.type === 'ops_shown' && event.payload?.event_id === 701);
   })).toBe(true);
+});
+
+test('multi-stroke drawing with long pauses submits exactly once, on Done', async ({ page, request }) => {
+  const { session, lessonCapability } = await createSyntheticSession(request, `draft-life-${Date.now().toString(36)}`);
+  await installFakeRealtime(page);
+  await setLessonCapability(page, session.id, lessonCapability);
+  await page.goto(`/lesson/${session.id}`);
+  await page.getByRole('button', { name: 'Begin' }).click();
+  await expect(page.getByText(/Type below — Noura is ready|Listening/)).toBeVisible();
+
+  await page.getByRole('button', { name: 'Draw on the board' }).click();
+  const board = page.locator('.board__svg');
+  const box = await board.boundingBox();
+  expect(box).not.toBeNull();
+  const strokeAt = async (fx: number, fy: number) => {
+    await page.mouse.move(box!.x + box!.width * fx, box!.y + box!.height * fy);
+    await page.mouse.down();
+    await page.mouse.move(box!.x + box!.width * (fx + 0.08), box!.y + box!.height * (fy + 0.1), { steps: 4 });
+    await page.mouse.up();
+  };
+
+  // Three strokes separated by natural thinking pauses.
+  await strokeAt(0.2, 0.3);
+  await page.waitForTimeout(1_200);
+  await strokeAt(0.4, 0.35);
+  await page.waitForTimeout(2_000);
+  await strokeAt(0.6, 0.4);
+  await expect(page.locator('[data-item^="sketch-"]')).toHaveCount(3);
+
+  // Undo removes the last stroke; the draft stays open and quiet.
+  await page.getByRole('button', { name: 'Undo your last mark' }).click();
+  await expect(page.locator('[data-item^="sketch-"]')).toHaveCount(2);
+  await page.getByRole('button', { name: 'Redo your last undone mark' }).click();
+  await expect(page.locator('[data-item^="sketch-"]')).toHaveCount(3);
+
+  // Nothing has been captured, submitted, or asked of the model.
+  expect(await page.evaluate(() => {
+    const socket = (window as typeof window & { __nouraFakeSocket: { sent: Array<{ type: string }> } }).__nouraFakeSocket;
+    return socket.sent.filter((event) => ['board_event', 'board_submission'].includes(event.type)).length;
+  })).toBe(0);
+  await expect(page.getByText('Thinking…')).toHaveCount(0);
+
+  // Done: exactly one idempotent submission with vector analysis and image.
+  await page.getByTestId('draft-done').click();
+  await expect.poll(() => page.evaluate(() => {
+    const socket = (window as typeof window & { __nouraFakeSocket: { sent: Array<{ type: string; payload?: Record<string, unknown> }> } }).__nouraFakeSocket;
+    return socket.sent.filter((event) => event.type === 'board_submission').length;
+  })).toBe(1);
+  const submission = await page.evaluate(() => {
+    const socket = (window as typeof window & { __nouraFakeSocket: { sent: Array<{ type: string; payload?: Record<string, unknown> }> } }).__nouraFakeSocket;
+    return socket.sent.find((event) => event.type === 'board_submission')?.payload;
+  });
+  expect(Array.isArray(submission?.ops) ? submission.ops.length : 0).toBe(3);
+  expect(String(submission?.imageDataUrl ?? '')).toMatch(/^data:image\/jpeg;base64,/);
+  expect((submission?.analysis as { version?: string } | undefined)?.version).toBe('1.0.0');
+  await expect(page.getByText('Sending your drawing…')).toBeVisible();
+
+  // The server acknowledges; further Done presses are impossible because the
+  // draft is closed, and no duplicate submission exists.
+  await page.evaluate((submissionId) => {
+    const socket = (window as typeof window & { __nouraFakeSocket: { emit(type: string, payload: Record<string, unknown>): void } }).__nouraFakeSocket;
+    socket.emit('board_submission_ack', { submissionId });
+  }, String(submission?.submissionId));
+  await expect(page.getByText('Thinking…')).toBeVisible();
+  await expect(page.getByTestId('draft-done')).toHaveCount(0);
+  expect(await page.evaluate(() => {
+    const socket = (window as typeof window & { __nouraFakeSocket: { sent: Array<{ type: string }> } }).__nouraFakeSocket;
+    return socket.sent.filter((event) => event.type === 'board_submission').length;
+  })).toBe(1);
+});
+
+test('a delivered drawing task shows a persistent banner and yields to the learner', async ({ page, request }) => {
+  const { session, lessonCapability } = await createSyntheticSession(request, `task-life-${Date.now().toString(36)}`);
+  await installFakeRealtime(page);
+  await setLessonCapability(page, session.id, lessonCapability);
+  await page.goto(`/lesson/${session.id}`);
+  await page.getByRole('button', { name: 'Begin' }).click();
+  await expect(page.getByText(/Type below — Noura is ready|Listening/)).toBeVisible();
+
+  await page.evaluate(() => {
+    const socket = (window as typeof window & { __nouraFakeSocket: { emit(type: string, payload: Record<string, unknown>, optional?: Record<string, unknown>): void } }).__nouraFakeSocket;
+    socket.emit('learner_task', {
+      task: {
+        taskId: 'circle-acute', prompt: 'Circle the acute angle.', responseMode: 'draw', submitPolicy: 'explicit',
+        targetObjectIds: [], boardRevision: 0, allowVoiceWhileDrawing: true,
+      },
+    });
+  });
+  const banner = page.getByTestId('task-banner');
+  await expect(banner).toContainText('Circle the acute angle.');
+  await expect(banner).toContainText('draw on the board');
+  await expect(banner).toContainText('Press Done when you finish.');
+  // The banner persists while the learner thinks and draws.
+  await page.waitForTimeout(1_000);
+  await expect(banner).toBeVisible();
 });
 
 test('durable board replay renders once as committed state without animation', async ({ page, request }) => {

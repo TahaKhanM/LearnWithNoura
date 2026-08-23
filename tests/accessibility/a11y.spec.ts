@@ -110,23 +110,39 @@ test('actual Lesson start, listening, thinking, speaking/visual, reduced-motion 
   await expect(page.locator('[data-item="fraction-scale-main"]')).toBeVisible();
   await expect(page.locator('[data-item^="sketch-"]')).toHaveCount(1);
   await expect(page.locator('[data-item="fraction-context-note"]')).not.toHaveClass(/board__item--deemphasized/, { timeout: 2_000 });
+  // The stroke only opened a draft. Nothing is captured or submitted until
+  // the learner explicitly presses Done.
+  expect(await page.evaluate(() => {
+    const socket = (window as typeof window & { __nouraFakeSocket: { sent: Array<{ type: string }> } }).__nouraFakeSocket;
+    return socket.sent.filter((event) => ['board_event', 'board_submission'].includes(event.type)).length;
+  })).toBe(0);
+  await page.getByTestId('draft-done').click();
   await expect.poll(() => page.evaluate(() => {
     const socket = (window as typeof window & { __nouraFakeSocket: { sent: Array<{ type: string; payload?: Record<string, unknown> }> } }).__nouraFakeSocket;
-    const event = [...socket.sent].reverse().find((candidate) => candidate.type === 'board_event');
-    return {
+    const event = [...socket.sent].reverse().find((candidate) => candidate.type === 'board_submission');
+    return event ? {
       hasImage: typeof event?.payload?.imageDataUrl === 'string' && String(event.payload.imageDataUrl).startsWith('data:image/jpeg;base64,'),
       opCount: Array.isArray(event?.payload?.ops) ? event.payload.ops.length : 0,
       analysisVersion: (event?.payload?.analysis as { version?: string } | undefined)?.version,
       analysisGroup: (event?.payload?.analysis as { semanticGroupId?: string } | undefined)?.semanticGroupId,
-    };
+    } : null;
   })).toEqual({ hasImage: true, opCount: 1, analysisVersion: '1.0.0', analysisGroup: 'fraction-scale' });
   expect(await page.evaluate(async () => {
     const socket = (window as typeof window & { __nouraFakeSocket: { sent: Array<{ type: string; payload?: Record<string, unknown> }> } }).__nouraFakeSocket;
-    const src = String([...socket.sent].reverse().find((candidate) => candidate.type === 'board_event')?.payload?.imageDataUrl ?? '');
+    const src = String([...socket.sent].reverse().find((candidate) => candidate.type === 'board_submission')?.payload?.imageDataUrl ?? '');
     const image = new Image();
     await new Promise<void>((resolve, reject) => { image.onload = () => resolve(); image.onerror = () => reject(new Error('context image failed')); image.src = src; });
     return { width: image.naturalWidth, height: image.naturalHeight };
   })).toEqual({ width: 960, height: 576 });
+  await page.evaluate(() => {
+    const socket = (window as typeof window & { __nouraFakeSocket: { sent: Array<{ type: string; payload?: Record<string, unknown> }>; emit(type: string, payload: Record<string, unknown>): void } }).__nouraFakeSocket;
+    const submissionId = String([...socket.sent].reverse().find((candidate) => candidate.type === 'board_submission')?.payload?.submissionId ?? '');
+    socket.emit('board_submission_ack', { submissionId });
+  });
+  // Tutor checkpoints deliberately no longer reset the learner's part
+  // position; navigate back to the first part explicitly for the
+  // responsive containment assertions below.
+  await page.getByRole('button', { name: 'Previous part of this board section' }).click();
 
   const browserArtifactDir = resolve('artifacts/browser');
   mkdirSync(browserArtifactDir, { recursive: true });

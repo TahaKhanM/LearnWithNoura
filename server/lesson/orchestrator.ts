@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { TeachingMoveSchema, type ResponseTaxonomy, type TeachingMove } from '../../shared/pedagogy.js';
+import { submitPolicyForMode, type ResponseMode, type SubmitPolicy } from '../../shared/lessonTurn.js';
 
 export type LessonPhase = 'ORIENT' | 'EXPLAIN' | 'VISUALIZE' | 'ASK' | 'AWAIT_LEARNER' | 'ASSESS' | 'FEEDBACK' | 'PRACTICE' | 'RETEACH' | 'ADVANCE' | 'COMPLETE' | 'STRETCH';
 export type OwedAction = 'explain' | 'visual' | 'question' | 'wait' | 'feedback' | 'practice' | 'reteach' | 'advance' | 'complete';
@@ -25,11 +26,13 @@ export interface LessonOrchestrationState {
   characterAttentionTarget: string;
   lastClassification: ResponseTaxonomy | null;
   continuationAttempts: number;
+  deliveredResponseMode: ResponseMode | null;
+  deliveredSubmitPolicy: SubmitPolicy | null;
 }
 
 export type OrchestratorEvent =
   | { type: 'MOVE_PROPOSED'; move: TeachingMove }
-  | { type: 'QUESTION_DELIVERED'; taskId: string; text: string }
+  | { type: 'QUESTION_DELIVERED'; taskId: string; text: string; responseMode?: ResponseMode }
   | { type: 'LEARNER_RESPONSE_RECEIVED' }
   | { type: 'ASSESSED'; classification: ResponseTaxonomy; evidenceId?: string }
   | { type: 'INTERRUPTED' }
@@ -59,6 +62,8 @@ export function createLessonState(goal: string, generationId: string = randomUUI
     characterAttentionTarget: 'learner',
     lastClassification: null,
     continuationAttempts: 0,
+    deliveredResponseMode: null,
+    deliveredSubmitPolicy: null,
   };
 }
 
@@ -86,7 +91,12 @@ export function reduceLesson(state: LessonOrchestrationState, event: Orchestrato
     }
     case 'QUESTION_DELIVERED': {
       if (!event.taskId.trim() || !event.text.trim()) throw new Error('A delivered question needs an id and text.');
-      return { ...state, phase: 'AWAIT_LEARNER', owedAction: 'wait', turnOwner: 'learner', deliveredQuestionTaskId: event.taskId, deliveredQuestionText: event.text, continuationAttempts: 0 };
+      const responseMode = event.responseMode ?? 'voice';
+      return {
+        ...state, phase: 'AWAIT_LEARNER', owedAction: 'wait', turnOwner: 'learner',
+        deliveredQuestionTaskId: event.taskId, deliveredQuestionText: event.text, continuationAttempts: 0,
+        deliveredResponseMode: responseMode, deliveredSubmitPolicy: submitPolicyForMode(responseMode),
+      };
     }
     case 'LEARNER_RESPONSE_RECEIVED':
       if (state.phase !== 'AWAIT_LEARNER') throw new Error('Learner response is only legal while awaiting the learner.');
@@ -107,11 +117,21 @@ export function reduceLesson(state: LessonOrchestrationState, event: Orchestrato
   }
 }
 
-export type HandoffDecision = 'wait' | 'bounded_continuation' | 'safe_question';
+export type HandoffDecision = 'wait' | 'bounded_continuation';
 
+/**
+ * Decides what happens after a completed tutor response.
+ *
+ * Turn ownership is explicit, not punctuation: a delivered task (question or
+ * imperative such as "Circle the acute angle.") already yields the floor. An
+ * explanation without a question simply waits — the tutor is never forced to
+ * inject a question after every response. The only continuation is when the
+ * model explicitly *promised* a question move and then failed to deliver it.
+ */
 export function responseHandoff(state: LessonOrchestrationState, deliveredText: string): HandoffDecision {
-  if (state.phase === 'COMPLETE') return 'wait';
+  if (state.phase === 'COMPLETE' || state.phase === 'AWAIT_LEARNER') return 'wait';
   const hasQuestion = deliveredText.trim().length > 0 && /[?？]\s*$/.test(deliveredText.trim());
   if (hasQuestion) return 'wait';
-  return state.continuationAttempts < 1 ? 'bounded_continuation' : 'safe_question';
+  if (state.owedAction === 'question' && state.continuationAttempts < 1) return 'bounded_continuation';
+  return 'wait';
 }

@@ -100,6 +100,17 @@ export class BoardContextTracker {
     return this.items.some((item) => item.semanticGroupId === id);
   }
 
+  /** Learner marks in a section make destructive replacement illegal. */
+  groupHasLearnerMarks(id: string): boolean {
+    return this.items.some((item) => item.semanticGroupId === id && item.owner === 'learner');
+  }
+
+  /** Applies an atomic section replacement: scoped clear plus the new ops. */
+  applyReplacement(ops: BoardOp[], semanticGroupId: string, semanticGroupLabel?: string): void {
+    this.apply([{ op: 'clear' }], 'tutor', semanticGroupId);
+    this.apply(ops, 'tutor', semanticGroupId, semanticGroupLabel);
+  }
+
   observeBoardRejection(reason: string): void {
     if (!reason) return;
     this.rejectionObservations.push(reason.slice(0, 300));
@@ -162,7 +173,7 @@ export async function loadReleasedBoardContext(repo: DomainRepository, sessionId
     }
     if (!['board_ops', 'semantic_scene', 'learner_board'].includes(event.type)) continue;
     const owner = event.type === 'learner_board' ? 'learner' : 'tutor';
-    const payload = event.payload as { ops?: unknown; semanticObjectId?: unknown; groupLabel?: unknown; plan?: { groups?: Array<{ id?: unknown; label?: unknown }> } };
+    const payload = event.payload as { ops?: unknown; semanticObjectId?: unknown; groupLabel?: unknown; replacesGroup?: unknown; plan?: { groups?: Array<{ id?: unknown; label?: unknown }> } };
     const raw = payload.ops;
     const ops = owner === 'learner' ? releasedLearnerOps(raw) : validateOps(raw).ops;
     const semanticGroupId = typeof payload.semanticObjectId === 'string'
@@ -173,7 +184,9 @@ export async function loadReleasedBoardContext(repo: DomainRepository, sessionId
     const semanticGroupLabel = typeof payload.groupLabel === 'string'
       ? payload.groupLabel
       : typeof payload.plan?.groups?.[0]?.label === 'string' ? payload.plan.groups[0].label : undefined;
-    tracker.apply(ops, owner, semanticGroupId, semanticGroupLabel);
+    if (owner === 'tutor' && typeof payload.replacesGroup === 'string' && payload.replacesGroup) {
+      tracker.applyReplacement(ops, payload.replacesGroup, semanticGroupLabel);
+    } else tracker.apply(ops, owner, semanticGroupId, semanticGroupLabel);
     if (owner === 'learner') {
       const parsedAnalysis = LearnerBoardAnalysisSchema.safeParse((event.payload as { analysis?: unknown }).analysis);
       if (parsedAnalysis.success) tracker.observeLearnerAnalysis(parsedAnalysis.data);

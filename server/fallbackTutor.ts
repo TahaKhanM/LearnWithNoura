@@ -314,18 +314,12 @@ async function executeFallbackTurn(
         lessonState = reduceLesson(lessonState, { type: 'QUESTION_DELIVERED', taskId: `fallback-question-${request.turnId}`, text: delivered });
         break;
       }
+      // Explanations are allowed to end without an injected question; only a
+      // promised-but-undelivered question move earns one bounded continuation.
       const handoff = responseHandoff(lessonState, delivered);
       if (handoff === 'wait') break;
-      if (handoff === 'bounded_continuation') {
-        lessonState = { ...lessonState, continuationAttempts: lessonState.continuationAttempts + 1 };
-        messages.push({ role: 'system', content: 'Complete the promised teaching move now. End with exactly one short, concrete question or small task, then wait.' });
-        continue;
-      }
-      const safeQuestion = 'Tell me one thing you notice about the idea we just explored?';
-      await ensureLearnerEvent();
-      await repo.addFallbackEvent(identity, 'tutor_said', { text: safeQuestion, deterministic: true });
-      await emit('safe_question', { text: safeQuestion });
-      break;
+      lessonState = { ...lessonState, continuationAttempts: lessonState.continuationAttempts + 1 };
+      messages.push({ role: 'system', content: 'You proposed asking a question but have not asked it yet. Ask that one short, concrete question or small task now, then wait.' });
     }
     await assertActive();
     if (!(await repo.finishFallbackTurn(identity, 'completed', steps))) throw abortError('superseded before completion');

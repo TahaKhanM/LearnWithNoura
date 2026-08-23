@@ -22,8 +22,6 @@ export interface BoardAnimationRequest {
   itemIds: string[];
 }
 
-export interface BoardCaptureOptions { focusBox?: BBox }
-
 interface BoardCanvasProps {
   scene: SceneState;
   /** IDs the tutor just added; they get draw-on animation in this order. */
@@ -43,7 +41,6 @@ interface BoardCanvasProps {
   focusSemanticObjectId?: string;
   focusIndex?: number;
   overview?: boolean;
-  onCaptureReady?: (capture: (options?: BoardCaptureOptions) => Promise<string | null>) => void;
 }
 
 function KatexBlock({ node }: { node: Extract<RenderNode, { type: 'katex' }> }) {
@@ -177,7 +174,6 @@ export function BoardCanvas({
   focusSemanticObjectId,
   focusIndex = 0,
   overview = false,
-  onCaptureReady,
 }: BoardCanvasProps) {
   const svgRef = useRef<SVGSVGElement>(null);
   const animator = useMemo(() => new BoardAnimator(), []);
@@ -213,11 +209,6 @@ export function BoardCanvas({
   }, [animator, animatorRef]);
 
   useEffect(() => {
-    if (!onCaptureReady) return;
-    onCaptureReady((options) => captureBoardImage(svgRef.current, options));
-  }, [onCaptureReady]);
-
-  useEffect(() => {
     let cancelled = false;
     if (!document.fonts) return;
     void document.fonts.ready.then(() => { if (!cancelled) setFontsReady(true); });
@@ -238,11 +229,13 @@ export function BoardCanvas({
     () => new Set(animationRequest?.itemIds ?? []),
     [animationRequest],
   );
+  // Highlights deliberately do not steer the viewport: a temporary emphasis
+  // pulse must never move the learner's view and snap it back moments later.
   const semanticViewport = useMemo(
     () => overview || !compact
       ? { x: 0, y: 0, w: BOARD_W, h: BOARD_H, itemIds: [] }
-      : deriveSemanticViewport(scene, focusSemanticObjectId, focusIndex, highlights.map((highlight) => highlight.id)),
-    [scene, focusSemanticObjectId, focusIndex, overview, compact, highlights],
+      : deriveSemanticViewport(scene, focusSemanticObjectId, focusIndex),
+    [scene, focusSemanticObjectId, focusIndex, overview, compact],
   );
 
   // Animation is an explicit released-checkpoint transaction. The nodes are
@@ -403,7 +396,9 @@ export function BoardCanvas({
         nodeEls.current.set(item.id, els);
         return (
           <g
-            key={`${item.id}@${scene.epoch}`}
+            // Keyed by stable id: a scoped section replacement or clear must
+            // never remount preserved learner strokes in other sections.
+            key={item.id}
             data-item={item.id}
             data-animation-pending={pendingAnimationIds.has(item.id) ? 'true' : undefined}
             onPointerDown={eraseTarget(item.id, item.owner)}
@@ -412,7 +407,10 @@ export function BoardCanvas({
               tool === 'erase' && item.owner === 'learner' ? 'board__item--erasable' : '',
               highlightedIds.size > 0 && item.owner === 'tutor' && !highlightedIds.has(item.id) ? 'board__item--deemphasized' : '',
             ].filter(Boolean).join(' ')}
-            tabIndex={interactive ? 0 : undefined}
+            // Only genuinely operable items enter the tab order: learner
+            // marks can be erased; static tutor geometry is described by the
+            // board's long description instead of dozens of empty tab stops.
+            tabIndex={interactive && item.owner === 'learner' ? 0 : undefined}
             onFocus={() => onLearnerAttention?.([
               item.bbox.x + item.bbox.w / 2,
               item.bbox.y + item.bbox.h / 2,
@@ -467,76 +465,4 @@ export function BoardCanvas({
   );
 }
 
-async function captureBoardImage(svg: SVGSVGElement | null, options: BoardCaptureOptions = {}): Promise<string | null> {
-  if (!svg) return null;
-  const clone = svg.cloneNode(true) as SVGSVGElement;
-  clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
-  clone.setAttribute('width', String(BOARD_W));
-  clone.setAttribute('height', String(BOARD_H));
-  clone.setAttribute('viewBox', `0 0 ${BOARD_W} ${BOARD_H}`);
-  const markup = new XMLSerializer().serializeToString(clone);
-  const url = URL.createObjectURL(new Blob([markup], { type: 'image/svg+xml' }));
-  try {
-    const image = new Image();
-    await new Promise<void>((resolve, reject) => {
-      image.onload = () => resolve();
-      image.onerror = () => reject(new Error('board image could not be rendered'));
-      image.src = url;
-    });
-    const canvas = document.createElement('canvas');
-    canvas.width = 960;
-    canvas.height = 576;
-    const context = canvas.getContext('2d');
-    if (!context) return null;
-    context.fillStyle = '#fcfbf7';
-    context.fillRect(0, 0, canvas.width, canvas.height);
-    if (options.focusBox) {
-      // One image carries both global context and a legible detail crop. This
-      // preserves spatial grounding while giving Realtime vision enough pixels
-      // to inspect a small learner mark.
-      context.drawImage(image, 0, 0, BOARD_W, BOARD_H, 0, 96, 640, 384);
-      context.strokeStyle = '#d9d4ca';
-      context.lineWidth = 2;
-      context.strokeRect(0, 96, 640, 384);
-      context.fillStyle = '#26231f';
-      context.font = '600 18px sans-serif';
-      context.fillText('Full board', 16, 78);
-      context.fillText('Learner’s new mark', 668, 78);
 
-      const crop = normalizedCrop(options.focusBox);
-      const target = fitInside(crop.w, crop.h, 276, 430);
-      const dx = 660 + (284 - target.w) / 2;
-      const dy = 96 + (430 - target.h) / 2;
-      context.drawImage(image, crop.x, crop.y, crop.w, crop.h, dx, dy, target.w, target.h);
-      context.strokeStyle = '#2c5be0';
-      context.strokeRect(dx - 4, dy - 4, target.w + 8, target.h + 8);
-    } else {
-      context.drawImage(image, 0, 0, BOARD_W, BOARD_H, 0, 0, canvas.width, canvas.height);
-    }
-    for (const quality of [0.82, 0.68, 0.54, 0.4]) {
-      const dataUrl = canvas.toDataURL('image/jpeg', quality);
-      if (dataUrl.length <= 300_000) return dataUrl;
-    }
-    return null;
-  } catch {
-    return null;
-  } finally {
-    URL.revokeObjectURL(url);
-  }
-}
-
-function normalizedCrop(box: BBox): BBox {
-  const x = Math.max(0, Math.min(BOARD_W - 1, box.x));
-  const y = Math.max(0, Math.min(BOARD_H - 1, box.y));
-  return {
-    x,
-    y,
-    w: Math.max(1, Math.min(BOARD_W - x, box.w)),
-    h: Math.max(1, Math.min(BOARD_H - y, box.h)),
-  };
-}
-
-function fitInside(width: number, height: number, maxWidth: number, maxHeight: number): { w: number; h: number } {
-  const scale = Math.min(maxWidth / width, maxHeight / height);
-  return { w: width * scale, h: height * scale };
-}

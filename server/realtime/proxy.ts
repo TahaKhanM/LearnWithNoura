@@ -10,9 +10,9 @@ import { buildInstructions } from './instructions.js';
 import { REALTIME_TOOLS } from './tools.js';
 import type { Confidence, Verdict } from '../store/repo.js';
 import { createLessonState, reduceLesson, responseHandoff } from '../lesson/orchestrator.js';
-import { ResponseTaxonomySchema, TeachingMoveSchema, type ResponseTaxonomy } from '../../shared/pedagogy.js';
+import { ResponseTaxonomySchema, TeachingMoveSchema, type ResponseTaxonomy, type TeachingMove } from '../../shared/pedagogy.js';
 import { adaptSemanticScene } from '../../shared/semanticScene.js';
-import { LearnerBoardAnalysisSchema } from '../../shared/learnerBoard.js';
+import { BoardSubmissionSchema, DeliveredTaskSchema, submitPolicyForMode, type DeliveredTask } from '../../shared/lessonTurn.js';
 import { ResponseSegmentAnnotator } from './segmentAnnotator.js';
 import { loadReleasedBoardContext } from './boardContext.js';
 import type { DomainRepository } from '../store/domain.js';
@@ -43,6 +43,8 @@ export interface ProxyOptions {
   sessionId: string;
   log?: (line: string) => void;
   createUpstream?: (url: string, apiKey: string) => NodeWebSocket;
+  /** How long to wait for the browser to compile-check a full visual plan. */
+  preflightTimeoutMs?: number;
 }
 
 export async function connectRealtimeProxy(client: ClientSocket, options: ProxyOptions): Promise<void> {
@@ -87,7 +89,7 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
    */
   let childHoldsFloor = false;
   /** What the most recent response.create was for, to target retries. */
-  let lastCreateSource: 'tool' | 'user' | 'board' | 'start' = 'start';
+  let lastCreateSource: 'tool' | 'user' | 'board' | 'voice' | 'start' = 'start';
   /** A user ask hit an active response; ask again once it finishes. */
   let retryCreateOnDone = false;
   let clientIdentity: GenerationIdentity | null = null;
@@ -99,7 +101,7 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
   const responseIdentities = new Map<string, GenerationIdentity>();
   const responseTranscript = new Map<string, string>();
   const responseSegments = new Map<string, ResponseSegmentAnnotator>();
-  const pendingBoardOps = new Map<number, { ops: BoardOp[]; semanticGroupId?: string; groupLabel?: string }>();
+  const pendingBoardOps = new Map<number, { ops: BoardOp[]; semanticGroupId?: string; groupLabel?: string; replacesGroup?: string }>();
   let activeResponseId: string | null = null;
   let speechInProgress = false;
   let endpointingEagerness: 'medium' | 'high' = 'medium';
@@ -107,6 +109,18 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
   let lastLearnerEventId: number | null = null;
   let upstreamWork = Promise.resolve();
   let clientWork = Promise.resolve();
+  /** The learner is composing a drawing; nothing may auto-create a response. */
+  let draftOpen = false;
+  /** Board submissions already answered — duplicate Done must be a no-op. */
+  const respondedSubmissionIds = new Set<string>();
+  /** Every response.create is keyed; a key never creates twice. */
+  const usedResponseKeys = new Set<string>();
+  let voiceTurnCounter = 0;
+  /** A task the model proposed but has not yet finished speaking. */
+  let pendingDeliveredTask: DeliveredTask | null = null;
+  const preflightTimeoutMs = options.preflightTimeoutMs ?? 1_200;
+  let preflightCounter = 0;
+  const pendingPreflights = new Map<string, (result: { accepted: boolean; reasons: string[] }) => void>();
 
   function sendClient(
     payload: Record<string, unknown>,
@@ -143,6 +157,49 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
 
   function sendUpstream(payload: unknown): void {
     if (upstream.readyState === NodeWebSocket.OPEN) upstream.send(JSON.stringify(payload));
+  }
+
+  /**
+   * The single owner of `response.create`. Semantic VAD only chunks and
+   * transcribes speech (`create_response: false`); every model response is
+   * created here, keyed and idempotent, and never while the learner is
+   * composing a drawing draft.
+   */
+  function requestModelResponse(source: 'user' | 'board' | 'voice' | 'start', key: string): boolean {
+    if (usedResponseKeys.has(key)) return false;
+    if (source !== 'user' && draftOpen) return false;
+    usedResponseKeys.add(key);
+    if (usedResponseKeys.size > 512) usedResponseKeys.delete(usedResponseKeys.values().next().value as string);
+    childHoldsFloor = false;
+    toolContinues = 0;
+    lastCreateSource = source;
+    sendUpstream({ type: 'response.create' });
+    return true;
+  }
+
+  /** Asks the browser to compile-check a complete candidate plan offscreen. */
+  function preflightWithClient(input: { ops: BoardOp[]; semanticGroupId: string; groupLabel?: string; replacesGroup?: string }): Promise<{ accepted: boolean; reasons: string[] }> {
+    if (!clientIdentity || client.readyState !== client.OPEN) return Promise.resolve({ accepted: true, reasons: ['no client connected; accepted optimistically'] });
+    const preflightId = `preflight-${++preflightCounter}`;
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        pendingPreflights.delete(preflightId);
+        resolve({ accepted: true, reasons: ['preflight timed out; accepted optimistically'] });
+      }, preflightTimeoutMs);
+      pendingPreflights.set(preflightId, (result) => {
+        clearTimeout(timer);
+        pendingPreflights.delete(preflightId);
+        resolve(result);
+      });
+      sendClient({
+        type: 'visual_preflight',
+        preflight_id: preflightId,
+        ops: input.ops,
+        semanticObjectId: input.semanticGroupId,
+        ...(input.groupLabel ? { groupLabel: input.groupLabel } : {}),
+        ...(input.replacesGroup ? { replacesGroup: input.replacesGroup } : {}),
+      });
+    });
   }
 
   function setEndpointingEagerness(eagerness: 'medium' | 'high'): void {
@@ -252,7 +309,7 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
     const batches = events
       .filter((e) => ['board_ops', 'semantic_scene'].includes(e.type) && e.released)
       .map((e) => {
-        const payload = e.payload as { ops?: unknown[]; semanticObjectId?: unknown; groupLabel?: unknown; plan?: { groups?: Array<{ id?: unknown; label?: unknown }> } };
+        const payload = e.payload as { ops?: unknown[]; semanticObjectId?: unknown; groupLabel?: unknown; replacesGroup?: unknown; plan?: { groups?: Array<{ id?: unknown; label?: unknown }> } };
         const ops = validateOps(payload.ops).ops;
         const semanticObjectId = typeof payload.semanticObjectId === 'string'
           ? payload.semanticObjectId
@@ -260,7 +317,12 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
         const groupLabel = typeof payload.groupLabel === 'string'
           ? payload.groupLabel
           : typeof payload.plan?.groups?.[0]?.label === 'string' ? payload.plan.groups[0].label : undefined;
-        return { ops, ...(semanticObjectId ? { semanticObjectId } : {}), ...(groupLabel ? { groupLabel } : {}) };
+        return {
+          ops,
+          ...(semanticObjectId ? { semanticObjectId } : {}),
+          ...(groupLabel ? { groupLabel } : {}),
+          ...(typeof payload.replacesGroup === 'string' && payload.replacesGroup ? { replacesGroup: payload.replacesGroup } : {}),
+        };
       })
       .filter((batch) => batch.ops.length > 0);
     if (batches.length > 0) sendClient({ type: 'board_replay', batches });
@@ -273,6 +335,26 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
       })
       .filter((batch) => batch.ops.length > 0);
     if (learnerBatches.length > 0) sendClient({ type: 'learner_board_replay', batches: learnerBatches });
+    await restoreDeliveredTask(events);
+  }
+
+  /** After a refresh, an unanswered task must survive: restore the contract
+   * and show the banner again rather than losing the learner's turn. */
+  async function restoreDeliveredTask(events: Awaited<ReturnType<DomainRepository['listEvents']>>): Promise<void> {
+    let openTask: DeliveredTask | null = null;
+    for (const event of events) {
+      if (event.type === 'learner_task') {
+        const parsed = DeliveredTaskSchema.safeParse((event.payload as { task?: unknown }).task);
+        if (parsed.success) openTask = parsed.data;
+      } else if (['learner_said', 'learner_board'].includes(event.type)) openTask = null;
+    }
+    if (!openTask) return;
+    try {
+      lessonState = reduceLesson(lessonState, {
+        type: 'QUESTION_DELIVERED', taskId: openTask.taskId, text: openTask.prompt, responseMode: openTask.responseMode,
+      });
+    } catch { /* restoring an old task never breaks the live lesson */ }
+    sendClient({ type: 'learner_task', task: openTask, restored: true });
   }
 
   /** After a refresh the upstream model starts cold; hand it the story so far. */
@@ -305,12 +387,9 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
       }
 
       case 'response.created': {
-        // A response only starts when the child's turn is over (VAD or an
-        // explicit ask), so the floor is the tutor's again. This also
-        // recovers from a false-positive local interrupt that VAD never
-        // confirmed.
-        childHoldsFloor = false;
-        speechInProgress = false;
+        // Responses are only created by the deterministic coordinator
+        // (requestModelResponse / finishTool), which already owns the floor.
+        // A response starting therefore never *changes* floor ownership here.
         // High eagerness is a one-turn barge-in accelerator. Ordinary turns
         // retain medium semantic endpointing so a child can pause and think.
         setEndpointingEagerness('medium');
@@ -381,10 +460,16 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
         break;
 
       case 'input_audio_buffer.speech_stopped':
-        // VAD will now create the next response itself.
         speechInProgress = false;
-        childHoldsFloor = false;
-        sendClient({ type: 'speech_stopped' });
+        sendClient({ type: 'speech_stopped', draft_open: draftOpen });
+        // VAD no longer creates responses (`create_response: false`). A voice
+        // turn completes here only when no drawing draft is open; while the
+        // learner composes, their words accumulate as context for the one
+        // response created by their explicit Done.
+        if (!draftOpen) {
+          childHoldsFloor = false;
+          requestModelResponse('voice', `voice-turn-${++voiceTurnCounter}`);
+        }
         break;
 
       case 'response.function_call_arguments.done': {
@@ -404,6 +489,61 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
         const status = response?.status ?? 'unknown';
         if (status === 'cancelled' && response?.id) cancelledResponses.add(response.id);
         const responseIdentity = identityForResponse(response?.id);
+        const hasFunctionCall = response?.output?.some((item) => item.type === 'function_call') ?? false;
+        const delivered = response?.id ? (responseTranscript.get(response.id) ?? '') : '';
+        // Explicit handoff: a task proposed via propose_teaching_move is
+        // delivered once the model finishes speaking it — question mark or
+        // imperative alike. The heard-audio cue below shows the task banner
+        // exactly when the child has heard the whole response.
+        if (status === 'completed' && response?.id && !cancelledResponses.has(response.id) &&
+            pendingDeliveredTask && (delivered.trim() || !hasFunctionCall)) {
+          const task = pendingDeliveredTask;
+          pendingDeliveredTask = null;
+          responseSegment(response.id).addSemanticCue({ type: 'learner_task', task, response_id: response.id }, {
+            ...(task.semanticGroupId ? { semanticObjectId: task.semanticGroupId } : {}),
+          });
+          await repo.addEvent(sessionId, 'learner_task', { task });
+          try {
+            lessonState = reduceLesson(lessonState, {
+              type: 'QUESTION_DELIVERED', taskId: task.taskId, text: task.prompt, responseMode: task.responseMode,
+            });
+          } catch { /* the next deterministic decision will recover */ }
+        } else if (status === 'completed' && response?.id && !hasFunctionCall && !cancelledResponses.has(response.id)) {
+          if (/[?？]\s*$/.test(delivered.trim())) {
+            // A spoken question without a structured move still yields the
+            // floor as a voice-mode task.
+            const task: DeliveredTask = DeliveredTaskSchema.parse({
+              taskId: `question-${response.id}`,
+              prompt: delivered.trim().slice(0, 500),
+              responseMode: 'voice',
+              submitPolicy: 'vad',
+            });
+            responseSegment(response.id).addSemanticCue({ type: 'learner_task', task, response_id: response.id });
+            await repo.addEvent(sessionId, 'learner_task', { task });
+            try {
+              lessonState = reduceLesson(lessonState, {
+                type: 'QUESTION_DELIVERED', taskId: task.taskId, text: task.prompt,
+              });
+            } catch { /* the next deterministic decision will recover */ }
+          } else if (responseHandoff(lessonState, delivered) === 'bounded_continuation' && !childHoldsFloor) {
+            // Only a promised-but-undelivered question move continues.
+            // Explanations are allowed to end without an injected question.
+            lessonState = { ...lessonState, continuationAttempts: lessonState.continuationAttempts + 1 };
+            sendUpstream({
+              type: 'conversation.item.create',
+              item: {
+                type: 'message',
+                role: 'system',
+                content: [{
+                  type: 'input_text',
+                  text: 'You proposed asking a question but have not asked it yet. Ask that one short, concrete question or small task now, then wait.',
+                }],
+              },
+            });
+            lastCreateSource = 'tool';
+            sendUpstream({ type: 'response.create' });
+          }
+        }
         if (response?.id) flushResponseSegment(response.id, status === 'completed');
         sendClient({ type: 'response_done', response_id: response?.id, status }, responseIdentity);
         if (response?.id === activeResponseId) activeResponseId = null;
@@ -411,48 +551,7 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
           // The child asked something while a response was still running;
           // their question must not be dropped.
           retryCreateOnDone = false;
-          lastCreateSource = 'user';
           sendUpstream({ type: 'response.create' });
-        }
-        const hasFunctionCall = response?.output?.some((item) => item.type === 'function_call') ?? false;
-        if (status === 'completed' && response?.id && !hasFunctionCall && !cancelledResponses.has(response.id)) {
-          const delivered = responseTranscript.get(response.id) ?? '';
-          if (/[?？]\s*$/.test(delivered.trim())) {
-            try {
-              lessonState = reduceLesson(lessonState, {
-                type: 'QUESTION_DELIVERED',
-                taskId: `question-${response.id}`,
-                text: delivered.trim(),
-              });
-            } catch { /* the next deterministic decision will recover */ }
-          } else {
-            const decision = responseHandoff(lessonState, delivered);
-            if (decision === 'bounded_continuation' && !childHoldsFloor) {
-              lessonState = { ...lessonState, continuationAttempts: lessonState.continuationAttempts + 1 };
-              sendUpstream({
-                type: 'conversation.item.create',
-                item: {
-                  type: 'message',
-                  role: 'system',
-                  content: [{
-                    type: 'input_text',
-                    text: 'Complete the promised teaching move now. End with exactly one short, concrete question or small task, then wait.',
-                  }],
-                },
-              });
-              lastCreateSource = 'tool';
-              sendUpstream({ type: 'response.create' });
-            } else if (decision === 'safe_question') {
-              const safeQuestion = 'Tell me one thing you notice about the idea we just explored?';
-              await repo.addEvent(sessionId, 'tutor_said', { text: safeQuestion, deterministic: true });
-              sendClient({ type: 'safe_question', text: safeQuestion }, responseIdentity);
-              lessonState = reduceLesson(lessonState, {
-                type: 'QUESTION_DELIVERED',
-                taskId: `safe-question-${response.id}`,
-                text: safeQuestion,
-              });
-            }
-          }
         }
         break;
       }
@@ -464,7 +563,7 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
         const alreadyActive =
           error?.code === 'conversation_already_has_active_response' ||
           /active response in progress/i.test(error?.message ?? '');
-        if (alreadyActive && ['user', 'board'].includes(lastCreateSource)) retryCreateOnDone = true;
+        if (alreadyActive && ['user', 'board', 'voice'].includes(lastCreateSource)) retryCreateOnDone = true;
         const benign = error?.code === 'response_cancel_not_active' || alreadyActive;
         log(`session ${sessionId}: upstream error ${JSON.stringify(event.error).slice(0, 300)}`);
         if (!benign) {
@@ -500,7 +599,18 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
 
       case 'semantic_visual_plan': {
         try {
-          const { plan, ops, checkpoints } = adaptSemanticScene(args);
+          let forkedFrom: string | null = null;
+          let planInput = args;
+          const requestedAction = (args as { intent?: { action?: unknown; targetGroupId?: unknown } }).intent?.action;
+          const requestedTarget = (args as { intent?: { targetGroupId?: unknown } }).intent?.targetGroupId;
+          if (requestedAction === 'replace' && typeof requestedTarget === 'string' && boardContext.groupHasLearnerMarks(requestedTarget)) {
+            // The learner drew on that section; never replace geometry under
+            // their marks. Fork a new version of the section instead.
+            const fork = forkSectionPlan(args, requestedTarget);
+            planInput = fork.plan;
+            forkedFrom = requestedTarget;
+          }
+          const { plan, ops, checkpoints } = adaptSemanticScene(planInput);
           if (plan.intent.action === 'reuse' || plan.intent.action === 'skip') {
             const targetAvailable = plan.intent.action !== 'reuse' || Boolean(plan.intent.targetGroupId && boardContext.hasGroup(plan.intent.targetGroupId));
             finishTool(callId, responseId, {
@@ -510,6 +620,15 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
               relevance: plan.intent.relevance,
               questionAnswered: plan.intent.questionAnswered,
               ...(!targetAvailable ? { reason: 'The requested board section is not visible. Inspect the board and choose an existing group or create a new visual.' } : {}),
+              board: boardContext.toolSnapshot(),
+            });
+            break;
+          }
+          if (plan.intent.action === 'replace' && draftOpen) {
+            finishTool(callId, responseId, {
+              ok: false,
+              accepted: false,
+              reason: 'The learner is drawing right now. Wait for them to press Done before replacing any section; adapt with highlight/update instead.',
               board: boardContext.toolSnapshot(),
             });
             break;
@@ -545,39 +664,82 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
             });
             break;
           }
-          for (const checkpoint of checkpoints) {
-            const eventId = await repo.addEvent(sessionId, 'semantic_scene', {
-              plan,
-              ops: checkpoint.ops,
-              checkpointId: checkpoint.id,
-              reveal: checkpoint.reveal,
-              semanticObjectId: checkpoint.semanticObjectId,
-              groupLabel: checkpoint.groupLabel,
-            }, false);
-            pendingBoardOps.set(eventId, { ops: checkpoint.ops, semanticGroupId: checkpoint.semanticObjectId, groupLabel: checkpoint.groupLabel });
-            responseSegment(responseId).addSemanticCue({
-              type: 'board_ops',
-              ops: checkpoint.ops,
-              response_id: responseId,
-              event_id: eventId,
-              groupLabel: checkpoint.groupLabel,
-              checkpoint: checkpoint.reveal,
-            }, {
-              visualCueId: checkpoint.id,
-              semanticObjectId: checkpoint.semanticObjectId,
+          // Two-phase acceptance: the browser compiles and inspects the
+          // complete candidate scene offscreen before the model is told the
+          // plan is usable. Nothing becomes visible until the reveal cues.
+          const groupId = checkpoints[0]?.semanticObjectId ?? plan.groups[0]?.id ?? '';
+          const groupLabel = checkpoints[0]?.groupLabel;
+          const replacesGroup = plan.intent.action === 'replace' ? plan.intent.targetGroupId : undefined;
+          // Captured synchronously: preflight may finish after this response
+          // seals, in which case the cues are delivered directly at its
+          // final audio boundary instead of being silently dropped.
+          const planSegment = responseSegment(responseId);
+          void (async () => {
+            if (ops.length > 0 && groupId) {
+              const preflight = await preflightWithClient({ ops, semanticGroupId: groupId, groupLabel, ...(replacesGroup ? { replacesGroup } : {}) });
+              if (!preflight.accepted) {
+                boardContext.observeBoardRejection(preflight.reasons.join('; ').slice(0, 300) || 'Complete-plan preflight failed.');
+                refreshBoardInstructions();
+                finishTool(callId, responseId, {
+                  ok: false,
+                  accepted: false,
+                  reason: `The complete visual failed deterministic layout preflight: ${preflight.reasons.join('; ').slice(0, 240)}. Nothing was drawn. Simplify or reuse existing objects.`,
+                  board: boardContext.toolSnapshot(),
+                });
+                return;
+              }
+            }
+            for (const checkpoint of checkpoints) {
+              const eventId = await repo.addEvent(sessionId, 'semantic_scene', {
+                plan,
+                ops: checkpoint.ops,
+                checkpointId: checkpoint.id,
+                reveal: checkpoint.reveal,
+                semanticObjectId: checkpoint.semanticObjectId,
+                groupLabel: checkpoint.groupLabel,
+                ...(checkpoint.replacesGroup ? { replacesGroup: checkpoint.replacesGroup } : {}),
+              }, false);
+              pendingBoardOps.set(eventId, {
+                ops: checkpoint.ops,
+                semanticGroupId: checkpoint.semanticObjectId,
+                groupLabel: checkpoint.groupLabel,
+                ...(checkpoint.replacesGroup ? { replacesGroup: checkpoint.replacesGroup } : {}),
+              });
+              const cuePayload = {
+                type: 'board_ops',
+                ops: checkpoint.ops,
+                response_id: responseId,
+                event_id: eventId,
+                groupLabel: checkpoint.groupLabel,
+                checkpoint: checkpoint.reveal,
+                ...(checkpoint.replacesGroup ? { replacesGroup: checkpoint.replacesGroup } : {}),
+              };
+              const cueOptional = {
+                visualCueId: checkpoint.id,
+                semanticObjectId: checkpoint.semanticObjectId,
+              };
+              if (!planSegment.isSealed()) planSegment.addSemanticCue(cuePayload, cueOptional);
+              else if (!cancelledResponses.has(responseId)) {
+                const total = planSegment.totalSamples();
+                sendClient(cuePayload, identityForResponse(responseId), { ...cueOptional, audioSampleOffsets: { start: total, end: total } });
+              }
+            }
+            finishTool(callId, responseId, {
+              ok: true,
+              accepted: true,
+              applied: ops.length,
+              checkpoints: checkpoints.length,
+              noBoard: ops.length === 0,
+              action: plan.intent.action,
+              relevance: plan.intent.relevance,
+              questionAnswered: plan.intent.questionAnswered,
+              acceptedPendingObjectIds: ops.filter((op) => op.op === 'add').map((op) => op.id),
+              ...(forkedFrom ? { forkedFrom, forkedTo: groupId, note: 'The learner has marks on the requested section, so a new version was created beside it instead of replacing under their work.' } : {}),
+              board: boardContext.toolSnapshot(),
             });
-          }
-          finishTool(callId, responseId, {
-            ok: true,
-            accepted: true,
-            applied: ops.length,
-            checkpoints: checkpoints.length,
-            noBoard: ops.length === 0,
-            action: plan.intent.action,
-            relevance: plan.intent.relevance,
-            questionAnswered: plan.intent.questionAnswered,
-            acceptedPendingObjectIds: ops.filter((op) => op.op === 'add').map((op) => op.id),
-            board: boardContext.toolSnapshot(),
+          })().catch((error) => {
+            log(`session ${sessionId}: semantic plan staging error ${String(error).slice(0, 200)}`);
+            finishTool(callId, responseId, { ok: false, accepted: false, error: String(error).slice(0, 260) });
           });
         } catch (error) {
           finishTool(callId, responseId, {
@@ -597,6 +759,8 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
         }
         try {
           lessonState = reduceLesson(lessonState, { type: 'MOVE_PROPOSED', move: parsed.data });
+          const task = taskFromMove(parsed.data, responseId);
+          if (task) pendingDeliveredTask = task;
           const state = {
             activeConcept: lessonState.microObjective,
             strategy: lessonState.strategy,
@@ -623,6 +787,13 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
 
       case 'board_ops': {
         const validated = validateOps(args.ops);
+        // Raw destructive clears are not available to the model. Replacement
+        // is a staged, preflighted semantic_visual_plan decision.
+        const clears = validated.ops.filter((op) => op.op === 'clear');
+        if (clears.length > 0) {
+          validated.ops = validated.ops.filter((op) => op.op !== 'clear');
+          validated.rejected.push({ reason: 'clear is not available; use semantic_visual_plan with action "replace", or start a new section', raw: { op: 'clear' } });
+        }
         const semanticGroupId = lessonState.activeSemanticObjectId ?? `freeform-${identityForResponse(responseId)?.turnId ?? 'board'}`;
         const novel = boardContext.novelTutorOps(validated.ops, semanticGroupId);
         const { ops } = novel;
@@ -800,8 +971,7 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
           });
         }
         await repo.addEvent(sessionId, 'session_started', { resumed: Boolean(resume) });
-        lastCreateSource = 'start';
-        sendUpstream({ type: 'response.create' });
+        requestModelResponse('start', 'session-start');
         break;
       }
 
@@ -816,12 +986,13 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
         childHoldsFloor = false;
         lastLearnerEventId = await repo.addEvent(sessionId, 'learner_said', { text, via: 'text' });
         sendClient({ type: 'user_transcript', text });
+        try { lessonState = reduceLesson(lessonState, { type: 'LEARNER_RESPONSE_RECEIVED' }); }
+        catch { /* unsolicited typed turns are still valid input */ }
         sendUpstream({
           type: 'conversation.item.create',
           item: { type: 'message', role: 'user', content: [{ type: 'input_text', text }] },
         });
-        lastCreateSource = 'user';
-        sendUpstream({ type: 'response.create' });
+        requestModelResponse('user', `user-text-${idempotencyKey}`);
         break;
       }
 
@@ -849,33 +1020,73 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
         break;
       }
 
-      case 'board_event': {
-        const description = String(message.description ?? '').trim().slice(0, 4000);
-        const ops = learnerBoardOps(message.ops);
-        const imageDataUrl = safeBoardImage(message.imageDataUrl);
-        const semanticGroupId = typeof message.semanticObjectId === 'string' ? message.semanticObjectId.slice(0, 160) : undefined;
-        const semanticGroupLabel = typeof message.semanticGroupLabel === 'string' ? message.semanticGroupLabel.slice(0, 160) : undefined;
-        const parsedAnalysis = LearnerBoardAnalysisSchema.safeParse(message.analysis);
-        const analysis = parsedAnalysis.success ? parsedAnalysis.data : null;
-        if (!description && ops.length === 0) break;
-        await repo.addEvent(sessionId, 'learner_board', {
+      case 'draft_state': {
+        // The learner opened or closed a drawing draft. While a draft is
+        // open nothing may auto-create a response; pauses between strokes
+        // belong to the learner.
+        const draftId = String(message.draftId ?? '').slice(0, 160);
+        const open = message.open === true;
+        if (!draftId) break;
+        if (draftOpen !== open) {
+          draftOpen = open;
+          await repo.addEvent(sessionId, 'learner_draft', { draftId, open });
+        }
+        break;
+      }
+
+      case 'board_submission': {
+        // The learner pressed Done (or explicitly finished): one frozen,
+        // idempotent submission, one persisted learner event, one response.
+        const parsedSubmission = BoardSubmissionSchema.safeParse(message);
+        if (!parsedSubmission.success) {
+          sendClient({ type: 'board_submission_error', submissionId: String(message.submissionId ?? ''), reason: 'The submission was malformed. Your drawing is still on the board — press Done to try again.' });
+          break;
+        }
+        const submission = parsedSubmission.data;
+        if (respondedSubmissionIds.has(submission.submissionId)) {
+          sendClient({ type: 'board_submission_ack', submissionId: submission.submissionId, duplicate: true });
+          break;
+        }
+        const description = submission.description.trim().slice(0, 4000);
+        const ops = learnerBoardOps(submission.ops);
+        const imageDataUrl = safeBoardImage(submission.imageDataUrl);
+        const analysis = submission.analysis ?? null;
+        if (!description && ops.length === 0) {
+          sendClient({ type: 'board_submission_ack', submissionId: submission.submissionId, empty: true });
+          break;
+        }
+        respondedSubmissionIds.add(submission.submissionId);
+        draftOpen = false;
+        const eventId = await repo.addEvent(sessionId, 'learner_board', {
           description,
           ops,
+          submissionId: submission.submissionId,
+          draftId: submission.draftId,
           hasVisualContext: Boolean(imageDataUrl),
-          ...(semanticGroupId ? { semanticObjectId: semanticGroupId } : {}),
-          ...(semanticGroupLabel ? { groupLabel: semanticGroupLabel } : {}),
+          baseBoardRevision: submission.baseBoardRevision,
+          submittedBoardRevision: submission.submittedBoardRevision,
+          ...(submission.taskId ? { taskId: submission.taskId } : {}),
+          ...(submission.semanticGroupId ? { semanticObjectId: submission.semanticGroupId } : {}),
+          ...(submission.semanticGroupLabel ? { groupLabel: submission.semanticGroupLabel } : {}),
           ...(analysis ? { analysis } : {}),
         });
-        boardContext.apply(ops, 'learner', semanticGroupId, semanticGroupLabel);
+        // Evidence recorded for this answer cites the board event itself.
+        lastLearnerEventId = eventId;
+        boardContext.apply(ops, 'learner', submission.semanticGroupId, submission.semanticGroupLabel);
         if (analysis) boardContext.observeLearnerAnalysis(analysis);
         refreshBoardInstructions();
+        try { lessonState = reduceLesson(lessonState, { type: 'LEARNER_RESPONSE_RECEIVED' }); }
+        catch { /* a spontaneous drawing outside a task is still valid input */ }
         const content: Array<Record<string, unknown>> = [{
           type: 'input_text',
           text: [
-            '[The learner changed the shared board. Treat this as visual context, not a spoken message.]',
+            '[The learner finished a drawing on the shared board and pressed Done. This is their complete submitted answer, not a partial stroke.]',
+            submission.taskId ? `It answers task ${submission.taskId}.` : '',
             description,
             analysis ? `Deterministic vector analysis (spatial hints, not meaning): ${analysis.summary}` : '',
-            'Use the attached full-board/detail image to interpret the mark. If its meaning is ambiguous, ask the learner rather than guessing.',
+            imageDataUrl
+              ? 'Use the attached full-board/detail image to interpret the drawing. If its meaning is ambiguous, ask the learner rather than guessing.'
+              : 'No image is attached; rely on the vector analysis and board state. If the meaning is ambiguous, ask the learner rather than guessing.',
           ].filter(Boolean).join(' '),
         }];
         if (imageDataUrl) content.push({ type: 'input_image', image_url: imageDataUrl, detail: 'high' });
@@ -887,15 +1098,21 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
             content,
           },
         });
-        // A board-only turn is a real learner turn, not passive telemetry.
-        // If speech is also active, semantic VAD will create the one response
-        // after speech stops and the image remains context for that turn.
-        if (message.requestResponse === true && !speechInProgress) {
-          childHoldsFloor = false;
-          toolContinues = 0;
-          lastCreateSource = 'board';
-          sendUpstream({ type: 'response.create' });
-        }
+        sendClient({ type: 'board_submission_ack', submissionId: submission.submissionId });
+        // Mixed voice+drawing: if the learner is mid-utterance, speech stop
+        // completes the turn with this drawing already in context — still
+        // exactly one response.
+        if (!speechInProgress) requestModelResponse('board', submission.submissionId);
+        break;
+      }
+
+      case 'visual_preflight_result': {
+        const preflightId = String(message.preflight_id ?? '');
+        const resolver = pendingPreflights.get(preflightId);
+        if (resolver) resolver({
+          accepted: message.accepted === true,
+          reasons: Array.isArray(message.reasons) ? message.reasons.filter((reason): reason is string => typeof reason === 'string').map((reason) => reason.slice(0, 200)).slice(0, 8) : [],
+        });
         break;
       }
 
@@ -905,7 +1122,8 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
           await repo.markEventReleased(sessionId, message.event_id);
           const pending = pendingBoardOps.get(message.event_id);
           if (pending) {
-            boardContext.apply(pending.ops, 'tutor', pending.semanticGroupId, pending.groupLabel);
+            if (pending.replacesGroup) boardContext.applyReplacement(pending.ops, pending.replacesGroup, pending.groupLabel);
+            else boardContext.apply(pending.ops, 'tutor', pending.semanticGroupId, pending.groupLabel);
             pendingBoardOps.delete(message.event_id);
           } else {
             // Covers acknowledgement after an unusual connection handoff.
@@ -995,9 +1213,46 @@ function semanticTurnDetection(eagerness: 'medium' | 'high') {
   return {
     type: 'semantic_vad',
     eagerness,
-    create_response: true,
+    // The server-side coordinator is the only owner of response.create.
+    // VAD still chunks and transcribes speech, but a drawing draft, a mixed
+    // voice+drawing answer, and an explicit Done all decide response timing
+    // deterministically rather than the provider.
+    create_response: false,
     // Client-side sustained-speech confirmation owns cancellation; provider
     // VAD alone must not stop Noura on incidental noise.
     interrupt_response: false,
   } as const;
+}
+
+/** Builds the explicit learner-task contract from a structured teaching move. */
+function taskFromMove(move: TeachingMove, responseId: string): DeliveredTask | null {
+  if (!move.questionOrTask?.trim()) return null;
+  const responseMode = move.responseMode ?? 'voice';
+  const parsed = DeliveredTaskSchema.safeParse({
+    taskId: (move.taskId?.trim() || `task-${responseId}`).slice(0, 160),
+    prompt: move.questionOrTask.trim().slice(0, 500),
+    responseMode,
+    submitPolicy: submitPolicyForMode(responseMode),
+    ...(move.semanticObjectId ? { semanticGroupId: move.semanticObjectId } : {}),
+  });
+  return parsed.success ? parsed.data : null;
+}
+
+/**
+ * The learner has marks on the section the model asked to replace. Instead of
+ * destroying the geometry under their work, create the next version of the
+ * section beside it.
+ */
+function forkSectionPlan(args: Record<string, unknown>, target: string): { plan: Record<string, unknown>; forkedTo: string } {
+  const source = args as { intent?: Record<string, unknown>; groups?: Array<Record<string, unknown>> };
+  const match = /^(.*?)(?:-v(\d+))?$/.exec(target);
+  const base = match?.[1] ?? target;
+  const version = (match?.[2] ? Number(match[2]) : 1) + 1;
+  const forkedTo = `${base}-v${version}`.slice(0, 80);
+  const groups = (source.groups ?? []).map((group, index) => index === 0
+    ? { ...group, id: forkedTo, label: typeof group.label === 'string' ? `${group.label}`.slice(0, 160) : forkedTo }
+    : group);
+  const intent = { ...(source.intent ?? {}), action: 'create' };
+  delete (intent as { targetGroupId?: unknown }).targetGroupId;
+  return { plan: { ...args, intent, groups }, forkedTo };
 }

@@ -68,4 +68,45 @@ describe('BoardSceneCoordinator', () => {
     expect(board.applyReplay(ops, 'tutor', 'historical')).not.toBeNull();
     expect(board.current.items).toHaveLength(31);
   });
+
+  it('replaces one section atomically in a single commit, preserving other sections and learner marks', () => {
+    const board = new BoardSceneCoordinator();
+    board.applyTutorCheckpoint([{ op: 'add', id: 'model-box', spec: { kind: 'box', at: [500, 300], text: 'Old model' } }], 'working-model');
+    board.applyTutorCheckpoint([{ op: 'add', id: 'other-box', spec: { kind: 'box', at: [500, 300], text: 'Other page' } }], 'other-section');
+    board.applyLearner([{ op: 'add', id: 'sketch-kept', spec: { kind: 'path', points: [[120, 140], [180, 160]] } }], 'working-model');
+
+    const applied = board.applyTutorCheckpoint([
+      { op: 'add', id: 'new-model-box', spec: { kind: 'box', at: [500, 300], text: 'New model' } },
+    ], 'working-model', 'working-model');
+    // The committed scene simultaneously drops the old tutor content and
+    // shows the replacement — the swap is one state, never a blank interim.
+    expect(applied).not.toBeNull();
+    const ids = applied?.scene.items.map((item) => item.id);
+    expect(ids).not.toContain('model-box');
+    expect(ids).toContain('new-model-box');
+    expect(ids).toContain('other-box');
+    expect(ids).toContain('sketch-kept');
+  });
+
+  it('preflights a complete candidate plan without mutating the visible scene', () => {
+    const board = new BoardSceneCoordinator();
+    board.applyTutorCheckpoint([{ op: 'add', id: 'base-box', spec: { kind: 'box', at: [500, 300], text: 'Base' } }], 'base');
+    const before = board.current;
+
+    const good = board.preflightTutorOps([
+      { op: 'add', id: 'plan-box', spec: { kind: 'box', at: [500, 300], text: 'Planned idea' } },
+    ], 'plan-section');
+    expect(good.accepted).toBe(true);
+    expect(board.current).toBe(before);
+
+    // A plan violating the density budget is rejected — before anything is
+    // shown or the model is told it was accepted.
+    const dense = board.preflightTutorOps(Array.from({ length: 31 }, (_, index) => ({
+      op: 'add' as const, id: `dense-${index}`,
+      spec: { kind: 'line' as const, from: [40 + index * 4, 100] as [number, number], to: [40 + index * 4, 300] as [number, number] },
+    })), 'dense-section');
+    expect(dense.accepted).toBe(false);
+    expect(dense.reasons.join(' ')).toMatch(/density/);
+    expect(board.current).toBe(before);
+  });
 });

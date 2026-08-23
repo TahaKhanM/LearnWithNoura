@@ -28,7 +28,7 @@ Learner marks follow a parallel path:
 2. Learner marks belong to the active section and survive tutor replacement or clear operations.
 3. Only heard and acknowledged tutor checkpoints enter durable replay and agent board state.
 4. Visual Plan 2.0 states relevance, the concrete question answered, action, target section and density.
-5. `reuse` and `skip` create no section. `replace` keeps the section identity, clears tutor work in that section only, and preserves learner marks.
+5. `reuse` and `skip` create no section. `replace` is one atomic checkpoint: the section-scoped clear and the replacement content commit in a single visible frame (no standalone clear, no draw-on gap). If the learner has marks in the target section, the replacement is forked into a new section version (`…-v2`) instead of changing the geometry under their work, and a replacement is refused entirely while a learner drawing draft is open. Raw model-issued `clear` is rejected.
 6. Minimal sections contain at most 14 proposed operations; standard sections at most 30. The rendered section also has a 30-item, 720-character and crossing budget.
 7. A failed client quality check is reported to the agent; rejected marks are never described as visible.
 8. Vector learner analysis is explicitly a spatial hint. Vision or learner clarification supplies meaning.

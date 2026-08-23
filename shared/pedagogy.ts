@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ResponseModeSchema } from './lessonTurn.js';
 
 export const ResponseTaxonomySchema = z.enum([
   'correct',
@@ -24,6 +25,8 @@ export const TeachingMoveSchema = z.object({
   childFacingText: z.string().min(1).max(1200),
   questionOrTask: z.string().min(1).max(500).optional(),
   taskId: z.string().min(1).max(160).optional(),
+  /** How the learner is expected to answer the questionOrTask. */
+  responseMode: ResponseModeSchema.optional(),
   proposedAction: z.enum(['explain', 'visual', 'question', 'wait', 'feedback', 'practice', 'reteach', 'advance', 'complete']),
 });
 export type TeachingMove = z.infer<typeof TeachingMoveSchema>;

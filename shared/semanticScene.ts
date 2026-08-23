@@ -53,7 +53,17 @@ export interface SemanticCheckpoint {
   groupLabel: string;
   reveal: SemanticReveal;
   ops: BoardOp[];
+  /**
+   * When set, this checkpoint atomically replaces the named section: the
+   * client clears that section and applies these ops in one visible commit,
+   * with no intermediate blank frame and no draw-on animation gap.
+   */
+  replacesGroup?: string;
 }
+
+/** Dependency rank owned by code: targets always reveal before their labels,
+ * relations, and connectors, regardless of the order the model requested. */
+const CANONICAL_REVEAL_ORDER: SemanticReveal[] = ['outline', 'relation', 'label', 'connector', 'emphasis'];
 
 export function adaptSemanticScene(input: unknown): { plan: SemanticScenePlan; ops: BoardOp[]; checkpoints: SemanticCheckpoint[] } {
   const plan = SemanticScenePlanSchema.parse(input);
@@ -61,17 +71,27 @@ export function adaptSemanticScene(input: unknown): { plan: SemanticScenePlan; o
   const checkpoints: SemanticCheckpoint[] = [];
   for (const group of plan.groups) {
     if (group.template === 'no_board') continue;
-    const groupOps = [...(plan.intent.action === 'replace' ? [{ op: 'clear' as const }] : []), ...opsForGroup(group)];
-    const finalized = finalizePlan(plan, groupOps).ops;
+    const finalized = finalizePlan(plan, opsForGroup(group)).ops;
     ops.push(...finalized);
-    const buckets = new Map<SemanticReveal, BoardOp[]>();
-    for (const reveal of group.revealOrder) buckets.set(reveal, []);
-    for (const op of finalized) {
-      const requested = revealForOp(op);
-      const reveal = buckets.has(requested) ? requested : group.revealOrder[group.revealOrder.length - 1];
-      buckets.get(reveal)?.push(op);
+    if (plan.intent.action === 'replace') {
+      // A replacement is one atomic checkpoint. A standalone clear must
+      // never reach the board ahead of the content that replaces it.
+      checkpoints.push({
+        id: `${plan.planId}:${group.id}:0:replace`,
+        semanticObjectId: group.id,
+        groupLabel: group.label,
+        reveal: 'outline',
+        ops: finalized,
+        replacesGroup: group.id,
+      });
+      continue;
     }
-    for (const [index, reveal] of group.revealOrder.entries()) {
+    const buckets = new Map<SemanticReveal, BoardOp[]>();
+    for (const op of finalized) {
+      const reveal = revealForOp(op);
+      buckets.set(reveal, [...(buckets.get(reveal) ?? []), op]);
+    }
+    for (const [index, reveal] of CANONICAL_REVEAL_ORDER.entries()) {
       const checkpointOps = buckets.get(reveal) ?? [];
       if (checkpointOps.length === 0) continue;
       checkpoints.push({

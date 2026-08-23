@@ -33,10 +33,17 @@ export class BoardSceneCoordinator {
     return applied;
   }
 
-  applyTutorCheckpoint(ops: BoardOp[], semanticGroupId?: string): AppliedOps | null {
-    const applied = applyOps(this.value, ops, 'tutor', semanticGroupId);
+  /**
+   * A checkpoint that atomically replaces one section: the scoped clear and
+   * the replacement content land in a single committed scene, so there is
+   * never a frame where the old diagram is gone and the new one absent.
+   */
+  applyTutorCheckpoint(ops: BoardOp[], semanticGroupId?: string, replacesGroup?: string): AppliedOps | null {
+    const effectiveOps: BoardOp[] = replacesGroup ? [{ op: 'clear' }, ...ops] : ops;
+    const scope = replacesGroup ?? semanticGroupId;
+    const applied = applyOps(this.value, effectiveOps, 'tutor', scope);
     const fullCandidate = applied.scene;
-    let candidate = layoutTutorAnnotations(semanticGroupId ? sceneForGroup(fullCandidate, semanticGroupId) : fullCandidate);
+    let candidate = layoutTutorAnnotations(scope ? sceneForGroup(fullCandidate, scope) : fullCandidate);
     let inspection = tutorInspection(candidate);
     if (!inspection.accepted) {
       candidate = repairSceneOnce(candidate, inspection);
@@ -46,19 +53,44 @@ export class BoardSceneCoordinator {
     const quality = evaluateBoardQuality(candidate);
     this.quality = quality;
     if (!quality.accepted) return null;
-    const committed = semanticGroupId ? mergeScopedScene(fullCandidate, candidate) : candidate;
+    const committed = scope ? mergeScopedScene(fullCandidate, candidate) : candidate;
     this.value = committed;
     return { ...applied, scene: committed };
   }
 
-  applyReplay(ops: BoardOp[], owner: Owner, semanticGroupId?: string): AppliedOps | null {
+  /**
+   * Compiles and inspects a complete candidate plan offscreen, without
+   * touching the visible scene. The model only hears "accepted" for plans
+   * whose entire final scene passes deterministic layout and quality checks,
+   * so no later checkpoint can fail after earlier ones committed.
+   */
+  preflightTutorOps(ops: BoardOp[], semanticGroupId?: string, replacesGroup?: string): { accepted: boolean; reasons: string[] } {
+    const effectiveOps: BoardOp[] = replacesGroup ? [{ op: 'clear' }, ...ops] : ops;
+    const scope = replacesGroup ?? semanticGroupId;
+    const applied = applyOps(this.value, effectiveOps, 'tutor', scope);
+    let candidate = layoutTutorAnnotations(scope ? sceneForGroup(applied.scene, scope) : applied.scene);
+    let inspection = tutorInspection(candidate);
+    if (!inspection.accepted) {
+      candidate = repairSceneOnce(candidate, inspection);
+      inspection = tutorInspection(candidate);
+    }
+    if (!inspection.accepted) {
+      return { accepted: false, reasons: inspection.issues.slice(0, 8).map((issue) => `${issue.kind}:${issue.itemId}${issue.withItemId ? `:${issue.withItemId}` : ''}`) };
+    }
+    const quality = evaluateBoardQuality(candidate);
+    return quality.accepted ? { accepted: true, reasons: [] } : { accepted: false, reasons: quality.reasons.slice(0, 8) };
+  }
+
+  applyReplay(ops: BoardOp[], owner: Owner, semanticGroupId?: string, replacesGroup?: string): AppliedOps | null {
     if (owner === 'learner') return this.applyLearner(ops, semanticGroupId);
     // Released replay is historical visible truth. Re-run deterministic
     // annotation layout under current code, but never make an older accepted
     // section disappear because today's quality budget became stricter.
-    const applied = applyOps(this.value, ops, 'tutor', semanticGroupId);
-    const scoped = layoutTutorAnnotations(semanticGroupId ? sceneForGroup(applied.scene, semanticGroupId) : applied.scene);
-    const committed = semanticGroupId ? mergeScopedScene(applied.scene, scoped) : scoped;
+    const effectiveOps: BoardOp[] = replacesGroup ? [{ op: 'clear' }, ...ops] : ops;
+    const scope = replacesGroup ?? semanticGroupId;
+    const applied = applyOps(this.value, effectiveOps, 'tutor', scope);
+    const scoped = layoutTutorAnnotations(scope ? sceneForGroup(applied.scene, scope) : applied.scene);
+    const committed = scope ? mergeScopedScene(applied.scene, scoped) : scoped;
     this.value = committed;
     return { ...applied, scene: committed };
   }

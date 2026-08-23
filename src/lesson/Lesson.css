@@ -127,11 +127,42 @@
   flex: 1;
   min-height: 0;
   padding: 0 18px;
+  display: flex;
+  flex-direction: column;
+}
+
+/* The delivered task stays visible, beside — never covering — the board. */
+.lesson__task {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 10px;
+  margin: 0 0 8px;
+  padding: 8px 14px;
+  border: 1px solid rgba(44, 91, 224, 0.28);
+  border-radius: 12px;
+  background: var(--blue-wash, rgba(44, 91, 224, 0.08));
+  font-size: 15px;
+}
+
+.lesson__task strong {
+  color: var(--blue);
+  font-weight: 700;
+}
+
+.lesson__task-prompt {
+  color: var(--ink);
+}
+
+.lesson__task-hint {
+  color: var(--ink-soft);
+  font-size: 13.5px;
 }
 
 .lesson__surface {
   position: relative;
-  height: 100%;
+  flex: 1;
+  min-height: 0;
   border-radius: 14px;
   border: 1px solid var(--rail-line);
   background-color: var(--board);
@@ -294,6 +325,63 @@
   padding: 0 4px;
 }
 
+.lesson__part {
+  min-width: 74px;
+  text-align: center;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--ink-soft);
+  white-space: nowrap;
+}
+
+.lesson__draft-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-left: 6px;
+  border-left: 1px solid var(--rail-line);
+}
+
+.lesson__done {
+  appearance: none;
+  border: none;
+  border-radius: 10px;
+  background: var(--green);
+  color: white;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  min-height: 44px;
+  min-width: 76px;
+  padding: 0 18px;
+  cursor: pointer;
+  transition: filter 0.15s ease, transform 0.1s ease;
+}
+
+.lesson__done:hover:not(:disabled) {
+  filter: brightness(0.94);
+}
+
+.lesson__done:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.lesson__done:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.lesson__draft-note {
+  margin: 6px 2px 0;
+  font-size: 14px;
+  color: var(--ink-soft);
+}
+
+.lesson__draft-note--error {
+  color: var(--red);
+  font-weight: 600;
+}
+
 .lesson__color {
   appearance: none;
   border: 0;
@@ -454,7 +542,6 @@
   .lesson__bar { padding: 7px 12px; gap: 8px; }
   .lesson__brand { font-size: 18px; }
   .lesson__concept { max-width: 42vw; }
-  .lesson__tools { top: 10px; right: 22px; }
   .lesson__dock { padding: 8px 14px calc(10px + env(safe-area-inset-bottom)); }
   .lesson__ended-actions { width: 100%; flex-direction: column; }
   .lesson__surface { overflow: hidden; overscroll-behavior: contain; }
@@ -463,6 +550,57 @@
   .lesson__board-context { max-width: 56vw; }
 }
 
+/* Compact screens: the tools sit beside or below the board instead of
+ * covering the drawing surface, so no control ever hides educational
+ * content. Portrait gets one horizontally scrollable row under the board;
+ * short landscape gets a vertical rail beside it. */
+@media (max-width: 540px), (max-height: 500px) {
+  .lesson__task { margin-bottom: 6px; padding: 6px 10px; font-size: 14px; }
+}
+
+@media (max-width: 540px) {
+  .lesson__tools {
+    position: static;
+    order: 2;
+    margin-top: 8px;
+    max-width: none;
+    width: 100%;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    justify-content: flex-start;
+  }
+  .lesson__tools > * { flex: 0 0 auto; }
+}
+
+@media (max-height: 500px) and (min-width: 541px) {
+  /* A pinned, scrollable side rail: bounded height, never over the board. */
+  .lesson__tools {
+    top: 0;
+    bottom: 0;
+    right: 18px;
+    width: 88px;
+    flex-direction: column;
+    flex-wrap: nowrap;
+    overflow-y: auto;
+    justify-content: flex-start;
+    align-content: flex-start;
+  }
+  .lesson__tools > * { flex: 0 0 auto; }
+  .lesson__group-picker select { max-width: 76px; }
+  .lesson__surface { margin-right: 100px; }
+  .lesson__task { margin-right: 100px; }
+  .lesson__draft-controls {
+    flex-direction: column;
+    border-left: 0;
+    padding-left: 0;
+    border-top: 1px solid var(--rail-line);
+    padding-top: 6px;
+  }
+}
+
 @media (min-width: 541px) and (min-height: 501px) {
-  .lesson__overview-toggle, .lesson__pan-control { display: none; }
+  .lesson__overview-toggle, .lesson__pan-control, .lesson__part { display: none; }
+  /* Leave the floating tool tray its own lane so the task banner and the
+   * tools never overlap. */
+  .lesson__task { margin-right: 300px; }
 }

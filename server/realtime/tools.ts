@@ -80,8 +80,13 @@ export const REALTIME_TOOLS = [
         visualStrategy: { type: 'string', minLength: 1, maxLength: 220 },
         semanticObjectId: { type: 'string', minLength: 1, maxLength: 160 },
         childFacingText: { type: 'string', minLength: 1, maxLength: 1200 },
-        questionOrTask: { type: 'string', minLength: 1, maxLength: 500 },
+        questionOrTask: { type: 'string', minLength: 1, maxLength: 500, description: 'The exact question or small task handed to the learner. Works for imperatives too, e.g. "Circle the acute angle." Providing this yields the floor once it has been spoken.' },
         taskId: { type: 'string', minLength: 1, maxLength: 160 },
+        responseMode: {
+          type: 'string',
+          enum: ['voice', 'text', 'draw', 'choice', 'mixed'],
+          description: 'How the learner should answer questionOrTask. Use "draw" (or "mixed" for draw-and-explain) for board tasks: the learner then composes freely and presses Done; you will receive exactly one complete submitted drawing.',
+        },
         proposedAction: { type: 'string', enum: ['explain', 'visual', 'question', 'wait', 'feedback', 'practice', 'reteach', 'advance', 'complete'] },
       },
       required: ['rationale', 'microObjective', 'strategy', 'childFacingText', 'proposedAction'],
@@ -91,7 +96,7 @@ export const REALTIME_TOOLS = [
     type: 'function' as const,
     name: 'board_ops',
     description:
-      'Add one small increment to an existing shared-board visual. New diagrams should use semantic_visual_plan so code owns layout; use raw board_ops only when no semantic template fits.',
+      'Add one small increment to an existing shared-board visual. New diagrams should use semantic_visual_plan so code owns layout; use raw board_ops only when no semantic template fits. There is no clear operation: replacing a section is a semantic_visual_plan "replace" decision, and unrelated new ideas get a new section.',
     parameters: {
       type: 'object',
       additionalProperties: false,

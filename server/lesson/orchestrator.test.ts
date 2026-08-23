@@ -18,10 +18,28 @@ describe('lesson orchestrator', () => {
     expect(state.conceptEvidenceIds).toEqual(['evidence-1']);
   });
 
-  it('issues continuation instead of silently listening after an unresolved promise', () => {
+  it('never injects a question after an explanation; only a promised question continues once', () => {
     const state = createLessonState('water cycle', 'generation-1');
-    expect(responseHandoff(state, 'Next, we will connect evaporation to clouds.')).toBe('bounded_continuation');
-    expect(responseHandoff({ ...state, continuationAttempts: 1 }, 'Next, we will connect it.')).toBe('safe_question');
+    // A plain explanation without a promised question simply waits — the
+    // tutor is not forced to end every response with a question.
+    expect(responseHandoff(state, 'Next, we will connect evaporation to clouds.')).toBe('wait');
+    // A question the model explicitly promised but failed to ask continues
+    // exactly once, and never a second time.
+    const promisedQuestion = { ...state, owedAction: 'question' as const };
+    expect(responseHandoff(promisedQuestion, 'Evaporation lifts the water.')).toBe('bounded_continuation');
+    expect(responseHandoff({ ...promisedQuestion, continuationAttempts: 1 }, 'Evaporation lifts the water.')).toBe('wait');
     expect(responseHandoff(state, 'Where does the water go next?')).toBe('wait');
+  });
+
+  it('treats an imperative drawing task as a delivered handoff with an explicit submit policy', () => {
+    let state = createLessonState('angles', 'generation-1');
+    state = reduceLesson(state, { type: 'QUESTION_DELIVERED', taskId: 'circle-acute', text: 'Circle the acute angle.', responseMode: 'draw' });
+    expect(state.phase).toBe('AWAIT_LEARNER');
+    expect(state.turnOwner).toBe('learner');
+    expect(state.deliveredResponseMode).toBe('draw');
+    expect(state.deliveredSubmitPolicy).toBe('explicit');
+    // Once the task is delivered, a completed explanation response waits for
+    // the learner instead of injecting another question.
+    expect(responseHandoff(state, 'Take your time.')).toBe('wait');
   });
 });

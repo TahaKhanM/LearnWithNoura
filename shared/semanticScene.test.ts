@@ -27,8 +27,25 @@ describe('semantic visual adapters', () => {
     const { ops, checkpoints } = adaptSemanticScene(plan('pythagorean_area_proof'));
     expect(ops.filter((op) => op.op === 'add' && op.spec.kind === 'polygon').length).toBeGreaterThanOrEqual(10);
     expect(JSON.stringify(ops)).toContain('same 4 triangles');
-    expect(checkpoints.map((checkpoint) => checkpoint.reveal)).toEqual(['outline', 'label']);
+    // Reveal order is dependency-owned by code: connectors can never appear
+    // before the objects they join, regardless of what the model requested.
+    expect(checkpoints.map((checkpoint) => checkpoint.reveal)).toEqual(['outline', 'label', 'connector']);
     expect(new Set(checkpoints.flatMap((checkpoint) => checkpoint.ops).map((op) => 'id' in op ? op.id : ''))).toEqual(new Set(ops.map((op) => 'id' in op ? op.id : '')));
+  });
+
+  it('normalizes duplicate or dependency-inverted reveal requests without duplicating ops', () => {
+    const requested = plan('triangle_angle_sum');
+    requested.groups[0].revealOrder = ['label', 'label', 'outline', 'outline', 'relation'];
+    const { ops, checkpoints } = adaptSemanticScene(requested);
+    const reveals = checkpoints.map((checkpoint) => checkpoint.reveal);
+    // Canonical dependency order, deduplicated: outlines first, then
+    // relations, then labels — never the model's inverted request.
+    expect(reveals).toEqual([...new Set(reveals)]);
+    expect(reveals.indexOf('outline')).toBeLessThan(reveals.indexOf('label'));
+    expect(reveals.indexOf('outline')).toBeLessThan(reveals.indexOf('relation'));
+    const revealedIds = checkpoints.flatMap((checkpoint) => checkpoint.ops).map((op) => 'id' in op ? op.id : 'clear');
+    expect(revealedIds).toHaveLength(new Set(revealedIds).size);
+    expect(revealedIds).toHaveLength(ops.length);
   });
 
   it('keeps fractions on one exact scale and distinguishes slopes by colour', () => {
@@ -96,7 +113,7 @@ describe('semantic visual adapters', () => {
     expect(reuse.ops).toEqual([]);
   });
 
-  it('replaces one board section in place without clearing learner work', () => {
+  it('replaces one board section as a single atomic checkpoint without a standalone clear', () => {
     let scene = applyOps(emptyScene, [{ op: 'add', id: 'old-model', spec: { kind: 'box', at: [500, 300], text: 'Old model' } }], 'tutor', 'working-model').scene;
     scene = applyOps(scene, [{ op: 'add', id: 'sketch-kept', spec: { kind: 'path', points: [[10, 10], [20, 20], [30, 15]] } }], 'learner', 'working-model').scene;
     const replacement = adaptSemanticScene({
@@ -104,7 +121,12 @@ describe('semantic visual adapters', () => {
       intent: { objective: 'Replace the model', domain: 'process', relevance: 'essential', questionAnswered: 'What is the corrected order?', rationale: 'The old sequence is misleading.', action: 'replace', targetGroupId: 'working-model', density: 'minimal' },
       groups: [{ id: 'working-model', label: 'Corrected model', revealOrder: ['outline', 'connector'], template: 'worked_steps', parameters: { steps: ['First', 'Second'] } }],
     });
-    scene = applyOps(scene, replacement.ops, 'tutor', 'working-model').scene;
+    // No model-visible clear op, and the whole replacement is one checkpoint
+    // so the swap commits atomically — never a blank board between clears.
+    expect(replacement.ops.some((op) => op.op === 'clear')).toBe(false);
+    expect(replacement.checkpoints).toHaveLength(1);
+    expect(replacement.checkpoints[0].replacesGroup).toBe('working-model');
+    scene = applyOps(scene, [{ op: 'clear' }, ...replacement.checkpoints[0].ops], 'tutor', 'working-model').scene;
     expect(scene.items.some((item) => item.id === 'old-model')).toBe(false);
     expect(scene.items.some((item) => item.id === 'sketch-kept')).toBe(true);
     expect(scene.items.some((item) => item.id === 'working-model-step-0')).toBe(true);
