@@ -35,7 +35,7 @@ The active path is:
 4. A deterministic lesson reducer owns legal transitions and forbids waiting without a delivered question or task.
 5. One `GenerationScope` owns audio, provisional captions, transient visuals, character tasks, timers, reconnect work and fallback cancellation.
 6. The PCM sample clock releases phrase captions, semantic visual cues, the pen and character attention.
-7. Semantic visual intent is adapted into exact BoardOps, inspected, repaired once and otherwise rejected as one transaction.
+7. Semantic visual intent is adapted into exact BoardOps; free-standing annotations are placed against real stroke geometry, inspected, repaired once and otherwise rejected as one transaction.
 8. Heard, accepted visual checkpoints become the in-memory board immediately; completed draw-on animation acknowledges them for durable replay.
 9. Evidence observations carry source event IDs, normalized source spans, taxonomy, confidence basis, opportunity, independence and turn/generation lineage.
 10. Ending creates an immutable event cutoff; continuing creates a new linked session.
@@ -101,6 +101,8 @@ The browser suites use synthetic learner fixtures. Paid live-provider runs are n
 - Voice interruption requires sustained adaptive microphone energy plus independent server speech-start confirmation. Short noises and server VAD alone do not cancel Noura.
 - Confirmed voice interruption temporarily raises semantic endpointing eagerness for that one turn, then restores the normal child-friendly setting. Speech-end-to-response and speech-end-to-audio intervals are recorded separately.
 - Released tutor checkpoints finish and remain visible across re-renders and turn changes, then acknowledge durable replay even if interruption happened mid-animation. Learner strokes are committed as learner-owned BoardOps, replay after refresh and send a compressed transient board image to Realtime so Noura can inspect and respond to a board-only turn.
+- The server mirrors only released tutor checkpoints and committed learner marks into the agent’s current-board instructions. Teaching-move and drawing tool results return reusable object IDs; exact raw redraws and mostly equivalent semantic scenes are suppressed so questions adapt the visible diagram in place.
+- Triangle angle-sum/straight-line proofs have a code-owned semantic template, while arbitrary raw diagrams still pass through the general geometry-aware annotation solver.
 - Captions use PCM-timed phrase cues and final transcript correction. The app does not claim provider word timestamps or exact word synchronization.
 
 ## Known blockers

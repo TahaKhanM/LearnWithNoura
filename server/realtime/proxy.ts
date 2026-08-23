@@ -13,6 +13,7 @@ import { createLessonState, reduceLesson, responseHandoff } from '../lesson/orch
 import { ResponseTaxonomySchema, TeachingMoveSchema, type ResponseTaxonomy } from '../../shared/pedagogy.js';
 import { adaptSemanticScene } from '../../shared/semanticScene.js';
 import { ResponseSegmentAnnotator } from './segmentAnnotator.js';
+import { loadReleasedBoardContext } from './boardContext.js';
 import type { DomainRepository } from '../store/domain.js';
 
 /**
@@ -60,6 +61,13 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
     return;
   }
 
+  const baseInstructions = buildInstructions({
+    childName: child.name,
+    childAge: child.age,
+    goal: session.goal,
+  });
+  let boardContext = await loadReleasedBoardContext(repo, sessionId);
+
   const upstreamUrl = `${REALTIME_URL}?model=${encodeURIComponent(model)}`;
   const upstream = options.createUpstream?.(upstreamUrl, apiKey) ?? new NodeWebSocket(upstreamUrl, {
     headers: { Authorization: `Bearer ${apiKey}` },
@@ -90,6 +98,7 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
   const responseIdentities = new Map<string, GenerationIdentity>();
   const responseTranscript = new Map<string, string>();
   const responseSegments = new Map<string, ResponseSegmentAnnotator>();
+  const pendingBoardOps = new Map<number, BoardOp[]>();
   let activeResponseId: string | null = null;
   let speechInProgress = false;
   let endpointingEagerness: 'medium' | 'high' = 'medium';
@@ -147,6 +156,14 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
     });
   }
 
+  function currentInstructions(): string {
+    return `${baseInstructions}\n\n${boardContext.prompt()}`;
+  }
+
+  function refreshBoardInstructions(): void {
+    sendUpstream({ type: 'session.update', session: { type: 'realtime', instructions: currentInstructions() } });
+  }
+
   function responseSegment(responseId: string): ResponseSegmentAnnotator {
     const existing = responseSegments.get(responseId);
     if (existing) return existing;
@@ -186,11 +203,7 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
       session: {
         type: 'realtime',
         output_modalities: ['audio'],
-        instructions: buildInstructions({
-          childName: child.name,
-          childAge: child.age,
-          goal: session.goal,
-        }),
+        instructions: currentInstructions(),
         tools: REALTIME_TOOLS,
         tool_choice: 'auto',
         audio: {
@@ -462,8 +475,20 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
       case 'semantic_visual_plan': {
         try {
           const { plan, ops, checkpoints } = adaptSemanticScene(args);
+          const equivalent = boardContext.equivalentTutorScene(ops);
+          if (equivalent.equivalent) {
+            finishTool(callId, responseId, {
+              ok: true,
+              accepted: false,
+              reason: 'An equivalent visual is already visible. Reuse its IDs and adapt it in place.',
+              equivalentObjects: equivalent.duplicates,
+              board: boardContext.toolSnapshot(),
+            });
+            break;
+          }
           for (const checkpoint of checkpoints) {
             const eventId = await repo.addEvent(sessionId, 'semantic_scene', { plan, ops: checkpoint.ops, checkpointId: checkpoint.id, reveal: checkpoint.reveal }, false);
+            pendingBoardOps.set(eventId, checkpoint.ops);
             responseSegment(responseId).addSemanticCue({
               type: 'board_ops',
               ops: checkpoint.ops,
@@ -482,6 +507,8 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
             applied: ops.length,
             checkpoints: checkpoints.length,
             noBoard: ops.length === 0,
+            acceptedPendingObjectIds: ops.filter((op) => op.op === 'add').map((op) => op.id),
+            board: boardContext.toolSnapshot(),
           });
         } catch (error) {
           finishTool(callId, responseId, {
@@ -513,7 +540,12 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
           responseSegment(responseId).addSemanticCue({ type: 'lesson_state', state }, {
             ...(lessonState.activeSemanticObjectId ? { semanticObjectId: lessonState.activeSemanticObjectId } : {}),
           });
-          finishTool(callId, responseId, { ok: true, legalPhase: lessonState.phase, owedAction: lessonState.owedAction });
+          finishTool(callId, responseId, {
+            ok: true,
+            legalPhase: lessonState.phase,
+            owedAction: lessonState.owedAction,
+            board: boardContext.toolSnapshot(),
+          });
         } catch (error) {
           finishTool(callId, responseId, { ok: false, error: String(error).slice(0, 220) });
         }
@@ -521,17 +553,22 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
       }
 
       case 'board_ops': {
-        const { ops, rejected } = validateOps(args.ops);
+        const validated = validateOps(args.ops);
+        const novel = boardContext.novelTutorOps(validated.ops);
+        const { ops } = novel;
         if (ops.length > 0) {
           const eventId = await repo.addEvent(sessionId, 'board_ops', { ops }, false);
+          pendingBoardOps.set(eventId, ops);
           responseSegment(responseId).addSemanticCue({ type: 'board_ops', ops, response_id: responseId, event_id: eventId });
         }
         finishTool(callId, responseId, {
-          ok: rejected.length === 0,
+          ok: validated.rejected.length === 0,
           applied: ops.length,
-          ...(rejected.length > 0
-            ? { rejected: rejected.map((r) => r.reason).slice(0, 5) }
+          ...(validated.rejected.length > 0
+            ? { rejected: validated.rejected.map((r) => r.reason).slice(0, 5) }
             : {}),
+          ...(novel.duplicates.length > 0 ? { skippedEquivalentRedraws: novel.duplicates } : {}),
+          board: boardContext.toolSnapshot(),
         });
         break;
       }
@@ -738,6 +775,8 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
         const imageDataUrl = safeBoardImage(message.imageDataUrl);
         if (!description && ops.length === 0) break;
         await repo.addEvent(sessionId, 'learner_board', { description, ops, hasVisualContext: Boolean(imageDataUrl) });
+        boardContext.apply(ops, 'learner');
+        refreshBoardInstructions();
         const content: Array<Record<string, unknown>> = [{
           type: 'input_text',
           text: `[The learner changed the shared board. Treat this as visual context, not a spoken message.] ${description}`,
@@ -767,6 +806,15 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
         // The child has actually seen this batch; it is now part of the board.
         if (typeof message.event_id === 'number') {
           await repo.markEventReleased(sessionId, message.event_id);
+          const ops = pendingBoardOps.get(message.event_id);
+          if (ops) {
+            boardContext.apply(ops, 'tutor');
+            pendingBoardOps.delete(message.event_id);
+          } else {
+            // Covers acknowledgement after an unusual connection handoff.
+            boardContext = await loadReleasedBoardContext(repo, sessionId);
+          }
+          refreshBoardInstructions();
         }
         break;
       }

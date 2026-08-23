@@ -3,7 +3,7 @@ import { validateOps, type BoardOp, type Vec } from './boardOps.js';
 
 export const VISUAL_PLAN_VERSION = '1.0.0' as const;
 export const VisualTemplateSchema = z.enum([
-  'pythagorean_area_proof', 'unit_circle_projection', 'fraction_comparison',
+  'pythagorean_area_proof', 'triangle_angle_sum', 'unit_circle_projection', 'fraction_comparison',
   'slope_comparison', 'causal_cycle', 'argument_structure', 'cause_effect',
   'grammar_structure', 'table', 'timeline', 'no_board',
 ]);
@@ -73,6 +73,7 @@ function opsForGroup(group: SemanticScenePlan['groups'][number]): BoardOp[] {
   const prefix = group.id;
   switch (group.template) {
     case 'pythagorean_area_proof': return pythagoreanProof(prefix);
+    case 'triangle_angle_sum': return triangleAngleSum(prefix);
     case 'unit_circle_projection': return unitCircle(prefix, numberParam(group.parameters, 'angleDegrees', 60));
     case 'fraction_comparison': return fractionComparison(prefix, numberArray(group.parameters.values, [2 / 3, 3 / 5]), stringArray(group.parameters.labels, ['2/3', '3/5']));
     case 'slope_comparison': return slopeComparison(prefix, numberArray(group.parameters.slopes, [1, 2, -1]));
@@ -133,8 +134,25 @@ function pythagoreanProof(prefix: string): BoardOp[] {
   ops.push({ op: 'add', id: `${prefix}-label-c`, color: 'green', spec: { kind: 'text', at: [left + 150, 470], text: 'c² square', size: 'big' } });
   ops.push({ op: 'add', id: `${prefix}-label-ab`, color: 'blue', spec: { kind: 'text', at: [right, 470], text: 'a² + b² squares' } });
   ops.push({ op: 'add', id: `${prefix}-equivalence`, color: 'ink', spec: { kind: 'connector', from: [420, 270], to: [580, 270], label: 'same 4 triangles' } });
-  ops.push({ op: 'add', id: `${prefix}-equation`, color: 'green', spec: { kind: 'equation', at: [440, 350], latex: 'c^2=a^2+b^2' } });
+  // The equation occupies the measured centre gutter between both frames.
+  ops.push({ op: 'add', id: `${prefix}-equation`, color: 'green', spec: { kind: 'equation', at: [393, 330], latex: 'c^2=a^2+b^2', size: 'small' } });
   return ops;
+}
+
+/** A code-owned straight-line proof layout for the angle sum of a triangle. */
+function triangleAngleSum(prefix: string): BoardOp[] {
+  const left: Vec = [230, 430];
+  const apex: Vec = [500, 135];
+  const right: Vec = [770, 430];
+  return [
+    { op: 'add', id: `${prefix}-triangle`, color: 'ink', spec: { kind: 'polygon', points: [left, apex, right], closed: true } },
+    { op: 'add', id: `${prefix}-straight-line`, color: 'ink', spec: { kind: 'line', from: [165, apex[1]], to: [835, apex[1]], dash: true } },
+    { op: 'add', id: `${prefix}-angle-a`, color: 'blue', spec: { kind: 'angle', vertex: left, from: right, to: apex, radius: 48, label: 'A' } },
+    { op: 'add', id: `${prefix}-angle-c`, color: 'amber', spec: { kind: 'angle', vertex: apex, from: left, to: right, radius: 54, label: 'C' } },
+    { op: 'add', id: `${prefix}-angle-b`, color: 'red', spec: { kind: 'angle', vertex: right, from: apex, to: left, radius: 48, label: 'B' } },
+    { op: 'add', id: `${prefix}-straight-label`, color: 'ink', spec: { kind: 'label', target: `${prefix}-straight-line`, side: 'above', text: 'straight line = 180°' } },
+    { op: 'add', id: `${prefix}-sum`, color: 'green', spec: { kind: 'equation', at: [390, 480], latex: 'A+B+C=180^\\circ', size: 'big' } },
+  ];
 }
 
 function unitCircle(prefix: string, degrees: number): BoardOp[] {

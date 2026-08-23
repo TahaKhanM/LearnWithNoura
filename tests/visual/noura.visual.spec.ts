@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test';
 
 const KEY_EDUCATIONAL_TEXT: Record<string, string> = {
   pythagorean: 'c^2=a^2+b^2',
+  'triangle-angles': 'A+B+C=180^\\circ',
   'unit-circle': '(1/2, √3/2)',
   slopes: 'y = 1x',
   fractions: '2/3',
@@ -25,12 +26,12 @@ for (const viewport of [
   });
 }
 
-for (const scene of ['pythagorean', 'unit-circle', 'slopes', 'fractions', 'water-cycle', 'argument', 'history', 'grammar', 'no-board']) {
+for (const scene of ['pythagorean', 'triangle-angles', 'unit-circle', 'slopes', 'fractions', 'water-cycle', 'argument', 'history', 'grammar', 'no-board']) {
   test(`canonical ${scene} scene`, async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.emulateMedia({ reducedMotion: 'reduce' });
-    await page.goto('/dev/board');
-    await page.getByRole('button', { name: scene, exact: true }).click();
+    await page.goto(scene === 'triangle-angles' ? '/dev/board?scene=triangle-angles' : '/dev/board');
+    if (scene !== 'triangle-angles') await page.getByRole('button', { name: scene, exact: true }).click();
     await expect(page.locator('[data-active-scene]')).toContainText(scene);
     await expect(page).toHaveScreenshot(`scene-${scene}.png`, { animations: 'disabled' });
   });
@@ -42,8 +43,8 @@ for (const scene of ['pythagorean', 'unit-circle', 'slopes', 'fractions', 'water
     test(`canonical ${scene} scene ${viewport.name}`, async ({ page }) => {
       await page.setViewportSize(viewport);
       await page.emulateMedia({ reducedMotion: 'reduce' });
-      await page.goto('/dev/board');
-      await page.getByRole('button', { name: scene, exact: true }).click();
+      await page.goto(scene === 'triangle-angles' ? '/dev/board?scene=triangle-angles' : '/dev/board');
+      if (scene !== 'triangle-angles') await page.getByRole('button', { name: scene, exact: true }).click();
       await expect(page.locator('[data-active-scene]')).toContainText(scene);
       if (viewport.name === 'mobile-focus' && scene !== 'no-board') {
         const requiredKeys = await page.locator('[data-required-text-key]').evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-required-text-key')));

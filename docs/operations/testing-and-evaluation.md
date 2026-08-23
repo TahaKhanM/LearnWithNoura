@@ -8,7 +8,9 @@ Browser suites use a dedicated synthetic SQLite directory and separate ports. Vi
 
 Voice-interruption unit/integration rows cover short loud noise plus server VAD, sustained local energy without server confirmation, adaptive room-noise calibration, sustained speech with both detectors, one-turn high-eagerness endpointing with medium restoration, the `speech_stopped → thinking` phase, and speech-end-to-response/audio metrics. These deterministic checks prevent false cancellation and turn-latency lifecycle regressions but do not replace physical-room microphone testing.
 
-The actual Lesson browser rows require an animated tutor object to survive callback/phase re-renders and mid-animation learner interruption, finish visibly, emit replay acknowledgement after identity replacement, retain the learner stroke, and send a board-only response request with sanitized path operations plus a size-bounded JPEG board context. A separate row verifies the visible thinking state at speech stop before reply audio.
+The actual Lesson browser rows require an animated tutor object to survive callback/phase re-renders and mid-animation learner interruption, finish visibly, emit replay acknowledgement after identity replacement, retain the learner stroke, and send a board-only response request with sanitized path operations plus a size-bounded JPEG board context. Another adversarial browser row reconstructs the reported triangle/text overlap, requires the annotation coordinate to move, samples the rendered triangle path every two board units and fails if any stroke enters the padded text box. A separate row verifies the visible thinking state at speech stop before reply audio.
+
+Board-awareness tests reconstruct released tutor and learner objects while excluding unheard events, require reusable IDs in Realtime/fallback context, suppress exact raw redraws and mostly equivalent semantic scenes, and verify learner marks remain explicitly owned. Canonical geometry includes the triangle angle-sum template at desktop, tablet and mobile-focus sizes; compact traversal must expose every required annotation/equation without clipping.
 
 ## Live-provider budget
 

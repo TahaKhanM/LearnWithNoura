@@ -166,7 +166,15 @@ export function nodeBBox(node: RenderNode): BBox {
     return { x, y: node.y - node.size, w: node.w, h: node.size * 1.25 };
   }
   if (node.type === 'katex') {
-    return { x: node.x, y: node.y, w: node.w, h: node.h };
+    // Keep layout/focus geometry identical to the foreignObject rendered by
+    // KatexBlock. The previous estimate under-reported both dimensions and
+    // allowed equations to be clipped in compact semantic viewports.
+    return {
+      x: node.x,
+      y: node.y,
+      w: Math.min(BOARD_W - node.x, node.w * 1.6 + 40),
+      h: node.h * 1.6 + 20,
+    };
   }
   if (node.bbox) return node.bbox;
   // Parse coordinates out of the path data for a conservative bound.

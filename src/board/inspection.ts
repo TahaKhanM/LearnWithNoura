@@ -1,5 +1,6 @@
 import { BOARD_H, BOARD_W, type ShapeSpec, type Vec } from '../../shared/boardOps';
-import { compileScene, type BBox } from './compile';
+import { compileScene, nodeBBox, type BBox } from './compile';
+import { annotationGeometryCollisions } from './annotationLayout';
 import type { SceneItem, SceneState } from './scene';
 
 const SAFE = { x: 24, y: 24, w: BOARD_W - 48, h: BOARD_H - 48 };
@@ -8,7 +9,7 @@ const TEXT_BEARING = new Set<ShapeSpec['kind']>(['text', 'equation', 'label', 'p
 
 export interface SceneInspection {
   accepted: boolean;
-  issues: Array<{ itemId: string; kind: 'bounds' | 'collision' | 'reserved' | 'non_finite'; withItemId?: string }>;
+  issues: Array<{ itemId: string; kind: 'bounds' | 'collision' | 'stroke_collision' | 'reserved' | 'non_finite'; withItemId?: string }>;
 }
 
 export function inspectScene(scene: SceneState): SceneInspection {
@@ -24,12 +25,20 @@ export function inspectScene(scene: SceneState): SceneInspection {
   for (let left = 0; left < compiled.length; left += 1) {
     const leftSource = scene.items.find((item) => item.id === compiled[left].id);
     if (!leftSource || !TEXT_BEARING.has(leftSource.spec.kind)) continue;
+    const leftTextBoxes = compiled[left].nodes.filter((node) => node.type !== 'path').map(nodeBBox);
+    if (leftTextBoxes.length === 0) continue;
     for (let right = left + 1; right < compiled.length; right += 1) {
       const rightSource = scene.items.find((item) => item.id === compiled[right].id);
       if (!rightSource || !TEXT_BEARING.has(rightSource.spec.kind)) continue;
       if (dependentPair(leftSource, rightSource)) continue;
-      if (overlapRatio(compiled[left].bbox, compiled[right].bbox) > 0.16) issues.push({ itemId: compiled[right].id, kind: 'collision', withItemId: compiled[left].id });
+      const rightTextBoxes = compiled[right].nodes.filter((node) => node.type !== 'path').map(nodeBBox);
+      if (leftTextBoxes.some((leftBox) => rightTextBoxes.some((rightBox) => overlapRatio(leftBox, rightBox) > 0.16))) {
+        issues.push({ itemId: compiled[right].id, kind: 'collision', withItemId: compiled[left].id });
+      }
     }
+  }
+  for (const collision of annotationGeometryCollisions(scene)) {
+    issues.push({ ...collision, kind: 'stroke_collision' });
   }
   return { accepted: issues.length === 0, issues };
 }

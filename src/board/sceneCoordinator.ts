@@ -1,5 +1,6 @@
 import type { BoardOp } from '../../shared/boardOps';
 import { inspectScene, repairSceneOnce, type SceneInspection } from './inspection';
+import { layoutTutorAnnotations } from './annotationLayout';
 import { applyOps, emptyScene, type AppliedOps, type Owner, type SceneState } from './scene';
 
 /**
@@ -29,7 +30,7 @@ export class BoardSceneCoordinator {
 
   applyTutorCheckpoint(ops: BoardOp[]): AppliedOps | null {
     const applied = applyOps(this.value, ops, 'tutor');
-    let candidate = applied.scene;
+    let candidate = layoutTutorAnnotations(applied.scene);
     let inspection = tutorInspection(candidate);
     if (!inspection.accepted) {
       candidate = repairSceneOnce(candidate, inspection);
