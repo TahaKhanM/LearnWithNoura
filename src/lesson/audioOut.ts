@@ -1,11 +1,12 @@
 /**
  * Plays the tutor's PCM stream through Web Audio with a sample-accurate
  * clock. Chunks are scheduled ahead as they arrive; because we know
- * exactly how much audio has been scheduled and how much has played,
+ * exactly how much audio has been scheduled and how much has played —
+ * per response, even when several responses are queued back to back —
  * (a) stopping locally on interruption is instant, (b) captions and board
  * operations can be released at the exact moment in speech where the
  * model emitted them, and (c) truncation can tell the server precisely
- * how much the child heard.
+ * how much of each conversation item the child actually heard.
  */
 
 const RATE = 24000;
@@ -15,16 +16,27 @@ interface ActiveSource {
   gain: GainNode;
 }
 
+interface Timeline {
+  responseId: string;
+  itemId: string | null;
+  /** Context time when this response's first chunk starts playing. */
+  start: number;
+  scheduledSec: number;
+  /** RMS energy per chunk, offsets relative to `start`. */
+  energy: { at: number; rms: number }[];
+}
+
+export interface HeardItem {
+  itemId: string;
+  heardMs: number;
+  fullyPlayed: boolean;
+}
+
 export class AudioOut {
   private ctx: AudioContext | null = null;
   private cursor = 0;
   private sources = new Set<ActiveSource>();
-  /** Context time at which the current response's audio began. */
-  private responseStart = 0;
-  private responseScheduledSec = 0;
-  private responseId: string | null = null;
-  /** RMS energy per scheduled chunk, for avatar mouth movement. */
-  private energyTimeline: { at: number; rms: number }[] = [];
+  private timelines: Timeline[] = [];
   onPlaybackEnd: () => void = () => {};
 
   private context(): AudioContext {
@@ -39,7 +51,7 @@ export class AudioOut {
       try {
         await ctx.resume();
       } catch {
-        /* stays suspended; play() will retry */
+        /* stays suspended; scheduling still works, silently */
       }
     }
   }
@@ -49,7 +61,7 @@ export class AudioOut {
   }
 
   /** Decodes a base64 PCM16 chunk and schedules it after what's queued. */
-  append(responseId: string, base64: string): void {
+  append(responseId: string, itemId: string | null, base64: string): void {
     const ctx = this.context();
     const bytes = atob(base64);
     const samples = bytes.length >> 1;
@@ -68,14 +80,15 @@ export class AudioOut {
       sumSquares += f * f;
     }
 
-    if (responseId !== this.responseId) {
-      this.responseId = responseId;
-      this.responseScheduledSec = 0;
-      this.responseStart = Math.max(ctx.currentTime + 0.05, this.cursor);
-      this.energyTimeline = [];
-    }
-
     const at = Math.max(ctx.currentTime + 0.05, this.cursor);
+    let timeline = this.timelines[this.timelines.length - 1];
+    if (!timeline || timeline.responseId !== responseId) {
+      timeline = { responseId, itemId, start: at, scheduledSec: 0, energy: [] };
+      this.timelines.push(timeline);
+      if (this.timelines.length > 8) this.timelines.shift();
+    }
+    if (!timeline.itemId && itemId) timeline.itemId = itemId;
+
     const source = ctx.createBufferSource();
     const gain = ctx.createGain();
     source.buffer = buffer;
@@ -89,48 +102,69 @@ export class AudioOut {
     };
     source.start(at);
     this.cursor = at + buffer.duration;
-    this.responseScheduledSec += buffer.duration;
-    this.energyTimeline.push({
-      at: at - this.responseStart,
-      rms: Math.sqrt(sumSquares / samples),
-    });
+    timeline.scheduledSec += buffer.duration;
+    timeline.energy.push({ at: at - timeline.start, rms: Math.sqrt(sumSquares / samples) });
   }
 
-  /** How much of response `id` has actually been heard, in ms. */
-  playedMs(id: string | null = this.responseId): number {
+  private findTimeline(responseId: string): Timeline | undefined {
+    return this.timelines.find((t) => t.responseId === responseId);
+  }
+
+  /** How much of response `responseId` has actually been heard, in ms. */
+  playedMs(responseId: string): number {
     const ctx = this.ctx;
-    if (!ctx || id === null || id !== this.responseId) return 0;
-    const played = (ctx.currentTime - this.responseStart) * 1000;
-    return Math.max(0, Math.min(played, this.responseScheduledSec * 1000));
+    const timeline = this.findTimeline(responseId);
+    if (!ctx || !timeline) return 0;
+    const played = (ctx.currentTime - timeline.start) * 1000;
+    return Math.max(0, Math.min(played, timeline.scheduledSec * 1000));
   }
 
-  /** Total audio received for the current response, in ms. */
-  scheduledMs(): number {
-    return this.responseScheduledSec * 1000;
+  /** Total audio received so far for a response, in ms. */
+  scheduledMs(responseId: string): number {
+    return (this.findTimeline(responseId)?.scheduledSec ?? 0) * 1000;
   }
 
   get speaking(): boolean {
-    return this.sources.size > 0 && this.playedMs() < this.scheduledMs() - 1;
+    return this.sources.size > 0;
   }
 
   /** Voice loudness right now (0..~0.5), driving the avatar's mouth. */
   currentEnergy(): number {
-    if (!this.ctx || this.sources.size === 0) return 0;
-    const t = (this.ctx.currentTime - this.responseStart);
-    let latest = 0;
-    for (const entry of this.energyTimeline) {
-      if (entry.at <= t) latest = entry.rms;
-      else break;
+    const ctx = this.ctx;
+    if (!ctx || this.sources.size === 0) return 0;
+    const now = ctx.currentTime;
+    for (const timeline of this.timelines) {
+      const t = now - timeline.start;
+      if (t < 0 || t > timeline.scheduledSec) continue;
+      let latest = 0;
+      for (const entry of timeline.energy) {
+        if (entry.at <= t) latest = entry.rms;
+        else break;
+      }
+      return latest;
     }
-    return latest;
+    return 0;
   }
 
   /**
-   * Immediate local stop. Returns how many ms of the current response had
-   * been heard, so the caller can truncate the conversation item.
+   * Immediate local stop. Reports how much of each conversation item had
+   * been heard, so the caller can truncate the transcript truthfully.
    */
-  stop(): number {
-    const heard = this.playedMs();
+  stop(): HeardItem[] {
+    const ctx = this.ctx;
+    const heard: HeardItem[] = [];
+    if (ctx) {
+      const now = ctx.currentTime;
+      for (const timeline of this.timelines) {
+        if (!timeline.itemId) continue;
+        const playedSec = Math.max(0, Math.min(now - timeline.start, timeline.scheduledSec));
+        heard.push({
+          itemId: timeline.itemId,
+          heardMs: Math.round(playedSec * 1000),
+          fullyPlayed: playedSec >= timeline.scheduledSec - 0.01,
+        });
+      }
+    }
     for (const { node, gain } of this.sources) {
       node.onended = null;
       try {
@@ -142,13 +176,12 @@ export class AudioOut {
         /* already stopped */
       }
     }
+    // Deliberately no onPlaybackEnd here: stop() is the interruption path,
+    // and the interrupter owns what happens to pending state.
     this.sources.clear();
     this.cursor = 0;
-    this.responseId = null;
-    this.responseScheduledSec = 0;
-    this.energyTimeline = [];
-    this.onPlaybackEnd();
-    return Math.round(heard);
+    this.timelines = [];
+    return heard;
   }
 
   async close(): Promise<void> {

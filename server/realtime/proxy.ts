@@ -240,10 +240,16 @@ export function connectRealtimeProxy(client: ClientSocket, options: ProxyOptions
 
       case 'error': {
         const error = event.error as { message?: string; code?: string } | undefined;
-        // An expected race: cancelling a turn that just finished.
-        if (error?.code === 'response_cancel_not_active') break;
+        // Expected races, harmless: cancelling a turn that just finished, or
+        // continuing after a tool call when VAD already started a response.
+        const benign =
+          error?.code === 'response_cancel_not_active' ||
+          error?.code === 'conversation_already_has_active_response' ||
+          /active response in progress/i.test(error?.message ?? '');
         log(`session ${sessionId}: upstream error ${JSON.stringify(event.error).slice(0, 300)}`);
-        sendClient({ type: 'error', message: error?.message ?? 'Tutor error.' });
+        if (!benign) {
+          sendClient({ type: 'error', message: 'The tutor hit a snag — it will recover in a moment.' });
+        }
         break;
       }
 

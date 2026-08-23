@@ -67,13 +67,18 @@ interface StampedOps {
   stampMs: number;
   responseId: string;
   ops: BoardOp[];
+  arrivedAt: number;
 }
 
 interface StampedText {
   stampMs: number;
   responseId: string;
   delta: string;
+  arrivedAt: number;
 }
+
+/** If playback never advances (suspended context), release anyway. */
+const SILENT_RELEASE_MS = 5000;
 
 type Listener = () => void;
 
@@ -88,10 +93,11 @@ export class RealtimeSession {
   private pendingText: StampedText[] = [];
   private releaseTimer: number | null = null;
   private currentResponseId: string | null = null;
-  private currentItemId: string | null = null;
   /** Responses killed by interruption; their late events must be ignored. */
   private deadResponses = new Set<string>();
   private tutorLine = '';
+  /** Which response the live caption line belongs to. */
+  private liveLineResponse: string | null = null;
   private reconnectAttempts = 0;
   private closedByUs = false;
   /** Sustained mic energy while the tutor speaks trips a local barge-in. */
@@ -246,7 +252,7 @@ export class RealtimeSession {
       return;
     }
     const interruptedAt = performance.now();
-    const heardMs = this.audioOut.stop();
+    const heard = this.audioOut.stop();
     if (this.currentResponseId !== null) {
       this.deadResponses.add(this.currentResponseId);
       if (this.deadResponses.size > 24) {
@@ -257,8 +263,11 @@ export class RealtimeSession {
     this.pendingText = [];
     this.hotFrames = 0;
     this.commitTutorLine();
-    if (this.currentItemId !== null && heardMs > 0) {
-      this.send({ type: 'truncate', item_id: this.currentItemId, audio_end_ms: heardMs });
+    // Tell the model exactly how much of each spoken item the child heard.
+    for (const item of heard) {
+      if (!item.fullyPlayed) {
+        this.send({ type: 'truncate', item_id: item.itemId, audio_end_ms: item.heardMs });
+      }
     }
     if (reason !== 'server') this.send({ type: 'interrupt' });
     const interruptToSilenceMs = Math.round(performance.now() - interruptedAt);
@@ -288,21 +297,20 @@ export class RealtimeSession {
 
       case 'response_started':
         this.currentResponseId = typeof message.response_id === 'string' ? message.response_id : null;
-        this.tutorLine = '';
         break;
 
       case 'audio': {
         if (typeof message.delta !== 'string') break;
         const responseId = String(message.response_id ?? '');
         if (this.deadResponses.has(responseId)) break;
-        this.currentItemId = typeof message.item_id === 'string' ? message.item_id : this.currentItemId;
+        const itemId = typeof message.item_id === 'string' ? message.item_id : null;
         if (!this.firstAudioSeen && this.askAt > 0) {
           this.firstAudioSeen = true;
           const askToFirstAudioMs = Math.round(performance.now() - this.askAt);
           this.send({ type: 'metric', name: 'ask_to_first_audio', ms: askToFirstAudioMs });
           this.update({ metrics: { ...this.snapshot.metrics, askToFirstAudioMs } });
         }
-        this.audioOut.append(responseId, message.delta);
+        this.audioOut.append(responseId, itemId, message.delta);
         if (this.snapshot.phase !== 'speaking') this.update({ phase: 'speaking' });
         break;
       }
@@ -312,9 +320,10 @@ export class RealtimeSession {
         const responseId = String(message.response_id ?? '');
         if (this.deadResponses.has(responseId)) break;
         this.pendingText.push({
-          stampMs: this.audioOut.scheduledMs(),
+          stampMs: this.audioOut.scheduledMs(responseId),
           responseId,
           delta: message.delta,
+          arrivedAt: performance.now(),
         });
         break;
       }
@@ -328,9 +337,10 @@ export class RealtimeSession {
         const responseId = String(message.response_id ?? '');
         if (this.deadResponses.has(responseId)) break;
         this.pendingOps.push({
-          stampMs: this.audioOut.scheduledMs(),
+          stampMs: this.audioOut.scheduledMs(responseId),
           responseId,
           ops: message.ops as BoardOp[],
+          arrivedAt: performance.now(),
         });
         break;
       }
@@ -374,9 +384,15 @@ export class RealtimeSession {
         break;
       }
 
-      case 'error':
-        this.update({ error: String(message.message ?? 'Something went wrong.') });
+      case 'error': {
+        const text = String(message.message ?? 'Something went wrong.');
+        this.update({ error: text });
+        // Transient snags shouldn't linger on a child's screen.
+        window.setTimeout(() => {
+          if (this.snapshot.error === text) this.update({ error: null });
+        }, 6000);
         break;
+      }
 
       case 'upstream_closed':
         // The proxy lost OpenAI; our socket will close next and reconnect.
@@ -389,28 +405,45 @@ export class RealtimeSession {
 
   // ----- synchronised release ------------------------------------------------
 
+  private shouldRelease(item: { stampMs: number; responseId: string; arrivedAt: number }, leadMs: number): boolean {
+    if (this.audioOut.playedMs(item.responseId) + leadMs >= item.stampMs) return true;
+    // Backstop for silent/suspended audio: don't hold content forever.
+    return performance.now() - item.arrivedAt > SILENT_RELEASE_MS;
+  }
+
   private releasePending(): void {
-    const played = this.audioOut.playedMs();
     const energy = this.audioOut.currentEnergy();
     if (Math.abs(energy - this.snapshot.voiceEnergy) > 0.01) {
       this.update({ voiceEnergy: energy });
     }
 
-    while (this.pendingText.length > 0 && this.pendingText[0].stampMs <= played + 120) {
+    while (this.pendingText.length > 0 && this.shouldRelease(this.pendingText[0], 120)) {
       const item = this.pendingText.shift() as StampedText;
+      if (this.liveLineResponse !== item.responseId) {
+        // A new spoken segment begins: settle the previous caption line.
+        this.commitTutorLine();
+        this.liveLineResponse = item.responseId;
+      }
       this.tutorLine += item.delta;
       this.showTutorLine();
     }
 
-    while (this.pendingOps.length > 0 && this.pendingOps[0].stampMs <= played + 60) {
+    while (this.pendingOps.length > 0 && this.shouldRelease(this.pendingOps[0], 60)) {
       const item = this.pendingOps.shift() as StampedOps;
       this.onBoardOps(item.ops, true);
     }
   }
 
   private handlePlaybackEnd(): void {
-    // Flush any text the stamps didn't quite release before audio ended.
-    for (const item of this.pendingText) this.tutorLine += item.delta;
+    // Natural end of speech: flush what the stamps didn't quite release,
+    // still respecting caption boundaries between spoken segments.
+    for (const item of this.pendingText) {
+      if (this.liveLineResponse !== item.responseId) {
+        this.commitTutorLine();
+        this.liveLineResponse = item.responseId;
+      }
+      this.tutorLine += item.delta;
+    }
     this.pendingText = [];
     this.showTutorLine();
     for (const item of this.pendingOps) this.onBoardOps(item.ops, true);
