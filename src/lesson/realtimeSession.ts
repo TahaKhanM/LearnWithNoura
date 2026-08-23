@@ -443,7 +443,7 @@ export class RealtimeSession {
           catch { /* malformed line */ }
         }
       }
-    } catch (error) {
+    } catch {
       if (!scope.signal.aborted) this.update({ error: 'Noura is unreachable right now.' });
     } finally {
       if (scope.active && this.snapshot.phase === 'thinking') this.update({ phase: 'fallback' });
