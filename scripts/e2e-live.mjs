@@ -6,7 +6,7 @@ import { chromium } from 'playwright';
 
 const wav = process.argv[2] && !process.argv[2].startsWith('--') ? process.argv[2] : null;
 const textOnly = process.argv.includes('--text-only');
-const shots = '/tmp/seneca-shots';
+const shots = '/tmp/noura-shots';
 
 const args = ['--autoplay-policy=no-user-gesture-required'];
 if (!textOnly) {
@@ -119,7 +119,7 @@ await browser.close();
 // Server-side truth: what did the session record?
 try {
   const { DatabaseSync } = await import('node:sqlite');
-  const db = new DatabaseSync('data/seneca.db', { readOnly: true });
+  const db = new DatabaseSync('data/noura.db', { readOnly: true });
   const rows = db
     .prepare(
       `SELECT type, payload FROM events WHERE session_id = (

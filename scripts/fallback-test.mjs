@@ -45,6 +45,6 @@ const state = await page.evaluate(() => ({
   lastCaption: document.querySelector('.lesson__caption')?.textContent?.slice(0, 140),
 }));
 mark('state ' + JSON.stringify(state));
-await page.screenshot({ path: '/tmp/seneca-shots/fallback-mode.png' });
+await page.screenshot({ path: '/tmp/noura-shots/fallback-mode.png' });
 await browser.close();
 console.log('fallback test done');

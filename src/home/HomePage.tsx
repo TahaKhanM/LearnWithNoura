@@ -12,6 +12,8 @@ interface ChildRow {
 
 interface AppConfig {
   realtime: boolean;
+  lessonsAvailable: boolean;
+  durableStorage: boolean;
   deploymentMode: string;
   syntheticOnly: boolean;
 }
@@ -90,13 +92,13 @@ export function HomePage() {
         return response.json() as Promise<AppConfig>;
       })
       .then(setConfig)
-      .catch(() => setConfig({ realtime: false, deploymentMode: 'unavailable', syntheticOnly: true }));
+      .catch(() => setConfig({ realtime: false, lessonsAvailable: false, durableStorage: false, deploymentMode: 'unavailable', syntheticOnly: true }));
   }, [refresh]);
 
   const createLearner = useCallback(
     async (event: React.FormEvent) => {
       event.preventDefault();
-      if (creating) return;
+      if (creating || !config?.lessonsAvailable) return;
       const name = newName.trim();
       const age = Number(newAge);
       const nextNameError = name ? null : 'Enter the learner’s name.';
@@ -127,11 +129,11 @@ export function HomePage() {
         setCreating(false);
       }
     },
-    [creating, newAge, newName, refresh, chooseChild],
+    [creating, config?.lessonsAvailable, newAge, newName, refresh, chooseChild],
   );
 
   const start = useCallback(async () => {
-    if (!selectedId || !goal.trim() || starting || !config?.realtime) return;
+    if (!selectedId || !goal.trim() || starting || !config?.lessonsAvailable) return;
     setStarting(true);
     setActionError(null);
     try {
@@ -148,7 +150,7 @@ export function HomePage() {
       setActionError('Noura could not start the lesson. Try again.');
       setStarting(false);
     }
-  }, [selectedId, goal, starting, config?.realtime, navigate]);
+  }, [selectedId, goal, starting, config?.lessonsAvailable, navigate]);
 
   const selected = children?.find((child) => child.id === selectedId) ?? null;
   const firstUse = children?.length === 0;
@@ -170,9 +172,12 @@ export function HomePage() {
             Private prototype · use synthetic learner details only.
           </p>
         )}
-        {config && !config.realtime && (
+        {config && !config.lessonsAvailable && (
           <div className="home__warning" role="alert">
-            <strong>Lessons are unavailable.</strong> The lesson service is not configured. Parent records remain viewable.
+            <strong>Interactive lessons are unavailable here.</strong>{' '}
+            {config.deploymentMode === 'preview-synthetic'
+              ? 'This protected Preview has no shared durable store, so it is limited to synthetic interface and visual-fixture review.'
+              : 'The provider or durable lesson service is not configured.'}
           </div>
         )}
         {loadError && (
@@ -199,6 +204,7 @@ export function HomePage() {
               nameError={nameError}
               ageError={ageError}
               creating={creating}
+              disabled={!config?.lessonsAvailable}
               onName={setNewName}
               onAge={setNewAge}
               onSubmit={createLearner}
@@ -245,6 +251,7 @@ export function HomePage() {
                   nameError={nameError}
                   ageError={ageError}
                   creating={creating}
+                  disabled={!config?.lessonsAvailable}
                   onName={setNewName}
                   onAge={setNewAge}
                   onSubmit={createLearner}
@@ -281,7 +288,7 @@ export function HomePage() {
                   <button
                     className="home__start"
                     onClick={start}
-                    disabled={!goal.trim() || starting || !config?.realtime}
+                    disabled={!goal.trim() || starting || !config?.lessonsAvailable}
                     data-testid="start-session"
                   >
                     {starting ? 'Preparing the board…' : `Hand to ${selected.name}`}
@@ -304,6 +311,7 @@ function LearnerForm(props: {
   nameError: string | null;
   ageError: string | null;
   creating: boolean;
+  disabled: boolean;
   onName: (value: string) => void;
   onAge: (value: string) => void;
   onSubmit: (event: React.FormEvent) => void;
@@ -339,7 +347,7 @@ function LearnerForm(props: {
           <span id="learner-age-help" className="home__field-help">Used only to adjust explanations.</span>
         )}
       </div>
-      <button type="submit" disabled={props.creating}>
+      <button type="submit" disabled={props.creating || props.disabled}>
         {props.creating ? 'Creating…' : 'Create learner'}
       </button>
     </form>
