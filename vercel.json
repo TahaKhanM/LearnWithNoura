@@ -1,0 +1,30 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "vite",
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
+  "functions": {
+    "api/ws.ts": {
+      "maxDuration": 300
+    },
+    "api/[...path].ts": {
+      "maxDuration": 60
+    }
+  },
+  "rewrites": [
+    { "source": "/healthz", "destination": "/api/healthz" },
+    { "source": "/version", "destination": "/api/version" },
+    { "source": "/ws/lesson", "destination": "/api/ws" },
+    { "source": "/lesson/:path*", "destination": "/index.html" },
+    { "source": "/parent", "destination": "/index.html" },
+    { "source": "/dev/board", "destination": "/index.html" }
+  ],
+  "redirects": [
+    {
+      "source": "/:path*",
+      "has": [{ "type": "host", "value": "www.learnwithnoura.com" }],
+      "destination": "https://learnwithnoura.com/:path*",
+      "permanent": true
+    }
+  ]
+}

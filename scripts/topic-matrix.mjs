@@ -13,7 +13,7 @@ const TOPICS = [
 
 const only = process.argv[2] !== undefined ? Number(process.argv[2]) : null;
 const list = only !== null ? [TOPICS[only]] : TOPICS;
-const shots = '/tmp/seneca-shots';
+const shots = '/tmp/noura-shots';
 
 const browser = await chromium.launch({ args: ['--autoplay-policy=no-user-gesture-required'] });
 

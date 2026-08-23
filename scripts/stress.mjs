@@ -4,7 +4,7 @@
 // 3. learner drawing — the tutor is told and can refer to it
 import { chromium } from 'playwright';
 
-const shots = '/tmp/seneca-shots';
+const shots = '/tmp/noura-shots';
 const browser = await chromium.launch({ args: ['--autoplay-policy=no-user-gesture-required'] });
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 const errors = [];

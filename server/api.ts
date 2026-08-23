@@ -27,9 +27,13 @@ export function createApi(
   const parent = (request: Request): string | null => security.parentId(request);
 
   router.get('/config', (_req, res) => {
+    const deploymentMode = process.env.NOURA_DEPLOYMENT_MODE ?? 'local-synthetic';
+    const durableStorage = deploymentMode === 'local-synthetic';
     res.json({
       realtime: Boolean(process.env.OPENAI_API_KEY),
-      deploymentMode: process.env.NOURA_DEPLOYMENT_MODE ?? 'local-synthetic',
+      lessonsAvailable: Boolean(process.env.OPENAI_API_KEY) && durableStorage,
+      durableStorage,
+      deploymentMode,
       syntheticOnly: process.env.NOURA_SYNTHETIC_ONLY !== 'false',
     });
   });

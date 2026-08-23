@@ -33,7 +33,7 @@ app.disable('x-powered-by');
 app.use(express.json({ limit: '256kb' }));
 app.use(security.originAndRateGuard);
 
-app.get('/healthz', (_req, res) => {
+app.get(['/healthz', '/api/healthz'], (_req, res) => {
   const durableStorageAvailable = runtimeConfig.deploymentMode === 'local-synthetic';
   const healthy = runtimeConfig.providerConfigured && durableStorageAvailable;
   res.status(healthy ? 200 : 503).json({
@@ -44,7 +44,7 @@ app.get('/healthz', (_req, res) => {
   });
 });
 
-app.get('/version', (_req, res) => {
+app.get(['/version', '/api/version'], (_req, res) => {
   res.json({
     brand: 'Noura',
     version: process.env.npm_package_version ?? '0.0.0',
