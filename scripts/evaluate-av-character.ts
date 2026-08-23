@@ -58,7 +58,7 @@ for (let frame = 0, ms = 0; ms <= 2_000; frame += 1, ms = frame * FRAME_MS) {
 const sourceTrace = { observedEvents, frames, staleCueWriteAccepted };
 const metrics = deriveMetrics(sourceTrace, samples);
 const gateResults = evaluateGates(metrics);
-const negativeFixtures = verifyNegativeFixtures(sourceTrace, samples);
+const negativeControls = verifyNegativeControls(sourceTrace, samples);
 
 const wavPath = join(outputDir, 'synthetic-interruption.wav');
 writeFileSync(wavPath, wavBuffer(samples, RATE));
@@ -75,12 +75,12 @@ writeFileSync(reportPath, `${JSON.stringify({
   renderedCharacterPenMouthPhase: 'NOT_CLAIMED',
   metrics,
   gateResults,
-  negativeFixtures,
+  negativeControls,
   sourceTrace,
 }, null, 2)}\n`);
 
-const ok = Object.values(gateResults).every(Boolean) && Object.values(negativeFixtures).every(Boolean);
-console.log(JSON.stringify({ ok, wavPath, reportPath, metrics, gateResults, negativeFixtures }, null, 2));
+const ok = Object.values(gateResults).every(Boolean) && negativeControls.allIsolated;
+console.log(JSON.stringify({ ok, wavPath, reportPath, metrics, gateResults, negativeControls }, null, 2));
 if (!ok) process.exit(1);
 
 function caption(cueId: string, endSample: number, sequence: number, delta: string): ResponseCue {
@@ -93,15 +93,12 @@ function visual(cueId: string, endSample: number, sequence: number): ResponseCue
 
 function deriveMetrics(trace: typeof sourceTrace, waveform: Int16Array) {
   const eventTime = (type: string, cueId?: string) => trace.observedEvents.find((event) => event.type === type && (!cueId || event.cueId === cueId))?.ms;
-  const captionErrors = [Math.abs((eventTime('caption', 'caption-1') ?? Infinity) - seededContract.captionMs)];
-  const visualErrors = [Math.abs((eventTime('visual', 'visual-1') ?? Infinity) - seededContract.visualMs)];
   const detectorAt = eventTime('detector') ?? Infinity;
   const cancelAt = eventTime('cancel_applied') ?? Infinity;
   const afterCancel = trace.frames.find((frame) => frame.ms + 0.1 >= cancelAt);
   return {
-    captionPhraseMedianAbsoluteErrorMs: percentile(captionErrors, 50),
-    captionPhraseP95AbsoluteErrorMs: percentile(captionErrors, 95),
-    visualCueP95ErrorMs: percentile(visualErrors, 95),
+    captionCueAbsoluteErrorMs: Math.abs((eventTime('caption', 'caption-1') ?? Infinity) - seededContract.captionMs),
+    visualCueAbsoluteErrorMs: Math.abs((eventTime('visual', 'visual-1') ?? Infinity) - seededContract.visualMs),
     finalCorrectionMs: (eventTime('final', 'final-1') ?? Infinity) - seededContract.responseCompleteMs,
     pendingCuesImmediatelyAfterCancel: afterCancel?.pendingCues ?? Infinity,
     staleCueWritesAcceptedAfterCancel: trace.staleCueWriteAccepted,
@@ -114,9 +111,8 @@ function deriveMetrics(trace: typeof sourceTrace, waveform: Int16Array) {
 
 function evaluateGates(metrics: ReturnType<typeof deriveMetrics>) {
   return {
-    captionMedian: metrics.captionPhraseMedianAbsoluteErrorMs <= 350,
-    captionP95: metrics.captionPhraseP95AbsoluteErrorMs <= 750,
-    visualP95: metrics.visualCueP95ErrorMs <= 500,
+    captionTiming: metrics.captionCueAbsoluteErrorMs <= 350,
+    visualTiming: metrics.visualCueAbsoluteErrorMs <= 500,
     finalCorrection: metrics.finalCorrectionMs <= 500,
     cancellationClearsPendingCues: metrics.pendingCuesImmediatelyAfterCancel === 0,
     staleCueWrites: metrics.staleCueWritesAcceptedAfterCancel === 0,
@@ -125,23 +121,38 @@ function evaluateGates(metrics: ReturnType<typeof deriveMetrics>) {
   };
 }
 
-function verifyNegativeFixtures(trace: typeof sourceTrace, waveform: Int16Array) {
-  const cases: Record<string, (copy: typeof sourceTrace, pcm: Int16Array) => void> = {
-    captionMedian: (copy) => { copy.observedEvents.find((event) => event.type === 'caption')!.ms += 800; },
-    captionP95: (copy) => { copy.observedEvents.find((event) => event.type === 'caption')!.ms += 800; },
-    visualP95: (copy) => { copy.observedEvents.find((event) => event.type === 'visual')!.ms += 800; },
+type GateResults = ReturnType<typeof evaluateGates>;
+type GateName = keyof GateResults;
+
+function verifyNegativeControls(trace: typeof sourceTrace, waveform: Int16Array) {
+  const cases: Record<GateName, (copy: typeof sourceTrace, pcm: Int16Array) => void> = {
+    captionTiming: (copy) => { copy.observedEvents.find((event) => event.cueId === 'caption-1')!.ms += 800; },
+    visualTiming: (copy) => { copy.observedEvents.find((event) => event.cueId === 'visual-1')!.ms += 800; },
     finalCorrection: (copy) => { copy.observedEvents.find((event) => event.type === 'final')!.ms += 800; },
     cancellationClearsPendingCues: (copy) => { copy.frames.find((frame) => frame.ms + 0.1 >= seededContract.detectorMs)!.pendingCues = 1; },
     staleCueWrites: (copy) => { copy.staleCueWriteAccepted = 1; },
     postCancelAudio: (_copy, pcm) => seedAudioResumption(pcm, 1_200, 80),
     interruptionAttention: (copy) => { copy.frames.find((frame) => frame.ms + 0.1 >= seededContract.detectorMs)!.gazeTarget = 'tutor_pen'; },
   };
-  return Object.fromEntries(Object.entries(cases).map(([gate, mutate]) => {
+  const baseline = evaluateGates(deriveMetrics(trace, waveform));
+  const matrix = {} as Record<GateName, GateResults>;
+  const isolated = {} as Record<GateName, boolean>;
+  for (const gate of Object.keys(cases) as GateName[]) {
     const copy = structuredClone(trace);
     const pcm = new Int16Array(waveform);
-    mutate(copy, pcm);
-    return [gate, evaluateGates(deriveMetrics(copy, pcm))[gate as keyof ReturnType<typeof evaluateGates>] === false];
-  }));
+    cases[gate](copy, pcm);
+    const result = evaluateGates(deriveMetrics(copy, pcm));
+    matrix[gate] = result;
+    isolated[gate] = result[gate] === false && (Object.keys(baseline) as GateName[])
+      .every((candidate) => candidate === gate || (baseline[candidate] === true && result[candidate] === true));
+  }
+  return {
+    contract: 'Each row mutates captured trace/PCM input; its named gate must be false and every unrelated retained gate must remain baseline true.',
+    baseline,
+    matrix,
+    isolated,
+    allIsolated: Object.values(isolated).every(Boolean),
+  };
 }
 
 function synthesizeWaveform(durationMs: number, startMs: number, silenceMs: number, fadeStartMs: number): Int16Array {
@@ -192,11 +203,6 @@ function rmsAt(pcm: Int16Array, ms: number, windowMs: number): number {
   let sum = 0;
   for (let index = start; index < end; index += 1) sum += (pcm[index] / 32768) ** 2;
   return Math.sqrt(sum / Math.max(1, end - start));
-}
-
-function percentile(values: number[], value: number): number {
-  const sorted = [...values].sort((left, right) => left - right);
-  return sorted[Math.min(sorted.length - 1, Math.max(0, Math.ceil((value / 100) * sorted.length) - 1))];
 }
 
 function wavBuffer(pcm: Int16Array, sampleRate: number): Buffer {

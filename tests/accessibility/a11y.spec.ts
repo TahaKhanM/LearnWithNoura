@@ -127,11 +127,48 @@ test('actual Lesson start, listening, thinking, speaking/visual, reduced-motion 
   expect(landscapeOverflow.y).toBeLessThanOrEqual(1);
   await assertActiveBoardTextContained(page, ['1/2', '3/4']);
 
-  await page.setViewportSize({ width: 1280, height: 800 });
-  await page.evaluate(() => { document.body.style.zoom = '2'; });
-  const zoomOverflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
-  expect(zoomOverflow).toBeLessThanOrEqual(1);
+  // Playwright cannot drive browser UI zoom. A 640×400 CSS viewport is the
+  // deterministic effective viewport of a 1280×800 page at 200% and exercises
+  // the same compact width/height media-query path. Physical/browser zoom is
+  // intentionally kept UNVERIFIED in the evidence ledger.
+  await page.setViewportSize({ width: 640, height: 400 });
+  const compactControls = [
+    page.getByLabel('Board section', { exact: true }),
+    page.getByRole('button', { name: 'Previous part of this board section' }),
+    page.getByRole('button', { name: 'Next part of this board section' }),
+    page.getByRole('button', { name: 'Fit the full board overview' }),
+  ];
+  for (const control of compactControls) {
+    await expect(control).toBeVisible();
+    const rect = await control.boundingBox();
+    expect(rect, `missing compact control geometry: ${await control.getAttribute('aria-label')}`).not.toBeNull();
+    expect(rect!.height).toBeGreaterThanOrEqual(44);
+  }
+  const effectiveViewportOverflow = await page.evaluate(() => ({
+    x: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    y: document.documentElement.scrollHeight - document.documentElement.clientHeight,
+  }));
+  expect(effectiveViewportOverflow.x).toBeLessThanOrEqual(1);
+  expect(effectiveViewportOverflow.y).toBeLessThanOrEqual(1);
   await assertActiveBoardTextContained(page, ['1/2', '3/4']);
+  await compactControls[0].focus();
+  await page.keyboard.press('Tab');
+  const focusAppearance = await page.evaluate(() => {
+    const active = document.activeElement as HTMLElement | null;
+    const style = active ? getComputedStyle(active) : null;
+    const rect = active?.getBoundingClientRect();
+    return {
+      label: active?.getAttribute('aria-label'),
+      focusVisible: active?.matches(':focus-visible') ?? false,
+      outlineStyle: style?.outlineStyle,
+      outlineWidth: Number.parseFloat(style?.outlineWidth ?? '0'),
+      contained: Boolean(rect && rect.left >= 0 && rect.top >= 0 && rect.right <= innerWidth && rect.bottom <= innerHeight),
+    };
+  });
+  expect(focusAppearance).toMatchObject({
+    label: 'Next part of this board section', focusVisible: true, outlineStyle: 'solid', contained: true,
+  });
+  expect(focusAppearance.outlineWidth).toBeGreaterThanOrEqual(2);
 });
 
 async function assertNoSeriousAxe(page: import('@playwright/test').Page) {
