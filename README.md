@@ -1,134 +1,110 @@
-# Seneca
+# Noura
 
-A voice-first AI tutor for children that teaches at a live whiteboard.
-Seneca talks with the child, draws precise visuals in sync with its own
-speech, can be interrupted mid-sentence, adapts its explanation to what
-the child actually says and turns the session into honest, evidence-based
-notes for a parent.
+Noura is a voice-first interactive tutor that leads a child through one small teaching objective at a time, speaks naturally, builds exact educational visuals, listens for interruption and gives a parent an evidence-linked account of what happened.
 
-## What a lesson looks like
+Canonical production origin: [https://learnwithnoura.com](https://learnwithnoura.com)
 
-1. A parent picks (or adds) a learner and a goal on the home screen.
-2. The child lands in the lesson workspace and presses **Start**.
-3. Seneca greets them by name and starts teaching out loud, drawing on
-   the board as it speaks: shapes, angle arcs, graphs, number lines,
-   process diagrams, typeset equations.
-4. The child just talks. Interrupting mid-sentence stops the voice
-   locally in ~1ms, cancels stale drawing and Seneca answers what was
-   actually asked. Typing works too and the child can draw on the board.
-5. During the lesson Seneca records structured evidence ("struggled with
-   X, high confidence, they said: …") and keeps a visible lesson state.
-6. **End lesson** produces a calibrated summary; the parent dashboard
-   shows what was worked on, strengths and struggles *with the evidence
-   for each* and a recommended next step. No invented percentages.
+## Readiness boundary
 
-![A live lesson: the child interrupted mid-proof and Seneca changed tack](docs/screenshots/lesson-triangle-interrupted.png)
+| Environment | Intended use | Current status |
+| --- | --- | --- |
+| Local | Synthetic development and private single-host demonstrations | Supported with SQLite; microphone/acoustic targets remain hardware-unverified. |
+| Vercel Preview | Access-gated synthetic evaluation | Project linked and configuration present; Preview verification is recorded in the deployment runbook. Storage is ephemeral and `/healthz` reports degraded. |
+| Production | Real parent/child use | Blocked fail-closed until managed Postgres is wired into the domain repository, real parent authentication is selected, privacy/safety operations are configured and ZDR evidence exists for any under-13 mode. |
 
-More: [line graph](docs/screenshots/lesson-line-graph.png) ·
-[metaphor vs simile](docs/screenshots/lesson-metaphor-simile.png) ·
-[a topic with no natural diagram](docs/screenshots/lesson-no-diagram-topic.png) ·
-[parent dashboard](docs/screenshots/parent-dashboard.png) ·
-[home](docs/screenshots/home.png) ·
-[mobile](docs/screenshots/lesson-mobile.png)
+Do not use real child details, recordings or transcripts in the current build. Noura does not claim legal compliance or production child readiness.
 
-## Setup
+## Runtime model boundary
 
-Requires Node 22.5+ (uses the built-in `node:sqlite`; developed on 24.x).
+The application runtime baseline remains unchanged:
+
+- `gpt-realtime-2.1` over the existing server-proxied Realtime WebSocket for speech-to-speech;
+- `gpt-4o-mini-transcribe` for input transcription;
+- `gpt-5.6-terra` through the existing Chat Completions path for captions-only fallback and parent summaries.
+
+GPT-5.6 Sol was the Codex implementation agent used for this repository work. It is not an application dependency and did not trigger a model, endpoint, reasoning-effort, provider or topology migration.
+
+## Architecture
+
+The active path is:
+
+1. Parent setup creates or explicitly selects a learner and a goal.
+2. The child taps **Begin**, which owns AudioContext unlock and microphone permission.
+3. A versioned event envelope carries session, connection epoch, turn, generation, sequence, provider, audio, visual and idempotency identity.
+4. A deterministic lesson reducer owns legal transitions and forbids waiting without a delivered question or task.
+5. One `GenerationScope` owns audio, provisional captions, transient visuals, character tasks, timers, reconnect work and fallback cancellation.
+6. The PCM sample clock releases phrase captions, semantic visual cues, the pen and character attention.
+7. Semantic visual intent is adapted into exact BoardOps, inspected, repaired once and otherwise rejected as one transaction.
+8. Only completed visual checkpoints become committed and replayable.
+9. Evidence observations carry source event IDs, normalized source spans, taxonomy, confidence basis, opportunity, independence and turn/generation lineage.
+10. Ending creates an immutable event cutoff; continuing creates a new linked session.
+
+See [the active architecture ADR](docs/architecture/2026-08-23-noura-runtime-architecture.md), [threat model](docs/privacy/threat-model.md) and [traceability matrix](docs/traceability/2026-08-23-noura-traceability.md).
+
+## Local setup
+
+Requires Node.js 24+.
 
 ```bash
 npm install
-cp .env.example .env   # then fill in OPENAI_API_KEY
-npm run dev            # frontend (5173) + backend (8787) together
+cp .env.example .env
+npm run dev
 ```
 
-Open http://localhost:5173, add a learner, pick a goal, start the lesson.
-Chrome is the best-tested browser. Use headphones for the smoothest
-barge-in behaviour (echo cancellation handles speakers well, but
-headphones make interruption detection sharper).
+Open `http://localhost:5173`.
 
-## Architecture (short version)
+The provider key stays server-side. The Vite client proxies `/api` and `/ws` to the local backend. Noura self-hosts Outfit and Caveat font assets through the build.
 
-Two evidence-based decisions shape the system: measurements and rejected
-alternatives are in `docs/architecture/2026-08-22-live-tutor-architecture.md`.
+### Local database migration
 
-**Voice**: native speech-to-speech via OpenAI Realtime
-(`gpt-realtime-2.1`), proxied through the Express server over WebSocket
-(`/ws/lesson`). The key never reaches the browser and the server records
-the same event stream that drives the child's screen: one source of
-truth for lesson and dashboard. The browser plays PCM through Web Audio
-with a per-response sample clock, so:
+The active default is `data/noura.db`. On first use, if that file is absent and the historical database exists, Noura:
 
-- interruption stops audio locally without a network round-trip,
-- captions and board marks are released exactly when speech reaches them
-  (the model generates ahead of playback),
-- truncation tells the model precisely how much the child heard.
+1. checkpoints the WAL;
+2. runs SQLite integrity checks;
+3. records table row counts;
+4. creates a verified backup;
+5. copies to a migration candidate;
+6. compares integrity and row counts;
+7. atomically renames the verified candidate.
 
-**Visuals**: the model emits semantic operations (`board_ops`), never
-pixels: polygons, circles, angle marks, labelled points, axes with
-plotted functions or data, bar charts, number lines, boxes, connectors,
-tables, KaTeX equations, plus `highlight`/`update`/`erase` against stable
-object ids. Every op is validated server-side; geometry (arcs, ticks,
-curve sampling via a safe expression parser, label anchoring with
-collision nudging, bounds clamping) is computed deterministically in the
-client compiler. Strokes animate on with a pen tracer that follows the
-line being drawn and hurry up if speech runs ahead.
+The old database is retained. `NOURA_DATA_DIR` is preferred; the historical environment alias is supported for one documented migration window only. Database files remain ignored.
 
-**Memory**: children, sessions, events and evidence live in SQLite
-(`data/seneca.db`, created automatically, gitignored). A page refresh
-replays exactly the marks the child saw and resumes the conversation
-with context. Ending a session generates the parent summary from the real
-transcript and recorded evidence.
+## Verification commands
 
-**Fallbacks**: each failure degrades honestly:
+```bash
+npm run build
+npm run typecheck:server
+npm run lint
+npm test
+npm audit --omit=dev
+npm run test:integration
+npm run test:e2e
+npm run test:visual
+npm run test:a11y
+npm run test:security
+npm run test:storage
+npm run test:brand
+```
 
-- microphone denied → typing works, Seneca still speaks;
-- realtime connection failing → four reconnect attempts, then a labelled
-  captions-only text mode over HTTP (same board language, same session
-  store), never fake audio;
-- missing `OPENAI_API_KEY` → the home screen says lessons can't run;
-- invalid model-drawn ops → rejected server-side, reported back to the
-  model, the lesson continues;
-- thin evidence → the summary says so instead of inventing conclusions.
+`npx vercel@latest build` is the deployment build gate. The installed global CLI predates Vercel’s native WebSocket public beta, so deployment work uses the current CLI without changing the global installation.
 
-## Scripts
+The browser suites use synthetic learner fixtures. Paid live-provider runs are not part of the default test commands.
 
-- `npm run dev`: frontend + backend together
-- `npm run build`: typecheck + production build
-- `npm run typecheck:server`: backend typecheck
-- `npm test`: unit tests (validation, expression parser, scene,
-  compiler layout, store)
-- `npm run lint`: oxlint
-- `node scripts/e2e-live.mjs [wav]`: full journey in a real browser;
-  pass a WAV to use it as a fake microphone (spoken barge-in test)
-- `node scripts/topic-matrix.mjs`: unseen-topic matrix across five
-  domains, with screenshots
-- `node scripts/stress.mjs`: interruption storm, refresh/replay,
-  learner-drawing tests
-- `node scripts/fallback-test.mjs`: degraded text-mode check (run the
-  server with `OPENAI_REALTIME_MODEL=gpt-bogus-model`)
+## Interaction and privacy notes
 
-`/dev/board` is a renderer test bench with canned scenes from four
-teaching domains.
+- Pointer, touch, focus, learner-stroke, tutor-pen, caption, semantic-object and interruption signals drive Noura’s gaze.
+- Character attention is generation-scoped, bounded, damped, reduced-motion aware and subordinate to the board.
+- Camera-responsive behavior is **not implemented**. No lesson needs camera permission. Noura performs no face recognition, biometric processing, emotion inference, attention scoring, engagement scoring or facial comprehension inference.
+- Raw audio, pointer trails and camera data are not persisted.
+- Realtime audio and transient character/visual work are cancelled locally before provider confirmation; target-hardware acoustic silence remains **UNVERIFIED**.
+- Captions use PCM-timed phrase cues and final transcript correction. The app does not claim provider word timestamps or exact word synchronization.
 
-## Observed performance (local, 2026-08-23)
+## Known blockers
 
-- typed question → first audible reply: ~0.75s
-- start pressed → first caption: ~2.4–3.5s (includes session setup)
-- spoken barge-in → local silence: ≤1ms (server confirmation ~150–170ms)
-- truncation reports the exact heard milliseconds of the interrupted item
+- The Postgres adapter passes an offline contract, but Production domain services still use the synchronous local repository. Production therefore fails closed.
+- Parent identity has a signed-cookie adapter boundary, session objects are parent-scoped and lessons use short-lived signed capabilities; a real external identity provider is not configured.
+- In-memory rate limits are a local/Preview layer, not the final multi-instance Production control.
+- ZDR/account evidence, legal decisions, retention policy approval, target-hardware audio, deployed persistence and real-minor safety evaluation are external gates.
+- Native Vercel WebSockets are currently a public beta and connections terminate at Function duration; reconnect is expected.
 
-Network latency to the provider is not controllable from here; these are
-honest local measurements, not guarantees.
-
-## Known limitations
-
-- One active lesson per browser tab; no authentication (demo scope).
-- SQLite is durable for a local demo; a serverless deployment would need
-  a managed database.
-- The client-side barge-in energy gate can trigger on loud non-speech
-  noise while the tutor is speaking (the server's semantic VAD is the
-  arbiter; false trips recover on the next turn).
-- Evidence quality depends on the model calling `record_evidence`;
-  short sessions may end with little evidence and the summary says so.
-- WhatsApp/notification delivery is out of scope; the session summary
-  row is the clean integration point for it later.
+The historical repository name and local directory are retained intentionally. Immutable historical audit evidence lives under `docs/legacy/`.

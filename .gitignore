@@ -28,3 +28,11 @@ dist-ssr
 *.sln
 *.sw?
 data/
+.vercel/
+.vercelignore
+recordings/
+playwright-report/
+test-results/
+artifacts/
+.vercel
+.env*
