@@ -144,6 +144,11 @@ export class RealtimeSession {
   // ----- lifecycle -----------------------------------------------------------
 
   async start(): Promise<void> {
+    // A StrictMode mount/unmount cycle may have "ended" us before the child
+    // ever pressed start; starting is what commits this session instance.
+    this.closedByUs = false;
+    this.reconnectAttempts = 0;
+    this.update({ phase: 'connecting' });
     await this.audioOut.unlock();
     this.audioOut.onPlaybackEnd = () => this.handlePlaybackEnd();
     if (AudioIn.supported()) {
@@ -169,9 +174,9 @@ export class RealtimeSession {
     );
     this.ws = ws;
 
-    ws.onopen = () => {
-      this.reconnectAttempts = 0;
-    };
+    // Note: attempts only reset on 'ready' (upstream fully configured), so
+    // a proxy that accepts us but can't reach the model still counts as a
+    // failure and eventually falls back to text mode.
     ws.onmessage = (event) => {
       try {
         this.handleServer(JSON.parse(String(event.data)));
@@ -284,6 +289,7 @@ export class RealtimeSession {
   private handleServer(message: Record<string, unknown>): void {
     switch (message.type) {
       case 'ready':
+        this.reconnectAttempts = 0;
         this.update({ phase: 'listening', error: null });
         this.send({ type: 'start' });
         break;
