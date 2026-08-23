@@ -22,7 +22,7 @@ interface EvidenceRow {
   confidence: 'low' | 'medium' | 'high'; excerpt: string | null; goal: string;
   evidenceId: string; conceptId: string; taxonomy: ResponseTaxonomy;
   independenceLevel: 'none' | 'reduced' | 'independent'; opportunityKind: EvidenceOpportunityKind;
-  taskId: string; turnId: string;
+  taskId: string; turnId: string; retrievalOf: string | null; contradicts: string[]; supersedes: string[];
 }
 interface Overview { child: Child; sessions: SessionRow[]; evidence: EvidenceRow[] }
 interface EventRow { id: number; ts: number; type: string; payload: { text?: string; concept?: string; verdict?: string; activeConcept?: string } }

@@ -63,6 +63,7 @@ test('actual Lesson start, listening, thinking, speaking/visual, reduced-motion 
   });
   await expect(page.getByText('Speaking')).toBeVisible();
   await expect(page.getByLabel('Board section', { exact: true })).toHaveValue('fraction-scale');
+  await assertActiveBoardTextContained(page, ['1/2', '3/4']);
   expect(await page.locator('.avatar').getAttribute('data-attention-target')).toBe('semantic_object');
   const firstSemanticView = await page.locator('.board__svg').getAttribute('viewBox');
   await page.getByRole('button', { name: 'Next part of this board section' }).click();
@@ -110,6 +111,7 @@ test('actual Lesson start, listening, thinking, speaking/visual, reduced-motion 
 
   await page.setViewportSize({ width: 320, height: 700 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
+  await assertActiveBoardTextContained(page, ['1/2', '3/4']);
   await page.keyboard.press('Tab');
   const focus = await page.evaluate(() => {
     const rect = (document.activeElement as HTMLElement | null)?.getBoundingClientRect();
@@ -123,14 +125,38 @@ test('actual Lesson start, listening, thinking, speaking/visual, reduced-motion 
   const landscapeOverflow = await page.evaluate(() => ({ x: document.documentElement.scrollWidth - document.documentElement.clientWidth, y: document.documentElement.scrollHeight - document.documentElement.clientHeight }));
   expect(landscapeOverflow.x).toBeLessThanOrEqual(1);
   expect(landscapeOverflow.y).toBeLessThanOrEqual(1);
+  await assertActiveBoardTextContained(page, ['1/2', '3/4']);
 
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.evaluate(() => { document.body.style.zoom = '2'; });
   const zoomOverflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(zoomOverflow).toBeLessThanOrEqual(1);
+  await assertActiveBoardTextContained(page, ['1/2', '3/4']);
 });
 
 async function assertNoSeriousAxe(page: import('@playwright/test').Page) {
   const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa']).analyze();
   expect(results.violations.filter((violation) => ['serious', 'critical'].includes(violation.impact ?? ''))).toEqual([]);
+}
+
+async function assertActiveBoardTextContained(page: import('@playwright/test').Page, required: string[]) {
+  const geometry = await page.locator('.board__svg').evaluate((svg) => {
+    const outer = svg.getBoundingClientRect();
+    return [...svg.querySelectorAll<SVGGraphicsElement>('[data-required-text-key]')]
+      .filter((node) => getComputedStyle(node).visibility !== 'hidden')
+      .map((node) => {
+        const rect = node.getBoundingClientRect();
+        return {
+          text: node.getAttribute('data-required-text') ?? '',
+          height: rect.height,
+          contained: rect.left >= outer.left - 0.5 && rect.right <= outer.right + 0.5 && rect.top >= outer.top - 0.5 && rect.bottom <= outer.bottom + 0.5,
+        };
+      });
+  });
+  expect(geometry.every((entry) => entry.contained)).toBe(true);
+  for (const text of required) {
+    const entry = geometry.find((candidate) => candidate.text === text);
+    expect(entry, `active educational text missing: ${text}`).toBeTruthy();
+    expect(entry!.height, `active educational text too small: ${text}`).toBeGreaterThanOrEqual(16);
+  }
 }

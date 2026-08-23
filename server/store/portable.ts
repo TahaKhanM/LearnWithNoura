@@ -56,7 +56,8 @@ export class PostgresStore implements PortableDurableStore {
         ts BIGINT NOT NULL,
         type TEXT NOT NULL,
         payload JSONB NOT NULL,
-        released BOOLEAN NOT NULL DEFAULT TRUE
+        released BOOLEAN NOT NULL DEFAULT TRUE,
+        release_requested BOOLEAN NOT NULL DEFAULT FALSE
       );
       CREATE TABLE IF NOT EXISTS evidence (
         id BIGINT PRIMARY KEY,
@@ -81,8 +82,17 @@ export class PostgresStore implements PortableDurableStore {
         turn_id TEXT NOT NULL,
         generation_id TEXT NOT NULL,
         contradicts_json JSONB NOT NULL,
-        supersedes_json JSONB NOT NULL
+        supersedes_json JSONB NOT NULL,
+        opportunity_kind TEXT NOT NULL DEFAULT 'recall',
+        retrieval_of TEXT,
+        released BOOLEAN NOT NULL DEFAULT TRUE,
+        idempotency_key TEXT
       );
+      ALTER TABLE events ADD COLUMN IF NOT EXISTS release_requested BOOLEAN NOT NULL DEFAULT FALSE;
+      ALTER TABLE evidence ADD COLUMN IF NOT EXISTS opportunity_kind TEXT NOT NULL DEFAULT 'recall';
+      ALTER TABLE evidence ADD COLUMN IF NOT EXISTS retrieval_of TEXT;
+      ALTER TABLE evidence ADD COLUMN IF NOT EXISTS released BOOLEAN NOT NULL DEFAULT TRUE;
+      ALTER TABLE evidence ADD COLUMN IF NOT EXISTS idempotency_key TEXT;
       INSERT INTO schema_migrations (version, applied_at) VALUES (1, ${Date.now()})
       ON CONFLICT (version) DO NOTHING;
     `);
@@ -164,18 +174,19 @@ async function insertSession(client: PoolClient, row: Record<string, unknown>): 
   await client.query('INSERT INTO sessions (id,child_id,goal,status,started_at,ended_at,summary_json,parent_session_id,ended_event_id,summary_version,summary_through_event_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT (id) DO NOTHING', [row.id,row.child_id,row.goal,row.status,row.started_at,row.ended_at ?? null,json(row.summary_json),row.parent_session_id ?? null,row.ended_event_id ?? null,row.summary_version ?? null,row.summary_through_event_id ?? null]);
 }
 async function insertEvent(client: PoolClient, row: Record<string, unknown>): Promise<void> {
-  await client.query('INSERT INTO events (id,session_id,ts,type,payload,released) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (id) DO NOTHING', [row.id,row.session_id,row.ts,row.type,json(row.payload),Boolean(row.released)]);
+  await client.query('INSERT INTO events (id,session_id,ts,type,payload,released,release_requested) VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (id) DO NOTHING', [row.id,row.session_id,row.ts,row.type,json(row.payload),Boolean(row.released),Boolean(row.release_requested)]);
 }
 async function insertEvidence(client: PoolClient, row: Record<string, unknown>): Promise<void> {
   await client.query(`INSERT INTO evidence (
     id,evidence_id,child_id,session_id,ts,concept,concept_id,observation,verdict,confidence,response_taxonomy,
     confidence_basis,source_event_ids,excerpt,normalized_excerpt,source_span_json,task_id,independence_level,
-    domain_check_json,turn_id,generation_id,contradicts_json,supersedes_json
-  ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)
+    domain_check_json,turn_id,generation_id,contradicts_json,supersedes_json,opportunity_kind,retrieval_of,released,idempotency_key
+  ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27)
   ON CONFLICT (id) DO NOTHING`, [
     row.id,row.evidence_id,row.child_id,row.session_id,row.ts,row.concept,row.concept_id,row.observation,row.verdict,row.confidence,row.response_taxonomy,
     row.confidence_basis,json(row.source_event_ids),row.excerpt ?? null,row.normalized_excerpt,json(row.source_span_json),row.task_id,row.independence_level,
     json(row.domain_check_json),row.turn_id,row.generation_id,json(row.contradicts_json ?? []),json(row.supersedes_json ?? []),
+    row.opportunity_kind ?? 'recall',row.retrieval_of ?? null,row.released !== false,row.idempotency_key ?? null,
   ]);
 }
 function json(value: unknown): unknown {

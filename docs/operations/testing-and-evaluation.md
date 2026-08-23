@@ -8,7 +8,7 @@ Browser suites use a dedicated synthetic SQLite directory and separate ports. Vi
 
 ## Live-provider budget
 
-Offline fixtures are the default. `npm run test:av` drives the production `ResponseCueTimeline` and `CharacterAttentionController`, derives silence from PCM windows, cue error from annotated versus observed release events, final correction from observed playback completion, frame p95 from captured timestamps, and stale writes from rejected post-cancel events. Each audiovisual gate has a negative source-trace fixture that must fail. The JSON report, WAV and MP4 are written under `artifacts/evaluation/`; they are deterministic offline evidence, not provider or target-hardware evidence.
+Offline fixtures are the default. `npm run test:av` drives the production `ResponseCueTimeline` and `CharacterAttentionController`; it derives cue error from observed scheduler releases, final correction from observed playback completion, pending/stale cues from post-cancel scheduler state, interruption attention from controller output, and audio resumption/silence from PCM windows. Each reported gate has an independent negative source-trace or waveform mutation that must fail. The JSON report and WAV are written under `artifacts/evaluation/`; they are deterministic offline production-module evidence, not provider, rendered-browser, frame-performance or target-hardware evidence. The former generic drawbox MP4 and assigned mobile-frame/render-phase metrics were removed because they did not observe a Noura application surface.
 
 A pre-merge live smoke is limited to two short synthetic sessions. Record runtime model IDs, audio duration, token usage and provider-reported cost. Never loop paid calls for screenshots.
 

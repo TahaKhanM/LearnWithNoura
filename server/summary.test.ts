@@ -79,16 +79,32 @@ describe('summary lineage and calibration', () => {
     expect(contradicted.struggles[0]).toMatchObject({ kind: 'uncertain' });
   });
 
-  it('shows unresolved misconception, then later independent improvement without overclaiming', () => {
+  it('shows unresolved misconception, then explicit resolution without overclaiming', () => {
     const unresolved = buildDeterministicSummary('Maya', 'fractions', [observation('e1', 'confident_misconception')], 1);
     expect(unresolved.struggles[0]).toMatchObject({ kind: 'misconception' });
 
     const improved = buildDeterministicSummary('Maya', 'fractions', [
       observation('e1', 'confident_misconception'),
-      observation('e2', 'correct', 'application'),
-      observation('e3', 'correct', 'retrieval'),
+      observation('e2', 'correct', 'application', { supersedes: ['e1'] }),
+      observation('e3', 'correct', 'retrieval', { retrievalOf: 'task-e2' }),
     ], 3);
-    expect(improved.strengths[0]?.status).toBe('demonstrated');
+    expect(improved.strengths[0]?.status).toBe('progressing');
     expect(improved.struggles).toEqual([]);
+  });
+
+  it('rejects a demonstrated summary when duplicate or later-negative evidence overclaims the projection', () => {
+    const duplicate = [
+      observation('e1', 'correct', 'application', { sessionId: 's', taskId: 'same', turnId: 'same' }),
+      observation('e2', 'correct', 'retrieval', { sessionId: 's', taskId: 'same', turnId: 'same', retrievalOf: 'same' }),
+    ];
+    const demonstrated = { ...base, strengths: [{ ...base.strengths[0], status: 'demonstrated' as const, evidenceIds: ['e1', 'e2'] }] };
+    expect(validateSummaryCitations(demonstrated, duplicate, 'Learner: two thirds is farther right')).toBe(false);
+
+    const laterNegative = [
+      observation('e1', 'correct', 'application'),
+      observation('e2', 'correct', 'retrieval'),
+      observation('e3', 'incorrect'),
+    ];
+    expect(validateSummaryCitations(demonstrated, laterNegative, 'Learner: two thirds is farther right')).toBe(false);
   });
 });

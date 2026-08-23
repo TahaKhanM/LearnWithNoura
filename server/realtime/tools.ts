@@ -122,6 +122,8 @@ export const REALTIME_TOOLS = [
           description: 'What kind of independent opportunity produced this evidence. Retrieval means a later revisit, not an immediate retry.',
         },
         retrieval_of: { type: 'string', description: 'Earlier task ID revisited by a genuine later retrieval opportunity.' },
+        contradicts: { type: 'array', items: { type: 'string' }, description: 'Earlier evidence IDs this observation conflicts with.' },
+        supersedes: { type: 'array', items: { type: 'string' }, description: 'Earlier evidence IDs explicitly resolved by this independent observation.' },
         confidence: {
           type: 'string',
           enum: ['low', 'medium', 'high'],

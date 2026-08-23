@@ -254,7 +254,7 @@ export function LessonPage({ sessionId }: LessonPageProps) {
 
   const lastChildLine = [...snap.captions].reverse().find((c) => c.role === 'child');
   const lastTutorLine = [...snap.captions].reverse().find((c) => c.role === 'tutor');
-  const semanticViewCount = deriveSemanticViewports(scene, activeVisualGroupId).length;
+  const semanticViewCount = deriveSemanticViewports(scene, activeVisualGroupId, highlights.map((highlight) => highlight.id)).length;
 
   const statusLabel =
     snap.phase === 'connecting'

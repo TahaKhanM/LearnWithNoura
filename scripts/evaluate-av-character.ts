@@ -1,6 +1,5 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { spawnSync } from 'node:child_process';
 import { CharacterAttentionController, attentionPriority } from '../src/lesson/characterAttention.js';
 import { ResponseCueTimeline, type ResponseCue } from '../src/lesson/responseTimeline.js';
 
@@ -10,70 +9,53 @@ mkdirSync(outputDir, { recursive: true });
 const RATE = 24_000;
 const FRAME_MS = 1000 / 60;
 const identity = { sessionId: 'offline-eval', connectionEpoch: 1, turnId: 'turn-1', generationId: 'generation-1' };
-const annotated = { captionMs: 280, visualMs: 340, responseCompleteMs: 780, learnerOnsetMs: 900, detectorMs: 1000 };
-const stopScheduledMs = nextFrame(annotated.detectorMs);
-const fadeEndMs = stopScheduledMs + 18;
-const samples = synthesizeWaveform(2_000, 120, fadeEndMs, stopScheduledMs);
+const seededContract = { responseStartMs: 120, captionMs: 280, visualMs: 340, responseCompleteMs: 780, detectorMs: 1000 };
+const samples = synthesizeWaveform(2_000, 120, 1_020, seededContract.detectorMs);
 const timeline = new ResponseCueTimeline();
 const attention = new CharacterAttentionController(identity);
-const responseStartMs = 120;
-const toSample = (absoluteMs: number) => Math.round(((absoluteMs - responseStartMs) / 1000) * RATE);
+const toSample = (absoluteMs: number) => Math.round(((absoluteMs - seededContract.responseStartMs) / 1000) * RATE);
 
-timeline.enqueue(caption('caption-1', toSample(annotated.captionMs), 1, 'one teaching phrase'));
-timeline.enqueue(visual('visual-1', toSample(annotated.visualMs), 2));
-timeline.enqueue({ kind: 'final', cueId: 'final-1', responseId: 'response-1', startSample: 0, endSample: toSample(annotated.responseCompleteMs), sequence: 3, identity, text: 'One teaching phrase.' });
+timeline.enqueue(caption('caption-1', toSample(seededContract.captionMs), 1, 'one teaching phrase'));
+timeline.enqueue(visual('visual-1', toSample(seededContract.visualMs), 2));
+timeline.enqueue({ kind: 'final', cueId: 'final-1', responseId: 'response-1', startSample: 0, endSample: toSample(seededContract.responseCompleteMs), sequence: 3, identity, text: 'One teaching phrase.' });
 timeline.enqueue(caption('caption-future', toSample(1_120), 4, 'future speech'));
 timeline.enqueue(visual('visual-future', toSample(1_160), 5));
 
-const observedEvents: Array<{ type: string; ms: number; cueId?: string }> = [];
-const frames: Array<{ frame: number; ms: number; captionCue: string | null; visualCue: string | null; characterPhase: string; gazeTarget: string; penVisible: boolean; mouthEnergy: number; pendingCues: number }> = [];
-let activeCaption: string | null = null;
-let activeVisual: string | null = null;
-let penVisible = false;
-let interrupted = false;
-let staleWrites = 0;
-let staleAudioResumptions = 0;
+type ObservedEvent = { type: string; ms: number; cueId?: string };
+type RuntimeFrame = { ms: number; gazeTarget: string; mouthEnergy: number; pendingCues: number };
+const observedEvents: ObservedEvent[] = [];
+const frames: RuntimeFrame[] = [];
+let cancelled = false;
+let staleCueWriteAccepted = 0;
 
 for (let frame = 0, ms = 0; ms <= 2_000; frame += 1, ms = frame * FRAME_MS) {
-  if (!interrupted && ms >= annotated.detectorMs) {
-    interrupted = true;
+  if (!cancelled && ms >= seededContract.detectorMs) {
+    cancelled = true;
     observedEvents.push({ type: 'detector', ms });
-    observedEvents.push({ type: 'stop_scheduled', ms });
     timeline.cancel(identity);
     attention.cancelGeneration(identity);
     attention.offer({ ...identity, targetType: 'interruption', priority: attentionPriority('interruption'), startTime: ms, expiryTime: ms + 900, smoothingProfile: 'immediate', permittedInReducedMotion: true });
-    penVisible = false;
-    const lateAccepted = timeline.enqueue(caption('stale-after-cancel', toSample(1_240), 6, 'stale'));
-    if (lateAccepted) staleWrites += 1;
+    if (timeline.enqueue(caption('stale-after-cancel', toSample(1_240), 6, 'stale'))) staleCueWriteAccepted += 1;
+    observedEvents.push({ type: 'cancel_applied', ms });
   }
 
-  const playedSamples = Math.max(0, Math.round(((ms - responseStartMs) / 1000) * RATE));
+  const playedSamples = Math.max(0, Math.round(((ms - seededContract.responseStartMs) / 1000) * RATE));
   for (const cue of timeline.drain(() => playedSamples)) {
     observedEvents.push({ type: cue.kind, ms, cueId: cue.cueId });
-    if (cue.kind === 'caption') activeCaption = cue.delta;
-    if (cue.kind === 'visual') {
-      activeVisual = cue.visualCueId ?? cue.cueId;
-      penVisible = true;
-      attention.offer({ ...identity, targetType: 'tutor_pen', boardCoordinates: [620, 260], priority: attentionPriority('tutor_pen'), startTime: ms, expiryTime: annotated.detectorMs, smoothingProfile: 'responsive', permittedInReducedMotion: false });
-    }
+    if (cue.kind === 'visual') attention.offer({
+      ...identity, targetType: 'tutor_pen', boardCoordinates: [620, 260], priority: attentionPriority('tutor_pen'),
+      startTime: ms, expiryTime: seededContract.detectorMs, smoothingProfile: 'responsive', permittedInReducedMotion: false,
+    });
   }
-  const waveformEnergy = rmsAt(samples, ms, 12);
-  const attentionFrame = attention.frame(ms);
   frames.push({
-    frame,
     ms: Number(ms.toFixed(3)),
-    captionCue: activeCaption,
-    visualCue: activeVisual,
-    characterPhase: interrupted ? 'listening' : waveformEnergy > 0.01 ? 'speaking' : 'thinking',
-    gazeTarget: attentionFrame.targetType,
-    penVisible,
-    mouthEnergy: waveformEnergy,
+    gazeTarget: attention.frame(ms).targetType,
+    mouthEnergy: rmsAt(samples, ms, 12),
     pendingCues: timeline.pendingCount(),
   });
 }
 
-const mobileFrameTimestamps = Array.from({ length: 84 }, (_, index) => index * 24);
-const sourceTrace = { observedEvents, frames, mobileFrameTimestamps, staleWrites, staleAudioResumptions };
+const sourceTrace = { observedEvents, frames, staleCueWriteAccepted };
 const metrics = deriveMetrics(sourceTrace, samples);
 const gateResults = evaluateGates(metrics);
 const negativeFixtures = verifyNegativeFixtures(sourceTrace, samples);
@@ -82,27 +64,23 @@ const wavPath = join(outputDir, 'synthetic-interruption.wav');
 writeFileSync(wavPath, wavBuffer(samples, RATE));
 const reportPath = join(outputDir, 'synthetic-av-character-report.json');
 writeFileSync(reportPath, `${JSON.stringify({
-  evidenceType: 'deterministic-offline-runtime',
+  evidenceType: 'deterministic-offline-production-module-trace',
+  evidenceBoundary: 'ResponseCueTimeline, CharacterAttentionController, and seeded PCM only; no browser-render or device-performance claim.',
   realChildData: false,
   runtimeProviderCalls: 0,
   runtimeCostUsd: 0,
   targetHardwareAcoustics: 'UNVERIFIED',
+  liveProviderBehavior: 'UNVERIFIED',
+  browserFramePerformance: 'NOT_CLAIMED',
+  renderedCharacterPenMouthPhase: 'NOT_CLAIMED',
   metrics,
   gateResults,
   negativeFixtures,
-  timeline: frames,
+  sourceTrace,
 }, null, 2)}\n`);
 
-const videoPath = join(outputDir, 'synthetic-av-character.mp4');
-const ffmpeg = spawnSync('ffmpeg', [
-  '-y', '-f', 'lavfi', '-i', 'color=c=white:s=1280x720:r=60:d=2', '-i', wavPath,
-  '-vf', "drawbox=x=0:y=0:w=1280:h=720:color=0xede9df:t=fill,drawbox=x=120:y=100:w=1040:h=460:color=0xfcfbf7:t=fill,drawbox=x=180:y=220:w=700:h=90:color=0x2c5be0@0.22:t=fill:enable='between(t,0.12,1.0)',drawbox=x=180:y=380:w=520:h=18:color=0x99620b:t=fill:enable='between(t,0.34,1.0)'",
-  '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-shortest', videoPath,
-], { encoding: 'utf8' });
-if (ffmpeg.status !== 0) throw new Error(`ffmpeg evaluator failed: ${ffmpeg.stderr.slice(-500)}`);
-
 const ok = Object.values(gateResults).every(Boolean) && Object.values(negativeFixtures).every(Boolean);
-console.log(JSON.stringify({ ok, wavPath, videoPath, reportPath, metrics, gateResults, negativeFixtures }, null, 2));
+console.log(JSON.stringify({ ok, wavPath, reportPath, metrics, gateResults, negativeFixtures }, null, 2));
 if (!ok) process.exit(1);
 
 function caption(cueId: string, endSample: number, sequence: number, delta: string): ResponseCue {
@@ -115,63 +93,54 @@ function visual(cueId: string, endSample: number, sequence: number): ResponseCue
 
 function deriveMetrics(trace: typeof sourceTrace, waveform: Int16Array) {
   const eventTime = (type: string, cueId?: string) => trace.observedEvents.find((event) => event.type === type && (!cueId || event.cueId === cueId))?.ms;
-  const captionErrors = [Math.abs((eventTime('caption', 'caption-1') ?? Infinity) - annotated.captionMs)];
-  const visualErrors = [Math.abs((eventTime('visual', 'visual-1') ?? Infinity) - annotated.visualMs)];
-  const finalAt = eventTime('final', 'final-1') ?? Infinity;
+  const captionErrors = [Math.abs((eventTime('caption', 'caption-1') ?? Infinity) - seededContract.captionMs)];
+  const visualErrors = [Math.abs((eventTime('visual', 'visual-1') ?? Infinity) - seededContract.visualMs)];
   const detectorAt = eventTime('detector') ?? Infinity;
-  const stopAt = eventTime('stop_scheduled') ?? Infinity;
-  const clearFrame = trace.frames.find((frame) => frame.ms >= detectorAt && frame.pendingCues === 0 && !frame.penVisible && frame.characterPhase === 'listening');
-  const frameIntervals = differences(trace.frames.map((frame) => frame.ms));
-  const acousticSilenceMs = detectSilenceMs(waveform, detectorAt);
+  const cancelAt = eventTime('cancel_applied') ?? Infinity;
+  const afterCancel = trace.frames.find((frame) => frame.ms + 0.1 >= cancelAt);
   return {
-    detectorToStopScheduledMs: stopAt - detectorAt,
-    scheduledStopToAcousticSilenceMs: acousticSilenceMs - stopAt,
-    syntheticOnsetToAcousticSilenceMs: acousticSilenceMs - annotated.learnerOnsetMs,
     captionPhraseMedianAbsoluteErrorMs: percentile(captionErrors, 50),
     captionPhraseP95AbsoluteErrorMs: percentile(captionErrors, 95),
     visualCueP95ErrorMs: percentile(visualErrors, 95),
-    finalCorrectionMs: finalAt - annotated.responseCompleteMs,
-    interruptionClearMs: (clearFrame?.ms ?? Infinity) - detectorAt,
-    desktopFrameIntervalP95Ms: percentile(frameIntervals, 95),
-    representativeMobileFrameIntervalP95Ms: percentile(differences(trace.mobileFrameTimestamps), 95),
-    staleAudioResumptions: trace.staleAudioResumptions,
-    staleCaptionVisualCharacterWrites: trace.staleWrites,
+    finalCorrectionMs: (eventTime('final', 'final-1') ?? Infinity) - seededContract.responseCompleteMs,
+    pendingCuesImmediatelyAfterCancel: afterCancel?.pendingCues ?? Infinity,
+    staleCueWritesAcceptedAfterCancel: trace.staleCueWriteAccepted,
+    postCancelAudioResumptions: countAudioResumptions(waveform, detectorAt),
+    attentionTargetImmediatelyAfterCancel: afterCancel?.gazeTarget ?? 'missing',
+    syntheticWaveformSilenceMs: detectSilenceMs(waveform, detectorAt),
     targetHardwareAcoustics: 'UNVERIFIED' as const,
   };
 }
 
 function evaluateGates(metrics: ReturnType<typeof deriveMetrics>) {
   return {
-    detectorStop: metrics.detectorToStopScheduledMs <= 16.8,
     captionMedian: metrics.captionPhraseMedianAbsoluteErrorMs <= 350,
     captionP95: metrics.captionPhraseP95AbsoluteErrorMs <= 750,
     visualP95: metrics.visualCueP95ErrorMs <= 500,
     finalCorrection: metrics.finalCorrectionMs <= 500,
-    interruptionClear: metrics.interruptionClearMs <= FRAME_MS + 0.1,
-    desktopFrames: metrics.desktopFrameIntervalP95Ms < 22,
-    mobileFrames: metrics.representativeMobileFrameIntervalP95Ms < 30,
-    staleAudio: metrics.staleAudioResumptions === 0,
-    staleWrites: metrics.staleCaptionVisualCharacterWrites === 0,
+    cancellationClearsPendingCues: metrics.pendingCuesImmediatelyAfterCancel === 0,
+    staleCueWrites: metrics.staleCueWritesAcceptedAfterCancel === 0,
+    postCancelAudio: metrics.postCancelAudioResumptions === 0,
+    interruptionAttention: metrics.attentionTargetImmediatelyAfterCancel === 'interruption',
   };
 }
 
 function verifyNegativeFixtures(trace: typeof sourceTrace, waveform: Int16Array) {
-  const cases: Record<string, (copy: typeof sourceTrace) => void> = {
-    detectorStop: (copy) => { copy.observedEvents.find((event) => event.type === 'stop_scheduled')!.ms += 50; },
+  const cases: Record<string, (copy: typeof sourceTrace, pcm: Int16Array) => void> = {
     captionMedian: (copy) => { copy.observedEvents.find((event) => event.type === 'caption')!.ms += 800; },
     captionP95: (copy) => { copy.observedEvents.find((event) => event.type === 'caption')!.ms += 800; },
     visualP95: (copy) => { copy.observedEvents.find((event) => event.type === 'visual')!.ms += 800; },
     finalCorrection: (copy) => { copy.observedEvents.find((event) => event.type === 'final')!.ms += 800; },
-    interruptionClear: (copy) => { const frame = copy.frames.find((item) => item.ms >= annotated.detectorMs)!; frame.pendingCues = 1; frame.penVisible = true; copy.frames.find((item) => item.ms > annotated.detectorMs)!.pendingCues = 1; },
-    desktopFrames: (copy) => { copy.frames = copy.frames.map((frame, index) => ({ ...frame, ms: index * 40 })); },
-    mobileFrames: (copy) => { copy.mobileFrameTimestamps = copy.mobileFrameTimestamps.map((_, index) => index * 40); },
-    staleAudio: (copy) => { copy.staleAudioResumptions = 1; },
-    staleWrites: (copy) => { copy.staleWrites = 1; },
+    cancellationClearsPendingCues: (copy) => { copy.frames.find((frame) => frame.ms + 0.1 >= seededContract.detectorMs)!.pendingCues = 1; },
+    staleCueWrites: (copy) => { copy.staleCueWriteAccepted = 1; },
+    postCancelAudio: (_copy, pcm) => seedAudioResumption(pcm, 1_200, 80),
+    interruptionAttention: (copy) => { copy.frames.find((frame) => frame.ms + 0.1 >= seededContract.detectorMs)!.gazeTarget = 'tutor_pen'; },
   };
   return Object.fromEntries(Object.entries(cases).map(([gate, mutate]) => {
     const copy = structuredClone(trace);
-    mutate(copy);
-    return [gate, evaluateGates(deriveMetrics(copy, waveform))[gate as keyof ReturnType<typeof evaluateGates>] === false];
+    const pcm = new Int16Array(waveform);
+    mutate(copy, pcm);
+    return [gate, evaluateGates(deriveMetrics(copy, pcm))[gate as keyof ReturnType<typeof evaluateGates>] === false];
   }));
 }
 
@@ -184,6 +153,27 @@ function synthesizeWaveform(durationMs: number, startMs: number, silenceMs: numb
     pcm[index] = Math.round(Math.sin((ms / 1000) * Math.PI * 2 * 220) * 0.22 * fade * 32767);
   }
   return pcm;
+}
+
+function seedAudioResumption(pcm: Int16Array, startMs: number, durationMs: number): void {
+  const start = Math.round((startMs / 1000) * RATE);
+  const end = Math.min(pcm.length, start + Math.round((durationMs / 1000) * RATE));
+  for (let index = start; index < end; index += 1) pcm[index] = Math.round(Math.sin((index / RATE) * Math.PI * 2 * 330) * 0.2 * 32767);
+}
+
+function countAudioResumptions(pcm: Int16Array, afterMs: number): number {
+  const windowSamples = Math.round(RATE * 0.01);
+  let observedSilence = false;
+  let resumed = false;
+  let resumptions = 0;
+  for (let start = Math.round((afterMs / 1000) * RATE); start < pcm.length - windowSamples; start += windowSamples) {
+    let sum = 0;
+    for (let index = start; index < start + windowSamples; index += 1) sum += (pcm[index] / 32768) ** 2;
+    const silent = Math.sqrt(sum / windowSamples) < 0.002;
+    if (silent) { observedSilence = true; resumed = false; }
+    else if (observedSilence && !resumed) { resumptions += 1; resumed = true; }
+  }
+  return resumptions;
 }
 
 function detectSilenceMs(pcm: Int16Array, afterMs: number): number {
@@ -208,9 +198,6 @@ function percentile(values: number[], value: number): number {
   const sorted = [...values].sort((left, right) => left - right);
   return sorted[Math.min(sorted.length - 1, Math.max(0, Math.ceil((value / 100) * sorted.length) - 1))];
 }
-
-function differences(values: number[]): number[] { return values.slice(1).map((value, index) => value - values[index]); }
-function nextFrame(ms: number): number { return Math.ceil(ms / FRAME_MS) * FRAME_MS; }
 
 function wavBuffer(pcm: Int16Array, sampleRate: number): Buffer {
   const dataBytes = pcm.byteLength;

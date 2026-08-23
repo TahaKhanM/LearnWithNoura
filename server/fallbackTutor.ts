@@ -232,6 +232,8 @@ async function executeFallbackTurn(
                 ? args.opportunity_kind as 'recall' | 'explanation' | 'application' | 'retrieval'
                 : 'recall',
               retrievalOf: typeof args.retrieval_of === 'string' ? args.retrieval_of.slice(0, 160) : undefined,
+              contradicts: Array.isArray(args.contradicts) ? args.contradicts.filter((value): value is string => typeof value === 'string').map((value) => value.slice(0, 160)).slice(0, 8) : [],
+              supersedes: Array.isArray(args.supersedes) ? args.supersedes.filter((value): value is string => typeof value === 'string').map((value) => value.slice(0, 160)).slice(0, 8) : [],
             });
             repo.addFallbackEvent(identity, 'evidence', { evidenceId: stored.evidenceId, concept, verdict: stored.verdict });
             emit('evidence', { entry: stored });

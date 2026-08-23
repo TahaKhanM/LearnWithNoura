@@ -28,7 +28,9 @@ Rules:
 - Quotes must match the supplied transcript exactly after whitespace and punctuation normalization.
 - Never invent a score, percentage, mastery claim, or event.
 - Label every strength as progressing or demonstrated. One correct or self-corrected answer is only progressing.
-- Demonstrated requires multiple independent opportunities, explanation/application, and later retrieval.
+- Demonstrated requires distinct independent task/turn opportunities, explanation/application, and a chronologically later retrieval tied to the earlier task.
+- Duplicate classifications from one answer never count twice. Latest negative or unresolved contradiction/misconception is uncertain.
+- A correction is progress, not confirmation; after explicit resolution, require fresh independent application/explanation and tied later retrieval.
 - Preserve contradiction, uncertainty, earlier difficulty, and later improvement.
 - If evidence is thin, use empty claim arrays and say so plainly.
 - Plain, warm, specific language. Refer to the learner by name.
@@ -189,6 +191,10 @@ function projectionInput(entry: EvidenceRow): ConceptEvidenceHistoryInput {
     sessionId: entry.sessionId,
     turnId: entry.turnId,
     ts: entry.ts,
+    order: entry.id,
+    retrievalOf: entry.retrievalOf,
+    contradicts: entry.contradicts,
+    supersedes: entry.supersedes,
   };
 }
 

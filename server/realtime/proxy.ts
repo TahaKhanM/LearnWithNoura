@@ -12,6 +12,7 @@ import type { Repo, Confidence, Verdict } from '../store/repo.js';
 import { createLessonState, reduceLesson, responseHandoff } from '../lesson/orchestrator.js';
 import { ResponseTaxonomySchema, TeachingMoveSchema, type ResponseTaxonomy } from '../../shared/pedagogy.js';
 import { adaptSemanticScene } from '../../shared/semanticScene.js';
+import { ResponseSegmentAnnotator } from './segmentAnnotator.js';
 
 /**
  * Bridges one browser lesson to one OpenAI Realtime session.
@@ -86,11 +87,7 @@ export function connectRealtimeProxy(client: ClientSocket, options: ProxyOptions
   const pendingClientPayloads: unknown[] = [];
   const responseIdentities = new Map<string, GenerationIdentity>();
   const responseTranscript = new Map<string, string>();
-  const responseSamples = new Map<string, number>();
-  const transcriptSamples = new Map<string, number>();
-  const pendingTranscript = new Map<string, Array<{ delta: string; itemId?: string }>>();
-  const pendingFinalTranscript = new Map<string, string>();
-  const audioDoneResponses = new Set<string>();
+  const responseSegments = new Map<string, ResponseSegmentAnnotator>();
   let activeResponseId: string | null = null;
   let lessonState = createLessonState(session.goal);
   let lastLearnerEventId: number | null = null;
@@ -132,43 +129,21 @@ export function connectRealtimeProxy(client: ClientSocket, options: ProxyOptions
     if (upstream.readyState === WebSocket.OPEN) upstream.send(JSON.stringify(payload));
   }
 
-  function emitTranscriptDelta(responseId: string, delta: string, itemId?: string): void {
-    const end = responseSamples.get(responseId) ?? 0;
-    const start = transcriptSamples.get(responseId) ?? 0;
-    if (end <= start) {
-      pendingTranscript.set(responseId, [...(pendingTranscript.get(responseId) ?? []), { delta, itemId }]);
-      return;
-    }
-    transcriptSamples.set(responseId, end);
-    sendClient({ type: 'transcript_delta', delta, response_id: responseId, item_id: itemId }, identityForResponse(responseId), {
-      audioSampleOffsets: { start, end },
-    });
+  function responseSegment(responseId: string): ResponseSegmentAnnotator {
+    const existing = responseSegments.get(responseId);
+    if (existing) return existing;
+    const created = new ResponseSegmentAnnotator();
+    responseSegments.set(responseId, created);
+    return created;
   }
 
-  function flushPendingTranscript(responseId: string): void {
-    const pending = pendingTranscript.get(responseId) ?? [];
-    if (pending.length === 0) return;
-    const total = responseSamples.get(responseId) ?? 0;
-    let cursor = transcriptSamples.get(responseId) ?? 0;
-    if (total <= cursor) return;
-    pendingTranscript.delete(responseId);
-    for (const [index, entry] of pending.entries()) {
-      const end = index === pending.length - 1
-        ? total
-        : cursor + Math.max(1, Math.floor((total - cursor) / (pending.length - index)));
-      sendClient({ type: 'transcript_delta', delta: entry.delta, response_id: responseId, item_id: entry.itemId }, identityForResponse(responseId), {
-        audioSampleOffsets: { start: cursor, end },
-      });
-      cursor = end;
+  function flushResponseSegment(responseId: string, completed: boolean): void {
+    const segment = responseSegments.get(responseId);
+    responseSegments.delete(responseId);
+    if (!segment || !completed || cancelledResponses.has(responseId)) return;
+    for (const cue of segment.seal()) {
+      sendClient({ ...cue.payload, response_id: responseId }, identityForResponse(responseId), cue.optional);
     }
-    transcriptSamples.set(responseId, cursor);
-  }
-
-  function emitFinalTranscript(responseId: string, text: string): void {
-    const total = responseSamples.get(responseId) ?? 0;
-    sendClient({ type: 'transcript_done', text, response_id: responseId }, identityForResponse(responseId), {
-      audioSampleOffsets: { start: 0, end: total },
-    });
   }
 
   function teardown(reason: string): void {
@@ -287,8 +262,7 @@ export function connectRealtimeProxy(client: ClientSocket, options: ProxyOptions
         if (response?.id && clientIdentity) {
           activeResponseId = response.id;
           responseIdentities.set(response.id, { ...clientIdentity });
-          responseSamples.set(response.id, 0);
-          transcriptSamples.set(response.id, 0);
+          responseSegments.set(response.id, new ResponseSegmentAnnotator());
         }
         sendClient({ type: 'response_started', response_id: response?.id }, identityForResponse(response?.id));
         break;
@@ -297,38 +271,28 @@ export function connectRealtimeProxy(client: ClientSocket, options: ProxyOptions
       case 'response.output_audio.delta': {
         const responseId = String(event.response_id ?? '');
         if (!responseId || cancelledResponses.has(responseId) || typeof event.delta !== 'string') break;
-        const start = responseSamples.get(responseId) ?? 0;
-        const end = start + pcmSampleCount(event.delta);
-        responseSamples.set(responseId, end);
+        const offsets = responseSegment(responseId).addAudioSamples(pcmSampleCount(event.delta));
         sendClient({
           type: 'audio',
           delta: event.delta,
           response_id: event.response_id,
           item_id: event.item_id,
-        }, identityForResponse(responseId), { audioSampleOffsets: { start, end } });
-        flushPendingTranscript(responseId);
+        }, identityForResponse(responseId), { audioSampleOffsets: offsets });
         break;
       }
 
       case 'response.output_audio.done': {
         const responseId = String(event.response_id ?? '');
         if (cancelledResponses.has(responseId)) break;
-        flushPendingTranscript(responseId);
-        audioDoneResponses.add(responseId);
-        const total = responseSamples.get(responseId) ?? 0;
+        const total = responseSegment(responseId).totalSamples();
         sendClient({ type: 'audio_done', response_id: responseId }, identityForResponse(responseId), { audioSampleOffsets: { start: 0, end: total } });
-        const finalText = pendingFinalTranscript.get(responseId);
-        if (finalText !== undefined) {
-          pendingFinalTranscript.delete(responseId);
-          emitFinalTranscript(responseId, finalText);
-        }
         break;
       }
 
       case 'response.output_audio_transcript.delta': {
         const responseId = String(event.response_id ?? '');
         if (!responseId || cancelledResponses.has(responseId) || typeof event.delta !== 'string') break;
-        emitTranscriptDelta(responseId, event.delta, typeof event.item_id === 'string' ? event.item_id : undefined);
+        responseSegment(responseId).addTranscriptDelta(event.delta, typeof event.item_id === 'string' ? event.item_id : undefined);
         break;
       }
 
@@ -336,11 +300,9 @@ export function connectRealtimeProxy(client: ClientSocket, options: ProxyOptions
         const text = String(event.transcript ?? '');
         const responseId = String(event.response_id ?? '');
         if (cancelledResponses.has(responseId)) break;
-        flushPendingTranscript(responseId);
         if (text.trim()) repo.addEvent(sessionId, 'tutor_said', { text });
         if (typeof event.response_id === 'string') responseTranscript.set(event.response_id, text);
-        if (audioDoneResponses.has(responseId)) emitFinalTranscript(responseId, text);
-        else pendingFinalTranscript.set(responseId, text);
+        responseSegment(responseId).setFinalTranscript(text);
         break;
       }
 
@@ -384,6 +346,7 @@ export function connectRealtimeProxy(client: ClientSocket, options: ProxyOptions
         const status = response?.status ?? 'unknown';
         if (status === 'cancelled' && response?.id) cancelledResponses.add(response.id);
         const responseIdentity = identityForResponse(response?.id);
+        if (response?.id) flushResponseSegment(response.id, status === 'completed');
         sendClient({ type: 'response_done', response_id: response?.id, status }, responseIdentity);
         if (response?.id === activeResponseId) activeResponseId = null;
         if (retryCreateOnDone) {
@@ -470,20 +433,16 @@ export function connectRealtimeProxy(client: ClientSocket, options: ProxyOptions
       case 'semantic_visual_plan': {
         try {
           const { plan, ops, checkpoints } = adaptSemanticScene(args);
-          const totalSamples = responseSamples.get(responseId) ?? 0;
-          const visualStart = Math.max(0, totalSamples - Math.min(totalSamples, checkpoints.length * 4_800));
-          for (const [index, checkpoint] of checkpoints.entries()) {
+          for (const checkpoint of checkpoints) {
             const eventId = repo.addEvent(sessionId, 'semantic_scene', { plan, ops: checkpoint.ops, checkpointId: checkpoint.id, reveal: checkpoint.reveal }, false);
-            const end = checkpoints.length === 0 ? totalSamples : Math.round(visualStart + ((totalSamples - visualStart) * (index + 1)) / checkpoints.length);
-            sendClient({
+            responseSegment(responseId).addSemanticCue({
               type: 'board_ops',
               ops: checkpoint.ops,
               response_id: responseId,
               event_id: eventId,
               groupLabel: checkpoint.groupLabel,
               checkpoint: checkpoint.reveal,
-            }, identityForResponse(responseId), {
-              audioSampleOffsets: { start: index === 0 ? visualStart : Math.round(visualStart + ((totalSamples - visualStart) * index) / checkpoints.length), end },
+            }, {
               visualCueId: checkpoint.id,
               semanticObjectId: checkpoint.semanticObjectId,
             });
@@ -522,9 +481,7 @@ export function connectRealtimeProxy(client: ClientSocket, options: ProxyOptions
             characterAttentionTarget: lessonState.characterAttentionTarget,
           };
           repo.addEvent(sessionId, 'lesson_state', state);
-          const sample = responseSamples.get(responseId) ?? 0;
-          sendClient({ type: 'lesson_state', state }, identityForResponse(responseId), {
-            audioSampleOffsets: { start: sample, end: sample },
+          responseSegment(responseId).addSemanticCue({ type: 'lesson_state', state }, {
             ...(lessonState.activeSemanticObjectId ? { semanticObjectId: lessonState.activeSemanticObjectId } : {}),
           });
           finishTool(callId, responseId, { ok: true, legalPhase: lessonState.phase, owedAction: lessonState.owedAction });
@@ -538,8 +495,7 @@ export function connectRealtimeProxy(client: ClientSocket, options: ProxyOptions
         const { ops, rejected } = validateOps(args.ops);
         if (ops.length > 0) {
           const eventId = repo.addEvent(sessionId, 'board_ops', { ops }, false);
-          const sample = responseSamples.get(responseId) ?? 0;
-          sendClient({ type: 'board_ops', ops, response_id: responseId, event_id: eventId }, identityForResponse(responseId), { audioSampleOffsets: { start: sample, end: sample } });
+          responseSegment(responseId).addSemanticCue({ type: 'board_ops', ops, response_id: responseId, event_id: eventId });
         }
         finishTool(callId, responseId, {
           ok: rejected.length === 0,
@@ -581,6 +537,8 @@ export function connectRealtimeProxy(client: ClientSocket, options: ProxyOptions
             ? args.opportunity_kind as 'recall' | 'explanation' | 'application' | 'retrieval'
             : 'recall' as const,
           retrievalOf: typeof args.retrieval_of === 'string' ? args.retrieval_of.slice(0, 160) : undefined,
+          contradicts: Array.isArray(args.contradicts) ? args.contradicts.filter((value): value is string => typeof value === 'string').map((value) => value.slice(0, 160)).slice(0, 8) : [],
+          supersedes: Array.isArray(args.supersedes) ? args.supersedes.filter((value): value is string => typeof value === 'string').map((value) => value.slice(0, 160)).slice(0, 8) : [],
         };
         if (entry.concept && entry.observation && entry.sourceEventIds.length > 0) {
           try {
@@ -605,7 +563,7 @@ export function connectRealtimeProxy(client: ClientSocket, options: ProxyOptions
           nextStep: args.next_step ? String(args.next_step).slice(0, 240) : undefined,
         };
         repo.addEvent(sessionId, 'lesson_state', state);
-        sendClient({ type: 'lesson_state', state }, identityForResponse(responseId));
+        responseSegment(responseId).addSemanticCue({ type: 'lesson_state', state });
         finishTool(callId, responseId, { ok: true });
         break;
       }

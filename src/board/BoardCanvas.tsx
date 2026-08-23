@@ -2,10 +2,10 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import katex from 'katex';
 import 'katex/dist/katex.min.css';
 import { BOARD_W, BOARD_H, type Vec } from '../../shared/boardOps';
-import { compileScene, type CompiledItem, type RenderNode, type BBox } from './compile';
+import { compileScene, nodeBBox, type CompiledItem, type RenderNode, type BBox } from './compile';
 import type { SceneState } from './scene';
 import { BoardAnimator, hideForAnimation, type PenPosition } from './animator';
-import { deriveSemanticViewport } from './semanticViewport';
+import { contains, deriveSemanticViewport } from './semanticViewport';
 import { FONT_HAND } from './measure';
 import './Board.css';
 
@@ -63,9 +63,13 @@ function KatexBlock({ node }: { node: Extract<RenderNode, { type: 'katex' }> }) 
 const NodeView = memo(function NodeView({
   node,
   refCallback,
+  hiddenInFocus,
+  textKey,
 }: {
   node: RenderNode;
   refCallback: (el: SVGElement | null) => void;
+  hiddenInFocus: boolean;
+  textKey: string;
 }) {
   if (node.type === 'path') {
     return (
@@ -94,13 +98,23 @@ const NodeView = memo(function NodeView({
         fontFamily={FONT_HAND}
         fontWeight={600}
         className="board__text"
+        visibility={hiddenInFocus ? 'hidden' : 'visible'}
+        data-required-text={node.text}
+        data-required-text-key={textKey}
+        data-focus-contained={hiddenInFocus ? 'false' : 'true'}
       >
         {node.text}
       </text>
     );
   }
   return (
-    <g ref={refCallback as (el: SVGGElement | null) => void}>
+    <g
+      ref={refCallback as (el: SVGGElement | null) => void}
+      visibility={hiddenInFocus ? 'hidden' : 'visible'}
+      data-required-text={node.latex}
+      data-required-text-key={textKey}
+      data-focus-contained={hiddenInFocus ? 'false' : 'true'}
+    >
       <KatexBlock node={node} />
     </g>
   );
@@ -184,8 +198,8 @@ export function BoardCanvas({
   const semanticViewport = useMemo(
     () => overview || !compact
       ? { x: 0, y: 0, w: BOARD_W, h: BOARD_H, itemIds: [] }
-      : deriveSemanticViewport(scene, focusSemanticObjectId, focusIndex),
-    [scene, focusSemanticObjectId, focusIndex, overview, compact],
+      : deriveSemanticViewport(scene, focusSemanticObjectId, focusIndex, highlights.map((highlight) => highlight.id)),
+    [scene, focusSemanticObjectId, focusIndex, overview, compact, highlights],
   );
 
   // A clear resets animation memory so re-used ids animate again.
@@ -353,6 +367,12 @@ export function BoardCanvas({
               <NodeView
                 key={`${i}-${item.revision}`}
                 node={node}
+                textKey={`${item.id}:${i}`}
+                hiddenInFocus={Boolean(
+                  compact && !overview && focusSemanticObjectId &&
+                  (node.type === 'text' || node.type === 'katex') &&
+                  !contains(semanticViewport, nodeBBox(node), -12),
+                )}
                 refCallback={(el) => {
                   els[i] = el;
                 }}

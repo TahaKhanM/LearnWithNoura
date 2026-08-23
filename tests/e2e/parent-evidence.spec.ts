@@ -6,13 +6,13 @@ test('Parent Area calibrates one answer, retrieval, self-correction, contradicti
   const evidence = [
     row(1, 'single correct', 'correct', 'recall'),
     row(2, 'retrieved concept', 'correct', 'application'),
-    row(3, 'retrieved concept', 'correct', 'retrieval'),
+    row(3, 'retrieved concept', 'correct', 'retrieval', 'independent', { retrievalOf: 'task-2' }),
     row(4, 'self corrected concept', 'self_corrected', 'explanation', 'reduced'),
     row(5, 'contradicted concept', 'correct', 'application'),
     row(6, 'contradicted concept', 'incorrect', 'retrieval'),
     row(7, 'resolved misconception', 'confident_misconception', 'recall'),
-    row(8, 'resolved misconception', 'correct', 'application'),
-    row(9, 'resolved misconception', 'correct', 'retrieval'),
+    row(8, 'resolved misconception', 'correct', 'application', 'independent', { supersedes: ['evidence-7'] }),
+    row(9, 'resolved misconception', 'correct', 'retrieval', 'independent', { retrievalOf: 'task-8' }),
   ].map((entry, index) => ({ ...entry, ts: now + index }));
   const summary = {
     headline: 'Maya compared fractions using several recorded opportunities.',
@@ -41,7 +41,7 @@ test('Parent Area calibrates one answer, retrieval, self-correction, contradicti
   await expectConceptStatus(page, 'retrieved concept', 'Demonstrated');
   await expectConceptStatus(page, 'self corrected concept', 'Progressing');
   await expectConceptStatus(page, 'contradicted concept', 'Uncertain');
-  await expectConceptStatus(page, 'resolved misconception', 'Demonstrated');
+  await expectConceptStatus(page, 'resolved misconception', 'Progressing');
   const improved = page.locator('.parent__concepts li').filter({ hasText: 'resolved misconception' });
   await expect(improved.getByText('View 2 earlier observations')).toBeVisible();
   await improved.getByText('View 2 earlier observations').click();
@@ -54,7 +54,14 @@ async function expectConceptStatus(page: import('@playwright/test').Page, concep
   await expect(item.locator('.parent__verdict')).toHaveText(status);
 }
 
-function row(id: number, concept: string, taxonomy: string, opportunityKind: string, independenceLevel = 'independent') {
+function row(
+  id: number,
+  concept: string,
+  taxonomy: string,
+  opportunityKind: string,
+  independenceLevel = 'independent',
+  lineage: { retrievalOf?: string; supersedes?: string[] } = {},
+) {
   return {
     id,
     sessionId: 'session-evidence',
@@ -71,5 +78,8 @@ function row(id: number, concept: string, taxonomy: string, opportunityKind: str
     opportunityKind,
     taskId: `task-${id}`,
     turnId: `turn-${id}`,
+    retrievalOf: lineage.retrievalOf ?? null,
+    contradicts: [],
+    supersedes: lineage.supersedes ?? [],
   };
 }

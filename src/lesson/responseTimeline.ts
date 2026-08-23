@@ -4,6 +4,7 @@ import type { GenerationIdentity } from '../../shared/runtimeProtocol';
 export type ResponseCue =
   | { kind: 'caption'; cueId: string; responseId: string; startSample: number; endSample: number; sequence: number; identity: GenerationIdentity; delta: string }
   | { kind: 'visual'; cueId: string; responseId: string; startSample: number; endSample: number; sequence: number; identity: GenerationIdentity; ops: BoardOp[]; eventId: number | null; visualCueId?: string; semanticObjectId?: string; groupLabel?: string; checkpoint?: string; idempotencyKey?: string }
+  | { kind: 'semantic'; cueId: string; responseId: string; startSample: number; endSample: number; sequence: number; identity: GenerationIdentity; state: Record<string, unknown>; semanticObjectId?: string }
   | { kind: 'final'; cueId: string; responseId: string; startSample: number; endSample: number; sequence: number; identity: GenerationIdentity; text: string };
 
 /**

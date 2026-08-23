@@ -138,7 +138,8 @@ function migrate(database: DatabaseSync): void {
       ts INTEGER NOT NULL,
       type TEXT NOT NULL,
       payload TEXT NOT NULL,
-      released INTEGER NOT NULL DEFAULT 1
+      released INTEGER NOT NULL DEFAULT 1,
+      release_requested INTEGER NOT NULL DEFAULT 0
     );
     CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id, id);
 
@@ -164,6 +165,7 @@ function migrate(database: DatabaseSync): void {
   } catch {
     /* column already exists */
   }
+  addColumn(database, 'events', 'release_requested INTEGER NOT NULL DEFAULT 0');
 
   addColumn(database, 'sessions', 'parent_session_id TEXT REFERENCES sessions(id)');
   addColumn(database, 'sessions', 'ended_event_id INTEGER');
@@ -204,6 +206,8 @@ function migrate(database: DatabaseSync): void {
   addColumn(database, 'evidence', 'supersedes_json TEXT');
   addColumn(database, 'evidence', "opportunity_kind TEXT NOT NULL DEFAULT 'recall'");
   addColumn(database, 'evidence', 'retrieval_of TEXT');
+  addColumn(database, 'evidence', 'released INTEGER NOT NULL DEFAULT 1');
+  addColumn(database, 'evidence', 'idempotency_key TEXT');
   database.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_evidence_evidence_id ON evidence(evidence_id) WHERE evidence_id IS NOT NULL');
 }
 

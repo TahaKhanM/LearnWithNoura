@@ -4,8 +4,8 @@
  * exactly how much audio has been scheduled and how much has played —
  * per response, even when several responses are queued back to back —
  * (a) stopping locally on interruption is instant, (b) captions and board
- * operations can be released at the exact moment in speech where the
- * model emitted them, and (c) truncation can tell the server precisely
+ * operations release only after their conservative server-derived response-
+ * segment boundary is heard, and (c) truncation can tell the server precisely
  * how much of each conversation item the child actually heard.
  */
 

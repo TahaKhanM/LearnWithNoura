@@ -66,6 +66,7 @@ export interface EvidenceRow {
   supersedes: string[];
   opportunityKind: EvidenceOpportunityKind;
   retrievalOf: string | null;
+  idempotencyKey?: string | null;
 }
 
 export interface EventRow {
@@ -289,7 +290,7 @@ export class Repo {
     return Boolean(row);
   }
 
-  addFallbackEvent(identity: FallbackTurnIdentity, type: string, payload: unknown, released = true): number {
+  addFallbackEvent(identity: FallbackTurnIdentity, type: string, payload: unknown, released = false): number {
     const scopedPayload = {
       ...(isRecord(payload) ? payload : { value: payload }),
       turnId: identity.turnId,
@@ -323,7 +324,8 @@ export class Repo {
         ...entry,
         turnId: identity.turnId,
         generationId: identity.generationId,
-      });
+        idempotencyKey: identity.idempotencyKey,
+      }, false);
       this.db.exec('COMMIT');
       return stored;
     } catch (error) {
@@ -334,7 +336,14 @@ export class Repo {
 
   markFallbackEventReleased(identity: FallbackTurnIdentity, eventId: number): void {
     const result = this.db.prepare(
-      `UPDATE events SET released = 1
+      `UPDATE events
+       SET release_requested = 1,
+           released = CASE WHEN EXISTS (
+             SELECT 1 FROM fallback_turns completed
+             WHERE completed.session_id = ? AND completed.idempotency_key = ?
+               AND completed.connection_epoch = ? AND completed.turn_id = ?
+               AND completed.generation_id = ? AND completed.status = 'completed'
+           ) THEN 1 ELSE released END
        WHERE id = ? AND session_id = ? AND json_extract(payload, '$.idempotencyKey') = ?
          AND json_extract(payload, '$.turnId') = ? AND json_extract(payload, '$.generationId') = ?
          AND EXISTS (
@@ -343,6 +352,7 @@ export class Repo {
              AND f.turn_id = ? AND f.generation_id = ? AND f.status IN ('active', 'completed') AND s.status = 'active'
          )`,
     ).run(
+      identity.sessionId, identity.idempotencyKey, identity.connectionEpoch, identity.turnId, identity.generationId,
       eventId, identity.sessionId, identity.idempotencyKey, identity.turnId, identity.generationId,
       identity.sessionId, identity.idempotencyKey, identity.connectionEpoch, identity.turnId, identity.generationId,
     );
@@ -350,21 +360,44 @@ export class Repo {
   }
 
   finishFallbackTurn(identity: FallbackTurnIdentity, status: 'completed' | 'failed' | 'cancelled', steps: unknown[] = []): boolean {
-    const result = this.db.prepare(
-      `UPDATE fallback_turns SET status = ?, steps_json = ?, updated_at = ?
-       WHERE session_id = ? AND idempotency_key = ? AND connection_epoch = ?
-         AND turn_id = ? AND generation_id = ? AND status = 'active'`,
-    ).run(
-      status,
-      status === 'completed' ? JSON.stringify(steps) : null,
-      Date.now(),
-      identity.sessionId,
-      identity.idempotencyKey,
-      identity.connectionEpoch,
-      identity.turnId,
-      identity.generationId,
-    );
-    return Number(result.changes) === 1;
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const result = this.db.prepare(
+        `UPDATE fallback_turns SET status = ?, steps_json = ?, updated_at = ?
+         WHERE session_id = ? AND idempotency_key = ? AND connection_epoch = ?
+           AND turn_id = ? AND generation_id = ? AND status = 'active'`,
+      ).run(
+        status,
+        status === 'completed' ? JSON.stringify(steps) : null,
+        Date.now(),
+        identity.sessionId,
+        identity.idempotencyKey,
+        identity.connectionEpoch,
+        identity.turnId,
+        identity.generationId,
+      );
+      if (Number(result.changes) !== 1) {
+        this.db.exec('ROLLBACK');
+        return false;
+      }
+      if (status === 'completed') {
+        this.db.prepare(
+          `UPDATE events SET released = 1
+           WHERE session_id = ? AND json_extract(payload, '$.idempotencyKey') = ?
+             AND json_extract(payload, '$.turnId') = ? AND json_extract(payload, '$.generationId') = ?
+             AND (type <> 'semantic_scene' OR release_requested = 1)`,
+        ).run(identity.sessionId, identity.idempotencyKey, identity.turnId, identity.generationId);
+        this.db.prepare(
+          `UPDATE evidence SET released = 1
+           WHERE session_id = ? AND turn_id = ? AND generation_id = ? AND idempotency_key = ?`,
+        ).run(identity.sessionId, identity.turnId, identity.generationId, identity.idempotencyKey);
+      }
+      this.db.exec('COMMIT');
+      return true;
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
   }
 
   getFallbackTurn(identity: Pick<FallbackTurnIdentity, 'sessionId' | 'idempotencyKey'>): { status: string; steps: unknown[] } | null {
@@ -398,14 +431,24 @@ export class Repo {
   }
 
   listEvents(sessionId: string, limit = 500, throughEventId?: number | null): EventRow[] {
+    return this.readEvents(sessionId, limit, throughEventId, false);
+  }
+
+  /** Explicit diagnostic path. Application APIs, replay, context and summaries
+   * must use listEvents(), which exposes released/committed truth only. */
+  listEventsForInternalAudit(sessionId: string, limit = 500, throughEventId?: number | null): EventRow[] {
+    return this.readEvents(sessionId, limit, throughEventId, true);
+  }
+
+  private readEvents(sessionId: string, limit: number, throughEventId: number | null | undefined, includeUnreleased: boolean): EventRow[] {
     const rows = this.db
       .prepare(
         `SELECT id, session_id, ts, type, payload, released FROM (
            SELECT id, session_id, ts, type, payload, released
-           FROM events WHERE session_id = ? AND (? IS NULL OR id <= ?) ORDER BY id DESC LIMIT ?
+           FROM events WHERE session_id = ? AND (? = 1 OR released = 1) AND (? IS NULL OR id <= ?) ORDER BY id DESC LIMIT ?
          ) latest ORDER BY id`,
       )
-      .all(sessionId, throughEventId ?? null, throughEventId ?? null, limit) as unknown as {
+      .all(sessionId, includeUnreleased ? 1 : 0, throughEventId ?? null, throughEventId ?? null, limit) as unknown as {
       id: number;
       session_id: string;
       ts: number;
@@ -443,7 +486,9 @@ export class Repo {
       supersedes?: string[];
       opportunityKind?: EvidenceOpportunityKind;
       retrievalOf?: string;
+      idempotencyKey?: string;
     },
+    released = true,
   ): EvidenceRow {
     this.assertActive(sessionId);
     const session = this.getSession(sessionId);
@@ -466,8 +511,8 @@ export class Repo {
           evidence_id, child_id, concept_id, response_taxonomy, confidence_basis,
           source_event_ids, normalized_excerpt, source_span_json, task_id,
           independence_level, domain_check_json, turn_id, generation_id,
-          contradicts_json, supersedes_json, opportunity_kind, retrieval_of
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          contradicts_json, supersedes_json, opportunity_kind, retrieval_of, released, idempotency_key
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         sessionId,
@@ -494,6 +539,8 @@ export class Repo {
         JSON.stringify(entry.supersedes ?? []),
         entry.opportunityKind ?? 'recall',
         entry.retrievalOf ?? null,
+        released ? 1 : 0,
+        entry.idempotencyKey ?? null,
       );
     return this.getEvidenceByRowId(Number(result.lastInsertRowid)) as EvidenceRow;
   }
@@ -501,7 +548,7 @@ export class Repo {
   listEvidence(sessionId: string): EvidenceRow[] {
     const rows = this.db
       .prepare(
-        'SELECT * FROM evidence WHERE session_id = ? ORDER BY id',
+        'SELECT * FROM evidence WHERE session_id = ? AND released = 1 ORDER BY id',
       )
       .all(sessionId) as unknown as {
       [key: string]: unknown;
@@ -509,12 +556,17 @@ export class Repo {
     return rows.map((r) => mapEvidence(r));
   }
 
+  listEvidenceForInternalAudit(sessionId: string): EvidenceRow[] {
+    const rows = this.db.prepare('SELECT * FROM evidence WHERE session_id = ? ORDER BY id').all(sessionId) as unknown as Record<string, unknown>[];
+    return rows.map((row) => mapEvidence(row));
+  }
+
   listEvidenceForChild(childId: string, limit = 200): (EvidenceRow & { goal: string })[] {
     const rows = this.db
       .prepare(
         `SELECT e.*, s.goal
          FROM evidence e JOIN sessions s ON s.id = e.session_id
-         WHERE s.child_id = ? ORDER BY e.id DESC LIMIT ?`,
+         WHERE s.child_id = ? AND e.released = 1 ORDER BY e.id DESC LIMIT ?`,
       )
       .all(childId, limit) as unknown as {
       [key: string]: unknown;
@@ -523,7 +575,7 @@ export class Repo {
   }
 
   getEvidenceByEvidenceId(evidenceId: string): EvidenceRow | null {
-    const row = this.db.prepare('SELECT * FROM evidence WHERE evidence_id = ?').get(evidenceId) as Record<string, unknown> | undefined;
+    const row = this.db.prepare('SELECT * FROM evidence WHERE evidence_id = ? AND released = 1').get(evidenceId) as Record<string, unknown> | undefined;
     return row ? mapEvidence(row) : null;
   }
 
@@ -547,7 +599,7 @@ export class Repo {
 
   private latestEventId(sessionId: string): number | null {
     const row = this.db
-      .prepare('SELECT MAX(id) AS id FROM events WHERE session_id = ?')
+      .prepare('SELECT MAX(id) AS id FROM events WHERE session_id = ? AND released = 1')
       .get(sessionId) as { id: number | null };
     return row.id === null ? null : Number(row.id);
   }
@@ -620,5 +672,6 @@ function mapEvidence(row: Record<string, unknown>): EvidenceRow {
     supersedes: parseArray<string>(row.supersedes_json),
     opportunityKind: row.opportunity_kind ? String(row.opportunity_kind) as EvidenceOpportunityKind : 'recall',
     retrievalOf: row.retrieval_of === null || row.retrieval_of === undefined ? null : String(row.retrieval_of),
+    idempotencyKey: row.idempotency_key === null || row.idempotency_key === undefined ? null : String(row.idempotency_key),
   };
 }

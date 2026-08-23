@@ -364,7 +364,19 @@ export class RealtimeSession {
         this.update({ phase: 'listening' });
         break;
       }
-      case 'lesson_state': this.update({ lessonState: { ...this.snapshot.lessonState, ...(message.state as LessonState) } }); break;
+      case 'lesson_state': {
+        const state = (message.state ?? {}) as LessonState;
+        const responseId = String(message.response_id ?? envelope.providerResponseId ?? '');
+        if (envelope.audioSampleOffsets && responseId) {
+          this.timeline.enqueue({
+            kind: 'semantic', cueId: envelope.eventId, responseId,
+            startSample: envelope.audioSampleOffsets.start, endSample: envelope.audioSampleOffsets.end,
+            sequence: envelope.sequence, identity: envelope, state: { ...state },
+            semanticObjectId: envelope.semanticObjectId,
+          });
+        } else this.update({ lessonState: { ...this.snapshot.lessonState, ...state } });
+        break;
+      }
       case 'evidence': {
         const entry = message.entry as unknown as EvidenceEntry;
         this.update({ evidenceCount: this.snapshot.evidenceCount + 1, lastEvidence: entry });
@@ -413,6 +425,7 @@ export class RealtimeSession {
     if (!this.isCurrent(cue.identity) || this.deadResponses.has(cue.responseId)) return;
     if (cue.kind === 'caption') this.pushTranscriptDelta(cue.responseId, cue.delta);
     else if (cue.kind === 'visual') this.releaseOps(cue);
+    else if (cue.kind === 'semantic') this.update({ lessonState: { ...this.snapshot.lessonState, ...(cue.state as LessonState) } });
     else this.applyFinalTranscript(cue.responseId, cue.text);
   }
 
