@@ -94,13 +94,13 @@ Line references are to this working revision and are refreshed at handoff.
 | VCL-03 | Correct Vite/static + Express/WS Functions | `vercel.json`; genuine local output has both functions | PASS local build |
 | VCL-04 | Git integration/main Production branch | private org repo cannot connect on Hobby | BLOCKED by account/repo plan boundary |
 | VCL-05 | Preview/Production env separation | Preview-only variables; sensitive secrets | PASS metadata |
-| VCL-06 | Native WS duration based on inspected plan | Hobby; 300s Function | PASS config; deployed WSS pending |
+| VCL-06 | Native WS duration based on inspected plan | Hobby; 300s Function; public WSS live PCM smoke | PASS deployed |
 | VCL-07 | Preview exact SHA/version/health | protected stable alias; `/version` exact SHA; `/healthz` explicit 503 degraded | PASS identity; health correctly BLOCKED |
 | VCL-08 | Preview synthetic/no Production child data | synthetic-only env, Standard Protection, lesson creation disabled without shared storage | PASS safe boundary |
-| VCL-09 | Public-v0 durable store / full-Production auth/privacy | `production-v0` requires provider, Postgres and signing; full `production` keeps auth/privacy/ZDR fail-close | v0 code PASS locally; deployed store pending. Full Production BLOCKED |
-| VCL-10 | Apex/www/SSL/DNS assignment | domain exists with Vercel nameservers; not attached before gate | Production BLOCKED |
-| VCL-11 | HTTPS/WSS/persistence/restart | HTTPS/REST/deep routes pass; real Function test proved `/tmp` is not shared, then UI failed closed | WSS journey/persistence BLOCKED without managed store |
-| VCL-12 | Rollback target/procedure | operations runbook | Procedure PASS; target only after deployment |
+| VCL-09 | Public-v0 durable store / full-Production auth/privacy | `production-v0` requires provider, Postgres and signing; full `production` keeps auth/privacy/ZDR fail-close | v0 managed store PASS deployed. Full Production BLOCKED |
+| VCL-10 | Apex/www/SSL/DNS assignment | apex public with issued certificate; `www` 308 to apex | PASS deployed |
+| VCL-11 | HTTPS/WSS/persistence/restart | public HTTPS, nested REST, signed guest scope, managed persistence, WSS ready/live PCM, fallback/evidence/summary | PASS synthetic deployed; target hardware UNVERIFIED |
+| VCL-12 | Rollback target/procedure | operations runbook; historical maintenance and prior verified v0 deployment IDs retained | PASS |
 
 ## Runtime-model preservation
 
@@ -113,7 +113,8 @@ Line references are to this working revision and are refreshed at handoff.
 | Environment | URL / deployment ID | SHA | Health/version/REST/WSS/log/persistence result |
 | --- | --- | --- | --- |
 | Preview | `https://noura-preview-mtk2982007.vercel.app` (final deployment ID in handoff) | `/version` must match final HEAD | Standard-protected; Home/deep routes/config/version pass; health 503 degraded; lessons disabled; logs clean |
-| Production | Static maintenance boundary only: `dpl_DPdMDbq9D69cSZyJX3VS4C7MbdeU` | Maintenance artifact | No tutor backend; purchased domain intentionally unattached; application Production blocked |
+| Public v0 | `https://learnwithnoura.com` / `dpl_k7yESkTnLV7jBNavcqrgwdgCa4ff` | `9a92844bcf1d17d7679b9ef18b6a38c8f1ca2e1a` | Health/version/config pass; nested REST and Parent persistence pass; WSS ready/live PCM/interruption pass; fallback tools/board/evidence/summary/immutable end pass; synthetic rows cleaned |
+| Full Production | — | — | Real-user auth/privacy/ZDR/CA/target-hardware gates remain blocked |
 
 ## Manual/recorded evidence still required
 

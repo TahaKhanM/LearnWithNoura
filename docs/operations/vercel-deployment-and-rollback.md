@@ -11,6 +11,8 @@
 - GitHub integration: blocked because the repository is private and organization-owned while the inspected Hobby account cannot attach that repository class. Use reviewed manual CLI deployments until account/project ownership changes.
 - Deployment Protection: Standard Vercel Authentication (`all_except_custom_domains`).
 - Stable protected Preview alias: `https://noura-preview-mtk2982007.vercel.app`
+- Public v0: `https://learnwithnoura.com`; `www` permanently redirects to the apex.
+- Current verified public-v0 deployment: `dpl_k7yESkTnLV7jBNavcqrgwdgCa4ff`, revision `9a92844bcf1d17d7679b9ef18b6a38c8f1ca2e1a`.
 
 Do not print or download Production secrets into tracked files. `.vercel/`, `.env*` and databases are ignored.
 
@@ -28,7 +30,7 @@ Do not print or download Production secrets into tracked files. `.vercel/`, `.en
 
 Preview is synthetic-only and storage-ephemeral. A 503 degraded `/healthz` for durable storage is an intentional blocker, not a successful persistence claim.
 
-The first CLI deployment is forcibly classified by Vercel as Production even when Preview was requested. Two accidentally classified tutor deployments were immediately removed. The surviving Production deployment is the static maintenance boundary `dpl_DPdMDbq9D69cSZyJX3VS4C7MbdeU`; it has no tutor API and no purchased-domain assignment. This seed allows subsequent explicit `--target=preview` deployments to remain Preview.
+The first CLI deployment was forcibly classified by Vercel as Production even when Preview was requested. Two accidentally classified tutor deployments were immediately removed. The former maintenance boundary `dpl_DPdMDbq9D69cSZyJX3VS4C7MbdeU` remains the historical rollback artifact; subsequent explicit Preview deployments remain Preview.
 
 ## Public v0 gate
 
@@ -45,6 +47,14 @@ Before setting `NOURA_DEPLOYMENT_MODE=production-v0`, require:
 The v0 boundary does not claim real-user readiness, legal compliance, ZDR, durable distributed rate limiting or external parent identity.
 
 The Supabase shared pooler encrypts the v0 database connection, but its certificate chain is not in Node's default CA store. Public v0 therefore sets `NOURA_DATABASE_SSL_REJECT_UNAUTHORIZED=false`. Before full Production, download and pin the project Server root certificate and restore certificate/hostname verification.
+
+Launch evidence for revision `9a92844`:
+
+- public apex health 200, exact `/version`, production-v0 config and permanent `www` redirect;
+- signed guest cookie, parent scoping, learner/session creation, nested session reload and Parent overview persisted through managed Postgres;
+- public WSS reached `ready`, started a Realtime response, delivered live PCM and accepted local interruption;
+- captions-only fallback completed with model tools, semantic board output, evidence, atomic release, immutable ending and Parent summary;
+- all named synthetic smoke records were deleted after verification; the launch database was handed over empty.
 
 ## Full Production gate
 

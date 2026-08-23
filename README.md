@@ -10,7 +10,7 @@ Canonical production origin: [https://learnwithnoura.com](https://learnwithnoura
 | --- | --- | --- |
 | Local | Synthetic development and private single-host demonstrations | Supported with SQLite; microphone/acoustic targets remain hardware-unverified. |
 | Vercel Preview | Access-gated synthetic UI and visual-fixture evaluation | Protected at `noura-preview-mtk2982007.vercel.app`; interactive lessons are disabled because storage is ephemeral and `/healthz` reports degraded. |
-| Public v0 | Full-product synthetic demonstrations | The real voice, board, interruption, fallback, evidence and Parent flows now support managed Postgres plus a signed guest-parent scope. Deployment remains pending until a database project is selected and the live gates pass. |
+| Public v0 | Full-product synthetic demonstrations | Live at `learnwithnoura.com`. Real voice/WSS, interruption, fallback/tools, semantic board output, evidence, managed Postgres, immutable ending and Parent summary passed deployed synthetic smoke at revision `9a92844`. |
 | Full Production | Real parent/child use | Still blocked fail-closed until real parent authentication is selected, privacy/safety operations are configured and ZDR evidence exists for any under-13 mode. |
 
 Do not use real child details, recordings or transcripts in the current build. Noura does not claim legal compliance or production child readiness.
@@ -102,11 +102,11 @@ The browser suites use synthetic learner fixtures. Paid live-provider runs are n
 
 ## Known blockers
 
-- The complete domain repository now has synchronous SQLite and asynchronous managed-Postgres implementations. The Postgres implementation passes parent/session/event/evidence, immutable-end and fallback-staging contract tests; a deployed database gate is still pending.
+- The complete domain repository has synchronous SQLite and asynchronous managed-Postgres implementations. The deployed private Supabase schema and least-privilege app role pass parent/session/event/evidence, immutable-end and fallback-staging contracts.
 - Public v0 can issue a long-lived signed pseudonymous guest-parent cookie, while sessions remain parent-scoped and lessons use short-lived signed capabilities. A real external identity provider is still required for full Production.
 - In-memory rate limits are a local/Preview layer, not the final multi-instance Production control.
-- ZDR/account evidence, legal decisions, retention policy approval, target-hardware audio, deployed persistence and real-minor safety evaluation are external gates.
+- ZDR/account evidence, legal decisions, retention policy approval, target-hardware audio and real-minor safety evaluation are external gates.
 - Native Vercel WebSockets are currently a public beta and connections terminate at Function duration; reconnect is expected.
-- A static maintenance page remains the only surviving Production deployment until the managed database and live smoke gates pass. It does not run the tutor backend and the purchased custom domain remains unattached.
+- Public v0 uses encrypted Supavisor transport with certificate verification disabled because Node does not trust the shared-pooler chain by default. Pinning the Supabase CA remains a full-Production gate.
 
 The historical repository name and local directory are retained intentionally. Immutable historical audit evidence lives under `docs/legacy/`.
