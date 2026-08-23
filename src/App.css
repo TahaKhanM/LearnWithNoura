@@ -1,2 +1,16 @@
 /* Screen-level layout lives with each page; nothing global is needed
    beyond the tokens in index.css. */
+.skip-link {
+  position: fixed;
+  z-index: 1000;
+  top: 8px;
+  left: 8px;
+  transform: translateY(-160%);
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: var(--ink);
+  color: var(--board);
+}
+
+.skip-link:focus { transform: translateY(0); }
+.route-loading { min-height: 100dvh; display: grid; place-items: center; color: var(--ink-soft); }

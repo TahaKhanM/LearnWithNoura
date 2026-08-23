@@ -1,9 +1,13 @@
-import { RouterProvider, matchPath, useRouter } from './router';
-import { HomePage } from './home/HomePage';
-import { LessonPage } from './lesson/LessonPage';
-import { ParentPage } from './parent/ParentPage';
-import { BoardHarness } from './dev/BoardHarness';
+import { lazy, Suspense } from 'react';
+import { RouterProvider } from './router';
+import { useRouter } from './routerContext';
+import { matchPath } from './matchPath';
 import './App.css';
+
+const HomePage = lazy(() => import('./home/HomePage').then((module) => ({ default: module.HomePage })));
+const LessonPage = lazy(() => import('./lesson/LessonPage').then((module) => ({ default: module.LessonPage })));
+const ParentPage = lazy(() => import('./parent/ParentPage').then((module) => ({ default: module.ParentPage })));
+const BoardHarness = lazy(() => import('./dev/BoardHarness').then((module) => ({ default: module.BoardHarness })));
 
 function Routes() {
   const { path } = useRouter();
@@ -18,7 +22,10 @@ function Routes() {
 function App() {
   return (
     <RouterProvider>
-      <Routes />
+      <a className="skip-link" href="#main-content">Skip to main content</a>
+      <Suspense fallback={<main id="main-content" className="route-loading" aria-live="polite">Loading Noura…</main>}>
+        <Routes />
+      </Suspense>
     </RouterProvider>
   );
 }

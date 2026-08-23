@@ -1,5 +1,5 @@
 /* The palette is a set of dry erase markers on a board, which is what the
-   product is imitating, and it is the same one the Seneca landing page
+   product is imitating, and it is the same one the Noura landing page
    uses so the app is recognisably the thing the site promised. */
 :root {
   --board: #fcfbf7;
@@ -7,20 +7,20 @@
   --rail: #ede9df;
   --rail-line: #ddd8cb;
   --ink: #26231f;
-  --ink-soft: #6e6862;
-  --ink-faint: #a8a199;
+  --ink-soft: #5f5a54;
+  --ink-faint: #716b64;
   --blue: #2c5be0;
   --blue-deep: #1e42ac;
   --blue-wash: #edf1fd;
-  --red: #e14b3c;
-  --green: #14a07a;
-  --amber: #f0a227;
+  --red: #c43e33;
+  --green: #0c7a5d;
+  --amber: #99620b;
 
-  /* Outfit is the product's voice. Caveat is Seneca's handwriting, so it
-     is reserved for what Seneca puts on the board and for its own asides,
+  /* Outfit is the product's voice. Caveat is Noura's handwriting, so it
+     is reserved for what Noura puts on the board and for its own asides,
      never for anything the child has to read at length. */
-  --font-ui: 'Outfit', system-ui, -apple-system, 'Segoe UI', sans-serif;
-  --font-hand: 'Caveat', 'Segoe Print', 'Comic Sans MS', cursive;
+  --font-ui: 'Outfit Variable', 'Outfit', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-hand: 'Caveat Variable', 'Caveat', 'Segoe Print', 'Comic Sans MS', cursive;
 
   font-family: var(--font-ui);
   font-size: 16px;
@@ -38,15 +38,23 @@
   box-sizing: border-box;
 }
 
+button,
+[role='button'],
+summary,
+select {
+  touch-action: manipulation;
+}
+
 html,
 body,
 #root {
-  height: 100%;
+  min-height: 100%;
   margin: 0;
 }
 
 body {
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
   background: var(--rail);
 }
 
