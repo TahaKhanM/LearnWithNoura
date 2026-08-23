@@ -18,7 +18,7 @@
     "test:visual": "playwright test tests/visual",
     "test:a11y": "playwright test tests/accessibility",
     "test:security": "vitest run server/security.test.ts server/api.auth.test.ts server/store/repo.test.ts",
-    "test:storage": "vitest run server/store/portable.test.ts server/store/db.test.ts",
+    "test:storage": "vitest run server/store/portable.test.ts server/store/postgresRepo.test.ts server/store/db.test.ts",
     "test:runtime-models": "node scripts/runtime-model-diff.mjs",
     "test:av": "tsx scripts/evaluate-av-character.ts"
   },

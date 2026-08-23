@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import express from 'express';
+import request from 'supertest';
 import { capabilityFromProtocols, SecurityBoundary } from './security';
 import { readRuntimeConfig } from './runtimeConfig';
 
@@ -27,5 +29,25 @@ describe('security boundary', () => {
     expect(boundary.allow('parent:child:session:ip', 2, 1000)).toBe(true);
     expect(boundary.allow('parent:child:session:ip', 2, 1000)).toBe(true);
     expect(boundary.allow('parent:child:session:ip', 2, 1000)).toBe(false);
+  });
+
+  it('gives the explicit v0 a stable signed guest parent scope without signup', async () => {
+    const env = {
+      NOURA_DEPLOYMENT_MODE: 'production-v0',
+      DATABASE_URL: 'postgres://fixture',
+      OPENAI_API_KEY: 'fixture',
+      NOURA_STORAGE_ADAPTER: 'postgres',
+      NOURA_LESSON_CAPABILITY_SECRET: 'test-secret-at-least-32-characters',
+    };
+    const boundary = new SecurityBoundary(readRuntimeConfig(env), env);
+    const app = express();
+    app.use(boundary.attachParentIdentity);
+    app.get('/identity', (req, res) => res.json({ parentId: boundary.parentId(req) }));
+    const first = await request(app).get('/identity');
+    const cookie = String(first.headers['set-cookie']?.[0]).split(';')[0];
+    const second = await request(app).get('/identity').set('Cookie', cookie);
+    expect(first.headers['set-cookie']?.[0]).toMatch(/noura_parent=.*HttpOnly.*Secure.*SameSite=Lax/i);
+    expect(first.body.parentId).toMatch(/^guest-/);
+    expect(second.body.parentId).toBe(first.body.parentId);
   });
 });

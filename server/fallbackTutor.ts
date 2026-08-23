@@ -5,7 +5,8 @@ import { ResponseTaxonomySchema, TeachingMoveSchema, type ResponseTaxonomy } fro
 import { createLessonState, reduceLesson, responseHandoff } from './lesson/orchestrator.js';
 import { buildInstructions } from './realtime/instructions.js';
 import { REALTIME_TOOLS } from './realtime/tools.js';
-import type { FallbackTurnIdentity, Repo } from './store/repo.js';
+import type { DomainRepository } from './store/domain.js';
+import type { FallbackTurnIdentity } from './store/repo.js';
 
 /** Captions-only degraded mode. It deliberately shares the semantic visual,
  * pedagogy, evidence, and generation-envelope contracts with Realtime. */
@@ -41,13 +42,13 @@ export class FallbackTurnCoordinator {
   async run(
     client: OpenAI,
     model: string,
-    repo: Repo,
+    repo: DomainRepository,
     request: FallbackTurnRequest,
     onEvent: (event: FallbackEvent) => void,
     requestSignal?: AbortSignal,
   ): Promise<'completed' | 'replayed'> {
     const identity = persistedIdentity(request);
-    const claim = repo.claimFallbackTurn(identity);
+    const claim = await repo.claimFallbackTurn(identity);
     if (claim.kind === 'completed') {
       for (const event of claim.steps) onEvent(event as FallbackEvent);
       return 'replayed';
@@ -58,7 +59,7 @@ export class FallbackTurnCoordinator {
         throw new Error('Fallback request is already active in another process.');
       }
       await running.promise;
-      const stored = repo.getFallbackTurn(identity);
+      const stored = await repo.getFallbackTurn(identity);
       if (stored?.status !== 'completed') throw new Error('Fallback request did not complete.');
       for (const event of stored.steps) onEvent(event as FallbackEvent);
       return 'replayed';
@@ -86,13 +87,13 @@ export const fallbackTurns = new FallbackTurnCoordinator();
 async function executeFallbackTurn(
   client: OpenAI,
   model: string,
-  repo: Repo,
+  repo: DomainRepository,
   request: FallbackTurnRequest,
   onEvent: (event: FallbackEvent) => void,
   signal: AbortSignal,
 ): Promise<FallbackEvent[]> {
-  const session = repo.getSession(request.sessionId);
-  const child = session ? repo.getChild(session.childId) : null;
+  const session = await repo.getSession(request.sessionId);
+  const child = session ? await repo.getChild(session.childId) : null;
   if (!session || !child) throw new Error('unknown session');
   if (session.status !== 'active') throw new Error('session has ended');
 
@@ -103,16 +104,16 @@ async function executeFallbackTurn(
   let learnerEventId: number | null = null;
   let lessonState = createLessonState(session.goal, request.generationId);
 
-  const assertActive = () => {
-    if (signal.aborted || !repo.isFallbackTurnActive(identity)) throw abortError(signal.reason);
+  const assertActive = async () => {
+    if (signal.aborted || !(await repo.isFallbackTurnActive(identity))) throw abortError(signal.reason);
   };
-  const ensureLearnerEvent = () => {
-    assertActive();
-    learnerEventId ??= repo.addFallbackEvent(identity, 'learner_said', { text: request.userText, via: 'text-fallback' });
+  const ensureLearnerEvent = async () => {
+    await assertActive();
+    learnerEventId ??= await repo.addFallbackEvent(identity, 'learner_said', { text: request.userText, via: 'text-fallback' });
     return learnerEventId;
   };
-  const emit = (type: string, payload: Record<string, unknown>, optional: Parameters<typeof createRuntimeEvent>[4] = {}) => {
-    assertActive();
+  const emit = async (type: string, payload: Record<string, unknown>, optional: Parameters<typeof createRuntimeEvent>[4] = {}) => {
+    await assertActive();
     const event = createRuntimeEvent(runtimeIdentity, sequence++, type, payload, {
       ...optional,
       idempotencyKey: request.idempotencyKey,
@@ -123,8 +124,8 @@ async function executeFallbackTurn(
   };
 
   const instructions = buildInstructions({ childName: child.name, childAge: child.age, goal: session.goal });
-  const history: OpenAI.Chat.ChatCompletionMessageParam[] = repo
-    .listEvents(request.sessionId, 400)
+  const storedHistory = await repo.listEvents(request.sessionId, 400);
+  const history: OpenAI.Chat.ChatCompletionMessageParam[] = storedHistory
     .filter((event) => ['tutor_said', 'learner_said'].includes(event.type))
     .slice(-40)
     .map((event) => ({
@@ -140,7 +141,7 @@ async function executeFallbackTurn(
 
   try {
     for (let round = 0; round < MAX_ROUNDS; round += 1) {
-      assertActive();
+      await assertActive();
       const response = await client.chat.completions.create({
         model,
         messages,
@@ -148,20 +149,20 @@ async function executeFallbackTurn(
         tool_choice: 'auto',
         reasoning_effort: 'none',
       }, { signal });
-      assertActive();
+      await assertActive();
       const message = response.choices[0]?.message;
       if (!message) throw new Error('Fallback provider returned no message.');
 
       if (message.content?.trim()) {
-        ensureLearnerEvent();
-        repo.addFallbackEvent(identity, 'tutor_said', { text: message.content.trim() });
-        emit('fallback_caption', { text: message.content.trim() });
+        await ensureLearnerEvent();
+        await repo.addFallbackEvent(identity, 'tutor_said', { text: message.content.trim() });
+        await emit('fallback_caption', { text: message.content.trim() });
       }
       messages.push(message);
 
       for (const call of message.tool_calls ?? []) {
         if (call.type !== 'function') continue;
-        assertActive();
+        await assertActive();
         let args: Record<string, unknown> = {};
         try { args = JSON.parse(call.function.arguments) as Record<string, unknown>; }
         catch { /* handled by tool result */ }
@@ -170,15 +171,15 @@ async function executeFallbackTurn(
         if (call.function.name === 'semantic_visual_plan') {
           try {
             const { plan, ops, checkpoints } = adaptSemanticScene(args);
-            ensureLearnerEvent();
+            await ensureLearnerEvent();
             for (const checkpoint of checkpoints) {
-              const eventId = repo.addFallbackEvent(identity, 'semantic_scene', {
+              const eventId = await repo.addFallbackEvent(identity, 'semantic_scene', {
                 plan,
                 ops: checkpoint.ops,
                 checkpointId: checkpoint.id,
                 reveal: checkpoint.reveal,
               }, false);
-              emit('board_ops', {
+              await emit('board_ops', {
                 ops: checkpoint.ops,
                 event_id: eventId,
                 response_id: `fallback-${request.generationId}`,
@@ -203,21 +204,21 @@ async function executeFallbackTurn(
                 activeSemanticObjectId: lessonState.activeSemanticObjectId,
                 characterAttentionTarget: lessonState.characterAttentionTarget,
               };
-              ensureLearnerEvent();
-              repo.addFallbackEvent(identity, 'lesson_state', state);
-              emit('lesson_state', { state }, lessonState.activeSemanticObjectId ? { semanticObjectId: lessonState.activeSemanticObjectId } : {});
+              await ensureLearnerEvent();
+              await repo.addFallbackEvent(identity, 'lesson_state', state);
+              await emit('lesson_state', { state }, lessonState.activeSemanticObjectId ? { semanticObjectId: lessonState.activeSemanticObjectId } : {});
               output = { ok: true, legalPhase: lessonState.phase, owedAction: lessonState.owedAction };
             } catch (error) { output = { ok: false, error: String(error).slice(0, 220) }; }
           } else output = { ok: false, error: 'teaching move failed schema validation' };
         } else if (call.function.name === 'record_evidence') {
-          const sourceEventId = ensureLearnerEvent();
+          const sourceEventId = await ensureLearnerEvent();
           const concept = String(args.concept ?? '').slice(0, 120);
           const observation = String(args.observation ?? '').slice(0, 500);
           const classification = ResponseTaxonomySchema.safeParse(args.classification).success
             ? args.classification as ResponseTaxonomy
             : 'uncertain_or_ambiguous';
           if (concept && observation) {
-            const stored = repo.addFallbackEvidence(identity, {
+            const stored = await repo.addFallbackEvidence(identity, {
               concept,
               observation,
               verdict: fallbackVerdict(classification),
@@ -235,8 +236,8 @@ async function executeFallbackTurn(
               contradicts: Array.isArray(args.contradicts) ? args.contradicts.filter((value): value is string => typeof value === 'string').map((value) => value.slice(0, 160)).slice(0, 8) : [],
               supersedes: Array.isArray(args.supersedes) ? args.supersedes.filter((value): value is string => typeof value === 'string').map((value) => value.slice(0, 160)).slice(0, 8) : [],
             });
-            repo.addFallbackEvent(identity, 'evidence', { evidenceId: stored.evidenceId, concept, verdict: stored.verdict });
-            emit('evidence', { entry: stored });
+            await repo.addFallbackEvent(identity, 'evidence', { evidenceId: stored.evidenceId, concept, verdict: stored.verdict });
+            await emit('evidence', { entry: stored });
             lessonState = reduceLesson(lessonState, { type: 'ASSESSED', classification, evidenceId: stored.evidenceId });
             output = { ok: true, evidenceId: stored.evidenceId };
           }
@@ -258,17 +259,17 @@ async function executeFallbackTurn(
         continue;
       }
       const safeQuestion = 'Tell me one thing you notice about the idea we just explored?';
-      ensureLearnerEvent();
-      repo.addFallbackEvent(identity, 'tutor_said', { text: safeQuestion, deterministic: true });
-      emit('safe_question', { text: safeQuestion });
+      await ensureLearnerEvent();
+      await repo.addFallbackEvent(identity, 'tutor_said', { text: safeQuestion, deterministic: true });
+      await emit('safe_question', { text: safeQuestion });
       break;
     }
-    assertActive();
-    if (!repo.finishFallbackTurn(identity, 'completed', steps)) throw abortError('superseded before completion');
+    await assertActive();
+    if (!(await repo.finishFallbackTurn(identity, 'completed', steps))) throw abortError('superseded before completion');
     return steps;
   } catch (error) {
-    const aborted = signal.aborted || !repo.isFallbackTurnActive(identity);
-    repo.finishFallbackTurn(identity, aborted ? 'cancelled' : 'failed');
+    const aborted = signal.aborted || !(await repo.isFallbackTurnActive(identity));
+    await repo.finishFallbackTurn(identity, aborted ? 'cancelled' : 'failed');
     throw error;
   }
 }

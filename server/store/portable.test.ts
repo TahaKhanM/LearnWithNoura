@@ -1,10 +1,22 @@
-import { newDb } from 'pg-mem';
+import { DataType, newDb } from 'pg-mem';
 import { describe, expect, it } from 'vitest';
 import { PostgresStore, type StorageSnapshot } from './portable';
 
 describe('PostgresStore portable contract', () => {
   it('imports and exports a deterministic snapshot with verified counts', async () => {
     const memory = newDb();
+    memory.public.registerFunction({
+      name: 'pg_get_serial_sequence',
+      args: [DataType.text, DataType.text],
+      returns: DataType.text,
+      implementation: (table: string) => `${table.replace('.', '_')}_id_seq`,
+    });
+    memory.public.registerFunction({
+      name: 'setval',
+      args: [DataType.text, DataType.integer, DataType.bool],
+      returns: DataType.integer,
+      implementation: (_sequence: string, value: number) => value,
+    });
     const adapter = memory.adapters.createPg();
     const store = new PostgresStore(new adapter.Pool());
     await store.initialize();

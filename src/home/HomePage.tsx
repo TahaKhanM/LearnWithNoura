@@ -85,14 +85,18 @@ export function HomePage() {
   }, [chooseChild, requestedChildId]);
 
   useEffect(() => {
-    void refresh();
-    fetch('/api/config')
-      .then(async (response) => {
+    void (async () => {
+      try {
+        const response = await fetch('/api/config');
         if (!response.ok) throw new Error('configuration unavailable');
-        return response.json() as Promise<AppConfig>;
-      })
-      .then(setConfig)
-      .catch(() => setConfig({ realtime: false, lessonsAvailable: false, durableStorage: false, deploymentMode: 'unavailable', syntheticOnly: true }));
+        setConfig(await response.json() as AppConfig);
+      } catch {
+        setConfig({ realtime: false, lessonsAvailable: false, durableStorage: false, deploymentMode: 'unavailable', syntheticOnly: true });
+      }
+      // In public v0, /api/config establishes the signed guest-parent cookie.
+      // Load parent-scoped data only after that boundary is stable.
+      await refresh();
+    })();
   }, [refresh]);
 
   const createLearner = useCallback(
@@ -169,7 +173,9 @@ export function HomePage() {
 
         {config?.syntheticOnly && (
           <p className="home__boundary" role="note">
-            Private prototype · use synthetic learner details only.
+            {config.deploymentMode === 'production-v0'
+              ? 'Live MVP preview · use pretend learner details only.'
+              : 'Private prototype · use synthetic learner details only.'}
           </p>
         )}
         {config && !config.lessonsAvailable && (

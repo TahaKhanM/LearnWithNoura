@@ -8,8 +8,7 @@ import { fallbackTurns } from './fallbackTutor.js';
 import { connectRealtimeProxy } from './realtime/proxy.js';
 import { assertRealtimePromptReadable } from './realtime/instructions.js';
 import { readRuntimeConfig, productionReadinessErrors, EVENT_SCHEMA_VERSION } from './runtimeConfig.js';
-import { getDb } from './store/db.js';
-import { Repo } from './store/repo.js';
+import { createRepositoryRuntime } from './store/createRepository.js';
 import { capabilityFromProtocols, SecurityBoundary } from './security.js';
 
 loadEnv({ override: false });
@@ -22,7 +21,8 @@ if (readinessErrors.length > 0) {
 
 assertRealtimePromptReadable();
 
-const repo = new Repo(getDb());
+const repository = createRepositoryRuntime(runtimeConfig);
+const repo = repository.repo;
 const security = new SecurityBoundary(runtimeConfig);
 const openai = runtimeConfig.providerConfigured
   ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
@@ -32,9 +32,11 @@ export const app = express();
 app.disable('x-powered-by');
 app.use(express.json({ limit: '256kb' }));
 app.use(security.originAndRateGuard);
+app.use(security.attachParentIdentity);
 
-app.get(['/healthz', '/api/healthz'], (_req, res) => {
-  const durableStorageAvailable = runtimeConfig.deploymentMode === 'local-synthetic';
+app.get(['/healthz', '/api/healthz'], async (_req, res) => {
+  let durableStorageAvailable = runtimeConfig.deploymentMode === 'local-synthetic';
+  if (repository.managed) durableStorageAvailable = await repository.managed.health();
   const healthy = runtimeConfig.providerConfigured && durableStorageAvailable;
   res.status(healthy ? 200 : 503).json({
     status: healthy ? 'healthy' : 'degraded',
@@ -59,7 +61,7 @@ app.get(['/version', '/api/version'], (_req, res) => {
   });
 });
 
-app.use('/api', createApi(repo, openai, runtimeConfig.textModel, security.apiSecurity()));
+app.use('/api', createApi(repo, openai, runtimeConfig.textModel, security.apiSecurity(), runtimeConfig));
 
 app.post('/api/fallback-turn', async (req, res) => {
   if (!openai) {
@@ -74,7 +76,7 @@ app.post('/api/fallback-turn', async (req, res) => {
     res.status(400).json({ error: 'sessionId and text are required' });
     return;
   }
-  const session = repo.getSession(sessionId);
+  const session = await repo.getSession(sessionId);
   if (!session) {
     res.status(404).json({ error: 'Unknown session.' });
     return;
@@ -135,7 +137,7 @@ app.post('/api/fallback-turn', async (req, res) => {
   }
 });
 
-app.post('/api/fallback-checkpoint', (req, res) => {
+app.post('/api/fallback-checkpoint', async (req, res) => {
   const { sessionId, idempotencyKey, connectionEpoch, turnId, generationId, eventId } = req.body as Record<string, unknown>;
   if (typeof sessionId !== 'string' || typeof idempotencyKey !== 'string' ||
       !Number.isInteger(connectionEpoch) || typeof turnId !== 'string' ||
@@ -143,7 +145,7 @@ app.post('/api/fallback-checkpoint', (req, res) => {
     res.status(400).json({ error: 'Fallback checkpoint identity is required.' });
     return;
   }
-  const session = repo.getSession(sessionId);
+  const session = await repo.getSession(sessionId);
   const authorization = req.headers.authorization ?? '';
   const capability = authorization.startsWith('Lesson ') ? authorization.slice(7) : null;
   const claim = security.verifyLessonCapability(capability, sessionId);
@@ -152,7 +154,7 @@ app.post('/api/fallback-checkpoint', (req, res) => {
     return;
   }
   try {
-    repo.markFallbackEventReleased({
+    await repo.markFallbackEventReleased({
       sessionId, idempotencyKey, connectionEpoch: Number(connectionEpoch), turnId, generationId,
     }, Number(eventId));
     res.status(204).end();
@@ -168,7 +170,7 @@ const wss = new WebSocketServer({
   handleProtocols: (protocols) => protocols.has('noura.v1') ? 'noura.v1' : false,
 });
 
-server.on('upgrade', (request, socket, head) => {
+server.on('upgrade', async (request, socket, head) => {
   const url = new URL(request.url ?? '/', 'http://localhost');
   if (url.pathname !== '/ws/lesson' && url.pathname !== '/api/ws') {
     socket.destroy();
@@ -177,7 +179,14 @@ server.on('upgrade', (request, socket, head) => {
   const sessionId = url.searchParams.get('session');
   const origin = typeof request.headers.origin === 'string' ? request.headers.origin : undefined;
   const capability = capabilityFromProtocols(request.headers['sec-websocket-protocol']);
-  const session = sessionId ? repo.getSession(sessionId) : null;
+  try {
+    await repository.ready();
+  } catch {
+    socket.write('HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n');
+    socket.destroy();
+    return;
+  }
+  const session = sessionId ? await repo.getSession(sessionId) : null;
   const claim = sessionId ? security.verifyLessonCapability(capability, sessionId) : null;
   const ip = request.socket.remoteAddress ?? 'unknown';
   if (!security.isAllowedOrigin(origin) || !session || !claim || claim.childId !== session.childId || !security.allow(`ws:${claim.parentId}:${sessionId}:${ip}`, 20, 60_000)) {
@@ -191,12 +200,14 @@ server.on('upgrade', (request, socket, head) => {
       client.close(4400);
       return;
     }
-    connectRealtimeProxy(client, {
+    void connectRealtimeProxy(client, {
       apiKey: process.env.OPENAI_API_KEY,
       model: runtimeConfig.realtimeModel,
       repo,
       sessionId,
       log: (line) => console.log(`[realtime] ${line}`),
+    }).catch(() => {
+      try { client.close(1011, 'lesson service unavailable'); } catch { /* already closed */ }
     });
   });
 });

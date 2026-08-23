@@ -8,12 +8,12 @@ Line references are to this working revision and are refreshed at handoff.
 
 | ID | Requirement / original status | Implementation | Automated/browser evidence | Residual / final status |
 | --- | --- | --- | --- | --- |
-| AUD-P0-01 | No deployment/version signal — FAIL | `server/app.ts` health/version; `api/`; `vercel.json`; project runbook | Vercel local build; Preview smoke row below | Preview pending; Production blocked. PARTIAL |
+| AUD-P0-01 | No deployment/version signal — FAIL | `server/app.ts` health/version; `api/`; `vercel.json`; project runbook | Vercel local build; Preview smoke row below | Public-v0 wiring complete locally; managed database and live deployment pending. PARTIAL |
 | AUD-P1-01 | Global visual bounds/collision unsafe — FAIL | `src/board/inspection.ts`; long-word splitting; semantic adapters | `inspection.test.ts`; canonical visual baselines | Actual DOM/KaTeX repair is bounded to one pass. PARTIAL |
 | AUD-P1-02 | Misleading interruption metric — FAIL | Detector-to-stop-scheduled and provider confirmation are separate; README removes acoustic claim | runtime/property tests | Acoustic onset-to-silence hardware run missing. UNVERIFIED |
 | AUD-P1-03 | Interruption finished stale drawing — FAIL | `BoardAnimator.cancelAll`; transient scene rollback; ack after idle | `animator.test.ts`; generation cancellation | Browser recorded interruption evidence not yet captured. PASS (deterministic), UNVERIFIED (hardware) |
 | AUD-P1-04 | Reconnect/fallback stale/drop/zombie risks — FAIL | 8s timeout, two retries, newest queued ask; durable fallback claim, supersession abort, composed timeout/request signal, scoped writes and replay | fallback concurrency/error/duplicate/stale tests; cue reconnect/navigation tests | Deterministic PASS; deployed provider/network fault test remains UNVERIFIED. |
-| AUD-P1-05 | Unauthenticated child data/paid WS — FAIL | parent-scoped rows/routes, signed lesson capability, exact Origin, rate bounds | `api.auth.test.ts`, `security.test.ts` | Real identity provider and distributed limiter absent. BLOCKED for Production |
+| AUD-P1-05 | Unauthenticated child data/paid WS — FAIL | parent-scoped rows/routes, signed lesson capability, signed pseudonymous v0 parent cookie, exact Origin, rate bounds | `api.auth.test.ts`, `security.test.ts` | Public-v0 guest boundary PASS locally; real identity provider and distributed limiter absent. BLOCKED for full Production |
 | AUD-P1-06 | Under-18 controls absent — FAIL | disclosure, synthetic boundary, raw-audio rule, Production/ZDR fail-close, threat model | runtime config tests, axe Home | Legal/account/ZDR/report ownership external. BLOCKED |
 | AUD-P1-07 | Tutor silently waits after promises — FAIL | lesson reducer and bounded continuation/safe question | `orchestrator.test.ts` | Paid representative live eval limited/not yet run. PARTIAL |
 | AUD-P1-08 | Ended sessions mutable — FAIL | immutable cutoff at end; store write rejection; linked continuation UI/API | `repo.test.ts`, Playwright ended route | Concurrent provider race needs deployed fault test. PASS locally |
@@ -66,7 +66,7 @@ Line references are to this working revision and are refreshed at handoff.
 | ARC-12 | Owner-aware board mutation | `scene.ts` | PASS |
 | ARC-13 | Latest pagination and immutable cutoff | `repo.ts` | PASS |
 | ARC-14 | Evidence lineage and summary citations | `repo.ts`, `summary.ts` | PASS new evidence |
-| ARC-15 | SQLite/Postgres separation | local migration + `PostgresStore` portable contract | Adapter PASS; Production wiring BLOCKED |
+| ARC-15 | SQLite/Postgres separation | local migration + complete async `PostgresRepo` domain contract + `PostgresStore` portable contract | Parent/session/event/evidence, immutable end and fallback staging PASS offline; deployed database pending |
 
 ## Character embodiment and privacy
 
@@ -94,13 +94,13 @@ Line references are to this working revision and are refreshed at handoff.
 | VCL-03 | Correct Vite/static + Express/WS Functions | `vercel.json`; genuine local output has both functions | PASS local build |
 | VCL-04 | Git integration/main Production branch | private org repo cannot connect on Hobby | BLOCKED by account/repo plan boundary |
 | VCL-05 | Preview/Production env separation | Preview-only variables; sensitive secrets | PASS metadata |
-| VCL-06 | Native WS duration based on inspected plan | Hobby; 300s Function | PASS config; deployed WSS pending |
+| VCL-06 | Native WS duration based on inspected plan | Hobby; 300s Function; public WSS live PCM smoke | PASS deployed |
 | VCL-07 | Preview exact SHA/version/health | protected stable alias; `/version` exact SHA; `/healthz` explicit 503 degraded | PASS identity; health correctly BLOCKED |
 | VCL-08 | Preview synthetic/no Production child data | synthetic-only env, Standard Protection, lesson creation disabled without shared storage | PASS safe boundary |
-| VCL-09 | Production durable store/auth/privacy | startup fail-closed | BLOCKED |
-| VCL-10 | Apex/www/SSL/DNS assignment | domain exists with Vercel nameservers; not attached before gate | Production BLOCKED |
-| VCL-11 | HTTPS/WSS/persistence/restart | HTTPS/REST/deep routes pass; real Function test proved `/tmp` is not shared, then UI failed closed | WSS journey/persistence BLOCKED without managed store |
-| VCL-12 | Rollback target/procedure | operations runbook | Procedure PASS; target only after deployment |
+| VCL-09 | Public-v0 durable store / full-Production auth/privacy | `production-v0` requires provider, Postgres and signing; full `production` keeps auth/privacy/ZDR fail-close | v0 managed store PASS deployed. Full Production BLOCKED |
+| VCL-10 | Apex/www/SSL/DNS assignment | apex public with issued certificate; `www` 308 to apex | PASS deployed |
+| VCL-11 | HTTPS/WSS/persistence/restart | public HTTPS, nested REST, signed guest scope, managed persistence, WSS ready/live PCM, fallback/evidence/summary | PASS synthetic deployed; target hardware UNVERIFIED |
+| VCL-12 | Rollback target/procedure | operations runbook; historical maintenance and prior verified v0 deployment IDs retained | PASS |
 
 ## Runtime-model preservation
 
@@ -113,7 +113,8 @@ Line references are to this working revision and are refreshed at handoff.
 | Environment | URL / deployment ID | SHA | Health/version/REST/WSS/log/persistence result |
 | --- | --- | --- | --- |
 | Preview | `https://noura-preview-mtk2982007.vercel.app` (final deployment ID in handoff) | `/version` must match final HEAD | Standard-protected; Home/deep routes/config/version pass; health 503 degraded; lessons disabled; logs clean |
-| Production | Static maintenance boundary only: `dpl_DPdMDbq9D69cSZyJX3VS4C7MbdeU` | Maintenance artifact | No tutor backend; purchased domain intentionally unattached; application Production blocked |
+| Public v0 | `https://learnwithnoura.com` / `dpl_k7yESkTnLV7jBNavcqrgwdgCa4ff` | `9a92844bcf1d17d7679b9ef18b6a38c8f1ca2e1a` | Health/version/config pass; nested REST and Parent persistence pass; WSS ready/live PCM/interruption pass; fallback tools/board/evidence/summary/immutable end pass; synthetic rows cleaned |
+| Full Production | — | — | Real-user auth/privacy/ZDR/CA/target-hardware gates remain blocked |
 
 ## Manual/recorded evidence still required
 

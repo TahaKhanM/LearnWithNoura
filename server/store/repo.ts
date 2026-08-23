@@ -69,6 +69,27 @@ export interface EvidenceRow {
   idempotencyKey?: string | null;
 }
 
+export interface EvidenceInput {
+  concept: string;
+  observation: string;
+  verdict: Verdict;
+  confidence: Confidence;
+  excerpt?: string;
+  classification?: ResponseTaxonomy;
+  confidenceBasis?: string;
+  sourceEventIds?: number[];
+  taskId?: string;
+  independenceLevel?: 'none' | 'reduced' | 'independent';
+  domainCheck?: unknown;
+  turnId?: string;
+  generationId?: string;
+  contradicts?: string[];
+  supersedes?: string[];
+  opportunityKind?: EvidenceOpportunityKind;
+  retrievalOf?: string;
+  idempotencyKey?: string;
+}
+
 export interface EventRow {
   id: number;
   sessionId: string;
@@ -315,7 +336,7 @@ export class Repo {
 
   addFallbackEvidence(
     identity: FallbackTurnIdentity,
-    entry: Parameters<Repo['addEvidence']>[1],
+    entry: EvidenceInput,
   ): EvidenceRow {
     this.db.exec('BEGIN IMMEDIATE');
     try {
@@ -468,26 +489,7 @@ export class Repo {
 
   addEvidence(
     sessionId: string,
-    entry: {
-      concept: string;
-      observation: string;
-      verdict: Verdict;
-      confidence: Confidence;
-      excerpt?: string;
-      classification?: ResponseTaxonomy;
-      confidenceBasis?: string;
-      sourceEventIds?: number[];
-      taskId?: string;
-      independenceLevel?: 'none' | 'reduced' | 'independent';
-      domainCheck?: unknown;
-      turnId?: string;
-      generationId?: string;
-      contradicts?: string[];
-      supersedes?: string[];
-      opportunityKind?: EvidenceOpportunityKind;
-      retrievalOf?: string;
-      idempotencyKey?: string;
-    },
+    entry: EvidenceInput,
     released = true,
   ): EvidenceRow {
     this.assertActive(sessionId);

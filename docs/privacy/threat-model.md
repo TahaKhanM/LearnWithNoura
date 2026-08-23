@@ -1,6 +1,6 @@
 # Noura threat model and privacy data flow
 
-Status: engineering controls implemented for local/access-gated synthetic use; Production owner/legal/account gates remain open.
+Status: engineering controls implemented for local, access-gated and public-v0 synthetic use; real-user Production owner/legal/account gates remain open.
 
 ## Data flow
 
@@ -23,7 +23,8 @@ Status: engineering controls implemented for local/access-gated synthetic use; P
 | Stale output after interruption | Provider-response generation map and browser event gate; GenerationScope cancellation | Target-hardware acoustic result unverified. |
 | Transcript/evidence fabrication | Source event IDs, normalized span verification, cited summaries | Model classification remains probabilistic; deterministic domain checks cover selected subjects only. |
 | Log disclosure | No message bodies, tokens, child names, keys or database URLs in application logs | Provider/platform logs require owner review. |
-| Ephemeral Production data | Production fail-closed; Preview health degraded | Postgres domain adapter wiring incomplete. |
+| Ephemeral deployed data | Preview health remains degraded; public v0 requires the managed Postgres domain adapter and fails closed without it | Deployed persistence and instance-replacement smoke evidence remain required before the custom domain is attached. |
+| Database transport interception | Public v0 uses encrypted Supavisor transport and a least-privilege private-schema role | Node does not trust the pooler's chain by default; CA/hostname verification remains a full-Production gate. |
 | Under-13 processing without ZDR | Under-13 Production mode requires an external evidence reference and other gates | ZDR status is unverified; no compliance claim. |
 
 Never log full child messages, transcripts, names, auth/capability tokens, raw pointer trails, camera data, provider keys, Vercel tokens or database URLs.

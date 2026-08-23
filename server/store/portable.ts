@@ -1,4 +1,5 @@
 import type { Pool, PoolClient } from 'pg';
+import { PostgresRepo } from './postgresRepo.js';
 
 export interface StorageSnapshot {
   schemaVersion: 1;
@@ -25,77 +26,7 @@ export class PostgresStore implements PortableDurableStore {
   constructor(private readonly pool: Pool) {}
 
   async initialize(): Promise<void> {
-    await this.pool.query(`
-      CREATE TABLE IF NOT EXISTS schema_migrations (
-        version INTEGER PRIMARY KEY,
-        applied_at BIGINT NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS children (
-        id TEXT PRIMARY KEY,
-        parent_id TEXT NOT NULL,
-        name TEXT NOT NULL,
-        age INTEGER,
-        created_at BIGINT NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS sessions (
-        id TEXT PRIMARY KEY,
-        child_id TEXT NOT NULL REFERENCES children(id),
-        goal TEXT NOT NULL,
-        status TEXT NOT NULL,
-        started_at BIGINT NOT NULL,
-        ended_at BIGINT,
-        summary_json JSONB,
-        parent_session_id TEXT REFERENCES sessions(id),
-        ended_event_id BIGINT,
-        summary_version INTEGER,
-        summary_through_event_id BIGINT
-      );
-      CREATE TABLE IF NOT EXISTS events (
-        id BIGINT PRIMARY KEY,
-        session_id TEXT NOT NULL REFERENCES sessions(id),
-        ts BIGINT NOT NULL,
-        type TEXT NOT NULL,
-        payload JSONB NOT NULL,
-        released BOOLEAN NOT NULL DEFAULT TRUE,
-        release_requested BOOLEAN NOT NULL DEFAULT FALSE
-      );
-      CREATE TABLE IF NOT EXISTS evidence (
-        id BIGINT PRIMARY KEY,
-        evidence_id TEXT UNIQUE NOT NULL,
-        child_id TEXT NOT NULL REFERENCES children(id),
-        session_id TEXT NOT NULL REFERENCES sessions(id),
-        ts BIGINT NOT NULL,
-        concept TEXT NOT NULL,
-        concept_id TEXT NOT NULL,
-        observation TEXT NOT NULL,
-        verdict TEXT NOT NULL,
-        confidence TEXT NOT NULL,
-        response_taxonomy TEXT NOT NULL,
-        confidence_basis TEXT NOT NULL,
-        source_event_ids JSONB NOT NULL,
-        excerpt TEXT,
-        normalized_excerpt TEXT NOT NULL,
-        source_span_json JSONB,
-        task_id TEXT NOT NULL,
-        independence_level TEXT NOT NULL,
-        domain_check_json JSONB,
-        turn_id TEXT NOT NULL,
-        generation_id TEXT NOT NULL,
-        contradicts_json JSONB NOT NULL,
-        supersedes_json JSONB NOT NULL,
-        opportunity_kind TEXT NOT NULL DEFAULT 'recall',
-        retrieval_of TEXT,
-        released BOOLEAN NOT NULL DEFAULT TRUE,
-        idempotency_key TEXT
-      );
-      ALTER TABLE events ADD COLUMN IF NOT EXISTS release_requested BOOLEAN NOT NULL DEFAULT FALSE;
-      ALTER TABLE evidence ADD COLUMN IF NOT EXISTS opportunity_kind TEXT NOT NULL DEFAULT 'recall';
-      ALTER TABLE evidence ADD COLUMN IF NOT EXISTS retrieval_of TEXT;
-      ALTER TABLE evidence ADD COLUMN IF NOT EXISTS released BOOLEAN NOT NULL DEFAULT TRUE;
-      ALTER TABLE evidence ADD COLUMN IF NOT EXISTS idempotency_key TEXT;
-      INSERT INTO schema_migrations (version, applied_at) VALUES (1, ${Date.now()})
-      ON CONFLICT (version) DO NOTHING;
-    `);
+    await new PostgresRepo(this.pool).initialize();
   }
 
   async health(): Promise<boolean> {
@@ -106,10 +37,10 @@ export class PostgresStore implements PortableDurableStore {
   async counts(): Promise<StorageCounts> {
     const result = await this.pool.query(`
       SELECT
-        (SELECT COUNT(*)::int FROM children) AS children,
-        (SELECT COUNT(*)::int FROM sessions) AS sessions,
-        (SELECT COUNT(*)::int FROM events) AS events,
-        (SELECT COUNT(*)::int FROM evidence) AS evidence
+        (SELECT COUNT(*)::int FROM noura.children) AS children,
+        (SELECT COUNT(*)::int FROM noura.sessions) AS sessions,
+        (SELECT COUNT(*)::int FROM noura.events) AS events,
+        (SELECT COUNT(*)::int FROM noura.evidence) AS evidence
     `);
     const row = result.rows[0] as Record<string, unknown>;
     return {
@@ -122,10 +53,10 @@ export class PostgresStore implements PortableDurableStore {
 
   async exportSnapshot(): Promise<StorageSnapshot> {
     const [children, sessions, events, evidence] = await Promise.all([
-      this.pool.query('SELECT * FROM children ORDER BY id'),
-      this.pool.query('SELECT * FROM sessions ORDER BY id'),
-      this.pool.query('SELECT * FROM events ORDER BY id'),
-      this.pool.query('SELECT * FROM evidence ORDER BY id'),
+      this.pool.query('SELECT * FROM noura.children ORDER BY id'),
+      this.pool.query('SELECT * FROM noura.sessions ORDER BY id'),
+      this.pool.query('SELECT * FROM noura.events ORDER BY id'),
+      this.pool.query('SELECT * FROM noura.evidence ORDER BY id'),
     ]);
     return {
       schemaVersion: 1,
@@ -146,6 +77,8 @@ export class PostgresStore implements PortableDurableStore {
       for (const row of snapshot.sessions) await insertSession(client, row);
       for (const row of snapshot.events) await insertEvent(client, row);
       for (const row of snapshot.evidence) await insertEvidence(client, row);
+      await client.query("SELECT setval(pg_get_serial_sequence('noura.events', 'id'), GREATEST(COALESCE((SELECT MAX(id) FROM noura.events), 1), 1), EXISTS (SELECT 1 FROM noura.events))");
+      await client.query("SELECT setval(pg_get_serial_sequence('noura.evidence', 'id'), GREATEST(COALESCE((SELECT MAX(id) FROM noura.evidence), 1), 1), EXISTS (SELECT 1 FROM noura.evidence))");
       await client.query('COMMIT');
     } catch (error) {
       await client.query('ROLLBACK');
@@ -168,16 +101,16 @@ export class PostgresStore implements PortableDurableStore {
 }
 
 async function insertChild(client: PoolClient, row: Record<string, unknown>): Promise<void> {
-  await client.query('INSERT INTO children (id,parent_id,name,age,created_at) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (id) DO NOTHING', [row.id, row.parent_id ?? 'local-synthetic-parent', row.name, row.age ?? null, row.created_at]);
+  await client.query('INSERT INTO noura.children (id,parent_id,name,age,created_at) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (id) DO NOTHING', [row.id, row.parent_id ?? 'local-synthetic-parent', row.name, row.age ?? null, row.created_at]);
 }
 async function insertSession(client: PoolClient, row: Record<string, unknown>): Promise<void> {
-  await client.query('INSERT INTO sessions (id,child_id,goal,status,started_at,ended_at,summary_json,parent_session_id,ended_event_id,summary_version,summary_through_event_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT (id) DO NOTHING', [row.id,row.child_id,row.goal,row.status,row.started_at,row.ended_at ?? null,json(row.summary_json),row.parent_session_id ?? null,row.ended_event_id ?? null,row.summary_version ?? null,row.summary_through_event_id ?? null]);
+  await client.query('INSERT INTO noura.sessions (id,child_id,goal,status,started_at,ended_at,summary_json,parent_session_id,ended_event_id,summary_version,summary_through_event_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT (id) DO NOTHING', [row.id,row.child_id,row.goal,row.status,row.started_at,row.ended_at ?? null,json(row.summary_json),row.parent_session_id ?? null,row.ended_event_id ?? null,row.summary_version ?? null,row.summary_through_event_id ?? null]);
 }
 async function insertEvent(client: PoolClient, row: Record<string, unknown>): Promise<void> {
-  await client.query('INSERT INTO events (id,session_id,ts,type,payload,released,release_requested) VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (id) DO NOTHING', [row.id,row.session_id,row.ts,row.type,json(row.payload),Boolean(row.released),Boolean(row.release_requested)]);
+  await client.query('INSERT INTO noura.events (id,session_id,ts,type,payload,released,release_requested) VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (id) DO NOTHING', [row.id,row.session_id,row.ts,row.type,json(row.payload),Boolean(row.released),Boolean(row.release_requested)]);
 }
 async function insertEvidence(client: PoolClient, row: Record<string, unknown>): Promise<void> {
-  await client.query(`INSERT INTO evidence (
+  await client.query(`INSERT INTO noura.evidence (
     id,evidence_id,child_id,session_id,ts,concept,concept_id,observation,verdict,confidence,response_taxonomy,
     confidence_basis,source_event_ids,excerpt,normalized_excerpt,source_span_json,task_id,independence_level,
     domain_check_json,turn_id,generation_id,contradicts_json,supersedes_json,opportunity_kind,retrieval_of,released,idempotency_key
