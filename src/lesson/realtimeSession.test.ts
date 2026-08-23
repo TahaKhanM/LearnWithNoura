@@ -75,6 +75,17 @@ describe('RealtimeSession sealed response release', () => {
     expect(session.getIdentity()).toEqual(identity);
   });
 
+  it('replays persisted learner board operations through the learner-owned path', () => {
+    const session = new RealtimeSession('session');
+    const harness = session as unknown as SessionHarness;
+    const replay = vi.fn();
+    session.onLearnerBoardReplay = replay;
+    const identity = session.getIdentity();
+    const ops = [{ op: 'add', id: 'sketch-test', spec: { kind: 'path', points: [[1, 1], [2, 2]] } }];
+    harness.handleServer(createRuntimeEvent(identity, 0, 'learner_board_replay', { batches: [ops] }));
+    expect(replay).toHaveBeenCalledWith(ops);
+  });
+
   it('rejects late sealed cues after interruption, reconnect identity replacement, and navigation cleanup', () => {
     const session = new RealtimeSession('session');
     const harness = session as unknown as SessionHarness;

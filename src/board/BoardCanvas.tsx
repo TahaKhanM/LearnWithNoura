@@ -34,6 +34,7 @@ interface BoardCanvasProps {
   focusSemanticObjectId?: string;
   focusIndex?: number;
   overview?: boolean;
+  onCaptureReady?: (capture: () => Promise<string | null>) => void;
 }
 
 function KatexBlock({ node }: { node: Extract<RenderNode, { type: 'katex' }> }) {
@@ -157,6 +158,7 @@ export function BoardCanvas({
   focusSemanticObjectId,
   focusIndex = 0,
   overview = false,
+  onCaptureReady,
 }: BoardCanvasProps) {
   const svgRef = useRef<SVGSVGElement>(null);
   const animator = useMemo(() => new BoardAnimator(), []);
@@ -177,6 +179,11 @@ export function BoardCanvas({
     animatorRef?.(animator);
     return () => animator.cancelAll();
   }, [animator, animatorRef, onTutorPen]);
+
+  useEffect(() => {
+    if (!onCaptureReady) return;
+    onCaptureReady(() => captureBoardImage(svgRef.current));
+  }, [onCaptureReady]);
 
   useEffect(() => {
     let cancelled = false;
@@ -409,4 +416,40 @@ export function BoardCanvas({
       </p>
     </div>
   );
+}
+
+async function captureBoardImage(svg: SVGSVGElement | null): Promise<string | null> {
+  if (!svg) return null;
+  const clone = svg.cloneNode(true) as SVGSVGElement;
+  clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+  clone.setAttribute('width', String(BOARD_W));
+  clone.setAttribute('height', String(BOARD_H));
+  clone.setAttribute('viewBox', `0 0 ${BOARD_W} ${BOARD_H}`);
+  const markup = new XMLSerializer().serializeToString(clone);
+  const url = URL.createObjectURL(new Blob([markup], { type: 'image/svg+xml' }));
+  try {
+    const image = new Image();
+    await new Promise<void>((resolve, reject) => {
+      image.onload = () => resolve();
+      image.onerror = () => reject(new Error('board image could not be rendered'));
+      image.src = url;
+    });
+    const canvas = document.createElement('canvas');
+    canvas.width = 768;
+    canvas.height = Math.round((768 * BOARD_H) / BOARD_W);
+    const context = canvas.getContext('2d');
+    if (!context) return null;
+    context.fillStyle = '#fcfbf7';
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+    for (const quality of [0.8, 0.65, 0.5]) {
+      const dataUrl = canvas.toDataURL('image/jpeg', quality);
+      if (dataUrl.length <= 300_000) return dataUrl;
+    }
+    return null;
+  } catch {
+    return null;
+  } finally {
+    URL.revokeObjectURL(url);
+  }
 }

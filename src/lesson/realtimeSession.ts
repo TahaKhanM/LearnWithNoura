@@ -69,6 +69,7 @@ export class RealtimeSession {
   private interruptionPending = false;
 
   onBoardOps: (ops: BoardOp[], animate: boolean, identity: GenerationIdentity, cue?: VisualCueMetadata) => Promise<boolean | void> | boolean | void = () => {};
+  onLearnerBoardReplay: (ops: BoardOp[]) => void = () => {};
   onGenerationCancelled: (identity: GenerationIdentity) => void = () => {};
   onGenerationActivated: (identity: GenerationIdentity, reason: 'interruption' | 'ordinary') => void = () => {};
   onCaptionQuestion: (identity: GenerationIdentity) => void = () => {};
@@ -287,6 +288,11 @@ export class RealtimeSession {
       case 'board_replay': {
         const batches = Array.isArray(message.batches) ? message.batches : [];
         for (const batch of batches) if (Array.isArray(batch)) void this.onBoardOps(batch as BoardOp[], false, envelope);
+        break;
+      }
+      case 'learner_board_replay': {
+        const batches = Array.isArray(message.batches) ? message.batches : [];
+        for (const batch of batches) if (Array.isArray(batch)) this.onLearnerBoardReplay(batch as BoardOp[]);
         break;
       }
       case 'response_started': {
@@ -536,7 +542,13 @@ export class RealtimeSession {
     if (step.type === 'stream_error') this.update({ error: String(step.message ?? 'The tutor failed.') });
   }
 
-  sendBoardEvent(description: string): void { this.send('board_event', { description }); }
+  sendBoardEvent(input: { description: string; ops: BoardOp[]; imageDataUrl?: string | null }): void {
+    this.send('board_event', {
+      description: input.description,
+      ops: input.ops,
+      ...(input.imageDataUrl ? { imageDataUrl: input.imageDataUrl } : {}),
+    });
+  }
 
   private activateScope(advanceGeneration: boolean): void {
     if (advanceGeneration) this.generationCounter += 1;

@@ -1,5 +1,5 @@
 import { WebSocket as NodeWebSocket, type WebSocket as ClientSocket } from 'ws';
-import { validateOps } from '../../shared/boardOps.js';
+import { normalizeColor, validateOps, validateSpec, type BoardOp } from '../../shared/boardOps.js';
 import {
   createRuntimeEvent,
   RuntimeEventEnvelopeSchema,
@@ -232,6 +232,11 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
       .map((e) => validateOps((e.payload as { ops?: unknown[] })?.ops).ops)
       .filter((ops) => ops.length > 0);
     if (batches.length > 0) sendClient({ type: 'board_replay', batches });
+    const learnerBatches = events
+      .filter((event) => event.type === 'learner_board' && event.released)
+      .map((event) => learnerBoardOps((event.payload as { ops?: unknown }).ops))
+      .filter((ops) => ops.length > 0);
+    if (learnerBatches.length > 0) sendClient({ type: 'learner_board_replay', batches: learnerBatches });
   }
 
   /** After a refresh the upstream model starts cold; hand it the story so far. */
@@ -715,19 +720,21 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
 
       case 'board_event': {
         const description = String(message.description ?? '').trim().slice(0, 4000);
-        if (!description) break;
-        await repo.addEvent(sessionId, 'learner_board', { description });
+        const ops = learnerBoardOps(message.ops);
+        const imageDataUrl = safeBoardImage(message.imageDataUrl);
+        if (!description && ops.length === 0) break;
+        await repo.addEvent(sessionId, 'learner_board', { description, ops, hasVisualContext: Boolean(imageDataUrl) });
+        const content: Array<Record<string, unknown>> = [{
+          type: 'input_text',
+          text: `[The learner changed the shared board. Treat this as visual context, not a spoken message.] ${description}`,
+        }];
+        if (imageDataUrl) content.push({ type: 'input_image', image_url: imageDataUrl, detail: 'high' });
         sendUpstream({
           type: 'conversation.item.create',
           item: {
             type: 'message',
             role: 'user',
-            content: [
-              {
-                type: 'input_text',
-                text: `[The learner just drew on the board — this is context, not a message] ${description}`,
-              },
-            ],
+            content,
           },
         });
         break;
@@ -765,4 +772,32 @@ function taxonomyFromLegacyVerdict(value: unknown): ResponseTaxonomy {
 function pcmSampleCount(base64: string): number {
   try { return Math.floor(Buffer.from(base64, 'base64').byteLength / 2); }
   catch { return 0; }
+}
+
+function learnerBoardOps(raw: unknown): BoardOp[] {
+  if (!Array.isArray(raw)) return [];
+  const ops: BoardOp[] = [];
+  for (const entry of raw.slice(0, 40)) {
+    if (typeof entry !== 'object' || entry === null) continue;
+    const candidate = entry as { op?: unknown; id?: unknown; color?: unknown; spec?: unknown };
+    const id = typeof candidate.id === 'string' && /^sketch-[\w-]{1,80}$/.test(candidate.id)
+      ? candidate.id
+      : null;
+    if (!id) continue;
+    if (candidate.op === 'erase') {
+      ops.push({ op: 'erase', id });
+      continue;
+    }
+    if (candidate.op !== 'add' || typeof candidate.spec !== 'object' || candidate.spec === null) continue;
+    const spec = validateSpec(candidate.spec as never);
+    if (spec?.kind !== 'path') continue;
+    const color = normalizeColor(candidate.color);
+    ops.push({ op: 'add', id, spec, ...(color ? { color } : {}) });
+  }
+  return ops;
+}
+
+function safeBoardImage(value: unknown): string | null {
+  if (typeof value !== 'string' || value.length > 320_000) return null;
+  return /^data:image\/(?:png|jpeg);base64,[a-z0-9+/=]+$/i.test(value) ? value : null;
 }

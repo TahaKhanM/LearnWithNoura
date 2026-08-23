@@ -53,6 +53,8 @@ export function LessonPage({ sessionId }: LessonPageProps) {
   const highlightNonce = useRef(0);
   const boardEventTimer = useRef<number | null>(null);
   const pendingBoardNote = useRef<string[]>([]);
+  const pendingBoardOps = useRef<BoardOp[]>([]);
+  const captureBoard = useRef<(() => Promise<string | null>) | null>(null);
 
   const session = useMemo(() => new RealtimeSession(sessionId), [sessionId]);
   const snap = useSyncExternalStore(session.subscribe, session.getSnapshot);
@@ -120,10 +122,12 @@ export function LessonPage({ sessionId }: LessonPageProps) {
         offerAttention(attention, identity, 'semantic_object', center, cue.semanticObjectId);
       }
       await nextPaint();
-      if (!sameIdentity(session.getIdentity(), identity)) return false;
-      const completed = await (animator.current?.whenIdle() ?? Promise.resolve(true));
-      if (completed && sameIdentity(session.getIdentity(), identity)) {
-        committedSceneRef.current = candidate;
+      const completed = await finishBoardAnimationWithin(animator.current, 2_400);
+      if (completed) {
+        const committed = mergeLatestLearnerMarks(candidate, committedSceneRef.current);
+        committedSceneRef.current = committed;
+        sceneRef.current = committed;
+        setScene(committed);
         return true;
       }
       sceneRef.current = committedSceneRef.current;
@@ -136,11 +140,17 @@ export function LessonPage({ sessionId }: LessonPageProps) {
 
   useEffect(() => {
     session.onBoardOps = applyTutorOps;
+    session.onLearnerBoardReplay = (ops) => {
+      const result = applyOps(committedSceneRef.current, ops, 'learner');
+      committedSceneRef.current = result.scene;
+      sceneRef.current = result.scene;
+      setScene(result.scene);
+    };
     session.onGenerationCancelled = (identity) => {
-      animator.current?.cancelAll();
+      // A checkpoint reaches this surface only after its audio cue is heard.
+      // Finish that visible checkpoint instead of making it disappear.
+      animator.current?.finishAll();
       attention.cancelGeneration(identity);
-      sceneRef.current = committedSceneRef.current;
-      setScene(committedSceneRef.current);
       setHighlights([]);
     };
     session.onGenerationActivated = (identity, reason) => {
@@ -176,9 +186,10 @@ export function LessonPage({ sessionId }: LessonPageProps) {
   const handleLearnerStroke = useCallback(
     (points: Vec[]) => {
       const id = `sketch-${Date.now().toString(36)}`;
+      const op: BoardOp = { op: 'add', id, color: penColor, spec: { kind: 'path', points } };
       const result = applyOps(
         committedSceneRef.current,
-        [{ op: 'add', id, color: penColor, spec: { kind: 'path', points } }],
+        [op],
         'learner',
       );
       sceneRef.current = result.scene;
@@ -188,31 +199,39 @@ export function LessonPage({ sessionId }: LessonPageProps) {
       pendingBoardNote.current.push(
         `a freehand stroke around (${Math.round(x)}, ${Math.round(y)})`,
       );
+      pendingBoardOps.current.push(op);
       scheduleBoardNote();
     },
     [penColor], // eslint-disable-line react-hooks/exhaustive-deps
   );
 
   const handleLearnerErase = useCallback((id: string) => {
-    const result = applyOps(committedSceneRef.current, [{ op: 'erase', id }], 'learner');
+    const op: BoardOp = { op: 'erase', id };
+    const result = applyOps(committedSceneRef.current, [op], 'learner');
     sceneRef.current = result.scene;
     committedSceneRef.current = result.scene;
     setScene(result.scene);
     pendingBoardNote.current.push('erased one of their own marks');
+    pendingBoardOps.current.push(op);
     scheduleBoardNote();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   /** Batches learner board activity into one context note for the tutor. */
   const scheduleBoardNote = useCallback(() => {
     if (boardEventTimer.current !== null) window.clearTimeout(boardEventTimer.current);
-    boardEventTimer.current = window.setTimeout(() => {
+    boardEventTimer.current = window.setTimeout(async () => {
       const notes = pendingBoardNote.current;
+      const ops = pendingBoardOps.current;
       pendingBoardNote.current = [];
-      if (notes.length === 0) return;
-      session.sendBoardEvent(
-        `${notes.join('; ')}. ${describeScene(sceneRef.current)}`,
-      );
-    }, 1600);
+      pendingBoardOps.current = [];
+      if (notes.length === 0 || ops.length === 0) return;
+      const imageDataUrl = await captureBoard.current?.() ?? null;
+      session.sendBoardEvent({
+        description: `${notes.join('; ')}. ${describeScene(sceneRef.current)}`,
+        ops,
+        imageDataUrl,
+      });
+    }, 650);
   }, [session]);
 
   const submitText = useCallback(
@@ -346,6 +365,7 @@ export function LessonPage({ sessionId }: LessonPageProps) {
             focusSemanticObjectId={activeVisualGroupId}
             focusIndex={focusIndex}
             overview={boardOverview}
+            onCaptureReady={(capture) => { captureBoard.current = capture; }}
           />
           {!started && (
             <div className="lesson__start">
@@ -540,4 +560,33 @@ function prepareScene(scene: SceneState, ops: BoardOp[]): SceneState | null {
     inspection = inspectScene(candidate);
   }
   return inspection.accepted ? candidate : null;
+}
+
+function mergeLatestLearnerMarks(candidate: SceneState, latest: SceneState): SceneState {
+  return {
+    epoch: Math.max(candidate.epoch, latest.epoch),
+    items: [
+      ...candidate.items.filter((item) => item.owner === 'tutor'),
+      ...latest.items.filter((item) => item.owner === 'learner'),
+    ],
+  };
+}
+
+function finishBoardAnimationWithin(boardAnimator: BoardAnimator | null, timeoutMs: number): Promise<boolean> {
+  if (!boardAnimator) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    let settled = false;
+    const timer = window.setTimeout(() => {
+      if (settled) return;
+      boardAnimator.finishAll();
+      settled = true;
+      resolve(true);
+    }, timeoutMs);
+    void boardAnimator.whenIdle().then((completed) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timer);
+      resolve(completed);
+    });
+  });
 }

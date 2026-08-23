@@ -46,6 +46,40 @@ describe('realtime proxy response annotation', () => {
     expect(update.session.audio.input.turn_detection.interrupt_response).toBe(false);
   });
 
+  it('forwards a learner board image to Realtime and persists only sanitized replay ops', async () => {
+    vi.stubGlobal('WebSocket', FakeUpstream);
+    const repo = new Repo(openTestDb());
+    const child = repo.createChild('Maya', 10);
+    const session = repo.createSession(child.id, 'fractions');
+    const client = new FakeClient();
+    await connectRealtimeProxy(client as never, { apiKey: 'offline-fixture', model: 'gpt-realtime-2.1', repo, sessionId: session.id, createUpstream: () => new FakeUpstream() as never });
+    const active = { ...identity, sessionId: session.id };
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 0, 'hello', {})));
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 1, 'board_event', {
+      description: 'one learner stroke',
+      ops: [{ op: 'add', id: 'sketch-test', color: '#2C5BE0', spec: { kind: 'path', points: [[10, 10], [30, 30], [60, 20]] } }],
+      imageDataUrl: 'data:image/jpeg;base64,AAAA',
+    })));
+    await flushProxy();
+
+    const upstream = FakeUpstream.latest.sent.map((raw) => JSON.parse(raw) as { type: string; item?: { content?: Array<{ type: string }> } });
+    const context = upstream.find((event) => event.type === 'conversation.item.create');
+    expect(context?.item?.content?.map((part) => part.type)).toEqual(['input_text', 'input_image']);
+    const stored = repo.listEvents(session.id);
+    expect(stored).toEqual([
+      expect.objectContaining({
+        type: 'learner_board',
+        payload: expect.objectContaining({ hasVisualContext: true, ops: [expect.objectContaining({ op: 'add', id: 'sketch-test' })] }),
+      }),
+    ]);
+    expect(JSON.stringify(stored)).not.toContain('data:image');
+    FakeUpstream.latest.emit({ type: 'session.updated' });
+    await flushProxy();
+    expect(client.sent.find((event) => event.type === 'learner_board_replay')?.payload).toMatchObject({
+      batches: [[expect.objectContaining({ op: 'add', id: 'sketch-test' })]],
+    });
+  });
+
   it('maps raw transcript-before-audio events across the complete PCM segment', async () => {
     vi.stubGlobal('WebSocket', FakeUpstream);
     const repo = new Repo(openTestDb());

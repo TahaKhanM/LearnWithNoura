@@ -99,6 +99,7 @@ The browser suites use synthetic learner fixtures. Paid live-provider runs are n
 - Raw audio, pointer trails and camera data are not persisted.
 - Realtime audio and transient character/visual work are cancelled locally before provider confirmation; target-hardware acoustic silence remains **UNVERIFIED**.
 - Voice interruption requires sustained adaptive microphone energy plus independent server speech-start confirmation. Short noises and server VAD alone do not cancel Noura.
+- Released tutor checkpoints finish and remain visible across turn changes. Learner strokes are committed as learner-owned BoardOps, replay after refresh and send a compressed transient board image to Realtime so Noura can inspect the drawing.
 - Captions use PCM-timed phrase cues and final transcript correction. The app does not claim provider word timestamps or exact word synchronization.
 
 ## Known blockers
