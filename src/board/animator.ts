@@ -60,8 +60,9 @@ export class BoardAnimator {
   private queue: AnimTask[] = [];
   private running = false;
   private raf = 0;
-  private currentResolve: (() => void) | null = null;
+  private currentResolve: ((completed: boolean) => void) | null = null;
   private currentTask: AnimTask | null = null;
+  private idleWaiters = new Set<(completed: boolean) => void>();
   onPen: (pos: PenPosition | null) => void = () => {};
   /** Called when the animation queue drains. */
   onIdle: () => void = () => {};
@@ -73,6 +74,31 @@ export class BoardAnimator {
     }
     this.queue.push(task);
     if (!this.running) void this.run();
+  }
+
+  whenIdle(): Promise<boolean> {
+    if (!this.running && this.queue.length === 0 && !this.currentTask) return Promise.resolve(true);
+    return new Promise((resolve) => this.idleWaiters.add(resolve));
+  }
+
+  /** Drops the active transient checkpoint and every queued checkpoint. */
+  cancelAll(): void {
+    if (this.raf) cancelAnimationFrame(this.raf);
+    this.raf = 0;
+    this.running = false;
+    if (this.currentTask) {
+      for (const node of this.currentTask.nodes) hideForAnimation(node.el, node.kind, node.length);
+      this.currentTask = null;
+    }
+    for (const task of this.queue) for (const node of task.nodes) hideForAnimation(node.el, node.kind, node.length);
+    this.queue = [];
+    if (this.currentResolve) {
+      const resolve = this.currentResolve;
+      this.currentResolve = null;
+      resolve(false);
+    }
+    this.onPen(null);
+    this.resolveIdle(false);
   }
 
   /** Instantly completes everything queued or mid-draw. */
@@ -88,13 +114,14 @@ export class BoardAnimator {
     if (this.currentResolve) {
       const resolve = this.currentResolve;
       this.currentResolve = null;
-      resolve();
+      resolve(true);
     }
     for (const task of this.queue) {
       for (const node of task.nodes) revealNode(node.el, node.kind);
     }
     this.queue = [];
     this.onPen(null);
+    this.resolveIdle(true);
   }
 
   private async run(): Promise<void> {
@@ -104,20 +131,22 @@ export class BoardAnimator {
       this.currentTask = task;
       for (const node of task.nodes) {
         if (!this.running) break;
-        await this.animateNode(node);
+        const completed = await this.animateNode(node);
+        if (!completed) break;
       }
       this.currentTask = null;
     }
     this.running = false;
     this.onPen(null);
     this.onIdle();
+    this.resolveIdle(true);
   }
 
-  private animateNode(node: AnimTask['nodes'][number]): Promise<void> {
+  private animateNode(node: AnimTask['nodes'][number]): Promise<boolean> {
     const { el, kind, length } = node;
     if (!el.isConnected) {
       revealNode(el, kind);
-      return Promise.resolve();
+      return Promise.resolve(true);
     }
 
     // When a backlog builds up (a big scene landing at once, or speech
@@ -154,10 +183,15 @@ export class BoardAnimator {
         } else {
           revealNode(el, kind);
           this.currentResolve = null;
-          resolve();
+          resolve(true);
         }
       };
       this.raf = requestAnimationFrame(tick);
     });
+  }
+
+  private resolveIdle(completed: boolean): void {
+    for (const resolve of this.idleWaiters) resolve(completed);
+    this.idleWaiters.clear();
   }
 }

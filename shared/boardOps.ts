@@ -627,7 +627,10 @@ export function validateOps(rawOps: unknown): ValidatedOps {
           out.rejected.push({ reason: 'add requires a short alphanumeric id', raw });
           break;
         }
-        const spec = validateSpec(op);
+        const normalizedSpec = typeof (op as unknown as { spec?: unknown }).spec === 'object' && (op as unknown as { spec?: unknown }).spec !== null
+          ? { ...((op as unknown as { spec: Record<string, unknown> }).spec), op: 'add', id: op.id, color: op.color }
+          : op;
+        const spec = validateSpec(normalizedSpec as RawOp);
         if (!spec) {
           out.rejected.push({
             reason: `invalid or unsupported spec for kind "${String(op.kind)}"`,

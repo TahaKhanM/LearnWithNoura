@@ -53,6 +53,17 @@ describe('applyOps', () => {
     expect(cleared.scene.epoch).toBe(1);
   });
 
+  it('does not let tutor operations erase learner-owned marks', () => {
+    const learnerScene = applyOps(emptyScene, [add('learner-mark')], 'learner').scene;
+    const withTutor = applyOps(learnerScene, [add('tutor-mark')], 'tutor').scene;
+
+    const erased = applyOps(withTutor, [{ op: 'erase', id: 'learner-mark' }], 'tutor');
+    expect(erased.scene.items.map((item) => item.id)).toContain('learner-mark');
+
+    const cleared = applyOps(withTutor, [{ op: 'clear' }], 'tutor');
+    expect(cleared.scene.items.map((item) => item.id)).toEqual(['learner-mark']);
+  });
+
   it('collects highlights only for objects that exist', () => {
     const base = applyOps(emptyScene, [add('a')], 'tutor');
     const result = applyOps(

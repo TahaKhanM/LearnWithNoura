@@ -1,8 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
+import type { ResponseTaxonomy } from '../../shared/pedagogy.js';
 
 export interface Child {
   id: string;
+  parentId: string;
   name: string;
   age: number | null;
   createdAt: number;
@@ -16,15 +18,22 @@ export interface Session {
   startedAt: number;
   endedAt: number | null;
   summary: SessionSummary | null;
+  parentSessionId: string | null;
+  endedEventId: number | null;
+  summaryVersion: number | null;
+  summaryThroughEventId: number | null;
 }
 
 /** Calibrated language only — no invented mastery percentages. */
 export interface SessionSummary {
+  version?: number;
+  throughEventId?: number | null;
   headline: string;
   workedOn: string[];
-  strengths: { concept: string; evidence: string }[];
-  struggles: { concept: string; evidence: string; kind: 'misconception' | 'gap' | 'uncertain' }[];
+  strengths: { concept: string; evidence: string; evidenceIds?: string[] }[];
+  struggles: { concept: string; evidence: string; evidenceIds?: string[]; kind: 'misconception' | 'gap' | 'uncertain' }[];
   recommendation: string;
+  recommendationEvidenceIds?: string[];
   confidenceNote: string;
 }
 
@@ -40,6 +49,21 @@ export interface EvidenceRow {
   verdict: Verdict;
   confidence: Confidence;
   excerpt: string | null;
+  evidenceId: string;
+  childId: string;
+  conceptId: string;
+  taxonomy: ResponseTaxonomy;
+  confidenceBasis: string;
+  sourceEventIds: number[];
+  normalizedExcerpt: string;
+  sourceSpan: { eventId: number; start: number; end: number } | null;
+  taskId: string;
+  independenceLevel: 'none' | 'reduced' | 'independent';
+  domainCheck: unknown;
+  turnId: string;
+  generationId: string;
+  contradicts: string[];
+  supersedes: string[];
 }
 
 export interface EventRow {
@@ -58,29 +82,39 @@ export class Repo {
     this.db = db;
   }
 
-  createChild(name: string, age: number | null): Child {
-    const child: Child = { id: randomUUID(), name, age, createdAt: Date.now() };
+  createChild(name: string, age: number | null, parentId = 'local-synthetic-parent'): Child {
+    const child: Child = { id: randomUUID(), parentId, name, age, createdAt: Date.now() };
     this.db
-      .prepare('INSERT INTO children (id, name, age, created_at) VALUES (?, ?, ?, ?)')
-      .run(child.id, child.name, child.age, child.createdAt);
+      .prepare('INSERT INTO children (id, parent_id, name, age, created_at) VALUES (?, ?, ?, ?, ?)')
+      .run(child.id, child.parentId, child.name, child.age, child.createdAt);
     return child;
   }
 
-  listChildren(): Child[] {
+  listChildren(parentId?: string): Child[] {
     const rows = this.db
-      .prepare('SELECT id, name, age, created_at FROM children ORDER BY created_at')
-      .all() as unknown as { id: string; name: string; age: number | null; created_at: number }[];
-    return rows.map((r) => ({ id: r.id, name: r.name, age: r.age, createdAt: r.created_at }));
+      .prepare('SELECT id, parent_id, name, age, created_at FROM children WHERE (? IS NULL OR parent_id = ?) ORDER BY created_at')
+      .all(parentId ?? null, parentId ?? null) as unknown as { id: string; parent_id: string; name: string; age: number | null; created_at: number }[];
+    return rows.map((r) => ({ id: r.id, parentId: r.parent_id, name: r.name, age: r.age, createdAt: r.created_at }));
   }
 
   getChild(id: string): Child | null {
     const r = this.db
-      .prepare('SELECT id, name, age, created_at FROM children WHERE id = ?')
-      .get(id) as { id: string; name: string; age: number | null; created_at: number } | undefined;
-    return r ? { id: r.id, name: r.name, age: r.age, createdAt: r.created_at } : null;
+      .prepare('SELECT id, parent_id, name, age, created_at FROM children WHERE id = ?')
+      .get(id) as { id: string; parent_id: string; name: string; age: number | null; created_at: number } | undefined;
+    return r ? { id: r.id, parentId: r.parent_id, name: r.name, age: r.age, createdAt: r.created_at } : null;
   }
 
-  createSession(childId: string, goal: string): Session {
+  getChildForParent(id: string, parentId: string): Child | null {
+    const child = this.getChild(id);
+    return child?.parentId === parentId ? child : null;
+  }
+
+  getSessionForParent(id: string, parentId: string): Session | null {
+    const session = this.getSession(id);
+    return session && this.getChildForParent(session.childId, parentId) ? session : null;
+  }
+
+  createSession(childId: string, goal: string, parentSessionId: string | null = null): Session {
     const session: Session = {
       id: randomUUID(),
       childId,
@@ -89,19 +123,23 @@ export class Repo {
       startedAt: Date.now(),
       endedAt: null,
       summary: null,
+      parentSessionId,
+      endedEventId: null,
+      summaryVersion: null,
+      summaryThroughEventId: null,
     };
     this.db
       .prepare(
-        'INSERT INTO sessions (id, child_id, goal, status, started_at) VALUES (?, ?, ?, ?, ?)',
+        'INSERT INTO sessions (id, child_id, goal, status, started_at, parent_session_id) VALUES (?, ?, ?, ?, ?, ?)',
       )
-      .run(session.id, childId, goal, session.status, session.startedAt);
+      .run(session.id, childId, goal, session.status, session.startedAt, parentSessionId);
     return session;
   }
 
   getSession(id: string): Session | null {
     const r = this.db
       .prepare(
-        'SELECT id, child_id, goal, status, started_at, ended_at, summary_json FROM sessions WHERE id = ?',
+        'SELECT id, child_id, goal, status, started_at, ended_at, summary_json, parent_session_id, ended_event_id, summary_version, summary_through_event_id FROM sessions WHERE id = ?',
       )
       .get(id) as
       | {
@@ -112,6 +150,10 @@ export class Repo {
           started_at: number;
           ended_at: number | null;
           summary_json: string | null;
+          parent_session_id: string | null;
+          ended_event_id: number | null;
+          summary_version: number | null;
+          summary_through_event_id: number | null;
         }
       | undefined;
     if (!r) return null;
@@ -123,6 +165,10 @@ export class Repo {
       startedAt: r.started_at,
       endedAt: r.ended_at,
       summary: r.summary_json ? (JSON.parse(r.summary_json) as SessionSummary) : null,
+      parentSessionId: r.parent_session_id,
+      endedEventId: r.ended_event_id,
+      summaryVersion: r.summary_version,
+      summaryThroughEventId: r.summary_through_event_id,
     };
   }
 
@@ -137,10 +183,31 @@ export class Repo {
       .filter((s): s is Session => s !== null);
   }
 
-  endSession(id: string, summary: SessionSummary | null): void {
+  endSession(id: string, summary: SessionSummary | null): Session | null {
+    const current = this.getSession(id);
+    if (!current) return null;
+    if (current.status === 'active') {
+      const cutoff = this.latestEventId(id);
+      this.db
+        .prepare("UPDATE sessions SET status = 'ended', ended_at = ?, ended_event_id = ? WHERE id = ? AND status = 'active'")
+        .run(Date.now(), cutoff, id);
+    }
+    if (summary) this.setSessionSummary(id, summary, current.summaryVersion ?? 1);
+    return this.getSession(id);
+  }
+
+  setSessionSummary(id: string, summary: SessionSummary, version = 1): void {
+    const session = this.getSession(id);
+    if (!session || session.status !== 'ended') throw new Error('Session must be ended before summary write.');
     this.db
-      .prepare("UPDATE sessions SET status = 'ended', ended_at = ?, summary_json = ? WHERE id = ?")
-      .run(Date.now(), summary ? JSON.stringify(summary) : null, id);
+      .prepare('UPDATE sessions SET summary_json = ?, summary_version = ?, summary_through_event_id = ended_event_id WHERE id = ?')
+      .run(JSON.stringify(summary), version, id);
+  }
+
+  createContinuation(id: string): Session {
+    const session = this.getSession(id);
+    if (!session || session.status !== 'ended') throw new Error('Only an ended session can continue.');
+    return this.createSession(session.childId, session.goal, session.id);
   }
 
   /**
@@ -150,6 +217,7 @@ export class Repo {
    * interruption cancelled.
    */
   addEvent(sessionId: string, type: string, payload: unknown, released = true): number {
+    this.assertActive(sessionId);
     const result = this.db
       .prepare('INSERT INTO events (session_id, ts, type, payload, released) VALUES (?, ?, ?, ?, ?)')
       .run(sessionId, Date.now(), type, JSON.stringify(payload ?? {}), released ? 1 : 0);
@@ -157,17 +225,21 @@ export class Repo {
   }
 
   markEventReleased(sessionId: string, eventId: number): void {
+    this.assertActive(sessionId);
     this.db
       .prepare('UPDATE events SET released = 1 WHERE id = ? AND session_id = ?')
       .run(eventId, sessionId);
   }
 
-  listEvents(sessionId: string, limit = 500): EventRow[] {
+  listEvents(sessionId: string, limit = 500, throughEventId?: number | null): EventRow[] {
     const rows = this.db
       .prepare(
-        'SELECT id, session_id, ts, type, payload, released FROM events WHERE session_id = ? ORDER BY id LIMIT ?',
+        `SELECT id, session_id, ts, type, payload, released FROM (
+           SELECT id, session_id, ts, type, payload, released
+           FROM events WHERE session_id = ? AND (? IS NULL OR id <= ?) ORDER BY id DESC LIMIT ?
+         ) latest ORDER BY id`,
       )
-      .all(sessionId, limit) as unknown as {
+      .all(sessionId, throughEventId ?? null, throughEventId ?? null, limit) as unknown as {
       id: number;
       session_id: string;
       ts: number;
@@ -193,11 +265,41 @@ export class Repo {
       verdict: Verdict;
       confidence: Confidence;
       excerpt?: string;
+      classification?: ResponseTaxonomy;
+      confidenceBasis?: string;
+      sourceEventIds?: number[];
+      taskId?: string;
+      independenceLevel?: 'none' | 'reduced' | 'independent';
+      domainCheck?: unknown;
+      turnId?: string;
+      generationId?: string;
+      contradicts?: string[];
+      supersedes?: string[];
     },
-  ): void {
-    this.db
+  ): EvidenceRow {
+    this.assertActive(sessionId);
+    const session = this.getSession(sessionId);
+    if (!session) throw new Error('Unknown session.');
+    const evidenceId = randomUUID();
+    const sourceEventIds = [...new Set(entry.sourceEventIds ?? [])];
+    if (sourceEventIds.length === 0) throw new Error('Evidence requires at least one source event ID.');
+    const excerpt = normalizeExcerpt(entry.excerpt ?? '');
+    const sourceSpan = excerpt ? this.validateExcerpt(sessionId, sourceEventIds, excerpt) : null;
+    const taxonomy = entry.classification ?? taxonomyFromVerdict(entry.verdict);
+    const confidenceBasis = entry.confidenceBasis ?? `${entry.confidence} confidence model observation`;
+    const taskId = entry.taskId ?? 'unspecified-opportunity';
+    const independenceLevel = entry.independenceLevel ?? 'reduced';
+    const turnId = entry.turnId ?? 'legacy-turn';
+    const generationId = entry.generationId ?? 'legacy-generation';
+    const result = this.db
       .prepare(
-        'INSERT INTO evidence (session_id, ts, concept, observation, verdict, confidence, excerpt) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        `INSERT INTO evidence (
+          session_id, ts, concept, observation, verdict, confidence, excerpt,
+          evidence_id, child_id, concept_id, response_taxonomy, confidence_basis,
+          source_event_ids, normalized_excerpt, source_span_json, task_id,
+          independence_level, domain_check_json, turn_id, generation_id,
+          contradicts_json, supersedes_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         sessionId,
@@ -207,65 +309,85 @@ export class Repo {
         entry.verdict,
         entry.confidence,
         entry.excerpt ?? null,
+        evidenceId,
+        session.childId,
+        normalizeConcept(entry.concept),
+        taxonomy,
+        confidenceBasis,
+        JSON.stringify(sourceEventIds),
+        excerpt,
+        sourceSpan ? JSON.stringify(sourceSpan) : null,
+        taskId,
+        independenceLevel,
+        JSON.stringify(entry.domainCheck ?? null),
+        turnId,
+        generationId,
+        JSON.stringify(entry.contradicts ?? []),
+        JSON.stringify(entry.supersedes ?? []),
       );
+    return this.getEvidenceByRowId(Number(result.lastInsertRowid)) as EvidenceRow;
   }
 
   listEvidence(sessionId: string): EvidenceRow[] {
     const rows = this.db
       .prepare(
-        'SELECT id, session_id, ts, concept, observation, verdict, confidence, excerpt FROM evidence WHERE session_id = ? ORDER BY id',
+        'SELECT * FROM evidence WHERE session_id = ? ORDER BY id',
       )
       .all(sessionId) as unknown as {
-      id: number;
-      session_id: string;
-      ts: number;
-      concept: string;
-      observation: string;
-      verdict: Verdict;
-      confidence: Confidence;
-      excerpt: string | null;
+      [key: string]: unknown;
     }[];
-    return rows.map((r) => ({
-      id: r.id,
-      sessionId: r.session_id,
-      ts: r.ts,
-      concept: r.concept,
-      observation: r.observation,
-      verdict: r.verdict,
-      confidence: r.confidence,
-      excerpt: r.excerpt,
-    }));
+    return rows.map((r) => mapEvidence(r));
   }
 
   listEvidenceForChild(childId: string, limit = 200): (EvidenceRow & { goal: string })[] {
     const rows = this.db
       .prepare(
-        `SELECT e.id, e.session_id, e.ts, e.concept, e.observation, e.verdict, e.confidence, e.excerpt, s.goal
+        `SELECT e.*, s.goal
          FROM evidence e JOIN sessions s ON s.id = e.session_id
          WHERE s.child_id = ? ORDER BY e.id DESC LIMIT ?`,
       )
       .all(childId, limit) as unknown as {
-      id: number;
-      session_id: string;
-      ts: number;
-      concept: string;
-      observation: string;
-      verdict: Verdict;
-      confidence: Confidence;
-      excerpt: string | null;
-      goal: string;
+      [key: string]: unknown;
     }[];
-    return rows.map((r) => ({
-      id: r.id,
-      sessionId: r.session_id,
-      ts: r.ts,
-      concept: r.concept,
-      observation: r.observation,
-      verdict: r.verdict,
-      confidence: r.confidence,
-      excerpt: r.excerpt,
-      goal: r.goal,
-    }));
+    return rows.map((r) => ({ ...mapEvidence(r), goal: String(r.goal) }));
+  }
+
+  getEvidenceByEvidenceId(evidenceId: string): EvidenceRow | null {
+    const row = this.db.prepare('SELECT * FROM evidence WHERE evidence_id = ?').get(evidenceId) as Record<string, unknown> | undefined;
+    return row ? mapEvidence(row) : null;
+  }
+
+  private getEvidenceByRowId(id: number): EvidenceRow | null {
+    const row = this.db.prepare('SELECT * FROM evidence WHERE id = ?').get(id) as Record<string, unknown> | undefined;
+    return row ? mapEvidence(row) : null;
+  }
+
+  private validateExcerpt(sessionId: string, sourceEventIds: number[], excerpt: string): { eventId: number; start: number; end: number } {
+    if (sourceEventIds.length === 0) throw new Error('Evidence excerpts require source event IDs.');
+    for (const eventId of sourceEventIds) {
+      const row = this.db.prepare('SELECT payload FROM events WHERE id = ? AND session_id = ?').get(eventId, sessionId) as { payload: string } | undefined;
+      if (!row) continue;
+      const payload = safeParse(row.payload) as { text?: unknown };
+      const source = normalizeExcerpt(typeof payload.text === 'string' ? payload.text : '');
+      const start = source.indexOf(excerpt);
+      if (start >= 0) return { eventId, start, end: start + excerpt.length };
+    }
+    throw new Error('Evidence excerpt does not match its source events.');
+  }
+
+  private latestEventId(sessionId: string): number | null {
+    const row = this.db
+      .prepare('SELECT MAX(id) AS id FROM events WHERE session_id = ?')
+      .get(sessionId) as { id: number | null };
+    return row.id === null ? null : Number(row.id);
+  }
+
+  private assertActive(sessionId: string): void {
+    const row = this.db
+      .prepare('SELECT status FROM sessions WHERE id = ?')
+      .get(sessionId) as { status: string } | undefined;
+    if (!row) throw new Error('Unknown session.');
+    if (row.status !== 'active') throw new Error('Session has ended and is immutable.');
   }
 }
 
@@ -275,4 +397,52 @@ function safeParse(json: string): unknown {
   } catch {
     return {};
   }
+}
+
+function normalizeExcerpt(value: string): string {
+  return value.normalize('NFKC').replace(/[\u2018\u2019]/g, "'").replace(/[\u201c\u201d]/g, '"').replace(/\s+/g, ' ').trim();
+}
+
+function normalizeConcept(value: string): string {
+  return value.normalize('NFKC').toLocaleLowerCase('en').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 160) || 'unspecified';
+}
+
+function taxonomyFromVerdict(verdict: Verdict): ResponseTaxonomy {
+  if (verdict === 'misconception') return 'confident_misconception';
+  if (verdict === 'struggling') return 'incorrect';
+  return 'correct';
+}
+
+function parseArray<T>(value: unknown, fallback: T[] = []): T[] {
+  if (typeof value !== 'string') return fallback;
+  const parsed = safeParse(value);
+  return Array.isArray(parsed) ? parsed as T[] : fallback;
+}
+
+function mapEvidence(row: Record<string, unknown>): EvidenceRow {
+  return {
+    id: Number(row.id),
+    sessionId: String(row.session_id),
+    ts: Number(row.ts),
+    concept: String(row.concept),
+    observation: String(row.observation),
+    verdict: String(row.verdict) as Verdict,
+    confidence: String(row.confidence) as Confidence,
+    excerpt: row.excerpt === null || row.excerpt === undefined ? null : String(row.excerpt),
+    evidenceId: row.evidence_id ? String(row.evidence_id) : `legacy-${row.id}`,
+    childId: row.child_id ? String(row.child_id) : '',
+    conceptId: row.concept_id ? String(row.concept_id) : normalizeConcept(String(row.concept)),
+    taxonomy: row.response_taxonomy ? String(row.response_taxonomy) as ResponseTaxonomy : taxonomyFromVerdict(String(row.verdict) as Verdict),
+    confidenceBasis: row.confidence_basis ? String(row.confidence_basis) : `${row.confidence} confidence legacy observation`,
+    sourceEventIds: parseArray<number>(row.source_event_ids),
+    normalizedExcerpt: row.normalized_excerpt ? String(row.normalized_excerpt) : normalizeExcerpt(row.excerpt ? String(row.excerpt) : ''),
+    sourceSpan: row.source_span_json ? safeParse(String(row.source_span_json)) as EvidenceRow['sourceSpan'] : null,
+    taskId: row.task_id ? String(row.task_id) : 'legacy-opportunity',
+    independenceLevel: row.independence_level ? String(row.independence_level) as EvidenceRow['independenceLevel'] : 'reduced',
+    domainCheck: row.domain_check_json ? safeParse(String(row.domain_check_json)) : null,
+    turnId: row.turn_id ? String(row.turn_id) : 'legacy-turn',
+    generationId: row.generation_id ? String(row.generation_id) : 'legacy-generation',
+    contradicts: parseArray<string>(row.contradicts_json),
+    supersedes: parseArray<string>(row.supersedes_json),
+  };
 }

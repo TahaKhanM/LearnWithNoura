@@ -1,8 +1,16 @@
 import type { WebSocket as ClientSocket } from 'ws';
-import { validateOps } from '../../shared/boardOps';
-import { buildInstructions } from './instructions';
-import { REALTIME_TOOLS } from './tools';
-import type { Repo, Confidence, Verdict } from '../store/repo';
+import { validateOps } from '../../shared/boardOps.js';
+import {
+  createRuntimeEvent,
+  RuntimeEventEnvelopeSchema,
+  type GenerationIdentity,
+} from '../../shared/runtimeProtocol.js';
+import { buildInstructions } from './instructions.js';
+import { REALTIME_TOOLS } from './tools.js';
+import type { Repo, Confidence, Verdict } from '../store/repo.js';
+import { createLessonState, reduceLesson, responseHandoff } from '../lesson/orchestrator.js';
+import { ResponseTaxonomySchema, TeachingMoveSchema, type ResponseTaxonomy } from '../../shared/pedagogy.js';
+import { adaptSemanticScene } from '../../shared/semanticScene.js';
 
 /**
  * Bridges one browser lesson to one OpenAI Realtime session.
@@ -42,6 +50,11 @@ export function connectRealtimeProxy(client: ClientSocket, options: ProxyOptions
     client.close(4404, 'unknown session');
     return;
   }
+  if (session.status !== 'active') {
+    sendClient({ type: 'error', message: 'This lesson has ended and is read-only.' });
+    client.close(4409, 'session ended');
+    return;
+  }
 
   const upstream = new WebSocket(`${REALTIME_URL}?model=${encodeURIComponent(model)}`, {
     // Node's fetch-based WebSocket accepts headers here.
@@ -64,9 +77,43 @@ export function connectRealtimeProxy(client: ClientSocket, options: ProxyOptions
   let lastCreateSource: 'tool' | 'user' | 'start' = 'start';
   /** A user ask hit an active response; ask again once it finishes. */
   let retryCreateOnDone = false;
+  let clientIdentity: GenerationIdentity | null = null;
+  let clientSequence = 0;
+  let lastClientSequence = -1;
+  const seenClientEvents = new Set<string>();
+  const seenIdempotencyKeys = new Set<string>();
+  const pendingClientPayloads: unknown[] = [];
+  const responseIdentities = new Map<string, GenerationIdentity>();
+  const responseTranscript = new Map<string, string>();
+  let lessonState = createLessonState(session.goal);
+  let lastLearnerEventId: number | null = null;
 
-  function sendClient(payload: unknown): void {
-    if (client.readyState === client.OPEN) client.send(JSON.stringify(payload));
+  function sendClient(payload: Record<string, unknown>, identity = clientIdentity): void {
+    if (!identity) {
+      pendingClientPayloads.push(payload);
+      return;
+    }
+    if (client.readyState !== client.OPEN) return;
+    const { type, ...body } = payload;
+    client.send(JSON.stringify(createRuntimeEvent(
+      identity,
+      clientSequence++,
+      String(type ?? 'unknown'),
+      body,
+      {
+        ...(typeof body.response_id === 'string' ? { providerResponseId: body.response_id } : {}),
+        ...(typeof body.item_id === 'string' ? { providerItemId: body.item_id } : {}),
+      },
+    )));
+  }
+
+  function flushPendingClientPayloads(): void {
+    if (!clientIdentity) return;
+    for (const payload of pendingClientPayloads.splice(0)) sendClient(payload as Record<string, unknown>);
+  }
+
+  function identityForResponse(responseId: unknown): GenerationIdentity | null {
+    return typeof responseId === 'string' ? responseIdentities.get(responseId) ?? clientIdentity : clientIdentity;
   }
 
   function sendUpstream(payload: unknown): void {
@@ -144,7 +191,7 @@ export function connectRealtimeProxy(client: ClientSocket, options: ProxyOptions
     // re-validated so yesterday's data always meets today's rules.
     const batches = repo
       .listEvents(sessionId, 2000)
-      .filter((e) => e.type === 'board_ops' && e.released)
+      .filter((e) => ['board_ops', 'semantic_scene'].includes(e.type) && e.released)
       .map((e) => validateOps((e.payload as { ops?: unknown[] })?.ops).ops)
       .filter((ops) => ops.length > 0);
     if (batches.length > 0) sendClient({ type: 'board_replay', batches });
@@ -186,7 +233,8 @@ export function connectRealtimeProxy(client: ClientSocket, options: ProxyOptions
         // confirmed.
         childHoldsFloor = false;
         const response = event.response as { id?: string } | undefined;
-        sendClient({ type: 'response_started', response_id: response?.id });
+        if (response?.id && clientIdentity) responseIdentities.set(response.id, { ...clientIdentity });
+        sendClient({ type: 'response_started', response_id: response?.id }, identityForResponse(response?.id));
         break;
       }
 
@@ -196,11 +244,11 @@ export function connectRealtimeProxy(client: ClientSocket, options: ProxyOptions
           delta: event.delta,
           response_id: event.response_id,
           item_id: event.item_id,
-        });
+        }, identityForResponse(event.response_id));
         break;
 
       case 'response.output_audio.done':
-        sendClient({ type: 'audio_done', response_id: event.response_id });
+        sendClient({ type: 'audio_done', response_id: event.response_id }, identityForResponse(event.response_id));
         break;
 
       case 'response.output_audio_transcript.delta':
@@ -209,21 +257,24 @@ export function connectRealtimeProxy(client: ClientSocket, options: ProxyOptions
           delta: event.delta,
           response_id: event.response_id,
           item_id: event.item_id,
-        });
+        }, identityForResponse(event.response_id));
         break;
 
       case 'response.output_audio_transcript.done': {
         const text = String(event.transcript ?? '');
         if (text.trim()) repo.addEvent(sessionId, 'tutor_said', { text });
-        sendClient({ type: 'transcript_done', text, response_id: event.response_id });
+        if (typeof event.response_id === 'string') responseTranscript.set(event.response_id, text);
+        sendClient({ type: 'transcript_done', text, response_id: event.response_id }, identityForResponse(event.response_id));
         break;
       }
 
       case 'conversation.item.input_audio_transcription.completed': {
         const text = String(event.transcript ?? '').trim();
         if (text) {
-          repo.addEvent(sessionId, 'learner_said', { text });
+          lastLearnerEventId = repo.addEvent(sessionId, 'learner_said', { text });
           sendClient({ type: 'user_transcript', text });
+          try { lessonState = reduceLesson(lessonState, { type: 'LEARNER_RESPONSE_RECEIVED' }); }
+          catch { /* unsolicited learner turns are still valid input; the next move re-orients */ }
         }
         break;
       }
@@ -256,13 +307,54 @@ export function connectRealtimeProxy(client: ClientSocket, options: ProxyOptions
           | undefined;
         const status = response?.status ?? 'unknown';
         if (status === 'cancelled' && response?.id) cancelledResponses.add(response.id);
-        sendClient({ type: 'response_done', response_id: response?.id, status });
+        const responseIdentity = identityForResponse(response?.id);
+        sendClient({ type: 'response_done', response_id: response?.id, status }, responseIdentity);
         if (retryCreateOnDone) {
           // The child asked something while a response was still running;
           // their question must not be dropped.
           retryCreateOnDone = false;
           lastCreateSource = 'user';
           sendUpstream({ type: 'response.create' });
+        }
+        const hasFunctionCall = response?.output?.some((item) => item.type === 'function_call') ?? false;
+        if (status === 'completed' && response?.id && !hasFunctionCall && !cancelledResponses.has(response.id)) {
+          const delivered = responseTranscript.get(response.id) ?? '';
+          if (/[?？]\s*$/.test(delivered.trim())) {
+            try {
+              lessonState = reduceLesson(lessonState, {
+                type: 'QUESTION_DELIVERED',
+                taskId: `question-${response.id}`,
+                text: delivered.trim(),
+              });
+            } catch { /* the next deterministic decision will recover */ }
+          } else {
+            const decision = responseHandoff(lessonState, delivered);
+            if (decision === 'bounded_continuation' && !childHoldsFloor) {
+              lessonState = { ...lessonState, continuationAttempts: lessonState.continuationAttempts + 1 };
+              sendUpstream({
+                type: 'conversation.item.create',
+                item: {
+                  type: 'message',
+                  role: 'system',
+                  content: [{
+                    type: 'input_text',
+                    text: 'Complete the promised teaching move now. End with exactly one short, concrete question or small task, then wait.',
+                  }],
+                },
+              });
+              lastCreateSource = 'tool';
+              sendUpstream({ type: 'response.create' });
+            } else if (decision === 'safe_question') {
+              const safeQuestion = 'Tell me one thing you notice about the idea we just explored?';
+              repo.addEvent(sessionId, 'tutor_said', { text: safeQuestion, deterministic: true });
+              sendClient({ type: 'safe_question', text: safeQuestion }, responseIdentity);
+              lessonState = reduceLesson(lessonState, {
+                type: 'QUESTION_DELIVERED',
+                taskId: `safe-question-${response.id}`,
+                text: safeQuestion,
+              });
+            }
+          }
         }
         break;
       }
@@ -278,7 +370,7 @@ export function connectRealtimeProxy(client: ClientSocket, options: ProxyOptions
         const benign = error?.code === 'response_cancel_not_active' || alreadyActive;
         log(`session ${sessionId}: upstream error ${JSON.stringify(event.error).slice(0, 300)}`);
         if (!benign) {
-          sendClient({ type: 'error', message: 'The tutor hit a snag — it will recover in a moment.' });
+          sendClient({ type: 'error', message: 'Noura hit a snag — it will recover in a moment.' });
         }
         break;
       }
@@ -298,11 +390,63 @@ export function connectRealtimeProxy(client: ClientSocket, options: ProxyOptions
     }
 
     switch (name) {
+      case 'semantic_visual_plan': {
+        try {
+          const { plan, ops } = adaptSemanticScene(args);
+          if (ops.length > 0) {
+            const eventId = repo.addEvent(sessionId, 'semantic_scene', { plan, ops }, false);
+            sendClient({
+              type: 'board_ops',
+              ops,
+              response_id: responseId,
+              event_id: eventId,
+              visual_cue_id: plan.groups[0]?.id,
+            }, identityForResponse(responseId));
+          }
+          finishTool(callId, responseId, {
+            ok: true,
+            accepted: true,
+            applied: ops.length,
+            noBoard: ops.length === 0,
+          });
+        } catch (error) {
+          finishTool(callId, responseId, {
+            ok: false,
+            accepted: false,
+            error: String(error).slice(0, 260),
+          });
+        }
+        break;
+      }
+
+      case 'propose_teaching_move': {
+        const parsed = TeachingMoveSchema.safeParse(args);
+        if (!parsed.success) {
+          finishTool(callId, responseId, { ok: false, error: 'teaching move failed schema validation' });
+          break;
+        }
+        try {
+          lessonState = reduceLesson(lessonState, { type: 'MOVE_PROPOSED', move: parsed.data });
+          const state = {
+            activeConcept: lessonState.microObjective,
+            strategy: lessonState.strategy,
+            nextStep: lessonState.owedAction,
+            phase: lessonState.phase,
+          };
+          repo.addEvent(sessionId, 'lesson_state', state);
+          sendClient({ type: 'lesson_state', state }, identityForResponse(responseId));
+          finishTool(callId, responseId, { ok: true, legalPhase: lessonState.phase, owedAction: lessonState.owedAction });
+        } catch (error) {
+          finishTool(callId, responseId, { ok: false, error: String(error).slice(0, 220) });
+        }
+        break;
+      }
+
       case 'board_ops': {
         const { ops, rejected } = validateOps(args.ops);
         if (ops.length > 0) {
           const eventId = repo.addEvent(sessionId, 'board_ops', { ops }, false);
-          sendClient({ type: 'board_ops', ops, response_id: responseId, event_id: eventId });
+          sendClient({ type: 'board_ops', ops, response_id: responseId, event_id: eventId }, identityForResponse(responseId));
         }
         finishTool(callId, responseId, {
           ok: rejected.length === 0,
@@ -315,26 +459,44 @@ export function connectRealtimeProxy(client: ClientSocket, options: ProxyOptions
       }
 
       case 'record_evidence': {
-        const verdicts: Verdict[] = ['mastered', 'progressing', 'struggling', 'misconception'];
+        const verdicts: Verdict[] = ['progressing', 'struggling', 'misconception'];
         const confidences: Confidence[] = ['low', 'medium', 'high'];
+        const classification = ResponseTaxonomySchema.safeParse(args.classification).success
+          ? (args.classification as ResponseTaxonomy)
+          : taxonomyFromLegacyVerdict(args.verdict);
+        const projectedVerdict: Verdict = classification === 'confident_misconception'
+          ? 'misconception'
+          : ['incorrect', 'confusion', 'missing_prerequisite', 'no_meaningful_response'].includes(classification)
+            ? 'struggling'
+            : 'progressing';
         const entry = {
           concept: String(args.concept ?? '').slice(0, 120),
           observation: String(args.observation ?? '').slice(0, 500),
-          verdict: verdicts.includes(args.verdict as Verdict)
-            ? (args.verdict as Verdict)
-            : 'progressing',
+          verdict: verdicts.includes(projectedVerdict) ? projectedVerdict : 'progressing',
           confidence: confidences.includes(args.confidence as Confidence)
             ? (args.confidence as Confidence)
             : 'low',
           excerpt: args.excerpt ? String(args.excerpt).slice(0, 300) : undefined,
+          classification,
+          confidenceBasis: String(args.confidence_basis ?? 'Model classification grounded in the latest learner response.').slice(0, 400),
+          sourceEventIds: lastLearnerEventId === null ? [] : [lastLearnerEventId],
+          taskId: String(args.task_id ?? lessonState.deliveredQuestionTaskId ?? 'unspecified-opportunity').slice(0, 160),
+          independenceLevel: classification === 'self_corrected' ? 'reduced' as const : 'independent' as const,
+          turnId: identityForResponse(responseId)?.turnId,
+          generationId: identityForResponse(responseId)?.generationId,
         };
-        if (entry.concept && entry.observation) {
-          repo.addEvidence(sessionId, entry);
-          repo.addEvent(sessionId, 'evidence', entry);
-          sendClient({ type: 'evidence', entry });
-          finishTool(callId, responseId, { ok: true });
+        if (entry.concept && entry.observation && entry.sourceEventIds.length > 0) {
+          try {
+            const stored = repo.addEvidence(sessionId, entry);
+            repo.addEvent(sessionId, 'evidence', { evidenceId: stored.evidenceId, concept: stored.concept, verdict: stored.verdict });
+            sendClient({ type: 'evidence', entry: stored }, identityForResponse(responseId));
+            lessonState = reduceLesson(lessonState, { type: 'ASSESSED', classification, evidenceId: stored.evidenceId });
+            finishTool(callId, responseId, { ok: true, evidenceId: stored.evidenceId });
+          } catch (error) {
+            finishTool(callId, responseId, { ok: false, error: String(error).slice(0, 220) });
+          }
         } else {
-          finishTool(callId, responseId, { ok: false, error: 'concept and observation are required' });
+          finishTool(callId, responseId, { ok: false, error: 'concept, observation, and a source learner event are required' });
         }
         break;
       }
@@ -346,7 +508,7 @@ export function connectRealtimeProxy(client: ClientSocket, options: ProxyOptions
           nextStep: args.next_step ? String(args.next_step).slice(0, 240) : undefined,
         };
         repo.addEvent(sessionId, 'lesson_state', state);
-        sendClient({ type: 'lesson_state', state });
+        sendClient({ type: 'lesson_state', state }, identityForResponse(responseId));
         finishTool(callId, responseId, { ok: true });
         break;
       }
@@ -374,13 +536,34 @@ export function connectRealtimeProxy(client: ClientSocket, options: ProxyOptions
   }
 
   client.on('message', (raw) => {
-    let message: UpstreamEvent;
-    try {
-      message = JSON.parse(String(raw));
-    } catch {
-      return;
+    let decoded: unknown;
+    try { decoded = JSON.parse(String(raw)); }
+    catch { return; }
+    const parsed = RuntimeEventEnvelopeSchema.safeParse(decoded);
+    if (!parsed.success) return;
+    const envelope = parsed.data;
+    if (envelope.sessionId !== sessionId || seenClientEvents.has(envelope.eventId)) return;
+    if (clientIdentity && envelope.connectionEpoch < clientIdentity.connectionEpoch) return;
+    const identityChanged = !clientIdentity ||
+      envelope.connectionEpoch !== clientIdentity.connectionEpoch ||
+      envelope.turnId !== clientIdentity.turnId ||
+      envelope.generationId !== clientIdentity.generationId;
+    if (identityChanged) {
+      clientIdentity = {
+        sessionId: envelope.sessionId,
+        connectionEpoch: envelope.connectionEpoch,
+        turnId: envelope.turnId,
+        generationId: envelope.generationId,
+      };
+      clientSequence = 0;
+      lastClientSequence = -1;
+      flushPendingClientPayloads();
     }
-    handleClient(message);
+    if (envelope.sequence <= lastClientSequence) return;
+    lastClientSequence = envelope.sequence;
+    seenClientEvents.add(envelope.eventId);
+    if (seenClientEvents.size > 1000) seenClientEvents.delete(seenClientEvents.values().next().value as string);
+    handleClient({ type: envelope.type, ...(envelope.payload as Record<string, unknown>) });
   });
 
   client.on('close', () => teardown('client closed'));
@@ -419,9 +602,13 @@ export function connectRealtimeProxy(client: ClientSocket, options: ProxyOptions
       case 'user_text': {
         const text = String(message.text ?? '').trim().slice(0, 2000);
         if (!text) break;
+        const idempotencyKey = String(message.idempotencyKey ?? '').slice(0, 200);
+        if (idempotencyKey.length < 8 || seenIdempotencyKeys.has(idempotencyKey)) break;
+        seenIdempotencyKeys.add(idempotencyKey);
+        if (seenIdempotencyKeys.size > 500) seenIdempotencyKeys.delete(seenIdempotencyKeys.values().next().value as string);
         toolContinues = 0;
         childHoldsFloor = false;
-        repo.addEvent(sessionId, 'learner_said', { text, via: 'text' });
+        lastLearnerEventId = repo.addEvent(sessionId, 'learner_said', { text, via: 'text' });
         sendClient({ type: 'user_transcript', text });
         sendUpstream({
           type: 'conversation.item.create',
@@ -436,6 +623,7 @@ export function connectRealtimeProxy(client: ClientSocket, options: ProxyOptions
         // The client already stopped local audio; make the model stop too,
         // and keep tool chains from restarting it while the child speaks.
         childHoldsFloor = true;
+        lessonState = reduceLesson(lessonState, { type: 'INTERRUPTED' });
         sendUpstream({ type: 'response.cancel' });
         break;
       }
@@ -494,4 +682,10 @@ export function connectRealtimeProxy(client: ClientSocket, options: ProxyOptions
         break;
     }
   }
+}
+
+function taxonomyFromLegacyVerdict(value: unknown): ResponseTaxonomy {
+  if (value === 'misconception') return 'confident_misconception';
+  if (value === 'struggling') return 'incorrect';
+  return 'uncertain_or_ambiguous';
 }

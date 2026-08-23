@@ -5,7 +5,7 @@
  * without canvas.
  */
 
-export const FONT_HAND = "'Caveat', 'Segoe Print', cursive";
+export const FONT_HAND = "'Caveat Variable', 'Caveat', 'Segoe Print', cursive";
 
 export const TEXT_SIZES = { small: 21, normal: 28, big: 38 } as const;
 export type TextSizeName = keyof typeof TEXT_SIZES;
@@ -35,7 +35,10 @@ export function measureText(text: string, fontSize: number): number {
 
 /** Greedy word wrap to a pixel width. Splits long words only if forced. */
 export function wrapText(text: string, fontSize: number, maxWidth: number): string[] {
-  const words = text.split(/\s+/).filter(Boolean);
+  const words = text
+    .split(/\s+/)
+    .filter(Boolean)
+    .flatMap((word) => breakLongWord(word, fontSize, maxWidth));
   const lines: string[] = [];
   let line = '';
   for (const word of words) {
@@ -49,4 +52,19 @@ export function wrapText(text: string, fontSize: number, maxWidth: number): stri
   }
   if (line) lines.push(line);
   return lines.length > 0 ? lines : [''];
+}
+
+function breakLongWord(word: string, fontSize: number, maxWidth: number): string[] {
+  if (measureText(word, fontSize) <= maxWidth) return [word];
+  const chunks: string[] = [];
+  let chunk = '';
+  for (const character of [...word]) {
+    const candidate = chunk + character;
+    if (chunk && measureText(candidate, fontSize) > maxWidth) {
+      chunks.push(chunk);
+      chunk = character;
+    } else chunk = candidate;
+  }
+  if (chunk) chunks.push(chunk);
+  return chunks;
 }

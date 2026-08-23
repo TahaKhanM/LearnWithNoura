@@ -7,12 +7,15 @@ import {
   useSyncExternalStore,
 } from 'react';
 import { PALETTE, type BoardOp, type Vec } from '../../shared/boardOps';
+import type { GenerationIdentity } from '../../shared/runtimeProtocol';
 import { applyOps, emptyScene, describeScene, type SceneState } from '../board/scene';
+import { inspectScene, repairSceneOnce } from '../board/inspection';
 import { BoardCanvas, type BoardHighlight, type BoardTool } from '../board/BoardCanvas';
 import type { BoardAnimator } from '../board/animator';
 import { RealtimeSession } from './realtimeSession';
 import { Avatar } from './Avatar';
-import { useRouter } from '../router';
+import { attentionPriority, CharacterAttentionController, type AttentionTargetType } from './characterAttention';
+import { useRouter } from '../routerContext';
 import './Lesson.css';
 
 interface LessonPageProps {
@@ -20,7 +23,7 @@ interface LessonPageProps {
 }
 
 interface SessionInfo {
-  child: { name: string };
+  child: { id: string; name: string };
   session: { goal: string; status: string };
 }
 
@@ -31,18 +34,29 @@ export function LessonPage({ sessionId }: LessonPageProps) {
   const [scene, setScene] = useState<SceneState>(emptyScene);
   const [highlights, setHighlights] = useState<BoardHighlight[]>([]);
   const [tool, setTool] = useState<BoardTool>('pointer');
+  const [boardOverview, setBoardOverview] = useState(false);
   const [penColor, setPenColor] = useState<string>(PALETTE.blue);
   const [draft, setDraft] = useState('');
   const [ending, setEnding] = useState(false);
+  const [continuing, setContinuing] = useState(false);
   const [started, setStarted] = useState(false);
   const animator = useRef<BoardAnimator | null>(null);
   const sceneRef = useRef<SceneState>(emptyScene);
+  const committedSceneRef = useRef<SceneState>(emptyScene);
+  const visualChain = useRef<Promise<boolean>>(Promise.resolve(true));
   const highlightNonce = useRef(0);
   const boardEventTimer = useRef<number | null>(null);
   const pendingBoardNote = useRef<string[]>([]);
 
   const session = useMemo(() => new RealtimeSession(sessionId), [sessionId]);
   const snap = useSyncExternalStore(session.subscribe, session.getSnapshot);
+  const attention = useMemo(
+    () => new CharacterAttentionController(
+      session.getIdentity(),
+      window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false,
+    ),
+    [session],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -62,48 +76,83 @@ export function LessonPage({ sessionId }: LessonPageProps) {
     };
   }, [sessionId]);
 
-  const applyTutorOps = useCallback((ops: BoardOp[], animate: boolean) => {
-    const result = applyOps(sceneRef.current, ops, 'tutor');
-    sceneRef.current = result.scene;
-    setScene(result.scene);
-    if (result.highlighted.length > 0) {
-      setHighlights(
-        result.highlighted.map((id) => ({ id, nonce: ++highlightNonce.current })),
-      );
-    }
+  const applyTutorOps = useCallback((ops: BoardOp[], animate: boolean, identity: GenerationIdentity) => {
     if (!animate) {
+      const result = prepareScene(committedSceneRef.current, ops);
+      if (!result) return Promise.resolve(false);
+      committedSceneRef.current = result;
+      sceneRef.current = result;
+      setScene(result);
       requestAnimationFrame(() => animator.current?.finishAll());
+      return Promise.resolve(true);
     }
-  }, []);
+    const transaction = visualChain.current.then(async () => {
+      if (!sameIdentity(session.getIdentity(), identity)) return false;
+      const applied = applyOps(committedSceneRef.current, ops, 'tutor');
+      let candidate = applied.scene;
+      let inspection = inspectScene(candidate);
+      if (!inspection.accepted) {
+        candidate = repairSceneOnce(candidate, inspection);
+        inspection = inspectScene(candidate);
+      }
+      if (!inspection.accepted) return false;
+      sceneRef.current = candidate;
+      setScene(candidate);
+      if (applied.highlighted.length > 0) setHighlights(applied.highlighted.map((id) => ({ id, nonce: ++highlightNonce.current })));
+      await nextPaint();
+      if (!sameIdentity(session.getIdentity(), identity)) return false;
+      const completed = await (animator.current?.whenIdle() ?? Promise.resolve(true));
+      if (completed && sameIdentity(session.getIdentity(), identity)) {
+        committedSceneRef.current = candidate;
+        return true;
+      }
+      sceneRef.current = committedSceneRef.current;
+      setScene(committedSceneRef.current);
+      return false;
+    });
+    visualChain.current = transaction.catch(() => false);
+    return transaction;
+  }, [session]);
 
   useEffect(() => {
     session.onBoardOps = applyTutorOps;
+    session.onGenerationCancelled = (identity) => {
+      animator.current?.cancelAll();
+      attention.cancelGeneration(identity);
+      sceneRef.current = committedSceneRef.current;
+      setScene(committedSceneRef.current);
+      setHighlights([]);
+    };
     return () => {
       session.end();
       if (boardEventTimer.current !== null) window.clearTimeout(boardEventTimer.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session]);
+  }, [session, applyTutorOps, attention]);
 
-  // Interruption must also stop in-flight drawing instantly.
   useEffect(() => {
-    if (snap.phase === 'listening') animator.current?.finishAll();
-  }, [snap.phase]);
+    attention.replaceGeneration(snap.identity);
+    if (snap.phase === 'thinking') offerAttention(attention, snap.identity, 'semantic_object');
+    else if (snap.phase === 'listening') offerAttention(attention, snap.identity, 'neutral_learner');
+    else if (snap.phase === 'reconnecting' || snap.phase === 'failed') offerAttention(attention, snap.identity, 'neutral_learner');
+  }, [attention, snap.identity, snap.phase]);
 
   const begin = useCallback(async () => {
+    if (!info || info.session.status !== 'active') return;
     setStarted(true);
     await session.start();
-  }, [session]);
+  }, [info, session]);
 
   const handleLearnerStroke = useCallback(
     (points: Vec[]) => {
       const id = `sketch-${Date.now().toString(36)}`;
       const result = applyOps(
-        sceneRef.current,
+        committedSceneRef.current,
         [{ op: 'add', id, color: penColor, spec: { kind: 'path', points } }],
         'learner',
       );
       sceneRef.current = result.scene;
+      committedSceneRef.current = result.scene;
       setScene(result.scene);
       const [x, y] = points[Math.floor(points.length / 2)];
       pendingBoardNote.current.push(
@@ -115,8 +164,9 @@ export function LessonPage({ sessionId }: LessonPageProps) {
   );
 
   const handleLearnerErase = useCallback((id: string) => {
-    const result = applyOps(sceneRef.current, [{ op: 'erase', id }], 'learner');
+    const result = applyOps(committedSceneRef.current, [{ op: 'erase', id }], 'learner');
     sceneRef.current = result.scene;
+    committedSceneRef.current = result.scene;
     setScene(result.scene);
     pendingBoardNote.current.push('erased one of their own marks');
     scheduleBoardNote();
@@ -154,23 +204,40 @@ export function LessonPage({ sessionId }: LessonPageProps) {
     } catch {
       /* summary can fail without blocking the exit */
     }
-    navigate(`/parent?session=${sessionId}`);
-  }, [ending, session, sessionId, navigate]);
+    navigate(`/parent?session=${sessionId}${info ? `&selectedChildId=${encodeURIComponent(info.child.id)}` : ''}`);
+  }, [ending, session, sessionId, navigate, info]);
+
+  const continueLesson = useCallback(async () => {
+    if (continuing) return;
+    setContinuing(true);
+    try {
+      const response = await fetch(`/api/sessions/${sessionId}/continue`, { method: 'POST' });
+      const body = (await response.json()) as { session?: { id: string }; lessonCapability?: string };
+      if (!response.ok || !body.session) throw new Error('continue failed');
+      if (body.lessonCapability) window.sessionStorage.setItem(`noura.lessonCapability.${body.session.id}`, body.lessonCapability);
+      navigate(`/lesson/${body.session.id}${info ? `?selectedChildId=${encodeURIComponent(info.child.id)}` : ''}`);
+    } catch {
+      setInfoError('Could not create a continuation lesson.');
+      setContinuing(false);
+    }
+  }, [continuing, info, navigate, sessionId]);
 
   const lastChildLine = [...snap.captions].reverse().find((c) => c.role === 'child');
   const lastTutorLine = [...snap.captions].reverse().find((c) => c.role === 'tutor');
 
   const statusLabel =
     snap.phase === 'connecting'
-      ? 'Waking Seneca up…'
+      ? 'Waking Noura up…'
       : snap.phase === 'reconnecting'
         ? 'Reconnecting…'
         : snap.phase === 'thinking'
           ? 'Thinking…'
           : snap.phase === 'listening'
-            ? snap.micDenied || !snap.micAvailable
-              ? 'Type below — Seneca is ready'
-              : 'Listening — just talk, or interrupt any time'
+            ? snap.muted
+              ? 'Microphone muted — type below or unmute'
+              : snap.micDenied || !snap.micAvailable
+                ? 'Type below — Noura is ready'
+                : 'Listening — just talk, or interrupt any time'
             : snap.phase === 'speaking'
               ? 'Speaking'
               : snap.phase === 'fallback'
@@ -179,17 +246,34 @@ export function LessonPage({ sessionId }: LessonPageProps) {
 
   if (infoError) {
     return (
-      <div className="lesson lesson--error">
+      <div className="lesson lesson--error" id="main-content">
         <p>Could not open this lesson: {infoError}</p>
         <button className="lesson__button" onClick={() => navigate('/')}>Back home</button>
       </div>
     );
   }
 
+  if (info?.session.status === 'ended') {
+    return (
+      <main className="lesson lesson--ended" id="main-content">
+        <div className="lesson__ended-card">
+          <Avatar phase="ended" voiceEnergy={0} micEnergy={0} />
+          <p className="lesson__ended-eyebrow">Noura · lesson complete</p>
+          <h1>This session is read-only.</h1>
+          <p>{info.child.name}’s finished transcript and evidence will not change.</p>
+          <div className="lesson__ended-actions">
+            <button className="lesson__button" onClick={continueLesson} disabled={continuing}>{continuing ? 'Creating…' : 'Continue in a new session'}</button>
+            <button className="lesson__secondary" onClick={() => navigate(`/parent?session=${sessionId}&selectedChildId=${encodeURIComponent(info.child.id)}`)}>Open Parent Area</button>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
   return (
-    <div className="lesson">
+    <div className="lesson" id="main-content">
       <header className="lesson__bar">
-        <span className="lesson__brand">Seneca</span>
+        <span className="lesson__brand">Noura</span>
         {info && (
           <span className="lesson__goal" title={info.session.goal}>
             {info.child.name} · {info.session.goal}
@@ -207,7 +291,7 @@ export function LessonPage({ sessionId }: LessonPageProps) {
       </header>
 
       <main className="lesson__board">
-        <div className="lesson__surface">
+        <div className={`lesson__surface${boardOverview ? ' lesson__surface--overview' : ''}`}>
           <BoardCanvas
             scene={scene}
             highlights={highlights}
@@ -216,21 +300,29 @@ export function LessonPage({ sessionId }: LessonPageProps) {
             interactive={started}
             onLearnerStroke={handleLearnerStroke}
             onLearnerErase={handleLearnerErase}
+            onLearnerActivityStart={() => session.beginLearnerActivity()}
+            onTutorPen={(position) => {
+              if (position) offerAttention(attention, session.getIdentity(), 'tutor_pen', [position.x, position.y]);
+            }}
+            onLearnerAttention={(position, kind) => {
+              const target = kind === 'drawing' ? 'learner_drawing' : kind === 'focus' ? 'focused_object' : 'learner_pointer';
+              offerAttention(attention, session.getIdentity(), target, position);
+            }}
+            longDescription={describeScene(scene)}
             animatorRef={(a) => {
               animator.current = a;
             }}
           />
           {!started && (
             <div className="lesson__start">
-              <Avatar phase="listening" voiceEnergy={0} micEnergy={0} />
-              <h1>Ready when you are{info ? `, ${info.child.name}` : ''}.</h1>
+              <Avatar phase="listening" voiceEnergy={0} micEnergy={0} attentionController={attention} />
+              <h1>{info ? `Hi ${info.child.name} — tap Begin when you’re ready` : 'Preparing your lesson…'}</h1>
               {info && <p className="lesson__start-goal">Today: {info.session.goal}</p>}
-              <button className="lesson__button lesson__button--big" onClick={begin} data-testid="start-lesson">
-                Start the lesson
+              <button className="lesson__button lesson__button--big" onClick={begin} disabled={!info} data-testid="start-lesson">
+                Begin
               </button>
               <p className="lesson__hint">
-                Seneca talks with you and draws while you learn. Interrupt whenever
-                you like — that's the point.
+                This tap enables sound and asks for microphone permission. Noura can still teach by text if you choose not to use the microphone.
               </p>
             </div>
           )}
@@ -242,14 +334,25 @@ export function LessonPage({ sessionId }: LessonPageProps) {
               className="lesson__tool"
               aria-pressed={tool === 'pointer'}
               title="Just watch"
+              aria-label="Pointer: watch the board"
               onClick={() => setTool('pointer')}
             >
               <svg viewBox="0 0 24 24"><path d="m5 3 14 7-6 2-2 6z" /></svg>
             </button>
             <button
+              className="lesson__tool lesson__overview-toggle"
+              aria-pressed={boardOverview}
+              aria-label={boardOverview ? 'Focus the active board area' : 'Fit the full board overview'}
+              title={boardOverview ? 'Focus board' : 'Fit overview'}
+              onClick={() => setBoardOverview((value) => !value)}
+            >
+              <svg viewBox="0 0 24 24"><path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5M9 9h6v6H9z" /></svg>
+            </button>
+            <button
               className="lesson__tool"
               aria-pressed={tool === 'draw'}
               title="Draw on the board"
+              aria-label="Draw on the board"
               onClick={() => setTool('draw')}
             >
               <svg viewBox="0 0 24 24"><path d="M4 20l1-4L16 5l3 3L8 19zM14.5 6.5l3 3" /></svg>
@@ -258,6 +361,7 @@ export function LessonPage({ sessionId }: LessonPageProps) {
               className="lesson__tool"
               aria-pressed={tool === 'erase'}
               title="Erase your marks"
+              aria-label="Erase your marks"
               onClick={() => setTool('erase')}
             >
               <svg viewBox="0 0 24 24"><path d="M7 20h10M5 15 15 5l4 4-8 8H7z" /></svg>
@@ -282,7 +386,7 @@ export function LessonPage({ sessionId }: LessonPageProps) {
 
       {started && (
         <footer className="lesson__dock">
-          <Avatar phase={snap.phase} voiceEnergy={snap.voiceEnergy} micEnergy={snap.micEnergy} />
+          <Avatar phase={snap.phase} voiceEnergy={snap.voiceEnergy} micEnergy={snap.micEnergy} attentionController={attention} />
 
           <div className="lesson__dialogue" aria-live="polite">
             {lastChildLine && (
@@ -299,7 +403,7 @@ export function LessonPage({ sessionId }: LessonPageProps) {
             {snap.error && <p className="lesson__error">{snap.error}</p>}
             {snap.micDenied && (
               <p className="lesson__notice">
-                The microphone is blocked, so Seneca can't hear you — but typing works.
+                The microphone is blocked, so Noura can’t hear you — but typing works.
               </p>
             )}
           </div>
@@ -310,6 +414,7 @@ export function LessonPage({ sessionId }: LessonPageProps) {
                 className="lesson__mic"
                 aria-pressed={!snap.muted}
                 title={snap.muted ? 'Unmute your microphone' : 'Mute your microphone'}
+                aria-label={snap.muted ? 'Unmute your microphone' : 'Mute your microphone'}
                 onClick={() => session.setMuted(!snap.muted)}
               >
                 {snap.muted ? (
@@ -323,8 +428,8 @@ export function LessonPage({ sessionId }: LessonPageProps) {
               <input
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
-                placeholder={snap.phase === 'fallback' ? 'Type to Seneca…' : 'Or type a question…'}
-                aria-label="Type to Seneca"
+                placeholder={snap.phase === 'fallback' ? 'Type to Noura…' : 'Or type a question…'}
+                aria-label="Type to Noura"
               />
               <button type="submit" disabled={!draft.trim()}>Ask</button>
             </form>
@@ -333,4 +438,44 @@ export function LessonPage({ sessionId }: LessonPageProps) {
       )}
     </div>
   );
+}
+
+function sameIdentity(left: GenerationIdentity, right: GenerationIdentity): boolean {
+  return left.sessionId === right.sessionId &&
+    left.connectionEpoch === right.connectionEpoch &&
+    left.turnId === right.turnId &&
+    left.generationId === right.generationId;
+}
+
+function nextPaint(): Promise<void> {
+  return new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+}
+
+function offerAttention(
+  controller: CharacterAttentionController,
+  identity: GenerationIdentity,
+  targetType: AttentionTargetType,
+  boardCoordinates?: [number, number],
+): void {
+  const now = performance.now();
+  controller.offer({
+    ...identity,
+    targetType,
+    ...(boardCoordinates ? { boardCoordinates } : {}),
+    priority: attentionPriority(targetType),
+    startTime: now,
+    expiryTime: now + (targetType === 'interruption' ? 900 : targetType.includes('learner') || targetType === 'focused_object' ? 700 : 420),
+    smoothingProfile: targetType === 'interruption' ? 'immediate' : targetType === 'learner_pointer' ? 'gentle' : 'responsive',
+    permittedInReducedMotion: ['interruption', 'semantic_object', 'neutral_learner', 'focused_object'].includes(targetType),
+  });
+}
+
+function prepareScene(scene: SceneState, ops: BoardOp[]): SceneState | null {
+  let candidate = applyOps(scene, ops, 'tutor').scene;
+  let inspection = inspectScene(candidate);
+  if (!inspection.accepted) {
+    candidate = repairSceneOnce(candidate, inspection);
+    inspection = inspectScene(candidate);
+  }
+  return inspection.accepted ? candidate : null;
 }

@@ -31,19 +31,23 @@ describe('Repo', () => {
     const r = repo();
     const child = r.createChild('Ava', 10);
     const s1 = r.createSession(child.id, 'triangles');
+    const source1 = r.addEvent(s1.id, 'learner_said', { text: 'they all squish into a straight line' });
     r.addEvidence(s1.id, {
       concept: 'angle sum',
       observation: 'Explained the straight-line argument unprompted.',
       verdict: 'mastered',
       confidence: 'high',
       excerpt: 'they all squish into a straight line',
+      sourceEventIds: [source1],
     });
     const s2 = r.createSession(child.id, 'fractions');
+    const source2 = r.addEvent(s2.id, 'learner_said', { text: 'I think one half and two quarters are different sizes.' });
     r.addEvidence(s2.id, {
       concept: 'equivalent fractions',
       observation: 'Thought 1/2 and 2/4 were different sizes.',
       verdict: 'misconception',
       confidence: 'medium',
+      sourceEventIds: [source2],
     });
     const all = r.listEvidenceForChild(child.id);
     expect(all).toHaveLength(2);
@@ -67,5 +71,74 @@ describe('Repo', () => {
     const stored = r.getSession(session.id);
     expect(stored?.status).toBe('ended');
     expect(stored?.summary?.headline).toContain('Leo');
+  });
+
+  it('enforces evidence source lineage and exact normalized excerpts', () => {
+    const r = repo();
+    const child = r.createChild('Noor', 11);
+    const session = r.createSession(child.id, 'lineage');
+    const sourceEventId = r.addEvent(session.id, 'learner_said', {
+      text: 'I first thought 25, but the side length is 5.',
+    });
+    const stored = r.addEvidence(session.id, {
+      concept: 'square roots',
+      observation: 'Self-corrected area to side length.',
+      verdict: 'progressing',
+      confidence: 'medium',
+      classification: 'self_corrected',
+      excerpt: 'the side length is 5',
+      sourceEventIds: [sourceEventId],
+      taskId: 'square-root-check',
+      independenceLevel: 'reduced',
+      turnId: 'turn-2',
+      generationId: 'generation-2',
+    });
+    expect(stored.sourceSpan).toMatchObject({ eventId: sourceEventId });
+    expect(stored.evidenceId).toBeTruthy();
+
+    expect(() => r.addEvidence(session.id, {
+      concept: 'square roots',
+      observation: 'Unsupported claim.',
+      verdict: 'progressing',
+      confidence: 'low',
+      excerpt: 'I explained it perfectly',
+      sourceEventIds: [sourceEventId],
+    })).toThrow(/does not match/i);
+  });
+
+  it('keeps the newest events when a long session is paginated', () => {
+    const r = repo();
+    const child = r.createChild('Noor', 11);
+    const session = r.createSession(child.id, 'event ordering');
+    for (let index = 1; index <= 8; index += 1) {
+      r.addEvent(session.id, 'learner_said', { text: `turn-${index}` });
+    }
+
+    const events = r.listEvents(session.id, 3);
+    expect(events.map((event) => (event.payload as { text: string }).text)).toEqual([
+      'turn-6',
+      'turn-7',
+      'turn-8',
+    ]);
+  });
+
+  it('rejects event and evidence writes after a session ends', () => {
+    const r = repo();
+    const child = r.createChild('Noor', 11);
+    const session = r.createSession(child.id, 'immutable ending');
+    r.endSession(session.id, null);
+
+    expect(() => r.addEvent(session.id, 'learner_said', { text: 'late' })).toThrow(
+      /ended/i,
+    );
+    expect(() =>
+      r.addEvidence(session.id, {
+        concept: 'late evidence',
+        observation: 'should not be stored',
+        verdict: 'progressing',
+        confidence: 'low',
+        sourceEventIds: [1],
+      }),
+    ).toThrow(/ended/i);
   });
 });
