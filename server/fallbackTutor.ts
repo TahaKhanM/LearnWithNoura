@@ -1,7 +1,8 @@
 import type OpenAI from 'openai';
-import { validateOps, type BoardOp } from '../shared/boardOps';
-import { buildInstructions } from './realtime/instructions';
-import type { Repo } from './store/repo';
+import { validateOps, type BoardOp } from '../shared/boardOps.js';
+import { buildInstructions } from './realtime/instructions.js';
+import type { Repo } from './store/repo.js';
+import { ResponseTaxonomySchema, type ResponseTaxonomy } from '../shared/pedagogy.js';
 
 /**
  * Captions-only degraded mode: when the realtime voice connection is
@@ -42,10 +43,13 @@ const FALLBACK_TOOLS = [
           concept: { type: 'string' },
           observation: { type: 'string' },
           verdict: { type: 'string', enum: ['mastered', 'progressing', 'struggling', 'misconception'] },
+          classification: { type: 'string', enum: ResponseTaxonomySchema.options },
           confidence: { type: 'string', enum: ['low', 'medium', 'high'] },
+          confidence_basis: { type: 'string' },
+          task_id: { type: 'string' },
           excerpt: { type: 'string' },
         },
-        required: ['concept', 'observation', 'verdict', 'confidence'],
+        required: ['concept', 'observation', 'verdict', 'confidence', 'classification', 'confidence_basis', 'task_id'],
       },
     },
   },
@@ -62,8 +66,9 @@ export async function runFallbackTurn(
   const session = repo.getSession(sessionId);
   const child = session ? repo.getChild(session.childId) : null;
   if (!session || !child) throw new Error('unknown session');
+  if (session.status !== 'active') throw new Error('session has ended');
 
-  repo.addEvent(sessionId, 'learner_said', { text: userText, via: 'text' });
+  const learnerEventId = repo.addEvent(sessionId, 'learner_said', { text: userText, via: 'text' });
 
   const instructions = buildInstructions({
     childName: child.name,
@@ -133,15 +138,20 @@ export async function runFallbackTurn(
           repo.addEvidence(sessionId, {
             concept,
             observation,
-            verdict: (['mastered', 'progressing', 'struggling', 'misconception'] as const).includes(
-              args.verdict as 'mastered',
-            )
-              ? (args.verdict as 'mastered')
-              : 'progressing',
+            verdict: fallbackVerdict(args.classification),
             confidence: (['low', 'medium', 'high'] as const).includes(args.confidence as 'low')
               ? (args.confidence as 'low')
               : 'low',
-            excerpt: args.excerpt ? String(args.excerpt).slice(0, 300) : undefined,
+            excerpt: verifiedExcerpt(userText, args.excerpt),
+            classification: ResponseTaxonomySchema.safeParse(args.classification).success
+              ? args.classification as ResponseTaxonomy
+              : 'uncertain_or_ambiguous',
+            confidenceBasis: String(args.confidence_basis ?? 'Fallback model classification.').slice(0, 400),
+            sourceEventIds: [learnerEventId],
+            taskId: String(args.task_id ?? 'fallback-opportunity').slice(0, 160),
+            independenceLevel: args.classification === 'self_corrected' ? 'reduced' : 'independent',
+            turnId: `fallback-${learnerEventId}`,
+            generationId: `fallback-${learnerEventId}`,
           });
           onStep({ type: 'evidence' });
           output = '{"ok":true}';
@@ -151,4 +161,17 @@ export async function runFallbackTurn(
       messages.push({ role: 'tool', tool_call_id: call.id, content: output });
     }
   }
+}
+
+function fallbackVerdict(value: unknown): 'progressing' | 'struggling' | 'misconception' {
+  if (value === 'confident_misconception') return 'misconception';
+  if (['incorrect', 'confusion', 'missing_prerequisite', 'no_meaningful_response'].includes(String(value))) return 'struggling';
+  return 'progressing';
+}
+
+function verifiedExcerpt(source: string, candidate: unknown): string | undefined {
+  if (typeof candidate !== 'string') return undefined;
+  const excerpt = candidate.normalize('NFKC').replace(/\s+/g, ' ').trim().slice(0, 300);
+  const normalizedSource = source.normalize('NFKC').replace(/\s+/g, ' ').trim();
+  return excerpt && normalizedSource.includes(excerpt) ? excerpt : undefined;
 }

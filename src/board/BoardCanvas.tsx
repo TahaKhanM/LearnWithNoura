@@ -24,7 +24,11 @@ interface BoardCanvasProps {
   interactive: boolean;
   onLearnerStroke: (points: Vec[]) => void;
   onLearnerErase: (id: string) => void;
-  /** Lets the parent finish animations instantly (e.g. on interruption). */
+  onLearnerActivityStart?: () => void;
+  onTutorPen?: (position: PenPosition | null) => void;
+  onLearnerAttention?: (position: Vec, kind: 'drawing' | 'pointer' | 'focus') => void;
+  longDescription?: string;
+  /** Lets the lesson own generation-scoped animation transactions. */
   animatorRef?: (animator: BoardAnimator) => void;
 }
 
@@ -127,6 +131,10 @@ export function BoardCanvas({
   interactive,
   onLearnerStroke,
   onLearnerErase,
+  onLearnerActivityStart,
+  onTutorPen,
+  onLearnerAttention,
+  longDescription,
   animatorRef,
 }: BoardCanvasProps) {
   const svgRef = useRef<SVGSVGElement>(null);
@@ -136,15 +144,35 @@ export function BoardCanvas({
   const animatedIds = useRef(new Set<string>());
   const lastEpoch = useRef(scene.epoch);
   const [liveStroke, setLiveStroke] = useState<Vec[] | null>(null);
+  const [fontsReady, setFontsReady] = useState(() => !document.fonts);
   const strokeRef = useRef<Vec[] | null>(null);
 
   useEffect(() => {
-    animator.onPen = setPen;
+    animator.onPen = (position) => {
+      setPen(position);
+      onTutorPen?.(position);
+    };
     animatorRef?.(animator);
-    return () => animator.finishAll();
-  }, [animator, animatorRef]);
+    return () => animator.cancelAll();
+  }, [animator, animatorRef, onTutorPen]);
 
-  const compiled = useMemo(() => compileScene(scene.items), [scene.items]);
+  useEffect(() => {
+    let cancelled = false;
+    if (!document.fonts) return;
+    void document.fonts.ready.then(() => { if (!cancelled) setFontsReady(true); });
+    return () => { cancelled = true; };
+  }, []);
+
+  const compiled = useMemo(() => fontsReady ? compileScene(scene.items) : [], [scene.items, fontsReady]);
+
+  useEffect(() => {
+    if (!fontsReady || compiled.length === 0 || window.innerWidth > 540) return;
+    const container = svgRef.current?.closest<HTMLElement>('.lesson__surface, .board-harness__surface');
+    if (!container || container.classList.contains('lesson__surface--overview')) return;
+    requestAnimationFrame(() => {
+      container.scrollLeft = Math.max(0, (container.scrollWidth - container.clientWidth) / 2);
+    });
+  }, [compiled, fontsReady]);
 
   // A clear resets animation memory so re-used ids animate again.
   if (scene.epoch !== lastEpoch.current) {
@@ -205,25 +233,27 @@ export function BoardCanvas({
     (e: React.PointerEvent<SVGSVGElement>) => {
       if (!interactive || tool !== 'draw' || e.button !== 0) return;
       e.preventDefault();
+      onLearnerActivityStart?.();
       svgRef.current?.setPointerCapture?.(e.pointerId);
       const start = boardPoint(e.clientX, e.clientY);
       strokeRef.current = [start];
       setLiveStroke([start]);
     },
-    [interactive, tool, boardPoint],
+    [interactive, tool, boardPoint, onLearnerActivityStart],
   );
 
   const onPointerMove = useCallback(
     (e: React.PointerEvent<SVGSVGElement>) => {
       const stroke = strokeRef.current;
-      if (!stroke) return;
       const point = boardPoint(e.clientX, e.clientY);
+      onLearnerAttention?.(point, stroke ? 'drawing' : 'pointer');
+      if (!stroke) return;
       const previous = stroke[stroke.length - 1];
       if (Math.hypot(point[0] - previous[0], point[1] - previous[1]) < 3) return;
       stroke.push(point);
       setLiveStroke([...stroke]);
     },
-    [boardPoint],
+    [boardPoint, onLearnerAttention],
   );
 
   const onPointerUp = useCallback(
@@ -259,13 +289,16 @@ export function BoardCanvas({
   }, [highlights, compiled]);
 
   return (
+    <div className="board__a11y-wrap">
     <svg
       ref={svgRef}
       className={`board__svg board__svg--${tool}`}
+      data-fonts-ready={fontsReady}
       viewBox={`0 0 ${BOARD_W} ${BOARD_H}`}
       preserveAspectRatio="xMidYMid meet"
       role="img"
-      aria-label="Shared whiteboard"
+      aria-label="Shared Noura whiteboard"
+      aria-describedby="noura-board-description"
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
@@ -294,6 +327,11 @@ export function BoardCanvas({
             className={
               tool === 'erase' && item.owner === 'learner' ? 'board__item board__item--erasable' : 'board__item'
             }
+            tabIndex={interactive ? 0 : undefined}
+            onFocus={() => onLearnerAttention?.([
+              item.bbox.x + item.bbox.w / 2,
+              item.bbox.y + item.bbox.h / 2,
+            ], 'focus')}
           >
             {item.nodes.map((node, i) => (
               <NodeView
@@ -330,6 +368,9 @@ export function BoardCanvas({
 
       <Pen pos={pen} />
     </svg>
+      <p id="noura-board-description" className="board__long-description">
+        {longDescription ?? 'The shared teaching board is empty.'}
+      </p>
+    </div>
   );
 }
-

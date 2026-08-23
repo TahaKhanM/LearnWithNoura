@@ -1,0 +1,5 @@
+.board-harness__surface { overflow: auto; overscroll-behavior: contain; }
+
+@media (max-width: 540px) {
+  .board-harness__surface .board__a11y-wrap { min-width: 720px; min-height: 432px; }
+}

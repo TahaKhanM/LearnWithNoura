@@ -1,55 +1,23 @@
 import type { BoardOp } from '../../shared/boardOps';
+import {
+  createRuntimeEvent,
+  RuntimeEventEnvelopeSchema,
+  RuntimeEventGate,
+  type GenerationIdentity,
+  type RuntimeEventEnvelope,
+} from '../../shared/runtimeProtocol';
 import { AudioOut } from './audioOut';
 import { AudioIn } from './audioIn';
+import { GenerationScope } from './generationScope';
 
-/**
- * Owns one live lesson: the WebSocket to the server proxy, microphone
- * capture, speech playback, and the turn discipline that makes
- * interruption feel instant.
- *
- * Synchronisation: the model generates faster than it speaks, so board
- * operations and caption words arrive early. Each is stamped with how
- * much audio had been received for the response at that moment, and
- * released only when playback reaches that point. Interruption drops
- * everything unreleased — stale marks never touch the board.
- */
-
-export type Phase =
-  | 'connecting'
-  | 'listening'
-  | 'thinking'
-  | 'speaking'
-  | 'reconnecting'
-  | 'fallback'
-  | 'failed'
-  | 'ended';
-
-export interface CaptionLine {
-  role: 'tutor' | 'child';
-  text: string;
-  live: boolean;
-}
-
-export interface LessonState {
-  activeConcept?: string;
-  strategy?: string;
-  nextStep?: string;
-}
-
-export interface EvidenceEntry {
-  concept: string;
-  observation: string;
-  verdict: string;
-  confidence: string;
-}
-
-export interface TurnMetrics {
-  askToFirstAudioMs?: number;
-  interruptToSilenceMs?: number;
-}
-
+export type Phase = 'connecting' | 'listening' | 'thinking' | 'speaking' | 'reconnecting' | 'fallback' | 'failed' | 'ended';
+export interface CaptionLine { role: 'tutor' | 'child'; text: string; live: boolean; responseId?: string }
+export interface LessonState { activeConcept?: string; strategy?: string; nextStep?: string }
+export interface EvidenceEntry { concept: string; observation: string; verdict: string; confidence: string }
+export interface TurnMetrics { askToFirstAudioMs?: number; detectorToStopScheduledMs?: number; providerCancelConfirmationMs?: number }
 export interface SessionSnapshot {
   phase: Phase;
+  identity: GenerationIdentity;
   micAvailable: boolean;
   micDenied: boolean;
   muted: boolean;
@@ -63,169 +31,172 @@ export interface SessionSnapshot {
   metrics: TurnMetrics;
 }
 
-interface StampedOps {
-  stampMs: number;
-  responseId: string;
-  ops: BoardOp[];
-  arrivedAt: number;
-  eventId: number | null;
-}
-
-interface StampedText {
-  stampMs: number;
-  responseId: string;
-  delta: string;
-  arrivedAt: number;
-}
-
-/** If playback never advances (suspended context), release anyway. */
-const SILENT_RELEASE_MS = 5000;
+interface StampedOps { stampMs: number; responseId: string; ops: BoardOp[]; eventId: number | null; identity: GenerationIdentity }
+interface StampedText { stampMs: number; responseId: string; delta: string; identity: GenerationIdentity }
+interface QueuedAsk { text: string; idempotencyKey: string; identity: GenerationIdentity }
 
 type Listener = () => void;
+const CONNECT_TIMEOUT_MS = 8_000;
+const MAX_RECONNECTS = 2;
 
 export class RealtimeSession {
   private ws: WebSocket | null = null;
   private audioOut = new AudioOut();
   private audioIn: AudioIn | null = null;
-  private sessionId: string;
+  private readonly sessionId: string;
   private listeners = new Set<Listener>();
   private snapshot: SessionSnapshot;
   private pendingOps: StampedOps[] = [];
   private pendingText: StampedText[] = [];
-  private releaseTimer: number | null = null;
+  private phraseBuffers = new Map<string, string>();
   private currentResponseId: string | null = null;
-  /** Responses killed by interruption; their late events must be ignored. */
   private deadResponses = new Set<string>();
-  private tutorLine = '';
-  /** Which response the live caption line belongs to. */
-  private liveLineResponse: string | null = null;
   private reconnectAttempts = 0;
   private closedByUs = false;
-  /** Sustained mic energy while the tutor speaks trips a local barge-in. */
+  private started = false;
   private hotFrames = 0;
   private askAt = 0;
+  private cancelRequestedAt = 0;
   private firstAudioSeen = false;
+  private connectionEpoch = 0;
+  private turnCounter = 0;
+  private generationCounter = 0;
+  private outboundSequence = 0;
+  private latestQueuedAsk: QueuedAsk | null = null;
+  private lessonCapability: string | null;
+  private scope: GenerationScope;
+  private gate: RuntimeEventGate;
 
-  onBoardOps: (ops: BoardOp[], animate: boolean) => void = () => {};
+  onBoardOps: (ops: BoardOp[], animate: boolean, identity: GenerationIdentity) => Promise<boolean | void> | boolean | void = () => {};
+  onGenerationCancelled: (identity: GenerationIdentity) => void = () => {};
   onEnded: () => void = () => {};
 
   constructor(sessionId: string) {
     this.sessionId = sessionId;
+    this.lessonCapability = window.sessionStorage.getItem(`noura.lessonCapability.${sessionId}`);
+    const identity = this.makeIdentity();
+    this.scope = new GenerationScope(identity);
+    this.gate = new RuntimeEventGate(identity);
     this.snapshot = {
-      phase: 'connecting',
-      micAvailable: AudioIn.supported(),
-      micDenied: false,
-      muted: false,
-      captions: [],
-      lessonState: {},
-      evidenceCount: 0,
-      lastEvidence: null,
-      micEnergy: 0,
-      voiceEnergy: 0,
-      error: null,
-      metrics: {},
+      phase: 'connecting', identity, micAvailable: AudioIn.supported(), micDenied: false, muted: false,
+      captions: [], lessonState: {}, evidenceCount: 0, lastEvidence: null,
+      micEnergy: 0, voiceEnergy: 0, error: null, metrics: {},
     };
   }
 
-  // ----- external store interface for React ---------------------------------
-
-  subscribe = (listener: Listener): (() => void) => {
-    this.listeners.add(listener);
-    return () => this.listeners.delete(listener);
-  };
-
+  subscribe = (listener: Listener): (() => void) => { this.listeners.add(listener); return () => this.listeners.delete(listener); };
   getSnapshot = (): SessionSnapshot => this.snapshot;
+  getIdentity = (): GenerationIdentity => this.scope.identity;
 
   private update(patch: Partial<SessionSnapshot>): void {
     this.snapshot = { ...this.snapshot, ...patch };
     for (const listener of this.listeners) listener();
   }
 
-  // ----- lifecycle -----------------------------------------------------------
-
   async start(): Promise<void> {
-    // A StrictMode mount/unmount cycle may have "ended" us before the child
-    // ever pressed start; starting is what commits this session instance.
+    if (this.started && !this.closedByUs) return;
+    this.started = true;
     this.closedByUs = false;
     this.reconnectAttempts = 0;
+    this.connectionEpoch += 1;
+    this.activateScope(false);
     this.update({ phase: 'connecting' });
     await this.audioOut.unlock();
     this.audioOut.onPlaybackEnd = () => this.handlePlaybackEnd();
     if (AudioIn.supported()) {
       this.audioIn = new AudioIn({
-        onChunk: (base64) => this.send({ type: 'input_audio', audio: base64 }),
+        onChunk: (audio) => this.send('input_audio', { audio }),
         onEnergy: (rms) => this.handleMicEnergy(rms),
       });
-      try {
-        await this.audioIn.start();
-      } catch {
-        this.audioIn = null;
-        this.update({ micDenied: true, micAvailable: false });
-      }
+      try { await this.audioIn.start(); }
+      catch { this.audioIn = null; this.update({ micDenied: true, micAvailable: false }); }
     }
     this.connect();
-    this.releaseTimer = window.setInterval(() => this.releasePending(), 50);
   }
 
   private connect(): void {
+    if (this.closedByUs || this.snapshot.phase === 'ended') return;
     const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+    if (!this.lessonCapability) {
+      this.update({ phase: 'failed', error: 'This lesson link is missing its short-lived access capability. Return to Parent setup.' });
+      return;
+    }
     const ws = new WebSocket(
       `${protocol}://${window.location.host}/ws/lesson?session=${encodeURIComponent(this.sessionId)}`,
+      ['noura.v1', `cap.${this.lessonCapability}`],
     );
     this.ws = ws;
-
-    // Note: attempts only reset on 'ready' (upstream fully configured), so
-    // a proxy that accepts us but can't reach the model still counts as a
-    // failure and eventually falls back to text mode.
+    const identity = this.scope.identity;
+    this.scope.timeout(() => {
+      if (this.ws === ws && ws.readyState !== WebSocket.OPEN) ws.close();
+    }, CONNECT_TIMEOUT_MS);
+    ws.onopen = () => {
+      if (!this.isCurrent(identity)) { ws.close(); return; }
+      this.send('hello', {});
+    };
     ws.onmessage = (event) => {
-      try {
-        this.handleServer(JSON.parse(String(event.data)));
-      } catch {
-        /* ignore malformed frames */
-      }
+      try { this.handleServer(JSON.parse(String(event.data))); }
+      catch { /* malformed frames never mutate state */ }
     };
     ws.onclose = () => {
-      if (this.closedByUs) return;
+      if (this.closedByUs || this.ws !== ws) return;
+      this.cancelGeneration('transport closed');
       this.audioOut.stop();
-      if (this.reconnectAttempts < 3) {
+      if (this.reconnectAttempts < MAX_RECONNECTS) {
         this.reconnectAttempts += 1;
+        this.connectionEpoch += 1;
+        this.activateScope(false);
+        if (this.latestQueuedAsk) this.latestQueuedAsk = { ...this.latestQueuedAsk, identity: this.scope.identity };
         this.update({ phase: 'reconnecting' });
-        window.setTimeout(() => this.connect(), 600 * this.reconnectAttempts);
+        this.scope.timeout(() => this.connect(), 600 * this.reconnectAttempts);
       } else {
-        this.update({
-          phase: 'fallback',
-          error: 'Voice connection lost — continuing in text mode.',
-        });
+        this.generationCounter += 1;
+        this.activateScope(false);
+        this.update({ phase: 'fallback', error: 'Voice connection lost — continuing in captions-only text mode.' });
+        const ask = this.latestQueuedAsk;
+        this.latestQueuedAsk = null;
+        if (ask) void this.runFallbackTurn(ask.text, ask.idempotencyKey, this.scope);
       }
     };
-    ws.onerror = () => {
-      /* onclose follows and owns recovery */
-    };
+    ws.onerror = () => { /* close owns recovery */ };
   }
 
   end(): void {
+    if (this.closedByUs) return;
     this.closedByUs = true;
-    if (this.releaseTimer !== null) window.clearInterval(this.releaseTimer);
+    this.cancelGeneration('lesson ended');
     this.audioIn?.stop();
+    this.audioIn = null;
     void this.audioOut.close();
     this.ws?.close();
+    this.ws = null;
     this.update({ phase: 'ended' });
     this.onEnded();
   }
 
-  // ----- user actions --------------------------------------------------------
-
   sendText(text: string): void {
     const trimmed = text.trim();
-    if (!trimmed) return;
-    if (this.snapshot.phase === 'fallback') {
-      void this.runFallbackTurn(trimmed);
-      return;
-    }
+    if (!trimmed || this.snapshot.phase === 'ended') return;
+    const wasFallback = this.snapshot.phase === 'fallback';
+    const wasReconnecting = this.snapshot.phase === 'reconnecting';
     this.interruptLocally('text');
+    this.turnCounter += 1;
+    this.activateScope(true);
     this.askAt = performance.now();
     this.firstAudioSeen = false;
-    this.send({ type: 'user_text', text: trimmed });
+    const idempotencyKey = `${this.sessionId}:${this.scope.identity.turnId}:${crypto.randomUUID()}`;
+    if (wasFallback) {
+      this.update({ phase: 'fallback' });
+      void this.runFallbackTurn(trimmed, idempotencyKey, this.scope);
+      return;
+    }
+    if (this.ws?.readyState !== WebSocket.OPEN || wasReconnecting) {
+      this.latestQueuedAsk = { text: trimmed, idempotencyKey, identity: this.scope.identity };
+      this.update({ phase: 'reconnecting' });
+      this.scope.timeout(() => this.connect(), 0);
+      return;
+    }
+    this.send('user_text', { text: trimmed, idempotencyKey });
     this.update({ phase: 'thinking' });
   }
 
@@ -234,326 +205,309 @@ export class RealtimeSession {
     this.update({ muted });
   }
 
-  // ----- barge-in ------------------------------------------------------------
+  beginLearnerActivity(): void {
+    if (!['speaking', 'thinking'].includes(this.snapshot.phase)) return;
+    this.interruptLocally('interaction');
+    this.turnCounter += 1;
+    this.activateScope(true);
+    this.update({ phase: 'listening' });
+  }
 
   private handleMicEnergy(rms: number): void {
-    if (this.snapshot.micEnergy * 0.7 + rms * 0.3 !== this.snapshot.micEnergy) {
-      this.update({ micEnergy: this.snapshot.micEnergy * 0.7 + rms * 0.3 });
-    }
+    const nextEnergy = this.snapshot.micEnergy * 0.7 + rms * 0.3;
+    if (Math.abs(nextEnergy - this.snapshot.micEnergy) > 0.002) this.update({ micEnergy: nextEnergy });
     if (this.snapshot.muted) return;
-    // Fast local interruption: the tutor is audibly speaking and the child
-    // is clearly talking over it. The server's semantic VAD will confirm,
-    // but the local stop is what makes it feel instant.
     if (this.audioOut.speaking && rms > 0.03) {
       this.hotFrames += 1;
-      if (this.hotFrames >= 4) this.interruptLocally('voice');
-    } else {
-      this.hotFrames = 0;
-    }
+      if (this.hotFrames === 4) {
+        this.interruptLocally('voice');
+        this.turnCounter += 1;
+        this.activateScope(true);
+      }
+    } else this.hotFrames = 0;
   }
 
-  /** Stops sound and stale work now, without waiting for the server. */
-  private interruptLocally(reason: 'voice' | 'text' | 'server'): void {
-    if (!this.audioOut.speaking && this.pendingOps.length === 0 && this.pendingText.length === 0) {
-      return;
-    }
-    const interruptedAt = performance.now();
+  private markResponseDead(responseId: string | null): void {
+    if (!responseId) return;
+    this.deadResponses.add(responseId);
+    if (this.deadResponses.size > 48) this.deadResponses.delete(this.deadResponses.values().next().value as string);
+  }
+
+  private interruptLocally(reason: 'voice' | 'text' | 'server' | 'interaction'): void {
+    const identity = this.scope.identity;
+    this.markResponseDead(this.currentResponseId);
+    const detectorAt = performance.now();
     const heard = this.audioOut.stop();
-    if (this.currentResponseId !== null) {
-      this.deadResponses.add(this.currentResponseId);
-      if (this.deadResponses.size > 24) {
-        this.deadResponses.delete(this.deadResponses.values().next().value as string);
-      }
-    }
+    const detectorToStopScheduledMs = Math.max(0, performance.now() - detectorAt);
     this.pendingOps = [];
     this.pendingText = [];
+    this.phraseBuffers.clear();
     this.hotFrames = 0;
-    this.commitTutorLine();
-    // Tell the model exactly how much of each spoken item the child heard.
+    this.cancelGeneration(`interrupted by ${reason}`);
     for (const item of heard) {
-      if (!item.fullyPlayed) {
-        this.send({ type: 'truncate', item_id: item.itemId, audio_end_ms: item.heardMs });
-      }
+      if (!item.fullyPlayed) this.sendUsingIdentity(identity, 'truncate', { item_id: item.itemId, audio_end_ms: item.heardMs });
     }
-    if (reason !== 'server') this.send({ type: 'interrupt' });
-    const interruptToSilenceMs = Math.round(performance.now() - interruptedAt);
-    this.send({ type: 'metric', name: `interrupt_local_stop_${reason}`, ms: interruptToSilenceMs });
-    this.update({
-      phase: 'listening',
-      metrics: { ...this.snapshot.metrics, interruptToSilenceMs },
-    });
+    if (reason !== 'server') {
+      this.cancelRequestedAt = performance.now();
+      this.sendUsingIdentity(identity, 'interrupt', { reason });
+    }
+    this.update({ phase: 'listening', metrics: { ...this.snapshot.metrics, detectorToStopScheduledMs } });
   }
 
-  // ----- server events -------------------------------------------------------
-
-  private handleServer(message: Record<string, unknown>): void {
-    switch (message.type) {
-      case 'ready':
+  private handleServer(raw: unknown): void {
+    const parsed = RuntimeEventEnvelopeSchema.safeParse(raw);
+    if (!parsed.success || !this.gate.accept(parsed.data)) return;
+    const envelope = parsed.data as RuntimeEventEnvelope<Record<string, unknown>>;
+    const message = envelope.payload ?? {};
+    const type = envelope.type;
+    switch (type) {
+      case 'ready': {
         this.reconnectAttempts = 0;
         this.update({ phase: 'listening', error: null });
-        this.send({ type: 'start' });
-        break;
-
-      case 'board_replay': {
-        const batches = Array.isArray(message.batches) ? message.batches : [];
-        for (const batch of batches) {
-          if (Array.isArray(batch)) this.onBoardOps(batch as BoardOp[], false);
+        this.send('start', {});
+        const ask = this.latestQueuedAsk;
+        this.latestQueuedAsk = null;
+        if (ask && this.isCurrent(ask.identity)) {
+          this.send('user_text', { text: ask.text, idempotencyKey: ask.idempotencyKey });
+          this.update({ phase: 'thinking' });
         }
         break;
       }
-
-      case 'response_started':
-        this.currentResponseId = typeof message.response_id === 'string' ? message.response_id : null;
+      case 'board_replay': {
+        const batches = Array.isArray(message.batches) ? message.batches : [];
+        for (const batch of batches) if (Array.isArray(batch)) void this.onBoardOps(batch as BoardOp[], false, envelope);
         break;
-
+      }
+      case 'response_started': {
+        this.currentResponseId = typeof message.response_id === 'string' ? message.response_id : null;
+        if (this.currentResponseId) this.scope.providerResponseIds.add(this.currentResponseId);
+        break;
+      }
       case 'audio': {
         if (typeof message.delta !== 'string') break;
         const responseId = String(message.response_id ?? '');
         if (this.deadResponses.has(responseId)) break;
+        this.currentResponseId = responseId;
         const itemId = typeof message.item_id === 'string' ? message.item_id : null;
         if (!this.firstAudioSeen && this.askAt > 0) {
           this.firstAudioSeen = true;
           const askToFirstAudioMs = Math.round(performance.now() - this.askAt);
-          this.send({ type: 'metric', name: 'ask_to_first_audio', ms: askToFirstAudioMs });
+          this.send('metric', { name: 'ask_to_first_audio', ms: askToFirstAudioMs });
           this.update({ metrics: { ...this.snapshot.metrics, askToFirstAudioMs } });
         }
         this.audioOut.append(responseId, itemId, message.delta);
         if (this.snapshot.phase !== 'speaking') this.update({ phase: 'speaking' });
         break;
       }
-
       case 'transcript_delta': {
         if (typeof message.delta !== 'string') break;
         const responseId = String(message.response_id ?? '');
         if (this.deadResponses.has(responseId)) break;
-        this.pendingText.push({
-          stampMs: this.audioOut.scheduledMs(responseId),
-          responseId,
-          delta: message.delta,
-          arrivedAt: performance.now(),
-        });
+        this.pendingText.push({ stampMs: this.audioOut.scheduledMs(responseId), responseId, delta: message.delta, identity: envelope });
         break;
       }
-
-      case 'transcript_done':
-        // The full line is already streaming out via deltas; nothing to do.
+      case 'transcript_done': {
+        const responseId = String(message.response_id ?? '');
+        const text = String(message.text ?? '').trim();
+        if (text && !this.deadResponses.has(responseId)) this.applyFinalTranscript(responseId, text);
         break;
-
+      }
       case 'board_ops': {
         if (!Array.isArray(message.ops)) break;
         const responseId = String(message.response_id ?? '');
         if (this.deadResponses.has(responseId)) break;
-        this.pendingOps.push({
-          stampMs: this.audioOut.scheduledMs(responseId),
-          responseId,
-          ops: message.ops as BoardOp[],
-          arrivedAt: performance.now(),
-          eventId: typeof message.event_id === 'number' ? message.event_id : null,
-        });
+        this.pendingOps.push({ stampMs: this.audioOut.scheduledMs(responseId), responseId, ops: message.ops as BoardOp[], eventId: typeof message.event_id === 'number' ? message.event_id : null, identity: envelope });
         break;
       }
-
       case 'user_transcript': {
-        const text = String(message.text ?? '');
-        if (!text) break;
-        this.commitTutorLine();
-        this.appendCaption({ role: 'child', text, live: false });
+        const text = String(message.text ?? '').trim();
+        if (text) this.appendCaption({ role: 'child', text, live: false });
         break;
       }
-
-      case 'speech_started':
-        // Server VAD heard the child: stop locally too (usually a no-op —
-        // the local energy gate has already fired).
+      case 'speech_started': {
         this.interruptLocally('server');
+        this.turnCounter += 1;
+        this.activateScope(true);
         this.update({ phase: 'listening' });
         break;
-
-      case 'lesson_state': {
-        const state = message.state as LessonState;
-        this.update({ lessonState: { ...this.snapshot.lessonState, ...state } });
-        break;
       }
-
+      case 'lesson_state': this.update({ lessonState: { ...this.snapshot.lessonState, ...(message.state as LessonState) } }); break;
       case 'evidence': {
-        const entry = message.entry as EvidenceEntry;
-        this.update({
-          evidenceCount: this.snapshot.evidenceCount + 1,
-          lastEvidence: entry,
-        });
+        const entry = message.entry as unknown as EvidenceEntry;
+        this.update({ evidenceCount: this.snapshot.evidenceCount + 1, lastEvidence: entry });
         break;
       }
-
       case 'response_done': {
-        // If nothing is left to play, we're back to listening.
-        if (!this.audioOut.speaking && this.pendingText.length === 0) {
-          this.commitTutorLine();
-          if (this.snapshot.phase === 'speaking') this.update({ phase: 'listening' });
+        if (message.status === 'cancelled' && this.cancelRequestedAt > 0) {
+          const providerCancelConfirmationMs = Math.round(performance.now() - this.cancelRequestedAt);
+          this.update({ metrics: { ...this.snapshot.metrics, providerCancelConfirmationMs } });
+          this.cancelRequestedAt = 0;
         }
+        if (!this.audioOut.speaking && this.pendingText.length === 0 && this.snapshot.phase === 'speaking') this.update({ phase: 'listening' });
         break;
       }
-
+      case 'safe_question': {
+        const text = String(message.text ?? '').trim();
+        if (text) this.appendCaption({ role: 'tutor', text, live: false });
+        this.update({ phase: 'listening' });
+        break;
+      }
       case 'error': {
         const text = String(message.message ?? 'Something went wrong.');
         this.update({ error: text });
-        // Transient snags shouldn't linger on a child's screen.
-        window.setTimeout(() => {
-          if (this.snapshot.error === text) this.update({ error: null });
-        }, 6000);
+        this.scope.timeout(() => { if (this.snapshot.error === text) this.update({ error: null }); }, 6000);
         break;
       }
-
-      case 'upstream_closed':
-        // The proxy lost OpenAI; our socket will close next and reconnect.
-        break;
-
-      default:
-        break;
+      default: break;
     }
-  }
-
-  // ----- synchronised release ------------------------------------------------
-
-  private shouldRelease(item: { stampMs: number; responseId: string; arrivedAt: number }, leadMs: number): boolean {
-    if (this.audioOut.playedMs(item.responseId) + leadMs >= item.stampMs) return true;
-    // Backstop for silent/suspended audio: don't hold content forever.
-    return performance.now() - item.arrivedAt > SILENT_RELEASE_MS;
   }
 
   private releasePending(): void {
+    if (!this.scope.active) return;
     const energy = this.audioOut.currentEnergy();
-    if (Math.abs(energy - this.snapshot.voiceEnergy) > 0.01) {
-      this.update({ voiceEnergy: energy });
-    }
-
-    while (this.pendingText.length > 0 && this.shouldRelease(this.pendingText[0], 120)) {
+    if (Math.abs(energy - this.snapshot.voiceEnergy) > 0.01) this.update({ voiceEnergy: energy });
+    while (this.pendingText.length > 0 && this.audioOut.playedMs(this.pendingText[0].responseId) + 120 >= this.pendingText[0].stampMs) {
       const item = this.pendingText.shift() as StampedText;
-      if (this.liveLineResponse !== item.responseId) {
-        // A new spoken segment begins: settle the previous caption line.
-        this.commitTutorLine();
-        this.liveLineResponse = item.responseId;
-      }
-      this.tutorLine += item.delta;
-      this.showTutorLine();
+      if (!this.isCurrent(item.identity) || this.deadResponses.has(item.responseId)) continue;
+      this.pushTranscriptDelta(item.responseId, item.delta);
     }
-
-    while (this.pendingOps.length > 0 && this.shouldRelease(this.pendingOps[0], 60)) {
+    while (this.pendingOps.length > 0 && this.audioOut.playedMs(this.pendingOps[0].responseId) + 60 >= this.pendingOps[0].stampMs) {
       const item = this.pendingOps.shift() as StampedOps;
       this.releaseOps(item);
     }
   }
 
-  /** Puts a batch on the board and confirms it as seen, for honest replay. */
   private releaseOps(item: StampedOps): void {
-    this.onBoardOps(item.ops, true);
-    if (item.eventId !== null) this.send({ type: 'ops_shown', event_id: item.eventId });
+    if (!this.isCurrent(item.identity) || this.deadResponses.has(item.responseId)) return;
+    void Promise.resolve(this.onBoardOps(item.ops, true, item.identity)).then((completed) => {
+      if (completed !== false && this.isCurrent(item.identity) && item.eventId !== null) this.send('ops_shown', { event_id: item.eventId });
+    });
   }
 
   private handlePlaybackEnd(): void {
-    // Natural end of speech: flush what the stamps didn't quite release,
-    // still respecting caption boundaries between spoken segments.
-    for (const item of this.pendingText) {
-      if (this.liveLineResponse !== item.responseId) {
-        this.commitTutorLine();
-        this.liveLineResponse = item.responseId;
-      }
-      this.tutorLine += item.delta;
-    }
-    this.pendingText = [];
-    this.showTutorLine();
-    for (const item of this.pendingOps) this.releaseOps(item);
-    this.pendingOps = [];
-    if (this.snapshot.phase === 'speaking') {
-      this.commitTutorLine();
-      this.update({ phase: 'listening' });
-    }
+    if (!this.scope.active) return;
+    for (const item of this.pendingText.splice(0)) if (this.isCurrent(item.identity) && !this.deadResponses.has(item.responseId)) this.pushTranscriptDelta(item.responseId, item.delta, true);
+    for (const item of this.pendingOps.splice(0)) this.releaseOps(item);
+    for (const responseId of this.phraseBuffers.keys()) this.flushPhrase(responseId, false);
+    if (this.snapshot.phase === 'speaking') this.update({ phase: 'listening', voiceEnergy: 0 });
   }
 
-  // ----- captions -------------------------------------------------------------
-
-  private showTutorLine(): void {
-    if (!this.tutorLine.trim()) return;
-    const captions = [...this.snapshot.captions];
-    const last = captions[captions.length - 1];
-    if (last?.role === 'tutor' && last.live) {
-      captions[captions.length - 1] = { ...last, text: this.tutorLine };
-    } else {
-      captions.push({ role: 'tutor', text: this.tutorLine, live: true });
+  private pushTranscriptDelta(responseId: string, delta: string, force = false): void {
+    let buffer = (this.phraseBuffers.get(responseId) ?? '') + delta;
+    const boundary = force ? buffer.length : phraseBoundary(buffer);
+    if (boundary > 0) {
+      const phrase = buffer.slice(0, boundary).trim();
+      buffer = buffer.slice(boundary);
+      if (phrase) this.appendCaption({ role: 'tutor', text: phrase, live: !force, responseId });
     }
-    this.update({ captions: captions.slice(-80) });
+    this.phraseBuffers.set(responseId, buffer);
   }
 
-  private commitTutorLine(): void {
-    if (this.tutorLine.trim()) {
-      const captions = [...this.snapshot.captions];
-      const last = captions[captions.length - 1];
-      if (last?.role === 'tutor' && last.live) {
-        captions[captions.length - 1] = { ...last, text: this.tutorLine, live: false };
-        this.update({ captions });
-      }
-    }
-    this.tutorLine = '';
+  private flushPhrase(responseId: string, live: boolean): void {
+    const phrase = (this.phraseBuffers.get(responseId) ?? '').trim();
+    this.phraseBuffers.delete(responseId);
+    if (phrase) this.appendCaption({ role: 'tutor', text: phrase, live, responseId });
   }
 
-  private appendCaption(line: CaptionLine): void {
-    this.update({ captions: [...this.snapshot.captions, line].slice(-80) });
+  private applyFinalTranscript(responseId: string, text: string): void {
+    this.phraseBuffers.delete(responseId);
+    const withoutResponse = this.snapshot.captions.filter((caption) => caption.responseId !== responseId);
+    const corrected = segmentPhrases(text).map((phrase) => ({ role: 'tutor' as const, text: phrase, live: false, responseId }));
+    this.update({ captions: [...withoutResponse, ...corrected].slice(-100) });
   }
 
-  // ----- fallback text mode ----------------------------------------------------
+  private appendCaption(line: CaptionLine): void { this.update({ captions: [...this.snapshot.captions, line].slice(-100) }); }
 
-  private async runFallbackTurn(text: string): Promise<void> {
+  private async runFallbackTurn(text: string, idempotencyKey: string, scope: GenerationScope): Promise<void> {
     this.appendCaption({ role: 'child', text, live: false });
     this.update({ phase: 'thinking' });
     try {
       const response = await fetch('/api/fallback-turn', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId: this.sessionId, text }),
+        headers: { 'Content-Type': 'application/json', Authorization: `Lesson ${this.lessonCapability ?? ''}` },
+        body: JSON.stringify({ sessionId: this.sessionId, text, idempotencyKey }), signal: scope.signal,
       });
       if (!response.ok || !response.body) throw new Error(`fallback failed (${response.status})`);
       const reader = response.body.getReader();
+      scope.addCleanup(() => void reader.cancel().catch(() => undefined));
       const decoder = new TextDecoder();
       let buffer = '';
       for (;;) {
         const { done, value } = await reader.read();
-        if (done) break;
+        if (done || !scope.active) break;
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split('\n');
         buffer = lines.pop() ?? '';
-        for (const line of lines) {
-          if (!line.trim()) continue;
-          try {
-            this.handleFallbackStep(JSON.parse(line));
-          } catch {
-            /* skip malformed line */
-          }
+        for (const line of lines) if (line.trim() && scope.active) {
+          try { this.handleFallbackStep(JSON.parse(line), scope.identity); }
+          catch { /* malformed line */ }
         }
       }
-    } catch {
-      this.update({ error: 'The tutor is unreachable right now.' });
+    } catch (error) {
+      if (!scope.signal.aborted) this.update({ error: 'Noura is unreachable right now.' });
     } finally {
-      if (this.snapshot.phase === 'thinking') this.update({ phase: 'fallback' });
+      if (scope.active && this.snapshot.phase === 'thinking') this.update({ phase: 'fallback' });
     }
   }
 
-  private handleFallbackStep(step: Record<string, unknown>): void {
-    if (step.type === 'say' && typeof step.text === 'string') {
-      this.appendCaption({ role: 'tutor', text: step.text, live: false });
-    } else if (step.type === 'board_ops' && Array.isArray(step.ops)) {
-      this.onBoardOps(step.ops as BoardOp[], true);
-    } else if (step.type === 'evidence') {
-      this.update({ evidenceCount: this.snapshot.evidenceCount + 1 });
-    } else if (step.type === 'error') {
-      this.update({ error: String(step.message ?? 'The tutor failed.') });
-    }
+  private handleFallbackStep(step: Record<string, unknown>, identity: GenerationIdentity): void {
+    if (!this.isCurrent(identity)) return;
+    if (step.type === 'say' && typeof step.text === 'string') for (const phrase of segmentPhrases(step.text)) this.appendCaption({ role: 'tutor', text: phrase, live: false });
+    else if (step.type === 'board_ops' && Array.isArray(step.ops)) void this.onBoardOps(step.ops as BoardOp[], true, identity);
+    else if (step.type === 'evidence') this.update({ evidenceCount: this.snapshot.evidenceCount + 1 });
+    else if (step.type === 'error') this.update({ error: String(step.message ?? 'The tutor failed.') });
   }
 
-  // ----- misc -------------------------------------------------------------------
+  sendBoardEvent(description: string): void { this.send('board_event', { description }); }
 
-  sendBoardEvent(description: string): void {
-    this.send({ type: 'board_event', description });
+  private activateScope(advanceGeneration: boolean): void {
+    if (advanceGeneration) this.generationCounter += 1;
+    const identity = this.makeIdentity();
+    this.scope = new GenerationScope(identity);
+    this.gate.replace(identity);
+    this.outboundSequence = 0;
+    this.scope.interval(() => this.releasePending(), 50);
+    this.update?.({ identity });
   }
 
-  private send(payload: unknown): void {
-    if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify(payload));
+  private cancelGeneration(reason: string): void {
+    const identity = this.scope.identity;
+    this.scope.cancel(reason);
+    this.onGenerationCancelled(identity);
   }
+
+  private makeIdentity(): GenerationIdentity {
+    return { sessionId: this.sessionId, connectionEpoch: this.connectionEpoch, turnId: `turn-${this.turnCounter}`, generationId: `generation-${this.generationCounter}` };
+  }
+
+  private isCurrent(identity: GenerationIdentity): boolean {
+    const current = this.scope.identity;
+    return identity.sessionId === current.sessionId && identity.connectionEpoch === current.connectionEpoch && identity.turnId === current.turnId && identity.generationId === current.generationId && this.scope.active;
+  }
+
+  private send(type: string, payload: Record<string, unknown>): void { this.sendUsingIdentity(this.scope.identity, type, payload); }
+  private sendUsingIdentity(identity: GenerationIdentity, type: string, payload: Record<string, unknown>): void {
+    if (this.ws?.readyState !== WebSocket.OPEN) return;
+    this.ws.send(JSON.stringify(createRuntimeEvent(identity, this.outboundSequence++, type, payload, payload.idempotencyKey ? { idempotencyKey: String(payload.idempotencyKey) } : {})));
+  }
+}
+
+function phraseBoundary(text: string): number {
+  const punctuation = [...text.matchAll(/[.!?;:]\s+/g)].at(-1);
+  if (punctuation && punctuation.index !== undefined) return punctuation.index + punctuation[0].length;
+  if (text.length < 92) return 0;
+  const breakAt = text.lastIndexOf(' ', 92);
+  return breakAt > 36 ? breakAt + 1 : 92;
+}
+
+export function segmentPhrases(text: string): string[] {
+  const phrases: string[] = [];
+  let remaining = text.trim();
+  while (remaining) {
+    const boundary = phraseBoundary(remaining);
+    if (boundary === 0) { phrases.push(remaining); break; }
+    phrases.push(remaining.slice(0, boundary).trim());
+    remaining = remaining.slice(boundary).trim();
+  }
+  return phrases.filter(Boolean);
 }
