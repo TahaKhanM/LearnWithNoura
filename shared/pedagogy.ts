@@ -36,6 +36,31 @@ export interface EvidenceProjectionInput {
   laterRetrieval: boolean;
 }
 
+export type EvidenceOpportunityKind = 'recall' | 'explanation' | 'application' | 'retrieval';
+
+export interface ConceptEvidenceHistoryInput {
+  evidenceId: string;
+  concept: string;
+  conceptId: string;
+  taxonomy: ResponseTaxonomy;
+  independenceLevel: 'none' | 'reduced' | 'independent';
+  opportunityKind: EvidenceOpportunityKind;
+  taskId: string;
+  sessionId: string;
+  turnId: string;
+  ts: number;
+}
+
+export interface ConceptHistoryProjection {
+  concept: string;
+  conceptId: string;
+  status: ConceptStatus;
+  evidenceIds: string[];
+  latestEvidenceId: string;
+  hasContradiction: boolean;
+  hasUnresolvedMisconception: boolean;
+}
+
 export type ConceptStatus = 'not_observed' | 'progressing' | 'uncertain' | 'demonstrated';
 
 export function projectConceptStatus(evidence: EvidenceProjectionInput[]): ConceptStatus {
@@ -56,6 +81,44 @@ export function projectConceptStatus(evidence: EvidenceProjectionInput[]): Conce
     ['incorrect', 'confident_misconception', 'missing_prerequisite'].includes(item.taxonomy),
   );
   return contradiction ? 'uncertain' : 'progressing';
+}
+
+/** One conservative projection used by summaries and every Parent surface. */
+export function projectConceptHistories(evidence: ConceptEvidenceHistoryInput[]): ConceptHistoryProjection[] {
+  const grouped = new Map<string, ConceptEvidenceHistoryInput[]>();
+  for (const entry of [...evidence].sort((left, right) => left.ts - right.ts || left.evidenceId.localeCompare(right.evidenceId))) {
+    const key = entry.conceptId || normalizeConcept(entry.concept);
+    grouped.set(key, [...(grouped.get(key) ?? []), entry]);
+  }
+  return [...grouped.entries()].map(([conceptId, history]) => {
+    const projected = history.map((entry) => ({
+      evidenceId: entry.evidenceId,
+      taxonomy: entry.taxonomy,
+      independent: entry.independenceLevel === 'independent',
+      explanationOrApplication: entry.opportunityKind === 'explanation' || entry.opportunityKind === 'application',
+      laterRetrieval: entry.opportunityKind === 'retrieval',
+    }));
+    const latest = history[history.length - 1];
+    const hasUnresolvedMisconception = history.some((entry, index) =>
+      entry.taxonomy === 'confident_misconception' &&
+      !history.slice(index + 1).some((later) => later.taxonomy === 'correct' && later.independenceLevel === 'independent'),
+    );
+    const positive = history.some((entry) => ['correct', 'self_corrected'].includes(entry.taxonomy));
+    const negative = history.some((entry) => ['incorrect', 'confident_misconception', 'missing_prerequisite'].includes(entry.taxonomy));
+    return {
+      concept: latest.concept,
+      conceptId,
+      status: projectConceptStatus(projected),
+      evidenceIds: history.map((entry) => entry.evidenceId),
+      latestEvidenceId: latest.evidenceId,
+      hasContradiction: positive && negative,
+      hasUnresolvedMisconception,
+    };
+  });
+}
+
+function normalizeConcept(value: string): string {
+  return value.normalize('NFKC').toLocaleLowerCase('en').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'unspecified';
 }
 
 export const TAXONOMY_POLICY: Record<ResponseTaxonomy, string> = {

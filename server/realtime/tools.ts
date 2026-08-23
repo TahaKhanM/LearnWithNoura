@@ -116,6 +116,12 @@ export const REALTIME_TOOLS = [
         },
         confidence_basis: { type: 'string', description: 'Why this confidence level is justified.' },
         task_id: { type: 'string', description: 'The delivered question or opportunity that produced this evidence.' },
+        opportunity_kind: {
+          type: 'string',
+          enum: ['recall', 'explanation', 'application', 'retrieval'],
+          description: 'What kind of independent opportunity produced this evidence. Retrieval means a later revisit, not an immediate retry.',
+        },
+        retrieval_of: { type: 'string', description: 'Earlier task ID revisited by a genuine later retrieval opportunity.' },
         confidence: {
           type: 'string',
           enum: ['low', 'medium', 'high'],
@@ -126,7 +132,7 @@ export const REALTIME_TOOLS = [
           description: 'Short quote of what the learner said, if available.',
         },
       },
-      required: ['concept', 'observation', 'verdict', 'confidence', 'classification', 'confidence_basis', 'task_id'],
+      required: ['concept', 'observation', 'verdict', 'confidence', 'classification', 'confidence_basis', 'task_id', 'opportunity_kind'],
     },
   },
   {

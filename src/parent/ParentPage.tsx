@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { projectConceptHistories, type ConceptStatus, type EvidenceOpportunityKind, type ResponseTaxonomy } from '../../shared/pedagogy';
 import { useRouter } from '../routerContext';
 import './Parent.css';
 
 interface Child { id: string; name: string; age: number | null }
-interface SummaryClaim { concept: string; evidence: string; evidenceIds?: Array<number | string> }
+interface SummaryClaim { concept: string; evidence: string; evidenceIds?: Array<number | string>; status?: 'progressing' | 'demonstrated' }
 interface Summary {
   headline: string;
   workedOn: string[];
@@ -19,6 +20,9 @@ interface EvidenceRow {
   id: number; sessionId: string; ts: number; concept: string; observation: string;
   verdict: 'mastered' | 'progressing' | 'struggling' | 'misconception';
   confidence: 'low' | 'medium' | 'high'; excerpt: string | null; goal: string;
+  evidenceId: string; conceptId: string; taxonomy: ResponseTaxonomy;
+  independenceLevel: 'none' | 'reduced' | 'independent'; opportunityKind: EvidenceOpportunityKind;
+  taskId: string; turnId: string;
 }
 interface Overview { child: Child; sessions: SessionRow[]; evidence: EvidenceRow[] }
 interface EventRow { id: number; ts: number; type: string; payload: { text?: string; concept?: string; verdict?: string; activeConcept?: string } }
@@ -30,9 +34,9 @@ function formatWhen(ts: number): string {
   return new Date(ts).toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 }
 
-function statusFor(entry: EvidenceRow): { label: string; tone: string } {
-  if (entry.verdict === 'mastered') return { label: 'Demonstrated', tone: 'demonstrated' };
-  if (entry.verdict === 'misconception' || entry.verdict === 'struggling') return { label: 'Misunderstood', tone: 'misunderstood' };
+function statusFor(status: ConceptStatus): { label: string; tone: string } {
+  if (status === 'demonstrated') return { label: 'Demonstrated', tone: 'demonstrated' };
+  if (status === 'progressing') return { label: 'Progressing', tone: 'progressing' };
   return { label: 'Uncertain', tone: 'uncertain' };
 }
 
@@ -160,8 +164,15 @@ export function ParentPage() {
   const { child, sessions, evidence } = overview;
   const latestWithSummary = sessions.find((session) => session.summary);
   const grouped = new Map<string, EvidenceRow[]>();
-  for (const entry of evidence) grouped.set(entry.concept, [...(grouped.get(entry.concept) ?? []), entry]);
-  const concepts = [...grouped.entries()].map(([concept, history]) => ({ concept, latest: history[0], history }));
+  for (const entry of evidence) grouped.set(entry.conceptId, [...(grouped.get(entry.conceptId) ?? []), entry]);
+  const projections = new Map(projectConceptHistories(evidence).map((projection) => [projection.conceptId, projection]));
+  const concepts = [...grouped.entries()].map(([conceptId, history]) => ({
+    conceptId,
+    concept: history[0].concept,
+    latest: history[0],
+    history,
+    projection: projections.get(conceptId),
+  }));
 
   return (
     <main className="parent" id="main-content">
@@ -186,7 +197,8 @@ export function ParentPage() {
             <p className="parent__headline">{latestWithSummary.summary.headline}</p>
             {latestWithSummary.summary.workedOn.length > 0 && <div className="parent__chips">{latestWithSummary.summary.workedOn.map((item) => <span key={item} className="parent__chip">{item}</span>)}</div>}
             <div className="parent__columns">
-              <SummaryColumn title="Demonstrated" claims={latestWithSummary.summary.strengths} tone="demonstrated" />
+              <SummaryColumn title="Demonstrated across opportunities" claims={latestWithSummary.summary.strengths.filter((claim) => claim.status === 'demonstrated')} tone="demonstrated" />
+              <SummaryColumn title="Progressing" claims={latestWithSummary.summary.strengths.filter((claim) => claim.status !== 'demonstrated')} tone="progressing" />
               <SummaryColumn title="Uncertain or misunderstood" claims={latestWithSummary.summary.struggles} tone="misunderstood" />
             </div>
             <div className="parent__recommendation">
@@ -204,16 +216,15 @@ export function ParentPage() {
           <p className="parent__note">Observations stay in order so difficulty, contradiction, and later improvement remain visible. These are not scores.</p>
           {concepts.length === 0 ? <p className="parent__note">No meaningful learner evidence has been recorded yet.</p> : (
             <ul className="parent__concepts">
-              {concepts.map(({ concept, latest, history }) => {
-                const status = statusFor(latest);
-                const contradictory = new Set(history.map((entry) => entry.verdict)).size > 1;
+              {concepts.map(({ conceptId, concept, latest, history, projection }) => {
+                const status = statusFor(projection?.status ?? 'uncertain');
                 return (
-                  <li key={concept}>
+                  <li key={conceptId}>
                     <span className={`parent__verdict parent__verdict--${status.tone}`}>{status.label}</span>
                     <div>
                       <p className="parent__concept-name">{concept}</p>
                       <p className="parent__concept-obs">{latest.observation}{latest.excerpt ? <em> — “{latest.excerpt}”</em> : null}</p>
-                      <p className="parent__concept-meta">Evidence #{latest.id} · {latest.confidence} confidence · {formatWhen(latest.ts)}{contradictory ? ' · Earlier evidence differs' : ''}</p>
+                      <p className="parent__concept-meta">Evidence #{latest.id} · {latest.confidence} confidence · {formatWhen(latest.ts)}{projection?.hasContradiction ? ' · Evidence differs across opportunities' : ''}{projection?.hasUnresolvedMisconception ? ' · Misconception not yet resolved independently' : ''}</p>
                       {history.length > 1 && <details className="parent__history"><summary>View {history.length - 1} earlier observation{history.length === 2 ? '' : 's'}</summary>{history.slice(1).map((entry) => <p key={entry.id}><strong>#{entry.id}</strong> · {formatWhen(entry.ts)} — {entry.observation}</p>)}</details>}
                     </div>
                   </li>

@@ -61,6 +61,7 @@ export class CharacterAttentionController {
   }
 
   replaceGeneration(identity: GenerationIdentity): void {
+    if (this.matches(identity)) return;
     this.identity = identity;
     this.active = null;
     this.lastPointer = null;

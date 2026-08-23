@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
-import type { ResponseTaxonomy } from '../../shared/pedagogy.js';
+import type { EvidenceOpportunityKind, ResponseTaxonomy } from '../../shared/pedagogy.js';
 
 export interface Child {
   id: string;
@@ -30,7 +30,7 @@ export interface SessionSummary {
   throughEventId?: number | null;
   headline: string;
   workedOn: string[];
-  strengths: { concept: string; evidence: string; evidenceIds?: string[] }[];
+  strengths: { concept: string; evidence: string; evidenceIds?: string[]; status: 'progressing' | 'demonstrated' }[];
   struggles: { concept: string; evidence: string; evidenceIds?: string[]; kind: 'misconception' | 'gap' | 'uncertain' }[];
   recommendation: string;
   recommendationEvidenceIds?: string[];
@@ -64,6 +64,8 @@ export interface EvidenceRow {
   generationId: string;
   contradicts: string[];
   supersedes: string[];
+  opportunityKind: EvidenceOpportunityKind;
+  retrievalOf: string | null;
 }
 
 export interface EventRow {
@@ -74,6 +76,20 @@ export interface EventRow {
   payload: unknown;
   released: boolean;
 }
+
+export interface FallbackTurnIdentity {
+  sessionId: string;
+  idempotencyKey: string;
+  connectionEpoch: number;
+  turnId: string;
+  generationId: string;
+}
+
+export type FallbackTurnClaim =
+  | { kind: 'started' }
+  | { kind: 'active' }
+  | { kind: 'completed'; steps: unknown[] }
+  | { kind: 'failed' };
 
 export class Repo {
   private db: DatabaseSync;
@@ -211,6 +227,156 @@ export class Repo {
   }
 
   /**
+   * Atomically supersedes the previous fallback generation for this session.
+   * The idempotency row is durable, while the provider AbortController stays
+   * process-local. Every later mutation rechecks this row before writing.
+   */
+  claimFallbackTurn(identity: FallbackTurnIdentity): FallbackTurnClaim {
+    this.assertActive(identity.sessionId);
+    const existing = this.db.prepare(
+      'SELECT status, steps_json FROM fallback_turns WHERE session_id = ? AND idempotency_key = ?',
+    ).get(identity.sessionId, identity.idempotencyKey) as { status: string; steps_json: string | null } | undefined;
+    if (existing) {
+      if (existing.status === 'completed') {
+        const parsed = existing.steps_json ? safeParse(existing.steps_json) : [];
+        return { kind: 'completed', steps: Array.isArray(parsed) ? parsed : [] };
+      }
+      return existing.status === 'active' ? { kind: 'active' } : { kind: 'failed' };
+    }
+
+    const now = Date.now();
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      this.db.prepare(
+        "UPDATE fallback_turns SET status = 'cancelled', updated_at = ? WHERE session_id = ? AND status = 'active'",
+      ).run(now, identity.sessionId);
+      this.db.prepare(
+        `INSERT INTO fallback_turns (
+          session_id, idempotency_key, connection_epoch, turn_id, generation_id,
+          status, steps_json, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, 'active', NULL, ?, ?)`,
+      ).run(
+        identity.sessionId,
+        identity.idempotencyKey,
+        identity.connectionEpoch,
+        identity.turnId,
+        identity.generationId,
+        now,
+        now,
+      );
+      this.db.exec('COMMIT');
+      return { kind: 'started' };
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
+  }
+
+  isFallbackTurnActive(identity: FallbackTurnIdentity): boolean {
+    const row = this.db.prepare(
+      `SELECT 1 AS active
+       FROM fallback_turns f JOIN sessions s ON s.id = f.session_id
+       WHERE f.session_id = ? AND f.idempotency_key = ? AND f.connection_epoch = ?
+         AND f.turn_id = ? AND f.generation_id = ? AND f.status = 'active'
+         AND s.status = 'active'`,
+    ).get(
+      identity.sessionId,
+      identity.idempotencyKey,
+      identity.connectionEpoch,
+      identity.turnId,
+      identity.generationId,
+    ) as { active: number } | undefined;
+    return Boolean(row);
+  }
+
+  addFallbackEvent(identity: FallbackTurnIdentity, type: string, payload: unknown, released = true): number {
+    const scopedPayload = {
+      ...(isRecord(payload) ? payload : { value: payload }),
+      turnId: identity.turnId,
+      generationId: identity.generationId,
+      idempotencyKey: identity.idempotencyKey,
+    };
+    const result = this.db.prepare(
+      `INSERT INTO events (session_id, ts, type, payload, released)
+       SELECT ?, ?, ?, ?, ?
+       WHERE EXISTS (
+         SELECT 1 FROM fallback_turns f JOIN sessions s ON s.id = f.session_id
+         WHERE f.session_id = ? AND f.idempotency_key = ? AND f.connection_epoch = ?
+           AND f.turn_id = ? AND f.generation_id = ? AND f.status = 'active' AND s.status = 'active'
+       )`,
+    ).run(
+      identity.sessionId, Date.now(), type, JSON.stringify(scopedPayload), released ? 1 : 0,
+      identity.sessionId, identity.idempotencyKey, identity.connectionEpoch, identity.turnId, identity.generationId,
+    );
+    if (Number(result.changes) !== 1) throw new Error('Stale fallback generation write rejected.');
+    return Number(result.lastInsertRowid);
+  }
+
+  addFallbackEvidence(
+    identity: FallbackTurnIdentity,
+    entry: Parameters<Repo['addEvidence']>[1],
+  ): EvidenceRow {
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      if (!this.isFallbackTurnActive(identity)) throw new Error('Stale fallback generation write rejected.');
+      const stored = this.addEvidence(identity.sessionId, {
+        ...entry,
+        turnId: identity.turnId,
+        generationId: identity.generationId,
+      });
+      this.db.exec('COMMIT');
+      return stored;
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
+  }
+
+  markFallbackEventReleased(identity: FallbackTurnIdentity, eventId: number): void {
+    const result = this.db.prepare(
+      `UPDATE events SET released = 1
+       WHERE id = ? AND session_id = ? AND json_extract(payload, '$.idempotencyKey') = ?
+         AND json_extract(payload, '$.turnId') = ? AND json_extract(payload, '$.generationId') = ?
+         AND EXISTS (
+           SELECT 1 FROM fallback_turns f JOIN sessions s ON s.id = f.session_id
+           WHERE f.session_id = ? AND f.idempotency_key = ? AND f.connection_epoch = ?
+             AND f.turn_id = ? AND f.generation_id = ? AND f.status IN ('active', 'completed') AND s.status = 'active'
+         )`,
+    ).run(
+      eventId, identity.sessionId, identity.idempotencyKey, identity.turnId, identity.generationId,
+      identity.sessionId, identity.idempotencyKey, identity.connectionEpoch, identity.turnId, identity.generationId,
+    );
+    if (Number(result.changes) !== 1) throw new Error('Stale fallback checkpoint acknowledgement rejected.');
+  }
+
+  finishFallbackTurn(identity: FallbackTurnIdentity, status: 'completed' | 'failed' | 'cancelled', steps: unknown[] = []): boolean {
+    const result = this.db.prepare(
+      `UPDATE fallback_turns SET status = ?, steps_json = ?, updated_at = ?
+       WHERE session_id = ? AND idempotency_key = ? AND connection_epoch = ?
+         AND turn_id = ? AND generation_id = ? AND status = 'active'`,
+    ).run(
+      status,
+      status === 'completed' ? JSON.stringify(steps) : null,
+      Date.now(),
+      identity.sessionId,
+      identity.idempotencyKey,
+      identity.connectionEpoch,
+      identity.turnId,
+      identity.generationId,
+    );
+    return Number(result.changes) === 1;
+  }
+
+  getFallbackTurn(identity: Pick<FallbackTurnIdentity, 'sessionId' | 'idempotencyKey'>): { status: string; steps: unknown[] } | null {
+    const row = this.db.prepare(
+      'SELECT status, steps_json FROM fallback_turns WHERE session_id = ? AND idempotency_key = ?',
+    ).get(identity.sessionId, identity.idempotencyKey) as { status: string; steps_json: string | null } | undefined;
+    if (!row) return null;
+    const parsed = row.steps_json ? safeParse(row.steps_json) : [];
+    return { status: row.status, steps: Array.isArray(parsed) ? parsed : [] };
+  }
+
+  /**
    * Records a session event. Events that only become true once the child
    * actually sees them (board marks synchronised to speech) are inserted
    * unreleased and confirmed later, so a replay never shows work that an
@@ -275,6 +441,8 @@ export class Repo {
       generationId?: string;
       contradicts?: string[];
       supersedes?: string[];
+      opportunityKind?: EvidenceOpportunityKind;
+      retrievalOf?: string;
     },
   ): EvidenceRow {
     this.assertActive(sessionId);
@@ -298,8 +466,8 @@ export class Repo {
           evidence_id, child_id, concept_id, response_taxonomy, confidence_basis,
           source_event_ids, normalized_excerpt, source_span_json, task_id,
           independence_level, domain_check_json, turn_id, generation_id,
-          contradicts_json, supersedes_json
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          contradicts_json, supersedes_json, opportunity_kind, retrieval_of
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         sessionId,
@@ -324,6 +492,8 @@ export class Repo {
         generationId,
         JSON.stringify(entry.contradicts ?? []),
         JSON.stringify(entry.supersedes ?? []),
+        entry.opportunityKind ?? 'recall',
+        entry.retrievalOf ?? null,
       );
     return this.getEvidenceByRowId(Number(result.lastInsertRowid)) as EvidenceRow;
   }
@@ -399,6 +569,10 @@ function safeParse(json: string): unknown {
   }
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 function normalizeExcerpt(value: string): string {
   return value.normalize('NFKC').replace(/[\u2018\u2019]/g, "'").replace(/[\u201c\u201d]/g, '"').replace(/\s+/g, ' ').trim();
 }
@@ -444,5 +618,7 @@ function mapEvidence(row: Record<string, unknown>): EvidenceRow {
     generationId: row.generation_id ? String(row.generation_id) : 'legacy-generation',
     contradicts: parseArray<string>(row.contradicts_json),
     supersedes: parseArray<string>(row.supersedes_json),
+    opportunityKind: row.opportunity_kind ? String(row.opportunity_kind) as EvidenceOpportunityKind : 'recall',
+    retrievalOf: row.retrieval_of === null || row.retrieval_of === undefined ? null : String(row.retrieval_of),
   };
 }

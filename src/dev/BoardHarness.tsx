@@ -31,6 +31,18 @@ const SCENES: Record<string, BoardOp[]> = {
   'no-board': semantic('no_board', 'none'),
 };
 
+const SCENE_GROUPS: Record<string, string> = {
+  pythagorean: 'group-pythagorean_area_proof',
+  'unit-circle': 'group-unit_circle_projection',
+  slopes: 'group-slope_comparison',
+  fractions: 'group-fraction_comparison',
+  'water-cycle': 'group-causal_cycle',
+  argument: 'group-argument_structure',
+  history: 'group-cause_effect',
+  grammar: 'group-grammar_structure',
+  'no-board': 'group-no_board',
+};
+
 export function BoardHarness() {
   const [scene, setScene] = useState<SceneState>(emptyScene);
   const [highlights, setHighlights] = useState<BoardHighlight[]>([]);
@@ -78,6 +90,7 @@ export function BoardHarness() {
           onLearnerErase={() => {}}
           longDescription={describeScene(scene)}
           animatorRef={(animator) => { animatorRef.current = animator; }}
+          focusSemanticObjectId={SCENE_GROUPS[active]}
         />
       </div>
     </main>

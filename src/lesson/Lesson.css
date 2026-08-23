@@ -197,6 +197,35 @@
   border-radius: 12px;
   background: rgba(252, 251, 247, 0.94);
   box-shadow: 0 8px 22px -14px rgba(38, 35, 31, 0.45);
+  max-width: calc(100% - 48px);
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.lesson__group-picker {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+}
+
+.lesson__group-picker > span {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}
+
+.lesson__group-picker select {
+  min-height: 44px;
+  max-width: 190px;
+  border: 1px solid var(--rail-line);
+  border-radius: 9px;
+  background: var(--board);
+  color: var(--ink);
+  padding: 0 30px 0 10px;
+  font: inherit;
+  font-size: 14px;
 }
 
 .lesson__tool {
@@ -225,6 +254,11 @@
 .lesson__tool:hover {
   background: rgba(38, 35, 31, 0.06);
   color: var(--ink);
+}
+
+.lesson__tool:disabled {
+  opacity: 0.38;
+  cursor: default;
 }
 
 .lesson__tool[aria-pressed='true'] {
@@ -399,11 +433,10 @@
   .lesson__tools { top: 10px; right: 22px; }
   .lesson__dock { padding: 8px 14px calc(10px + env(safe-area-inset-bottom)); }
   .lesson__ended-actions { width: 100%; flex-direction: column; }
-  .lesson__surface { overflow: auto; overscroll-behavior: contain; }
-  .lesson__surface .board__a11y-wrap { min-width: 720px; min-height: 432px; }
-  .lesson__surface--overview .board__a11y-wrap { min-width: 100%; min-height: 100%; }
+  .lesson__surface { overflow: hidden; overscroll-behavior: contain; }
+  .lesson__group-picker select { max-width: 132px; }
 }
 
-@media (min-width: 541px) {
-  .lesson__overview-toggle { display: none; }
+@media (min-width: 541px) and (min-height: 501px) {
+  .lesson__overview-toggle, .lesson__pan-control, .lesson__group-picker { display: none; }
 }

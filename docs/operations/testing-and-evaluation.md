@@ -8,7 +8,9 @@ Browser suites use a dedicated synthetic SQLite directory and separate ports. Vi
 
 ## Live-provider budget
 
-Offline fixtures are the default. A pre-merge live smoke is limited to two short synthetic sessions. Record runtime model IDs, audio duration, token usage and provider-reported cost. Never loop paid calls for screenshots.
+Offline fixtures are the default. `npm run test:av` drives the production `ResponseCueTimeline` and `CharacterAttentionController`, derives silence from PCM windows, cue error from annotated versus observed release events, final correction from observed playback completion, frame p95 from captured timestamps, and stale writes from rejected post-cancel events. Each audiovisual gate has a negative source-trace fixture that must fail. The JSON report, WAV and MP4 are written under `artifacts/evaluation/`; they are deterministic offline evidence, not provider or target-hardware evidence.
+
+A pre-merge live smoke is limited to two short synthetic sessions. Record runtime model IDs, audio duration, token usage and provider-reported cost. Never loop paid calls for screenshots.
 
 ## Target hardware
 
@@ -23,5 +25,7 @@ Record device, OS, browser, headphones/speakers, noise condition, autoplay, perm
 - frame intervals and long tasks.
 
 If loopback/recorded hardware evidence is absent, mark acoustic results UNVERIFIED. Synthetic PCM cannot substitute for target hardware.
+
+Browser coverage includes a real Lesson component with deterministic fake WebSocket/PCM events for start, listening, thinking, speaking, semantic visual focus, question caption, highlight gaze and drawing interruption. It asserts stale future visual rejection, semantic view geometry, 44 px controls, focus visibility/order, reduced motion, 320 px, mobile landscape and a 200% zoom/reflow state. This proves browser integration without claiming live provider or physical-device behavior.
 
 Camera scenarios are not applicable because camera support is not implemented.

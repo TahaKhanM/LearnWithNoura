@@ -9,10 +9,11 @@ import {
 import { AudioOut } from './audioOut';
 import { AudioIn } from './audioIn';
 import { GenerationScope } from './generationScope';
+import { ResponseCueTimeline, type ResponseCue } from './responseTimeline';
 
 export type Phase = 'connecting' | 'listening' | 'thinking' | 'speaking' | 'reconnecting' | 'fallback' | 'failed' | 'ended';
 export interface CaptionLine { role: 'tutor' | 'child'; text: string; live: boolean; responseId?: string }
-export interface LessonState { activeConcept?: string; strategy?: string; nextStep?: string }
+export interface LessonState { activeConcept?: string; strategy?: string; nextStep?: string; phase?: string; activeSemanticObjectId?: string; characterAttentionTarget?: string }
 export interface EvidenceEntry { concept: string; observation: string; verdict: string; confidence: string }
 export interface TurnMetrics { askToFirstAudioMs?: number; detectorToStopScheduledMs?: number; providerCancelConfirmationMs?: number }
 export interface SessionSnapshot {
@@ -31,9 +32,8 @@ export interface SessionSnapshot {
   metrics: TurnMetrics;
 }
 
-interface StampedOps { stampMs: number; responseId: string; ops: BoardOp[]; eventId: number | null; identity: GenerationIdentity }
-interface StampedText { stampMs: number; responseId: string; delta: string; identity: GenerationIdentity }
 interface QueuedAsk { text: string; idempotencyKey: string; identity: GenerationIdentity }
+export interface VisualCueMetadata { visualCueId?: string; semanticObjectId?: string; groupLabel?: string; checkpoint?: string }
 
 type Listener = () => void;
 const CONNECT_TIMEOUT_MS = 8_000;
@@ -46,8 +46,7 @@ export class RealtimeSession {
   private readonly sessionId: string;
   private listeners = new Set<Listener>();
   private snapshot: SessionSnapshot;
-  private pendingOps: StampedOps[] = [];
-  private pendingText: StampedText[] = [];
+  private timeline = new ResponseCueTimeline();
   private phraseBuffers = new Map<string, string>();
   private currentResponseId: string | null = null;
   private deadResponses = new Set<string>();
@@ -66,9 +65,12 @@ export class RealtimeSession {
   private lessonCapability: string | null;
   private scope: GenerationScope;
   private gate: RuntimeEventGate;
+  private interruptionPending = false;
 
-  onBoardOps: (ops: BoardOp[], animate: boolean, identity: GenerationIdentity) => Promise<boolean | void> | boolean | void = () => {};
+  onBoardOps: (ops: BoardOp[], animate: boolean, identity: GenerationIdentity, cue?: VisualCueMetadata) => Promise<boolean | void> | boolean | void = () => {};
   onGenerationCancelled: (identity: GenerationIdentity) => void = () => {};
+  onGenerationActivated: (identity: GenerationIdentity, reason: 'interruption' | 'ordinary') => void = () => {};
+  onCaptionQuestion: (identity: GenerationIdentity) => void = () => {};
   onEnded: () => void = () => {};
 
   constructor(sessionId: string) {
@@ -179,7 +181,8 @@ export class RealtimeSession {
     if (!trimmed || this.snapshot.phase === 'ended') return;
     const wasFallback = this.snapshot.phase === 'fallback';
     const wasReconnecting = this.snapshot.phase === 'reconnecting';
-    this.interruptLocally('text');
+    if (['speaking', 'thinking'].includes(this.snapshot.phase)) this.interruptLocally('text');
+    else this.cancelGeneration('new learner text turn');
     this.turnCounter += 1;
     this.activateScope(true);
     this.askAt = performance.now();
@@ -239,10 +242,10 @@ export class RealtimeSession {
     const detectorAt = performance.now();
     const heard = this.audioOut.stop();
     const detectorToStopScheduledMs = Math.max(0, performance.now() - detectorAt);
-    this.pendingOps = [];
-    this.pendingText = [];
+    this.timeline.cancel(identity);
     this.phraseBuffers.clear();
     this.hotFrames = 0;
+    this.interruptionPending = true;
     this.cancelGeneration(`interrupted by ${reason}`);
     for (const item of heard) {
       if (!item.fullyPlayed) this.sendUsingIdentity(identity, 'truncate', { item_id: item.itemId, audio_end_ms: item.heardMs });
@@ -303,20 +306,50 @@ export class RealtimeSession {
         if (typeof message.delta !== 'string') break;
         const responseId = String(message.response_id ?? '');
         if (this.deadResponses.has(responseId)) break;
-        this.pendingText.push({ stampMs: this.audioOut.scheduledMs(responseId), responseId, delta: message.delta, identity: envelope });
+        if (!envelope.audioSampleOffsets) break;
+        this.timeline.enqueue({
+          kind: 'caption', cueId: envelope.eventId, responseId,
+          startSample: envelope.audioSampleOffsets.start, endSample: envelope.audioSampleOffsets.end,
+          sequence: envelope.sequence, identity: envelope, delta: message.delta,
+        });
         break;
       }
       case 'transcript_done': {
         const responseId = String(message.response_id ?? '');
         const text = String(message.text ?? '').trim();
-        if (text && !this.deadResponses.has(responseId)) this.applyFinalTranscript(responseId, text);
+        if (text && !this.deadResponses.has(responseId) && envelope.audioSampleOffsets) this.timeline.enqueue({
+          kind: 'final', cueId: envelope.eventId, responseId,
+          startSample: envelope.audioSampleOffsets.start, endSample: envelope.audioSampleOffsets.end,
+          sequence: envelope.sequence, identity: envelope, text,
+        });
         break;
       }
       case 'board_ops': {
         if (!Array.isArray(message.ops)) break;
         const responseId = String(message.response_id ?? '');
         if (this.deadResponses.has(responseId)) break;
-        this.pendingOps.push({ stampMs: this.audioOut.scheduledMs(responseId), responseId, ops: message.ops as BoardOp[], eventId: typeof message.event_id === 'number' ? message.event_id : null, identity: envelope });
+        if (!envelope.audioSampleOffsets) {
+          if (envelope.idempotencyKey) this.releaseOps({
+            kind: 'visual', cueId: envelope.eventId, responseId,
+            startSample: 0, endSample: 0, sequence: envelope.sequence, identity: envelope,
+            ops: message.ops as BoardOp[], eventId: typeof message.event_id === 'number' ? message.event_id : null,
+            visualCueId: envelope.visualCueId, semanticObjectId: envelope.semanticObjectId,
+            groupLabel: typeof message.groupLabel === 'string' ? message.groupLabel : undefined,
+            checkpoint: typeof message.checkpoint === 'string' ? message.checkpoint : undefined,
+            idempotencyKey: envelope.idempotencyKey,
+          });
+          break;
+        }
+        this.timeline.enqueue({
+          kind: 'visual', cueId: envelope.eventId, responseId,
+          startSample: envelope.audioSampleOffsets.start, endSample: envelope.audioSampleOffsets.end,
+          sequence: envelope.sequence, identity: envelope,
+          ops: message.ops as BoardOp[], eventId: typeof message.event_id === 'number' ? message.event_id : null,
+          visualCueId: envelope.visualCueId, semanticObjectId: envelope.semanticObjectId,
+          groupLabel: typeof message.groupLabel === 'string' ? message.groupLabel : undefined,
+          checkpoint: typeof message.checkpoint === 'string' ? message.checkpoint : undefined,
+          idempotencyKey: envelope.idempotencyKey,
+        });
         break;
       }
       case 'user_transcript': {
@@ -343,13 +376,20 @@ export class RealtimeSession {
           this.update({ metrics: { ...this.snapshot.metrics, providerCancelConfirmationMs } });
           this.cancelRequestedAt = 0;
         }
-        if (!this.audioOut.speaking && this.pendingText.length === 0 && this.snapshot.phase === 'speaking') this.update({ phase: 'listening' });
+        if (!this.audioOut.speaking && this.timeline.pendingCount() === 0 && this.snapshot.phase === 'speaking') this.update({ phase: 'listening' });
         break;
       }
       case 'safe_question': {
         const text = String(message.text ?? '').trim();
         if (text) this.appendCaption({ role: 'tutor', text, live: false });
+        if (text) this.onCaptionQuestion(this.scope.identity);
         this.update({ phase: 'listening' });
+        break;
+      }
+      case 'fallback_caption': {
+        const text = String(message.text ?? '').trim();
+        if (text) for (const phrase of segmentPhrases(text)) this.appendCaption({ role: 'tutor', text: phrase, live: false, responseId: String(message.response_id ?? '') || undefined });
+        this.update({ phase: 'fallback' });
         break;
       }
       case 'error': {
@@ -366,28 +406,39 @@ export class RealtimeSession {
     if (!this.scope.active) return;
     const energy = this.audioOut.currentEnergy();
     if (Math.abs(energy - this.snapshot.voiceEnergy) > 0.01) this.update({ voiceEnergy: energy });
-    while (this.pendingText.length > 0 && this.audioOut.playedMs(this.pendingText[0].responseId) + 120 >= this.pendingText[0].stampMs) {
-      const item = this.pendingText.shift() as StampedText;
-      if (!this.isCurrent(item.identity) || this.deadResponses.has(item.responseId)) continue;
-      this.pushTranscriptDelta(item.responseId, item.delta);
-    }
-    while (this.pendingOps.length > 0 && this.audioOut.playedMs(this.pendingOps[0].responseId) + 60 >= this.pendingOps[0].stampMs) {
-      const item = this.pendingOps.shift() as StampedOps;
-      this.releaseOps(item);
-    }
+    for (const cue of this.timeline.drain((responseId) => this.audioOut.playedSamples(responseId))) this.releaseCue(cue);
   }
 
-  private releaseOps(item: StampedOps): void {
+  private releaseCue(cue: ResponseCue): void {
+    if (!this.isCurrent(cue.identity) || this.deadResponses.has(cue.responseId)) return;
+    if (cue.kind === 'caption') this.pushTranscriptDelta(cue.responseId, cue.delta);
+    else if (cue.kind === 'visual') this.releaseOps(cue);
+    else this.applyFinalTranscript(cue.responseId, cue.text);
+  }
+
+  private releaseOps(item: Extract<ResponseCue, { kind: 'visual' }>): void {
     if (!this.isCurrent(item.identity) || this.deadResponses.has(item.responseId)) return;
-    void Promise.resolve(this.onBoardOps(item.ops, true, item.identity)).then((completed) => {
-      if (completed !== false && this.isCurrent(item.identity) && item.eventId !== null) this.send('ops_shown', { event_id: item.eventId });
+    void Promise.resolve(this.onBoardOps(item.ops, true, item.identity, {
+      visualCueId: item.visualCueId,
+      semanticObjectId: item.semanticObjectId,
+      groupLabel: item.groupLabel,
+      checkpoint: item.checkpoint,
+    })).then((completed) => {
+      if (completed !== false && this.isCurrent(item.identity) && item.eventId !== null) {
+        if (item.idempotencyKey) {
+          void fetch('/api/fallback-checkpoint', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Lesson ${this.lessonCapability ?? ''}` },
+            body: JSON.stringify({ eventId: item.eventId, idempotencyKey: item.idempotencyKey, ...item.identity }),
+          }).catch(() => undefined);
+        } else this.send('ops_shown', { event_id: item.eventId });
+      }
     });
   }
 
   private handlePlaybackEnd(): void {
     if (!this.scope.active) return;
-    for (const item of this.pendingText.splice(0)) if (this.isCurrent(item.identity) && !this.deadResponses.has(item.responseId)) this.pushTranscriptDelta(item.responseId, item.delta, true);
-    for (const item of this.pendingOps.splice(0)) this.releaseOps(item);
+    this.releasePending();
     for (const responseId of this.phraseBuffers.keys()) this.flushPhrase(responseId, false);
     if (this.snapshot.phase === 'speaking') this.update({ phase: 'listening', voiceEnergy: 0 });
   }
@@ -399,6 +450,7 @@ export class RealtimeSession {
       const phrase = buffer.slice(0, boundary).trim();
       buffer = buffer.slice(boundary);
       if (phrase) this.appendCaption({ role: 'tutor', text: phrase, live: !force, responseId });
+      if (phrase && /[?？]\s*$/.test(phrase)) this.onCaptionQuestion(this.scope.identity);
     }
     this.phraseBuffers.set(responseId, buffer);
   }
@@ -414,6 +466,7 @@ export class RealtimeSession {
     const withoutResponse = this.snapshot.captions.filter((caption) => caption.responseId !== responseId);
     const corrected = segmentPhrases(text).map((phrase) => ({ role: 'tutor' as const, text: phrase, live: false, responseId }));
     this.update({ captions: [...withoutResponse, ...corrected].slice(-100) });
+    if (/[?？]\s*$/.test(text)) this.onCaptionQuestion(this.scope.identity);
   }
 
   private appendCaption(line: CaptionLine): void { this.update({ captions: [...this.snapshot.captions, line].slice(-100) }); }
@@ -425,7 +478,7 @@ export class RealtimeSession {
       const response = await fetch('/api/fallback-turn', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Lesson ${this.lessonCapability ?? ''}` },
-        body: JSON.stringify({ sessionId: this.sessionId, text, idempotencyKey }), signal: scope.signal,
+        body: JSON.stringify({ text, idempotencyKey, ...scope.identity }), signal: scope.signal,
       });
       if (!response.ok || !response.body) throw new Error(`fallback failed (${response.status})`);
       const reader = response.body.getReader();
@@ -439,7 +492,11 @@ export class RealtimeSession {
         const lines = buffer.split('\n');
         buffer = lines.pop() ?? '';
         for (const line of lines) if (line.trim() && scope.active) {
-          try { this.handleFallbackStep(JSON.parse(line), scope.identity); }
+          try {
+            const decoded = JSON.parse(line) as unknown;
+            if (RuntimeEventEnvelopeSchema.safeParse(decoded).success) this.handleServer(decoded);
+            else this.handleFallbackStep(decoded as Record<string, unknown>, scope.identity);
+          }
           catch { /* malformed line */ }
         }
       }
@@ -452,10 +509,7 @@ export class RealtimeSession {
 
   private handleFallbackStep(step: Record<string, unknown>, identity: GenerationIdentity): void {
     if (!this.isCurrent(identity)) return;
-    if (step.type === 'say' && typeof step.text === 'string') for (const phrase of segmentPhrases(step.text)) this.appendCaption({ role: 'tutor', text: phrase, live: false });
-    else if (step.type === 'board_ops' && Array.isArray(step.ops)) void this.onBoardOps(step.ops as BoardOp[], true, identity);
-    else if (step.type === 'evidence') this.update({ evidenceCount: this.snapshot.evidenceCount + 1 });
-    else if (step.type === 'error') this.update({ error: String(step.message ?? 'The tutor failed.') });
+    if (step.type === 'stream_error') this.update({ error: String(step.message ?? 'The tutor failed.') });
   }
 
   sendBoardEvent(description: string): void { this.send('board_event', { description }); }
@@ -468,6 +522,9 @@ export class RealtimeSession {
     this.outboundSequence = 0;
     this.scope.interval(() => this.releasePending(), 50);
     this.update?.({ identity });
+    const activationReason = this.interruptionPending ? 'interruption' : 'ordinary';
+    this.interruptionPending = false;
+    this.onGenerationActivated(identity, activationReason);
   }
 
   private cancelGeneration(reason: string): void {

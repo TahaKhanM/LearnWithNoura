@@ -5,6 +5,7 @@ import { BOARD_W, BOARD_H, type Vec } from '../../shared/boardOps';
 import { compileScene, type CompiledItem, type RenderNode, type BBox } from './compile';
 import type { SceneState } from './scene';
 import { BoardAnimator, hideForAnimation, type PenPosition } from './animator';
+import { deriveSemanticViewport } from './semanticViewport';
 import { FONT_HAND } from './measure';
 import './Board.css';
 
@@ -30,6 +31,9 @@ interface BoardCanvasProps {
   longDescription?: string;
   /** Lets the lesson own generation-scoped animation transactions. */
   animatorRef?: (animator: BoardAnimator) => void;
+  focusSemanticObjectId?: string;
+  focusIndex?: number;
+  overview?: boolean;
 }
 
 function KatexBlock({ node }: { node: Extract<RenderNode, { type: 'katex' }> }) {
@@ -136,6 +140,9 @@ export function BoardCanvas({
   onLearnerAttention,
   longDescription,
   animatorRef,
+  focusSemanticObjectId,
+  focusIndex = 0,
+  overview = false,
 }: BoardCanvasProps) {
   const svgRef = useRef<SVGSVGElement>(null);
   const animator = useMemo(() => new BoardAnimator(), []);
@@ -145,6 +152,7 @@ export function BoardCanvas({
   const lastEpoch = useRef(scene.epoch);
   const [liveStroke, setLiveStroke] = useState<Vec[] | null>(null);
   const [fontsReady, setFontsReady] = useState(() => !document.fonts);
+  const [compact, setCompact] = useState(() => window.matchMedia?.('(max-width: 540px), (max-height: 500px)').matches ?? false);
   const strokeRef = useRef<Vec[] | null>(null);
 
   useEffect(() => {
@@ -163,16 +171,22 @@ export function BoardCanvas({
     return () => { cancelled = true; };
   }, []);
 
-  const compiled = useMemo(() => fontsReady ? compileScene(scene.items) : [], [scene.items, fontsReady]);
-
   useEffect(() => {
-    if (!fontsReady || compiled.length === 0 || window.innerWidth > 540) return;
-    const container = svgRef.current?.closest<HTMLElement>('.lesson__surface, .board-harness__surface');
-    if (!container || container.classList.contains('lesson__surface--overview')) return;
-    requestAnimationFrame(() => {
-      container.scrollLeft = Math.max(0, (container.scrollWidth - container.clientWidth) / 2);
-    });
-  }, [compiled, fontsReady]);
+    const query = window.matchMedia?.('(max-width: 540px), (max-height: 500px)');
+    if (!query) return;
+    const update = () => setCompact(query.matches);
+    update();
+    query.addEventListener?.('change', update);
+    return () => query.removeEventListener?.('change', update);
+  }, []);
+
+  const compiled = useMemo(() => fontsReady ? compileScene(scene.items) : [], [scene.items, fontsReady]);
+  const semanticViewport = useMemo(
+    () => overview || !compact
+      ? { x: 0, y: 0, w: BOARD_W, h: BOARD_H, itemIds: [] }
+      : deriveSemanticViewport(scene, focusSemanticObjectId, focusIndex),
+    [scene, focusSemanticObjectId, focusIndex, overview, compact],
+  );
 
   // A clear resets animation memory so re-used ids animate again.
   if (scene.epoch !== lastEpoch.current) {
@@ -294,7 +308,9 @@ export function BoardCanvas({
       ref={svgRef}
       className={`board__svg board__svg--${tool}`}
       data-fonts-ready={fontsReady}
-      viewBox={`0 0 ${BOARD_W} ${BOARD_H}`}
+      viewBox={`${semanticViewport.x} ${semanticViewport.y} ${semanticViewport.w} ${semanticViewport.h}`}
+      data-semantic-object={focusSemanticObjectId ?? ''}
+      data-viewbox={`${semanticViewport.x},${semanticViewport.y},${semanticViewport.w},${semanticViewport.h}`}
       preserveAspectRatio="xMidYMid meet"
       role="img"
       aria-label="Shared Noura whiteboard"

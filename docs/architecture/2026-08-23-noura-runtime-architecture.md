@@ -33,11 +33,11 @@ The model proposes a validated `TeachingMove`. It owns classification rationale,
 
 ## Audio, captions and cancellation
 
-WebSocket plus browser-owned PCM remains the selected transport. PCM sample progress is the release clock for phrase captions and visual checkpoints. Final output-transcript events replace provisional response phrases. There is no claim of provider word timestamps.
+WebSocket plus browser-owned PCM remains the selected transport. The proxy counts decoded PCM16 samples per provider response and annotates audio, transcript, semantic visual, and final-correction envelopes with derived sample offsets. `ResponseCueTimeline` releases phrase captions, visual checkpoints, character targets, and final text from the browser's heard-sample playhead. Final transcript correction is held until `audio_done` and then until its final sample is heard, so a transcript completion event cannot reveal queued future speech. There is no claim of provider word timestamps.
 
 Interruption records detector-to-stop-scheduled and provider-confirmation intervals separately. Acoustic silence is not inferred from function return. Target-hardware onset-to-silence remains UNVERIFIED.
 
-Reconnect has an eight-second connect timeout and at most two retries. Only the newest queued text ask is retained with an idempotency key. Fallback uses the same session/evidence/board concepts, is single-generation, abortable and captions-only.
+Reconnect has an eight-second connect timeout and at most two retries. Only the newest queued text ask is retained with an idempotency key. Captions-only fallback uses the same versioned event envelope, deterministic wait guard, semantic visual adapter/checkpoints and evidence schema as Realtime. `FallbackTurnCoordinator` keeps one process-local provider controller per session while a durable `fallback_turns` claim enforces one active generation and idempotency across requests. Provider calls receive a composed request/supersession/timeout signal. Every fallback mutation revalidates active session, connection epoch, turn, generation and idempotency; completed duplicate keys replay stored envelopes without new rows. A checkpoint remains unreleased until the browser acknowledges completed animation.
 
 ## Semantic visuals and committed reveal
 
@@ -47,7 +47,7 @@ The preferred path is:
 
 Adapters cover exact Pythagorean area rearrangement, unit-circle projection, shared-scale fraction comparison, colour-distinguished slopes, causal cycles, claim/evidence/reasoning, history cause/effect, grammar structure, tables, timelines and explicit NoBoard.
 
-Scene inspection checks finite geometry, safe bounds, the toolbar region and destructive text-bearing collisions. Long unbroken words are split by measured width. Rejection preserves the last committed scene. Tutor clear/erase/update cannot mutate learner-owned marks. Mobile focus mode presents a readable pannable board with a full-overview toggle.
+Scene inspection checks finite geometry, safe bounds, the toolbar region and destructive text-bearing collisions. Long unbroken words are split by measured width. Rejection preserves the last committed scene. Tutor clear/erase/update cannot mutate learner-owned marks. `revealOrder` is compiled into ordered, individually persisted checkpoints; only a completed animation is acknowledged and replayable. Visual cue and semantic object IDs stay on the runtime envelope. Mobile and short-landscape focus derive a viewBox from semantic object bounds, cap the active view for readable text, expose labelled group selection and previous/next pan alternatives, and preserve an explicit full-board overview. The earlier fixed 720 px scroll canvas is removed.
 
 ## Character attention
 
@@ -59,7 +59,7 @@ The avatar uses real output energy for mouth state, direct CSS-variable eye moti
 
 Local SQLite uses numbered migrations, foreign keys, latest-event pagination, immutable ended-session cutoffs and linked continuation. `noura.db` migration checkpoints and verifies the historical database, writes a verified backup, compares row counts, and retains the source.
 
-Evidence observations include UUID, child/session, normalized concept, taxonomy, observation, confidence basis, source event IDs, exact normalized excerpt/span, task/opportunity, independence, domain result, turn/generation, contradiction/supersession and time. Summary claims cite evidence IDs; invalid IDs or invented quoted spans cause deterministic fallback.
+Evidence observations include UUID, child/session, normalized concept, taxonomy, observation, confidence basis, source event IDs, exact normalized excerpt/span, task/opportunity kind, retrieval lineage, independence, domain result, turn/generation, contradiction/supersession and time. `projectConceptHistories` is the single status projection used by summary validation, deterministic summary fallback and Parent concept history. “Demonstrated” requires two independent positive opportunities plus explanation/application and later retrieval. Self-correction is reduced-independence; unresolved misconception or contradiction remains uncertain. Summary claims cite evidence IDs and carry a calibrated `progressing|demonstrated` label; invalid IDs, projection overclaims or invented quoted spans cause deterministic fallback.
 
 `PostgresStore` provides a pooled, transactional, versioned export/import contract and passes an offline Postgres-compatible test. It is not yet wired into all domain services, so Production startup always fails closed.
 
