@@ -138,9 +138,25 @@ function migrate(database: DatabaseSync): void {
       ts INTEGER NOT NULL,
       type TEXT NOT NULL,
       payload TEXT NOT NULL,
-      released INTEGER NOT NULL DEFAULT 1
+      released INTEGER NOT NULL DEFAULT 1,
+      release_requested INTEGER NOT NULL DEFAULT 0
     );
     CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id, id);
+
+    CREATE TABLE IF NOT EXISTS fallback_turns (
+      session_id TEXT NOT NULL REFERENCES sessions(id),
+      idempotency_key TEXT NOT NULL,
+      connection_epoch INTEGER NOT NULL,
+      turn_id TEXT NOT NULL,
+      generation_id TEXT NOT NULL,
+      status TEXT NOT NULL,
+      steps_json TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY (session_id, idempotency_key)
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_fallback_one_active_session
+      ON fallback_turns(session_id) WHERE status = 'active';
   `);
 
   // Older local databases predate the released flag.
@@ -149,6 +165,7 @@ function migrate(database: DatabaseSync): void {
   } catch {
     /* column already exists */
   }
+  addColumn(database, 'events', 'release_requested INTEGER NOT NULL DEFAULT 0');
 
   addColumn(database, 'sessions', 'parent_session_id TEXT REFERENCES sessions(id)');
   addColumn(database, 'sessions', 'ended_event_id INTEGER');
@@ -187,6 +204,10 @@ function migrate(database: DatabaseSync): void {
   addColumn(database, 'evidence', 'generation_id TEXT');
   addColumn(database, 'evidence', 'contradicts_json TEXT');
   addColumn(database, 'evidence', 'supersedes_json TEXT');
+  addColumn(database, 'evidence', "opportunity_kind TEXT NOT NULL DEFAULT 'recall'");
+  addColumn(database, 'evidence', 'retrieval_of TEXT');
+  addColumn(database, 'evidence', 'released INTEGER NOT NULL DEFAULT 1');
+  addColumn(database, 'evidence', 'idempotency_key TEXT');
   database.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_evidence_evidence_id ON evidence(evidence_id) WHERE evidence_id IS NOT NULL');
 }
 

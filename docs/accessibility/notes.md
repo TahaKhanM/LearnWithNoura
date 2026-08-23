@@ -13,4 +13,4 @@ Target: WCAG 2.2 AA.
 - Reduced motion removes spatial character motion and progressive drawing while retaining ordered state/cue changes.
 - Character phase is duplicated in status text and is never the only signal.
 
-Automated axe checks cover Home and a canonical board state. Manual screen-reader, keyboard order, 200% zoom and target-device touch review remain required before Production.
+Automated axe checks cover Home and a canonical board state. Automated compact-layout coverage includes a 640×400 effective-viewport surrogate for 200% reflow, not browser UI zoom. Manual screen-reader, genuine 200% browser zoom and target-device touch review remain required before Production.

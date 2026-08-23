@@ -24,8 +24,12 @@ export function Avatar({ phase, voiceEnergy, micEnergy, attentionController }: A
     let frame = 0;
     const tick = (now: number) => {
       const gaze = attentionController.frame(now);
-      root.current?.style.setProperty('--gaze-x', gaze.x.toFixed(3));
-      root.current?.style.setProperty('--gaze-y', gaze.y.toFixed(3));
+      if (root.current) {
+        root.current.style.setProperty('--gaze-x', gaze.x.toFixed(3));
+        root.current.style.setProperty('--gaze-y', gaze.y.toFixed(3));
+        root.current.dataset.attentionTarget = gaze.targetType;
+        root.current.dataset.semanticObject = gaze.semanticObjectId ?? '';
+      }
       frame = requestAnimationFrame(tick);
     };
     const onVisibility = () => {

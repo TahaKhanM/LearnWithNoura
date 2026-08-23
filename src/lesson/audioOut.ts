@@ -4,12 +4,12 @@
  * exactly how much audio has been scheduled and how much has played —
  * per response, even when several responses are queued back to back —
  * (a) stopping locally on interruption is instant, (b) captions and board
- * operations can be released at the exact moment in speech where the
- * model emitted them, and (c) truncation can tell the server precisely
+ * operations release only after their conservative server-derived response-
+ * segment boundary is heard, and (c) truncation can tell the server precisely
  * how much of each conversation item the child actually heard.
  */
 
-const RATE = 24000;
+export const PCM_SAMPLE_RATE = 24000;
 
 interface ActiveSource {
   node: AudioBufferSourceNode;
@@ -42,7 +42,7 @@ export class AudioOut {
   onPlaybackEnd: () => void = () => {};
 
   private context(): AudioContext {
-    if (!this.ctx) this.ctx = new AudioContext({ sampleRate: RATE });
+    if (!this.ctx) this.ctx = new AudioContext({ sampleRate: PCM_SAMPLE_RATE });
     return this.ctx;
   }
 
@@ -69,7 +69,7 @@ export class AudioOut {
     const samples = bytes.length >> 1;
     if (samples === 0) return;
 
-    const buffer = ctx.createBuffer(1, samples, RATE);
+    const buffer = ctx.createBuffer(1, samples, PCM_SAMPLE_RATE);
     const channel = buffer.getChannelData(0);
     let sumSquares = 0;
     for (let i = 0; i < samples; i++) {
@@ -134,6 +134,15 @@ export class AudioOut {
   /** Total audio received so far for a response, in ms. */
   scheduledMs(responseId: string): number {
     return (this.findTimeline(responseId)?.scheduledSec ?? 0) * 1000;
+  }
+
+  playedSamples(responseId: string): number {
+    const played = this.playedMs(responseId);
+    return played === Number.MAX_SAFE_INTEGER ? played : Math.round((played / 1000) * PCM_SAMPLE_RATE);
+  }
+
+  scheduledSamples(responseId: string): number {
+    return Math.round((this.scheduledMs(responseId) / 1000) * PCM_SAMPLE_RATE);
   }
 
   get speaking(): boolean {

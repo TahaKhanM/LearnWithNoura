@@ -12,27 +12,27 @@ Line references are to this working revision and are refreshed at handoff.
 | AUD-P1-01 | Global visual bounds/collision unsafe — FAIL | `src/board/inspection.ts`; long-word splitting; semantic adapters | `inspection.test.ts`; canonical visual baselines | Actual DOM/KaTeX repair is bounded to one pass. PARTIAL |
 | AUD-P1-02 | Misleading interruption metric — FAIL | Detector-to-stop-scheduled and provider confirmation are separate; README removes acoustic claim | runtime/property tests | Acoustic onset-to-silence hardware run missing. UNVERIFIED |
 | AUD-P1-03 | Interruption finished stale drawing — FAIL | `BoardAnimator.cancelAll`; transient scene rollback; ack after idle | `animator.test.ts`; generation cancellation | Browser recorded interruption evidence not yet captured. PASS (deterministic), UNVERIFIED (hardware) |
-| AUD-P1-04 | Reconnect/fallback stale/drop/zombie risks — FAIL | 8s timeout, two retries, newest queued ask, idempotency, scope cleanup, abortable fallback | GenerationScope and event-gate tests | Full fake-WS integration matrix is incomplete. PARTIAL |
+| AUD-P1-04 | Reconnect/fallback stale/drop/zombie risks — FAIL | 8s timeout, two retries, newest queued ask; durable fallback claim, supersession abort, composed timeout/request signal, scoped writes and replay | fallback concurrency/error/duplicate/stale tests; cue reconnect/navigation tests | Deterministic PASS; deployed provider/network fault test remains UNVERIFIED. |
 | AUD-P1-05 | Unauthenticated child data/paid WS — FAIL | parent-scoped rows/routes, signed lesson capability, exact Origin, rate bounds | `api.auth.test.ts`, `security.test.ts` | Real identity provider and distributed limiter absent. BLOCKED for Production |
 | AUD-P1-06 | Under-18 controls absent — FAIL | disclosure, synthetic boundary, raw-audio rule, Production/ZDR fail-close, threat model | runtime config tests, axe Home | Legal/account/ZDR/report ownership external. BLOCKED |
 | AUD-P1-07 | Tutor silently waits after promises — FAIL | lesson reducer and bounded continuation/safe question | `orchestrator.test.ts` | Paid representative live eval limited/not yet run. PARTIAL |
 | AUD-P1-08 | Ended sessions mutable — FAIL | immutable cutoff at end; store write rejection; linked continuation UI/API | `repo.test.ts`, Playwright ended route | Concurrent provider race needs deployed fault test. PASS locally |
 | AUD-P1-09 | Parent scroll owner wrong — FAIL | body/document scroll; fixed viewport scoped to Lesson | Playwright body overflow and Parent journey | Manual trackpad/touch/Space/Page Down still required. PARTIAL |
-| AUD-P1-10 | Captions arrival-stamped/raw-token UI — FAIL | PCM-gated phrase segmentation and final response correction; caret/clamp removed | unit/build checks | Recorded alignment metrics not performed. UNVERIFIED |
+| AUD-P1-10 | Captions arrival-stamped/raw-token UI — FAIL | proxy-derived PCM sample offsets; one cue timeline; `audio_done` + heard-sample final gate | jitter/done-before-playback/interruption/reconnect tests; measured offline AV report | Deterministic PASS; target-hardware alignment remains UNVERIFIED. |
 | AUD-P2-01 | Direct timeline stuck — FAIL | shared `loadTimeline` called for query session | Playwright direct Parent Area | PASS |
 | AUD-P2-02 | Selected learner resets — FAIL | URL + same-origin state; invalid requested ID is not substituted | Playwright reload/back flow | PASS |
-| AUD-P2-03 | Mobile board unreadable/tiny controls — FAIL | 44px child tools; mobile focus/pan + overview; contrast tokens | screenshots/axe; mobile target inspection | 200% zoom and physical touch manual pass open. PARTIAL |
+| AUD-P2-03 | Mobile board unreadable/tiny controls — FAIL | semantic-bound viewBox; labelled group select; keyboard/touch pan; overview; 44px primary controls | 320/390/844×390 plus 640×400 200% effective-viewport surrogate, text-size/focus/2D-overflow browser assertions and reviewed baselines | Browser viewport/surrogate PASS; genuine browser zoom and physical-device touch remain UNVERIFIED. |
 | AUD-P2-04 | Summary lacks lineage — FAIL | UUID evidence/source span; cited schema; deterministic rejection/fallback | `summary.test.ts`, `repo.test.ts` | Existing historical evidence remains legacy-shaped. PASS for new evidence |
 | AUD-P2-05 | Scripts only log failures — FAIL | Vitest/Playwright/axe scripts assert and exit nonzero | command results | Live paid scripts remain excluded by default. PASS |
 | AUD-P2-06 | Tutor clear deletes learner work — FAIL | owner-aware add/update/erase/clear | `scene.test.ts` | PASS |
 | AUD-P2-07 | Muted UI still says listening — FAIL | explicit muted status branch | browser source/build; dedicated live-mic browser test pending | PARTIAL |
 | AUD-P3-01 | Chunk/fonts/lint cleanup — PARTIAL | self-hosted Outfit/Caveat; font-ready compilation | build | JS chunk still above 500k; router lint warnings remain. PARTIAL |
 | OWN-01 | Starting dashboard incomplete/confusing | explicit Parent setup, role disclosure, progressive first/returning states | Home Playwright + screenshots + axe | PASS |
-| OWN-02 | Parent dashboard inaccessible/unclear | switcher, next action, hierarchy, history, evidence IDs, session timeline | Parent Playwright | Real cited summary browser fixture pending. PARTIAL |
+| OWN-02 | Parent dashboard inaccessible/unclear | authoritative concept projection, calibrated summary columns, contradiction/resolution history, evidence IDs | Parent browser fixture covers single correct, retrieval, self-correction, contradiction, resolution and improvement | PASS deterministic/browser. |
 | OWN-03 | Tutor loses momentum | deterministic owed action/handoff | orchestrator tests | Representative live matrix pending. PARTIAL |
 | OWN-04 | Purposeful adaptive loop | complete taxonomy, policy, concept projection, TeachingMove seam | pedagogy/orchestrator tests | Deterministic domain checkers limited. PARTIAL |
-| OWN-05 | Drawing needs semantic redesign/performance | semantic templates, inspection, transaction, reveal checkpoints | semantic/inspection/visual tests | General layout repair and mobile semantic group navigation can deepen. PARTIAL |
-| OWN-06 | Captions/voice/drawing/avatar feel separate | PCM clock; response IDs; shared visual/attention generation | protocol/generation/character tests | Recorded audiovisual sync evaluation missing. UNVERIFIED |
+| OWN-05 | Drawing needs semantic redesign/performance | semantic templates, ordered checkpoint compilation, inspection, committed animation, semantic mobile navigation | exact-domain, bounds/collision/crossing, reveal, viewport and visual tests | PASS deterministic; broad live-topic/provider review remains UNVERIFIED. |
+| OWN-06 | Captions/voice/drawing/avatar feel separate | derived PCM offsets; shared cue scheduler; semantic/highlight/question/interruption attention integration | fake-clock tests, actual browser integration capture, measured offline AV report | PASS deterministic/browser; target-hardware/provider recording UNVERIFIED. |
 
 ## Rebrand and data migration
 
@@ -58,9 +58,9 @@ Line references are to this working revision and are refreshed at handoff.
 | ARC-04 | Legal teaching state machine | `server/lesson/orchestrator.ts` | reducer tests PASS |
 | ARC-05 | Full response taxonomy/policy | `shared/pedagogy.ts` | taxonomy/projection tests PASS |
 | ARC-06 | One answer never mastery | projection and evidence mapping | tests PASS |
-| ARC-07 | Reconnect/fallback bounded/single-generation | RealtimeSession | PARTIAL integration coverage |
-| ARC-08 | PCM authoritative captions/visual/character | RealtimeSession, Board transaction, controller | Code/tests PASS; recorded sync UNVERIFIED |
-| ARC-09 | Semantic plan above BoardOp | `shared/semanticScene.ts`, tool schema | PASS fixtures |
+| ARC-07 | Reconnect/fallback bounded/single-generation | RealtimeSession + durable fallback claim/coordinator | PASS deterministic; deployed network UNVERIFIED |
+| ARC-08 | PCM authoritative captions/visual/character | proxy sample annotation, ResponseCueTimeline, Board transaction, controller | PASS deterministic/browser; target hardware UNVERIFIED |
+| ARC-09 | Semantic plan above BoardOp | semantic checkpoints consume revealOrder and carry group/object/cue identity | PASS exact fixtures/runtime browser |
 | ARC-10 | Canonical domain scenes and NoBoard | Board harness + screenshots | PASS visual/semantic assertions |
 | ARC-11 | Render inspect/repair/reject | `inspection.ts`; transaction keeps committed scene | PASS unit; DOM repair PARTIAL |
 | ARC-12 | Owner-aware board mutation | `scene.ts` | PASS |
@@ -74,8 +74,8 @@ Line references are to this working revision and are refreshed at handoff.
 | --- | --- | --- | --- |
 | CHAR-01 | Independent pupils, blink/brows/mouth/head states | `Avatar.tsx/.css`; self-hosted visual baselines | PASS visual implementation |
 | CHAR-02 | Mouth from actual output energy | `AudioOut.currentEnergy` → snapshot → Avatar | PASS unit/build; recorded AV UNVERIFIED |
-| CHAR-03 | Tutor pen gaze | Board animator pen → attention target | controller priority tests; live recording pending | PARTIAL |
-| CHAR-04 | Semantic highlight/revision gaze ≤200ms | semantic target seam/controller | timing recording missing | UNVERIFIED |
+| CHAR-03 | Tutor pen gaze | Board animator pen → bbox-aware attention target | controller/animator and deterministic AV frame trace | PASS deterministic; live provider recording UNVERIFIED |
+| CHAR-04 | Semantic highlight/revision gaze ≤200ms | cue identity → real compiled bbox → focused target | browser observed adoption under 200ms; controller integration test | PASS deterministic/browser |
 | CHAR-05 | Learner stroke/pointer/touch/focus gaze | Board callbacks + hysteresis controller | controller tests | PASS deterministic |
 | CHAR-06 | Interruption cancels mouth/gesture/pen/stale gaze in frame | generation cancel + animator/controller reset | cancellation tests | PASS deterministic |
 | CHAR-07 | Thinking/reconnect/failure/complete poses honest | phase classes and status text | screenshots/code | PASS |
@@ -119,6 +119,53 @@ Line references are to this working revision and are refreshed at handoff.
 
 - Target-hardware headphones and speakers: UNVERIFIED.
 - Real microphone permission denial, noise, single/repeated barge-in and acoustic silence: UNVERIFIED.
-- Screen reader, full keyboard order, 200% zoom and physical touch: partially automated, manual pass UNVERIFIED.
+- Screen reader, genuine browser UI zoom and physical touch: manual pass UNVERIFIED. Keyboard order/focus visibility and a 640×400 effective-viewport surrogate for 200% reflow have automated browser evidence.
 - Recorded live character normal speech/drawing/interruption/reconnect performance: UNVERIFIED.
 - Camera: not implemented; no camera permission or privacy recording required.
+
+## Audit-cycle ledger
+
+### Cycle 1 — local remediation, 2026-08-23
+
+Starting revision: `1b6797030141519dff0b5114d17c506f9e6ea5d4` on `devin/demo-day-interactive-tutor`. No push, PR mutation, Preview deployment, Production promotion, domain change, paid provider call, paid resource or destructive action was performed.
+
+| Packet item | Remediation evidence | Cycle status |
+| --- | --- | --- |
+| P1-1 fallback scope/idempotency | Durable one-active-generation claim; composed abort/timeout; identity-gated event/evidence/checkpoint writes; completed replay; semantic/orchestrator path; concurrent, abort, duplicate, ended, provider-error and stale-write tests | PASS deterministic |
+| P1-2 evidence overclaim | One authoritative full-history projection in summary validation/fallback and Parent; explicit opportunity/retrieval fields; calibrated summary status; store/summary/unit/browser cases | PASS deterministic/browser |
+| P1-3 response timing | Proxy-derived PCM sample offsets, one cue scheduler, `audio_done` final gate, synchronous cancellation; normal/jitter/repeat/gap/done-before-end/interruption/stale/reconnect/navigation tests | PASS deterministic; target hardware UNVERIFIED |
+| P1-4 semantic reveal/character | `revealOrder` checkpoints; typed cue/object identity; bbox gaze; question/interruption integration; commit acknowledgement after animation; controller + actual-browser interruption/highlight evidence | PASS deterministic/browser; live provider recording UNVERIFIED |
+| P2-5 mobile semantic layout | Semantic-bounds viewBox, group selection, keyboard/touch pan, overview; 320/390/844×390, 44px, text-size and overflow assertions; reviewed baselines. The historical 200% claim was later identified as a CSS-zoom surrogate and is superseded by Cycle 3's explicit evidence boundary. | PASS browser viewports; genuine browser zoom and physical-device touch UNVERIFIED |
+| P1-6 AV evidence integrity | The Cycle-1 gate/fixture claim was superseded by later audits and is not retained as independence evidence. See Cycle 3's seven-gate full isolation matrix. | SUPERSEDED; target acoustics explicitly UNVERIFIED |
+| P2-7 acceptance depth | Exact canonical semantics plus bounds/collision/crossing; real Lesson axe major states; reduced motion/focus/reflow/touch geometry; evidence projection browser case | PASS for fixed deterministic/browser gates |
+
+Cycle 1 generated JSON, WAV, a generic MP4 and `artifacts/browser/lesson-semantic-mobile.png`. The generic MP4 was later removed because it did not observe a Noura application surface and is not retained evidence. The remaining AV artifacts are synthetic/offline; the browser PNG uses deterministic fake Realtime/PCM input. Neither substitutes for target-hardware or paid-provider evidence.
+
+### Cycle 2 — local remediation, 2026-08-23
+
+Starting revision: `bc876c3f8faaa1d0a67200286b13e495917aa438` on `devin/demo-day-interactive-tutor`; clean and nine commits ahead of upstream. Cycle 2 reopened the Cycle-1 claims below after independent adversarial reproduction. No push, PR mutation, Preview/Production deployment, domain/DNS/SSL/WSS change, paid provider call, paid resource or destructive/billing action was performed.
+
+| Packet item | Remediation and direct evidence | Cycle status |
+| --- | --- | --- |
+| P1-1 evidence projection | `projectConceptHistories` now identifies one opportunity by session/task/turn, requires a later `retrievalOf` relationship, blocks latest/unresolved negative evidence, and treats explicit correction as resolution rather than confirmation. Summary validation/fallback and Parent call this same function. Negative-first unit cases cover duplicate same opportunity, reversed retrieval, later incorrect, single correction, post-resolution confirmation and cross-session retrieval; Parent fixture no longer labels contradicted/resolved-with-one-confirmation evidence Demonstrated. | 12-file focused Vitest run includes exact projection/summary cases; Parent Playwright passes. Deterministic/browser PASS. |
+| P1-2 fallback atomicity | All fallback events/evidence are staged unreleased. One transaction completes the durable turn and promotes committed events/evidence; semantic scenes still require animation acknowledgement. Failed/cancelled/superseded rows remain hidden. Generic event/evidence reads filter released rows; only explicitly named internal-audit methods expose staging. Tests fail seeded mid-turn faults after assistant content, semantic checkpoint, lesson state and evidence, plus abort, supersession and end; completed replay remains write-idempotent. | Focused fallback/store Vitest: provider fault and lifecycle cases pass with zero generic events/evidence and unreleased internal staging. Deterministic PASS; deployed provider/network faults UNVERIFIED. |
+| P1-3 response cue annotation | `ResponseSegmentAnnotator` gives audio exact cumulative PCM offsets, buffers transcript and semantic cues until segment seal, distributes transcript deltas by character weight across complete PCM, and places visual/pen/character semantic state at the boundary. RealtimeSession queues lesson state on the same heard-sample scheduler. Cycle-2 direct raw proxy and lower-level session tests passed, but the successor audit found that they did not traverse the full raw upstream→proxy envelope→RealtimeSession matrix in one harness. | Cycle-2 deterministic behavior retained; compositional proof gap closed in Cycle 3. This is conservative sample timing, not provider word timestamps. Target hardware/live provider remain UNVERIFIED. |
+| P1-4 AV evidence integrity | The evaluator derived values from production modules and captured traces/PCM, but its two caption controls mutated the same sole observation and therefore failed together. The Cycle-2 statement that all eight controls were independent was incorrect. Generic drawbox MP4 removal and the NOT_CLAIMED/UNVERIFIED boundaries remain valid. | INDEPENDENCE CLAIM INVALIDATED; replaced by Cycle 3's seven-gate full matrix. |
+| P2-5 mobile focus/reachability | Focus behavior, labelled controls, reviewed baselines and the 320×700, 390×844 and 844×390 viewport results remain valid. The Cycle-2 “200% zoom” assertion used `document.body.style.zoom = '2'`, so it was a CSS scaling surrogate rather than genuine browser zoom. | Browser viewport PASS; old zoom claim INVALIDATED and replaced by an explicit effective-viewport surrogate in Cycle 3. Physical touch/screen-reader/genuine browser zoom UNVERIFIED. |
+| P2-6 acceptance depth | Added direct proxy tests, RealtimeSession release tests, projection regression cases, generic-read visibility tests, and per-node browser geometry. Existing exact canonical semantic assertions and core onboarding/timeline/brand behavior remain in the full offline gate. | Full Vitest: 27 files / 137 tests pass; full visual 31/31, accessibility 3/3 and E2E 4/4 pass. Full commands recorded in final handoff. |
+
+Cycle-2 generated evidence: `artifacts/evaluation/synthetic-av-character-report.json`, `artifacts/evaluation/synthetic-interruption.wav`, `artifacts/browser/lesson-semantic-mobile.png`, and the eight tracked `scene-*-mobile-focus` baselines. These do not substitute for target-device acoustics, physical touch, screen-reader or live-provider evidence.
+
+### Cycle 3 — local remediation, 2026-08-23
+
+Starting revision: `de90355200501dc3c855954ead19a3d665cd3863` on `devin/demo-day-interactive-tutor`; clean and ten commits ahead of upstream. Cycle 3 reopened the three claims below after independent successor reproduction. No push, PR mutation, deployment, domain/DNS/SSL/WSS change, paid provider call, paid resource or destructive/billing action was performed.
+
+| Packet item | Remediation and direct evidence | Cycle status |
+| --- | --- | --- |
+| P1 AV negative-control independence and percentile integrity | Removed the redundant one-observation caption median/P95 pair and the one-observation visual P95 label. Seven non-redundant gates now report direct observed cue errors or cancellation/final-state values. The JSON publishes the baseline, every row of a 7×7 boolean matrix, per-row isolation, and `allIsolated`; each row mutates captured trace/PCM input. The evaluator exits nonzero unless its target alone is false and all six unrelated gates remain baseline true, which would reject the former identical caption controls. | Deterministic offline production-module/PCM PASS. Browser frame performance and rendered pen/mouth/character phase NOT_CLAIMED; target acoustics/live provider UNVERIFIED. |
+| P2 raw realtime integration matrix | Added one compositional harness that feeds raw upstream events through `connectRealtimeProxy`, passes emitted runtime envelopes into `RealtimeSession`, and releases with a fake per-response heard-sample clock. Six table rows cover normal, transcript-before-audio, audio-before-transcript, multiple pending repeated phrases/no-audio gaps, tool-before/after timing, and transcript_done/audio_done permutations. Additional cases cover raw cancellation, interruption identity replacement, reconnect replacement, stale-envelope replay and navigation cleanup. The seeded 480-of-24,000 assertion requires the first caption boundary to be greater than 480 and holds board/lesson/character/final cues to 24,000. | Deterministic compositional PASS; live provider/network and target hardware UNVERIFIED. |
+| P2 200% zoom evidence boundary | Replaced `document.body.style.zoom='2'` with a 640×400 effective viewport representing a 1280×800 page at 200%. The test enters the compact width/height media-query path and asserts labelled section/previous/next/overview controls, ≥44px control height, visible ≥2px keyboard focus, complete required-text containment, ≥16px active educational text, and no horizontal or vertical overflow. | Effective-viewport surrogate PASS. Genuine browser UI zoom, screen reader and physical-device touch UNVERIFIED. |
+
+Cycle-3 generated evidence is limited to `artifacts/evaluation/synthetic-av-character-report.json` and `artifacts/evaluation/synthetic-interruption.wav`; both are deterministic offline artifacts. The existing browser screenshot and reviewed mobile baselines remain Cycle-2 evidence and are not regenerated by this cycle's reflow assertion.
+
+Cycle-3 final local gates: full Vitest 28 files / 145 tests; accessibility Playwright 3/3; E2E 4/4; visual 31/31 (including all nine mobile-focus cases); AV 7/7 gates and 7/7 isolated controls; lint, client TypeScript, server TypeScript, runtime-model guard and Vite `/tmp` build all exit 0. These commands used synthetic/local inputs only.

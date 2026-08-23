@@ -44,7 +44,7 @@
 }
 
 .parent__switch-label select {
-  min-height: 40px;
+  min-height: 44px;
   border: 1px solid var(--rail-line);
   border-radius: 9px;
   background: var(--board);
@@ -147,7 +147,7 @@
 
 .parent__columns {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
   gap: 18px;
   margin-bottom: 8px;
 }

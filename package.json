@@ -20,7 +20,7 @@
     "test:security": "vitest run server/security.test.ts server/api.auth.test.ts server/store/repo.test.ts",
     "test:storage": "vitest run server/store/portable.test.ts server/store/db.test.ts",
     "test:runtime-models": "node scripts/runtime-model-diff.mjs",
-    "test:av": "node scripts/evaluate-av-character.mjs"
+    "test:av": "tsx scripts/evaluate-av-character.ts"
   },
   "dependencies": {
     "@fontsource-variable/caveat": "^5.3.0",
