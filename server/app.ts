@@ -323,21 +323,6 @@ server.on('upgrade', async (request, socket, head) => {
 
 let repositoryClose: Promise<void> | null = null;
 let serverShutdown: Promise<ShutdownDisposition> | null = null;
-type FatalShutdownHook = (error: unknown) => void;
-let fatalShutdownHook: FatalShutdownHook = (error) => {
-  console.error(`[shutdown:fatal] ${String(error).slice(0, 240)}`);
-  process.exit(1);
-};
-
-export function setFatalShutdownHookForTests(
-  hook: FatalShutdownHook,
-): () => void {
-  const previous = fatalShutdownHook;
-  fatalShutdownHook = hook;
-  return () => {
-    fatalShutdownHook = previous;
-  };
-}
 
 export function closeRepository(): Promise<void> {
   repositoryClose ??= repository.close();
@@ -359,7 +344,10 @@ export function shutdownServer(): Promise<ShutdownDisposition> {
       console.error(`[shutdown] ${String(error).slice(0, 240)}`);
       process.exitCode = 1;
     },
-    fatal: (error: unknown) => fatalShutdownHook(error),
+    fatal: (error: unknown) => {
+      console.error(`[shutdown:fatal] ${String(error).slice(0, 240)}`);
+      process.exit(1);
+    },
   });
   return serverShutdown;
 }
