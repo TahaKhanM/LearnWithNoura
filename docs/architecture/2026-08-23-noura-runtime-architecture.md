@@ -44,9 +44,9 @@ session. A per-connection `SessionTelemetryWriter` enqueues without awaiting
 repository work and drains one bounded FIFO in order, so metrics cannot delay
 response creation, cancellation, cue/response completion, or later messages.
 Production SQLite telemetry append and prior-start paging run in a worker
-thread; managed Postgres uses its native async boundary. The FIFO contains
-normal observations and ordered gap barriers, so a failed or overflowed item
-is accounted for at its stream position without changing lesson behavior.
+thread; managed Postgres uses its native async boundary. Accepted normal
+observations remain FIFO. Fixed per-reason gap counters preserve completeness
+totals without claiming chronological position under saturation.
 Provider terminal observations are deduplicated by a bounded response-ID set.
 Provider-side observers read token categories from
 `response.done.response.usage`, derive tutor-audio duration from that response’s

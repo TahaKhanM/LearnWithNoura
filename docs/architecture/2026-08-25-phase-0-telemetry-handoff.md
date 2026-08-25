@@ -2,13 +2,15 @@
 
 ## Second-review status
 
-The second consolidated review wave is complete at code head `4fced4d`.
+The lifecycle/accounting follow-up is complete at code head `fcf8a64`.
 Browser/visual/accessibility evidence remains intentionally pending controller
 rerun; no live/provider/hardware claim is added.
 
 ## Proven offline
 
-- Second-wave hardening code head: `4fced4d` against reviewer head `fef2bc8`.
+- Lifecycle hardening code head: `fcf8a64` against reviewer head `b4281da`.
+  Commits are `524af68` (ratified contract) and `fcf8a64` (lifecycle fixes).
+  The preceding wave was `4fced4d` against `fef2bc8`.
   The wave is `99f4f39` (decision/design clarification), `2c7b526`
   (off-thread ordered telemetry), and `4fced4d` (complete smoke
   reconciliation/docs).
@@ -19,10 +21,10 @@ rerun; no live/provider/hardware claim is added.
   append/prior-start paging runs in a worker; Postgres stays natively async.
   Repository latency cannot hold initial `response.create`, cancellation,
   cue/response completion, or later messages.
-- `telemetry_gap` projects aggregated server queue, server persistence, and
-  browser pre-ready queue loss as ordered barriers. Overflow follows older
-  accepted observations; failed normal rows become persistence barriers in
-  place; failed gaps retain their original reason/value and block later rows.
+- `telemetry_gap` projects fixed exact counters for server queue, persistence,
+  reconnect-history, accounting-overflow, and browser pre-ready loss. Accepted
+  normal rows remain FIFO; gap counters are completeness, not chronology,
+  evidence under saturation. A pending gap blocks later normal acceptance.
   The smoke gate rejects any gap. This is honest known-loss accounting, not a
   guarantee after an unrecovered browser/fallback/failed transport.
 - Raw turn, generation, provider-response, visual-cue, semantic-object,
@@ -43,10 +45,11 @@ rerun; no live/provider/hardware claim is added.
   failed seven new reconciliation assertions. Final GREEN evidence:
   - focused shared/session-log/recorder/writer/proxy/RealtimeSession/API suite:
     8 files, 104 tests passed;
-  - `npm test`: 49 files, 329 tests passed;
+  - `npm test`: 49 files, 334 tests passed;
   - `npm run test:smoke-report`: 45 tests passed;
   - `npm run test:integration`: 49 files, 329 tests passed;
   - `npm run test:security`: 3 files, 16 tests passed;
+  - `npm run test:storage`: 3 files, 5 tests passed;
   - `npm run build`: 147 modules transformed;
   - `npm run typecheck:server`, `npm run lint`, `npm run test:brand`,
     `npm run test:runtime-models` (8/8 assertions), and `git diff --check`
