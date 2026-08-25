@@ -440,6 +440,8 @@ EOF
 - Create: `src/lesson/audioOut.test.ts`
 - Modify: `src/lesson/realtimeSession.ts`
 - Modify: `src/lesson/realtimeSession.test.ts`
+- Modify: `server/realtime/proxy.ts`
+- Modify: `server/realtime/proxy.test.ts`
 
 **Interfaces:**
 - Produces:
@@ -448,6 +450,8 @@ EOF
   - `ResponseTimingTracker.noteNarrationScheduled(responseId, boundaryMs)`
   - `ResponseTimingTracker.noteBoardReveal(responseId, revealMs, correlation)`
   - `RealtimeSession.noteBoardReveal(identity, cue)`
+- Produces a trusted response correlation only when the client envelope's
+  `providerResponseId` maps to the same accepted generation on the server.
 - Consumes: typed `MetricInput`
 
 - [ ] **Step 1: Write failing voice-gate outcome tests**
@@ -547,6 +551,8 @@ Capture outbound envelopes and assert:
 
 - existing speech and ask metrics use the new schema;
 - metric identity is carried only by the runtime envelope;
+- a valid provider response ID is carried in the envelope for correlated board
+  timing, while a forged or generation-mismatched ID is not persisted;
 - local/provider-only gate outcomes emit typed metrics;
 - confirmed gate still sends one `interrupt` and advances generation once;
 - first audio registers the scheduled narration boundary;
@@ -557,8 +563,12 @@ Capture outbound envelopes and assert:
 Add one private method:
 
 ```ts
-private emitMetric(input: MetricInput, identity = this.scope.identity): void {
-  this.sendUsingIdentity(identity, 'metric', input);
+private emitMetric(
+  input: MetricInput,
+  identity = this.scope.identity,
+  providerResponseId?: string,
+): void {
+  this.sendUsingIdentity(identity, 'metric', input, { providerResponseId });
 }
 ```
 
@@ -570,22 +580,35 @@ new structured decisions. Feed first-chunk receipts to
 noteBoardReveal(identity: GenerationIdentity, cue: VisualCueMetadata): void
 ```
 
-The method must ignore stale identity and missing response ID.
+Extend `sendUsingIdentity` with an optional fourth argument containing only
+runtime-envelope correlation fields; keep all existing callers unchanged.
+`noteBoardReveal` must ignore stale identity and missing response ID, and pass
+the response ID as envelope correlation rather than duplicating it in the
+metric payload.
 
-- [ ] **Step 13: Run lesson unit tests**
+- [ ] **Step 13: Validate provider-response correlation on the server**
+
+Write the failing proxy tests first. For an allowed client metric, accept
+`envelope.providerResponseId` only when `responseIdentities` maps that response
+to the same connection epoch, turn, and generation as the envelope. Persist
+that trusted ID through `metricContextFromIdentity`; omit forged, unknown, or
+generation-mismatched response IDs. This validation must not broaden the
+client metric-name allowlist from Task 2.
+
+- [ ] **Step 14: Run lesson and proxy unit tests**
 
 Run:
 
 ```bash
-npx vitest run src/lesson/voiceInterruption.test.ts src/lesson/audioOut.test.ts src/lesson/sessionTelemetry.test.ts src/lesson/realtimeSession.test.ts
+npx vitest run src/lesson/voiceInterruption.test.ts src/lesson/audioOut.test.ts src/lesson/sessionTelemetry.test.ts src/lesson/realtimeSession.test.ts server/realtime/proxy.test.ts
 ```
 
 Expected: PASS with unchanged draft, cue-release, and interruption assertions.
 
-- [ ] **Step 14: Commit the client timing milestone**
+- [ ] **Step 15: Commit the client timing milestone**
 
 ```bash
-git add src/lesson/sessionTelemetry.ts src/lesson/sessionTelemetry.test.ts src/lesson/voiceInterruption.ts src/lesson/voiceInterruption.test.ts src/lesson/audioOut.ts src/lesson/audioOut.test.ts src/lesson/realtimeSession.ts src/lesson/realtimeSession.test.ts
+git add src/lesson/sessionTelemetry.ts src/lesson/sessionTelemetry.test.ts src/lesson/voiceInterruption.ts src/lesson/voiceInterruption.test.ts src/lesson/audioOut.ts src/lesson/audioOut.test.ts src/lesson/realtimeSession.ts src/lesson/realtimeSession.test.ts server/realtime/proxy.ts server/realtime/proxy.test.ts
 git commit -m "$(cat <<'EOF'
 feat: observe voice and reveal timing
 EOF
