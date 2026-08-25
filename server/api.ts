@@ -3,6 +3,7 @@ import type OpenAI from 'openai';
 import type { DomainRepository } from './store/domain.js';
 import { readRuntimeConfig, type RuntimeConfig } from './runtimeConfig.js';
 import { summarizeSession } from './summary.js';
+import { buildSessionTelemetryLog } from './session/sessionLog.js';
 
 /**
  * REST surface for the home screen, lesson lifecycle, and parent
@@ -113,6 +114,22 @@ export function createApi(
       events: events
         .filter((e) => ['tutor_said', 'learner_said', 'interrupted', 'lesson_state', 'evidence'].includes(e.type)),
     });
+  });
+
+  router.get('/sessions/:id/log', async (req, res) => {
+    const parentId = parent(req);
+    if (!parentId) {
+      res.status(401).json({ error: 'Parent authentication required.' });
+      return;
+    }
+    const session = await repo.getSessionForParent(req.params.id, parentId);
+    if (!session) {
+      res.status(404).json({ error: 'not found' });
+      return;
+    }
+    const limit = 5_000;
+    const events = await repo.listEvents(session.id, limit);
+    res.json(buildSessionTelemetryLog(session.id, events, limit));
   });
 
   router.post('/sessions/:id/end', async (req, res) => {
