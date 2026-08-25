@@ -23,6 +23,11 @@ import { attentionPriority, CharacterAttentionController, type AttentionTargetTy
 import { centerForItemIds, centerForSemanticObject } from './attentionIntegration';
 import type { VisualCueMetadata } from './realtimeSession';
 import { useRouter } from '../routerContext';
+import {
+  RenderedTutorObjectTracker,
+  type AnnouncedBoardNavigation,
+  type NavigationCause,
+} from '../board/renderedObjectTracker';
 import './Lesson.css';
 
 interface LessonPageProps {
@@ -65,6 +70,9 @@ export function LessonPage({ sessionId }: LessonPageProps) {
   const sectionNoticeTimer = useRef<number | null>(null);
   const activeVisualGroupRef = useRef<string | undefined>(undefined);
   const visualGroupsRef = useRef<Array<{ id: string; label: string }>>([]);
+  const pendingNavigationRef = useRef<AnnouncedBoardNavigation | null>(null);
+  const pendingReplacementIdsRef = useRef<string[] | null>(null);
+  const renderedTutorObjectTracker = useRef(new RenderedTutorObjectTracker());
 
   const session = useMemo(() => new RealtimeSession(sessionId), [sessionId]);
   const snap = useSyncExternalStore(session.subscribe, session.getSnapshot);
@@ -86,6 +94,18 @@ export function LessonPage({ sessionId }: LessonPageProps) {
   }, [activeVisualGroupId, visualGroups]);
 
   useEffect(() => {
+    const tracker = renderedTutorObjectTracker.current;
+    tracker.reset();
+    pendingNavigationRef.current = null;
+    pendingReplacementIdsRef.current = null;
+    return () => {
+      pendingNavigationRef.current = null;
+      pendingReplacementIdsRef.current = null;
+      tracker.reset();
+    };
+  }, [session]);
+
+  useEffect(() => {
     let cancelled = false;
     fetch(`/api/sessions/${sessionId}`)
       .then(async (r) => {
@@ -103,6 +123,26 @@ export function LessonPage({ sessionId }: LessonPageProps) {
     };
   }, [sessionId]);
 
+  const openSection = useCallback((groupId: string, cause: NavigationCause) => {
+    const previousGroupId = activeVisualGroupRef.current ?? null;
+    if (previousGroupId !== groupId) {
+      const navigation: AnnouncedBoardNavigation = {
+        previousGroupId,
+        nextGroupId: groupId,
+        cause,
+      };
+      pendingNavigationRef.current = navigation;
+      session.recordSectionNavigation(navigation);
+    }
+    activeVisualGroupRef.current = groupId;
+    setActiveVisualGroupId(groupId);
+    setFocusIndex(0);
+    setBoardOverview(false);
+    if (cause !== 'initial_anchor') {
+      setSectionNotice((current) => current?.id === groupId ? null : current);
+    }
+  }, [session]);
+
   const registerVisualGroup = useCallback((cue?: VisualCueMetadata) => {
     if (!cue?.semanticObjectId) return;
     setVisualGroups((current) => current.some((group) => group.id === cue.semanticObjectId)
@@ -114,24 +154,13 @@ export function LessonPage({ sessionId }: LessonPageProps) {
     // announced and reachable, and the view switches only when the learner
     // (or an explicit navigation action) chooses it.
     if (!activeVisualGroupRef.current && !draftRef.current.isOpen) {
-      activeVisualGroupRef.current = cue.semanticObjectId;
-      setActiveVisualGroupId(cue.semanticObjectId);
-      setFocusIndex(0);
-      setBoardOverview(false);
+      openSection(cue.semanticObjectId, 'initial_anchor');
       return;
     }
     setSectionNotice({ id: cue.semanticObjectId, label: cue.groupLabel ?? cue.semanticObjectId });
     if (sectionNoticeTimer.current !== null) window.clearTimeout(sectionNoticeTimer.current);
     sectionNoticeTimer.current = window.setTimeout(() => setSectionNotice(null), 12_000);
-  }, []);
-
-  const openSection = useCallback((groupId: string) => {
-    activeVisualGroupRef.current = groupId;
-    setActiveVisualGroupId(groupId);
-    setFocusIndex(0);
-    setBoardOverview(false);
-    setSectionNotice((current) => current?.id === groupId ? null : current);
-  }, []);
+  }, [openSection]);
 
   const signalBoardActivity = useCallback((kind: 'noura' | 'learner', durationMs = 1_500) => {
     setBoardActivity(kind);
@@ -140,18 +169,35 @@ export function LessonPage({ sessionId }: LessonPageProps) {
   }, []);
 
   const applyTutorOps = useCallback((ops: BoardOp[], animate: boolean, identity: GenerationIdentity, cue?: VisualCueMetadata) => {
+    const tutorIdsForReplacement = () => cue?.replacesGroup
+      ? boardState.current.current.items
+          .filter((item) => item.owner === 'tutor' && item.semanticGroupId === cue.replacesGroup)
+          .map((item) => item.id)
+      : [];
+    const announceReplacement = (intentionallyRetiredTutorIds: readonly string[]) => {
+      if (!cue?.replacesGroup) return;
+      pendingReplacementIdsRef.current = [
+        ...new Set([
+          ...(pendingReplacementIdsRef.current ?? []),
+          ...intentionallyRetiredTutorIds,
+        ]),
+      ];
+    };
     if (!animate) {
+      const intentionallyRetiredTutorIds = tutorIdsForReplacement();
       const result = boardState.current.applyReplay(ops, 'tutor', cue?.semanticObjectId, cue?.replacesGroup);
       if (!result) return Promise.resolve(false);
       // Replays are already-committed board truth, never a new performance.
       animator.current?.finishAll();
       setBoardAnimation(null);
+      announceReplacement(intentionallyRetiredTutorIds);
       setScene(result.scene);
       registerVisualGroup(cue);
       return Promise.resolve(true);
     }
     const transaction = visualChain.current.then(async () => {
       if (!sameIdentity(session.getIdentity(), identity)) return false;
+      const intentionallyRetiredTutorIds = tutorIdsForReplacement();
       // The cue has crossed the heard-audio boundary, so it is now true on the
       // visible board. Promote it before animation; learner input and ordinary
       // re-renders must build on this state rather than an older checkpoint.
@@ -172,6 +218,7 @@ export function LessonPage({ sessionId }: LessonPageProps) {
         animator.current?.beginTransaction(request.id);
         setBoardAnimation(request);
       }
+      announceReplacement(intentionallyRetiredTutorIds);
       setScene(candidate);
       if (applied.highlighted.length > 0) {
         const center = centerForItemIds(candidate, applied.highlighted);
@@ -187,6 +234,7 @@ export function LessonPage({ sessionId }: LessonPageProps) {
         offerAttention(attention, identity, 'semantic_object', center, cue.semanticObjectId);
       }
       await nextPaint();
+      if (cue) session.noteBoardReveal(identity, cue);
       // Completion acknowledges durable replay. It no longer decides whether
       // an already-visible checkpoint remains on screen.
       const completed = request
@@ -270,7 +318,7 @@ export function LessonPage({ sessionId }: LessonPageProps) {
     if (restored) {
       const result = boardState.current.applyLearner(restored.ops, restored.semanticGroupId);
       setScene(result.scene);
-      if (restored.semanticGroupId) openSection(restored.semanticGroupId);
+      if (restored.semanticGroupId) openSection(restored.semanticGroupId, 'draft_restore');
       setTool('draw');
       session.notifyDraftState(true, restored.draftId);
     }
@@ -446,6 +494,20 @@ export function LessonPage({ sessionId }: LessonPageProps) {
   const activeBoardItemCount = groupItemCount(scene, activeVisualGroupId);
   const draftActive = draftSnap.status === 'open' || draftSnap.status === 'submitting' || draftSnap.status === 'error';
 
+  useEffect(() => {
+    const snapshot = {
+      visibleTutorIds: visibleScene.items.filter((item) => item.owner === 'tutor').map((item) => item.id),
+      allTutorIds: scene.items.filter((item) => item.owner === 'tutor').map((item) => item.id),
+      navigation: pendingNavigationRef.current,
+      intentionallyRetiredTutorIds: pendingReplacementIdsRef.current ?? undefined,
+    };
+    pendingNavigationRef.current = null;
+    pendingReplacementIdsRef.current = null;
+    for (const disappearance of renderedTutorObjectTracker.current.observe(snapshot)) {
+      session.recordTutorObjectDisappearance(disappearance);
+    }
+  }, [scene, session, visibleScene]);
+
   const statusLabel =
     draftSnap.status === 'submitting'
       ? 'Sending your drawing…'
@@ -592,7 +654,7 @@ export function LessonPage({ sessionId }: LessonPageProps) {
                 <select
                   aria-label="Board section"
                   value={activeVisualGroupId}
-                  onChange={(event) => openSection(event.target.value)}
+                  onChange={(event) => openSection(event.target.value, 'picker')}
                 >
                   {visualGroups.map((group) => <option key={group.id} value={group.id}>{group.label}</option>)}
                 </select>
@@ -710,7 +772,7 @@ export function LessonPage({ sessionId }: LessonPageProps) {
         {started && sectionNotice && (
           <p className="lesson__section-notice" role="status" data-testid="section-notice">
             Noura added a new board section: <strong>{sectionNotice.label}</strong>. Your current board stays put.
-            <button className="lesson__section-open" onClick={() => openSection(sectionNotice.id)}>
+            <button className="lesson__section-open" onClick={() => openSection(sectionNotice.id, 'notice_open')}>
               Open it
             </button>
           </p>

@@ -13,6 +13,13 @@ import { ResponseCueTimeline, type ResponseCue } from './responseTimeline';
 import { VoiceInterruptionGate } from './voiceInterruption';
 import type { LearnerBoardAnalysis } from '../../shared/learnerBoard';
 import { DeliveredTaskSchema, type DeliveredTask } from '../../shared/lessonTurn';
+import {
+  MetricInputSchema,
+  TELEMETRY_SCHEMA_VERSION,
+  type MetricInput,
+} from '../../shared/sessionTelemetry';
+import { ResponseTimingTracker } from './sessionTelemetry';
+import type { NavigationCause } from '../board/renderedObjectTracker';
 
 export type Phase = 'connecting' | 'listening' | 'thinking' | 'speaking' | 'reconnecting' | 'fallback' | 'failed' | 'ended';
 export interface CaptionLine { role: 'tutor' | 'child'; text: string; live: boolean; responseId?: string }
@@ -60,11 +67,12 @@ export interface SessionSnapshot {
 }
 
 interface QueuedAsk { text: string; idempotencyKey: string; identity: GenerationIdentity }
-export interface VisualCueMetadata { visualCueId?: string; semanticObjectId?: string; groupLabel?: string; checkpoint?: string; replacesGroup?: string }
+export interface VisualCueMetadata { responseId?: string; visualCueId?: string; semanticObjectId?: string; groupLabel?: string; checkpoint?: string; replacesGroup?: string }
 
 type Listener = () => void;
 const CONNECT_TIMEOUT_MS = 8_000;
 const MAX_RECONNECTS = 2;
+const MAX_PENDING_UNCORRELATED_METRICS = 64;
 
 export class RealtimeSession {
   private ws: WebSocket | null = null;
@@ -99,6 +107,8 @@ export class RealtimeSession {
   private draftOpen = false;
   private draftId: string | null = null;
   private submissionAckTimer: number | null = null;
+  private responseTiming = new ResponseTimingTracker();
+  private pendingUncorrelatedMetrics: MetricInput[] = [];
 
   onBoardOps: (ops: BoardOp[], animate: boolean, identity: GenerationIdentity, cue?: VisualCueMetadata) => Promise<boolean | void> | boolean | void = () => {};
   onLearnerBoardReplay: (ops: BoardOp[], semanticGroupId?: string) => void = () => {};
@@ -126,6 +136,52 @@ export class RealtimeSession {
   subscribe = (listener: Listener): (() => void) => { this.listeners.add(listener); return () => this.listeners.delete(listener); };
   getSnapshot = (): SessionSnapshot => this.snapshot;
   getIdentity = (): GenerationIdentity => this.scope.identity;
+
+  noteBoardReveal(identity: GenerationIdentity, cue: VisualCueMetadata): void {
+    if (!this.isCurrent(identity) || !cue.responseId) return;
+    const metric = this.responseTiming.noteBoardReveal(
+      cue.responseId,
+      performance.now(),
+      {
+        visualCueId: cue.visualCueId,
+        semanticObjectId: cue.semanticObjectId,
+      },
+    );
+    if (metric) this.emitMetric(metric, identity, cue.responseId);
+  }
+
+  recordSectionNavigation(input: {
+    previousGroupId: string | null;
+    nextGroupId: string;
+    cause: NavigationCause;
+  }): void {
+    const metric = MetricInputSchema.safeParse({
+      schemaVersion: TELEMETRY_SCHEMA_VERSION,
+      name: 'section_navigation',
+      unit: 'count',
+      value: 1,
+      dimensions: {
+        previousSemanticGroupId: input.previousGroupId ?? 'group-root',
+        nextSemanticGroupId: input.nextGroupId,
+        cause: input.cause,
+      },
+    });
+    if (metric.success) this.emitMetric(metric.data);
+  }
+
+  recordTutorObjectDisappearance(input: {
+    objectId: string;
+    cause: 'scene_mutation' | 'unknown';
+  }): void {
+    const metric = MetricInputSchema.safeParse({
+      schemaVersion: TELEMETRY_SCHEMA_VERSION,
+      name: 'tutor_object_disappearance',
+      unit: 'count',
+      value: 1,
+      dimensions: input,
+    });
+    if (metric.success) this.emitMetric(metric.data);
+  }
 
   private update(patch: Partial<SessionSnapshot>): void {
     this.snapshot = { ...this.snapshot, ...patch };
@@ -203,6 +259,7 @@ export class RealtimeSession {
   end(): void {
     if (this.closedByUs) return;
     this.closedByUs = true;
+    this.pendingUncorrelatedMetrics = [];
     this.cancelGeneration('lesson ended');
     this.audioIn?.stop();
     this.audioIn = null;
@@ -353,9 +410,15 @@ export class RealtimeSession {
     const nextEnergy = this.snapshot.micEnergy * 0.7 + rms * 0.3;
     if (Math.abs(nextEnergy - this.snapshot.micEnergy) > 0.002) this.update({ micEnergy: nextEnergy });
     if (this.snapshot.muted) return;
-    if (this.voiceInterruption.observeEnergy(rms, this.tutorTurnActive(), performance.now())) {
-      this.confirmVoiceInterruption();
-    }
+    const decision = this.voiceInterruption.observeEnergy(rms, this.tutorTurnActive(), performance.now());
+    if (decision.rejectedOutcome) this.emitMetric({
+      schemaVersion: TELEMETRY_SCHEMA_VERSION,
+      name: 'barge_in_gate_outcome',
+      unit: 'count',
+      value: 1,
+      dimensions: { outcome: decision.rejectedOutcome },
+    });
+    if (decision.shouldInterrupt) this.confirmVoiceInterruption();
   }
 
   private tutorTurnActive(): boolean {
@@ -410,6 +473,7 @@ export class RealtimeSession {
         // A reconnect must not lose an open drawing draft: re-arm the
         // server-side "learner is composing" guard for the new connection.
         if (this.draftOpen && this.draftId) this.send('draft_state', { open: true, draftId: this.draftId });
+        this.flushPendingUncorrelatedMetrics();
         const ask = this.latestQueuedAsk;
         this.latestQueuedAsk = null;
         if (ask && this.isCurrent(ask.identity)) {
@@ -455,7 +519,12 @@ export class RealtimeSession {
         if (this.speechStoppedAt > 0 && !this.speechResponseStartMeasured) {
           this.speechResponseStartMeasured = true;
           const speechEndToResponseStartedMs = Math.max(0, Math.round(performance.now() - this.speechStoppedAt));
-          this.send('metric', { name: 'speech_end_to_response_started', ms: speechEndToResponseStartedMs });
+          this.emitMetric({
+            schemaVersion: TELEMETRY_SCHEMA_VERSION,
+            name: 'speech_end_to_response_started',
+            unit: 'ms',
+            value: speechEndToResponseStartedMs,
+          });
           this.update({ metrics: { ...this.snapshot.metrics, speechEndToResponseStartedMs } });
         }
         break;
@@ -468,7 +537,12 @@ export class RealtimeSession {
         const itemId = typeof message.item_id === 'string' ? message.item_id : null;
         if (this.speechStoppedAt > 0) {
           const speechEndToFirstAudioMs = Math.max(0, Math.round(performance.now() - this.speechStoppedAt));
-          this.send('metric', { name: 'speech_end_to_first_audio', ms: speechEndToFirstAudioMs });
+          this.emitMetric({
+            schemaVersion: TELEMETRY_SCHEMA_VERSION,
+            name: 'speech_end_to_first_audio',
+            unit: 'ms',
+            value: speechEndToFirstAudioMs,
+          });
           this.speechStoppedAt = 0;
           this.update({ metrics: { ...this.snapshot.metrics, speechEndToFirstAudioMs } });
         }
@@ -476,10 +550,21 @@ export class RealtimeSession {
           this.firstAudioSeen = true;
           const askToFirstAudioMs = Math.round(performance.now() - this.askAt);
           this.askAt = 0;
-          this.send('metric', { name: 'ask_to_first_audio', ms: askToFirstAudioMs });
+          this.emitMetric({
+            schemaVersion: TELEMETRY_SCHEMA_VERSION,
+            name: 'ask_to_first_audio',
+            unit: 'ms',
+            value: askToFirstAudioMs,
+          });
           this.update({ metrics: { ...this.snapshot.metrics, askToFirstAudioMs } });
         }
-        this.audioOut.append(responseId, itemId, message.delta);
+        const receipt = this.audioOut.append(responseId, itemId, message.delta);
+        if (receipt) {
+          this.responseTiming.noteNarrationScheduled(
+            responseId,
+            performance.now() + receipt.playbackStartsInMs,
+          );
+        }
         if (this.snapshot.phase !== 'speaking') this.update({ phase: 'speaking' });
         break;
       }
@@ -541,13 +626,26 @@ export class RealtimeSession {
         break;
       }
       case 'speech_started': {
-        if (this.voiceInterruption.confirmServerSpeech(this.tutorTurnActive(), performance.now())) {
-          this.confirmVoiceInterruption();
-        }
+        const decision = this.voiceInterruption.confirmServerSpeech(this.tutorTurnActive(), performance.now());
+        if (decision.rejectedOutcome) this.emitMetric({
+          schemaVersion: TELEMETRY_SCHEMA_VERSION,
+          name: 'barge_in_gate_outcome',
+          unit: 'count',
+          value: 1,
+          dimensions: { outcome: decision.rejectedOutcome },
+        });
+        if (decision.shouldInterrupt) this.confirmVoiceInterruption();
         break;
       }
       case 'speech_stopped': {
-        this.voiceInterruption.endServerSpeech();
+        const decision = this.voiceInterruption.endServerSpeech();
+        if (decision.rejectedOutcome) this.emitMetric({
+          schemaVersion: TELEMETRY_SCHEMA_VERSION,
+          name: 'barge_in_gate_outcome',
+          unit: 'count',
+          value: 1,
+          dimensions: { outcome: decision.rejectedOutcome },
+        });
         // Ignore an unconfirmed acoustic blip while Noura still owns the
         // floor. Confirmed barge-in has already moved the phase to listening.
         if (this.tutorTurnActive()) break;
@@ -671,6 +769,7 @@ export class RealtimeSession {
   private releaseOps(item: Extract<ResponseCue, { kind: 'visual' }>): void {
     if (!this.isCurrent(item.identity) || this.deadResponses.has(item.responseId)) return;
     void Promise.resolve(this.onBoardOps(item.ops, true, item.identity, {
+      responseId: item.responseId,
       visualCueId: item.visualCueId,
       semanticObjectId: item.semanticObjectId,
       groupLabel: item.groupLabel,
@@ -792,6 +891,7 @@ export class RealtimeSession {
     this.scope = new GenerationScope(identity);
     this.gate.replace(identity);
     this.outboundSequence = 0;
+    this.responseTiming.resetGeneration();
     this.scope.interval(() => this.releasePending(), 50);
     this.update?.({ identity });
     const activationReason = this.interruptionPending ? 'interruption' : 'ordinary';
@@ -814,10 +914,52 @@ export class RealtimeSession {
     return identity.sessionId === current.sessionId && identity.connectionEpoch === current.connectionEpoch && identity.turnId === current.turnId && identity.generationId === current.generationId && this.scope.active;
   }
 
+  private emitMetric(
+    input: MetricInput,
+    identity = this.scope.identity,
+    providerResponseId?: string,
+  ): void {
+    const metric = MetricInputSchema.safeParse(input);
+    if (!metric.success) return;
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.sendUsingIdentity(identity, 'metric', metric.data, { providerResponseId });
+      return;
+    }
+    if (
+      providerResponseId ||
+      this.closedByUs ||
+      (this.snapshot.phase !== 'connecting' && this.snapshot.phase !== 'reconnecting')
+    ) {
+      return;
+    }
+    if (this.pendingUncorrelatedMetrics.length >= MAX_PENDING_UNCORRELATED_METRICS) {
+      this.pendingUncorrelatedMetrics.shift();
+    }
+    this.pendingUncorrelatedMetrics.push(metric.data);
+  }
+
+  private flushPendingUncorrelatedMetrics(): void {
+    if (this.ws?.readyState !== WebSocket.OPEN || this.pendingUncorrelatedMetrics.length === 0) return;
+    const pending = this.pendingUncorrelatedMetrics;
+    this.pendingUncorrelatedMetrics = [];
+    const identity = this.scope.identity;
+    for (const metric of pending) {
+      this.sendUsingIdentity(identity, 'metric', metric);
+    }
+  }
+
   private send(type: string, payload: Record<string, unknown>): void { this.sendUsingIdentity(this.scope.identity, type, payload); }
-  private sendUsingIdentity(identity: GenerationIdentity, type: string, payload: Record<string, unknown>): void {
+  private sendUsingIdentity(
+    identity: GenerationIdentity,
+    type: string,
+    payload: Record<string, unknown>,
+    correlation: { providerResponseId?: string } = {},
+  ): void {
     if (this.ws?.readyState !== WebSocket.OPEN) return;
-    this.ws.send(JSON.stringify(createRuntimeEvent(identity, this.outboundSequence++, type, payload, payload.idempotencyKey ? { idempotencyKey: String(payload.idempotencyKey) } : {})));
+    this.ws.send(JSON.stringify(createRuntimeEvent(identity, this.outboundSequence++, type, payload, {
+      ...(payload.idempotencyKey ? { idempotencyKey: String(payload.idempotencyKey) } : {}),
+      ...(correlation.providerResponseId ? { providerResponseId: correlation.providerResponseId } : {}),
+    })));
   }
 }
 

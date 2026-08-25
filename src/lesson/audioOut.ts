@@ -32,6 +32,10 @@ export interface HeardItem {
   fullyPlayed: boolean;
 }
 
+export interface AudioAppendReceipt {
+  playbackStartsInMs: number;
+}
+
 export class AudioOut {
   private ctx: AudioContext | null = null;
   private cursor = 0;
@@ -63,11 +67,11 @@ export class AudioOut {
   }
 
   /** Decodes a base64 PCM16 chunk and schedules it after what's queued. */
-  append(responseId: string, itemId: string | null, base64: string): void {
+  append(responseId: string, itemId: string | null, base64: string): AudioAppendReceipt | null {
     const ctx = this.context();
     const bytes = atob(base64);
     const samples = bytes.length >> 1;
-    if (samples === 0) return;
+    if (samples === 0) return null;
 
     const buffer = ctx.createBuffer(1, samples, PCM_SAMPLE_RATE);
     const channel = buffer.getChannelData(0);
@@ -84,8 +88,12 @@ export class AudioOut {
 
     const at = Math.max(ctx.currentTime + 0.05, this.cursor);
     let timeline = this.timelines[this.timelines.length - 1];
+    let receipt: AudioAppendReceipt | null = null;
     if (!timeline || timeline.responseId !== responseId) {
       timeline = { responseId, itemId, start: at, scheduledSec: 0, energy: [] };
+      receipt = {
+        playbackStartsInMs: Math.max(0, Math.round((at - ctx.currentTime) * 1000)),
+      };
       this.timelines.push(timeline);
       if (this.timelines.length > 8) {
         const evicted = this.timelines.shift() as Timeline;
@@ -112,6 +120,7 @@ export class AudioOut {
     this.cursor = at + buffer.duration;
     timeline.scheduledSec += buffer.duration;
     timeline.energy.push({ at: at - timeline.start, rms: Math.sqrt(sumSquares / samples) });
+    return receipt;
   }
 
   private findTimeline(responseId: string): Timeline | undefined {

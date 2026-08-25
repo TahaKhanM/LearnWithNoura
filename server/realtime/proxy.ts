@@ -6,6 +6,11 @@ import {
   type GenerationIdentity,
   type RuntimeEventEnvelope,
 } from '../../shared/runtimeProtocol.js';
+import {
+  MetricInputSchema,
+  TELEMETRY_SCHEMA_VERSION,
+  type MetricInput,
+} from '../../shared/sessionTelemetry.js';
 import { buildInstructions } from './instructions.js';
 import { REALTIME_TOOLS } from './tools.js';
 import type { Confidence, Verdict } from '../store/repo.js';
@@ -16,6 +21,11 @@ import { BoardSubmissionSchema, DeliveredTaskSchema, submitPolicyForMode, type D
 import { ResponseSegmentAnnotator } from './segmentAnnotator.js';
 import { loadReleasedBoardContext } from './boardContext.js';
 import type { DomainRepository } from '../store/domain.js';
+import {
+  metricContextFromIdentity,
+  recordMetric,
+  recordProviderUsage,
+} from '../session/telemetryRecorder.js';
 
 /**
  * Bridges one browser lesson to one OpenAI Realtime session.
@@ -27,11 +37,62 @@ import type { DomainRepository } from '../store/domain.js';
  */
 
 const REALTIME_URL = 'wss://api.openai.com/v1/realtime';
+const OUTPUT_AUDIO_SAMPLES_PER_MS = 24;
+const RECONNECT_HISTORY_PAGE_SIZE = 5_000;
 
 /** Stop auto-continuing tool chains after this many rounds per turn. */
 const MAX_TOOL_CONTINUES = 14;
 
+async function hasReleasedSessionStart(
+  repo: DomainRepository,
+  sessionId: string,
+): Promise<boolean> {
+  let throughEventId: number | null = null;
+
+  try {
+    while (true) {
+      const page = await repo.listEvents(
+        sessionId,
+        RECONNECT_HISTORY_PAGE_SIZE,
+        throughEventId,
+      );
+      if (page.some((event) => event.type === 'session_started')) return true;
+      if (page.length < RECONNECT_HISTORY_PAGE_SIZE) return false;
+
+      const oldestEventId = page[0]?.id;
+      if (oldestEventId === undefined || oldestEventId <= 1) return false;
+      const nextThroughEventId = oldestEventId - 1;
+      if (throughEventId !== null && nextThroughEventId >= throughEventId) return false;
+      throughEventId = nextThroughEventId;
+    }
+  } catch {
+    return false;
+  }
+}
+
+function isAllowedClientMetric(input: MetricInput): boolean {
+  switch (input.name) {
+    case 'speech_end_to_response_started':
+    case 'speech_end_to_first_audio':
+    case 'ask_to_first_audio':
+    case 'board_reveal_to_narration':
+    case 'section_navigation':
+    case 'tutor_object_disappearance':
+      return true;
+    case 'barge_in_gate_outcome':
+      return input.dimensions.outcome === 'local_only_rejected' ||
+        input.dimensions.outcome === 'provider_only_rejected';
+    default:
+      return false;
+  }
+}
+
 interface UpstreamEvent {
+  type: string;
+  [key: string]: unknown;
+}
+
+interface ClientMessage {
   type: string;
   [key: string]: unknown;
 }
@@ -104,6 +165,7 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
   const responseIdentities = new Map<string, GenerationIdentity>();
   const responseTranscript = new Map<string, string>();
   const responseSegments = new Map<string, ResponseSegmentAnnotator>();
+  const pendingVoiceBargeInResponses = new Set<string>();
   const pendingBoardOps = new Map<number, { ops: BoardOp[]; semanticGroupId?: string; groupLabel?: string; replacesGroup?: string }>();
   let activeResponseId: string | null = null;
   let speechInProgress = false;
@@ -172,6 +234,23 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
 
   function identityForResponse(responseId: unknown): GenerationIdentity | null {
     return typeof responseId === 'string' ? responseIdentities.get(responseId) ?? clientIdentity : clientIdentity;
+  }
+
+  function trustedClientResponseId(
+    metric: MetricInput,
+    envelope: RuntimeEventEnvelope,
+  ): string | undefined {
+    if (metric.name !== 'board_reveal_to_narration') return undefined;
+    const responseId = envelope.providerResponseId;
+    if (!responseId) return undefined;
+    const identity = responseIdentities.get(responseId);
+    if (!identity) return undefined;
+    return identity.sessionId === envelope.sessionId &&
+      identity.connectionEpoch === envelope.connectionEpoch &&
+      identity.turnId === envelope.turnId &&
+      identity.generationId === envelope.generationId
+      ? responseId
+      : undefined;
   }
 
   function sendUpstream(payload: unknown): void {
@@ -697,11 +776,39 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
 
       case 'response.done': {
         const response = event.response as
-          | { id?: string; status?: string; output?: { type: string }[] }
+          | { id?: string; status?: string; output?: { type: string }[]; usage?: unknown }
           | undefined;
         const status = response?.status ?? 'unknown';
         if (status === 'cancelled' && response?.id) cancelledResponses.add(response.id);
         const responseIdentity = identityForResponse(response?.id);
+        if (response?.id && responseIdentity) {
+          const context = metricContextFromIdentity(responseIdentity, response.id);
+          await recordProviderUsage(repo, sessionId, response.usage, context);
+          const outputSamples = responseSegments.get(response.id)?.totalSamples();
+          if (outputSamples !== undefined && outputSamples > 0) {
+            await recordMetric(repo, sessionId, {
+              schemaVersion: TELEMETRY_SCHEMA_VERSION,
+              name: 'tutor_audio_output_duration',
+              unit: 'ms',
+              value: Math.round(outputSamples / OUTPUT_AUDIO_SAMPLES_PER_MS),
+            }, context);
+          }
+          if (pendingVoiceBargeInResponses.has(response.id)) {
+            const outcome = status === 'cancelled'
+              ? 'provider_cancelled'
+              : status === 'completed'
+                ? 'provider_completed'
+                : 'provider_failed';
+            await recordMetric(repo, sessionId, {
+              schemaVersion: TELEMETRY_SCHEMA_VERSION,
+              name: 'barge_in_cancel_outcome',
+              unit: 'count',
+              value: 1,
+              dimensions: { outcome },
+            }, context);
+            pendingVoiceBargeInResponses.delete(response.id);
+          }
+        }
         const hasFunctionCall = response?.output?.some((item) => item.type === 'function_call') ?? false;
         const delivered = response?.id ? (responseTranscript.get(response.id) ?? '') : '';
         // Explicit handoff: a task proposed via propose_teaching_move is
@@ -1257,7 +1364,10 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
       lastClientSequence = envelope.sequence;
       seenClientEvents.add(envelope.eventId);
       if (seenClientEvents.size > 1000) seenClientEvents.delete(seenClientEvents.values().next().value as string);
-      await handleClient({ type: envelope.type, ...(envelope.payload as Record<string, unknown>) });
+      await handleClient(
+        { type: envelope.type, ...(envelope.payload as Record<string, unknown>) },
+        envelope,
+      );
     }).catch((error) => {
       log(`session ${sessionId}: client processing error ${String(error).slice(0, 240)}`);
       sendClient({ type: 'error', message: 'Noura could not save that turn. Please try again.' });
@@ -1267,7 +1377,10 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
   client.on('close', () => teardown('client closed'));
   client.on('error', () => teardown('client error'));
 
-  async function handleClient(message: UpstreamEvent): Promise<void> {
+  async function handleClient(
+    message: ClientMessage,
+    envelope: RuntimeEventEnvelope,
+  ): Promise<void> {
     switch (message.type) {
       case 'input_audio': {
         if (typeof message.audio === 'string' && message.audio.length < 400_000) {
@@ -1280,6 +1393,7 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
         if (started) break;
         started = true;
         toolContinues = 0;
+        const hadPriorStart = await hasReleasedSessionStart(repo, sessionId);
         const resume = await conversationContext();
         if (resume) {
           sendUpstream({
@@ -1291,7 +1405,18 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
             },
           });
         }
-        await repo.addEvent(sessionId, 'session_started', { resumed: Boolean(resume) });
+        await repo.addEvent(sessionId, 'session_started', {
+          resumed: Boolean(resume),
+          connectionEpoch: envelope.connectionEpoch,
+        });
+        if (hadPriorStart) {
+          await recordMetric(repo, sessionId, {
+            schemaVersion: TELEMETRY_SCHEMA_VERSION,
+            name: 'session_reconnect',
+            unit: 'count',
+            value: 1,
+          }, metricContextFromIdentity(envelope));
+        }
         requestModelResponse('start', 'session-start');
         break;
       }
@@ -1320,11 +1445,29 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
       case 'interrupt': {
         // The client already stopped local audio; make the model stop too,
         // and keep tool chains from restarting it while the child speaks.
+        const interruptedResponseId = activeResponseId;
+        const interruptedIdentity = interruptedResponseId
+          ? identityForResponse(interruptedResponseId)
+          : null;
+        const recordVoiceGate = message.reason === 'voice' &&
+          interruptedResponseId !== null &&
+          interruptedIdentity !== null &&
+          !pendingVoiceBargeInResponses.has(interruptedResponseId);
+        if (recordVoiceGate) pendingVoiceBargeInResponses.add(interruptedResponseId);
         childHoldsFloor = true;
         if (activeResponseId) cancelledResponses.add(activeResponseId);
         lessonState = reduceLesson(lessonState, { type: 'INTERRUPTED' });
         if (message.reason === 'voice') setEndpointingEagerness('high');
         sendUpstream({ type: 'response.cancel' });
+        if (recordVoiceGate) {
+          await recordMetric(repo, sessionId, {
+            schemaVersion: TELEMETRY_SCHEMA_VERSION,
+            name: 'barge_in_gate_outcome',
+            unit: 'count',
+            value: 1,
+            dimensions: { outcome: 'confirmed' },
+          }, metricContextFromIdentity(interruptedIdentity, interruptedResponseId));
+        }
         break;
       }
 
@@ -1482,11 +1625,14 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
       }
 
       case 'metric': {
-        // Client-side latency marks, kept with the session for observability.
-        await repo.addEvent(sessionId, 'metric', {
-          name: String(message.name ?? '').slice(0, 60),
-          ms: Number(message.ms) || 0,
-        });
+        const metric = MetricInputSchema.safeParse(envelope.payload);
+        if (!metric.success || !isAllowedClientMetric(metric.data)) break;
+        await recordMetric(
+          repo,
+          sessionId,
+          metric.data,
+          metricContextFromIdentity(envelope, trustedClientResponseId(metric.data, envelope)),
+        );
         break;
       }
 
