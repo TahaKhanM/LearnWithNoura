@@ -38,11 +38,14 @@ uses only the bounded reasons `server_queue_overflow`,
 `server_persistence_failure`, and `client_queue_overflow`, with a positive
 integer value that may aggregate losses.
 
-The server writer keeps pending totals outside its bounded FIFO. Before it
-persists a later normal observation, it first persists the pending gap totals.
-If a gap write fails, the total remains pending and later observations remain
-behind it. Browser pre-ready eviction is aggregated and emitted on the next
-accepted `ready`. Queues remain bounded.
+The server writer represents loss as ordered gap barriers in the same logical
+stream as normal observations. A gap may use a small bounded reserve and may
+merge only with an adjacent compatible gap; it never jumps ahead of an older
+observation. A failed normal observation is replaced at that exact position by
+a `server_persistence_failure` barrier. A failed gap retains its original
+reason and value and blocks later telemetry until a later retry succeeds.
+Browser pre-ready eviction is aggregated and emitted on the next accepted
+`ready`. Queues remain bounded.
 
 Session-log summaries expose totals by reason. Any gap fails the smoke gate.
 This makes observed completeness testable, but not absolute: a browser
@@ -58,12 +61,16 @@ accepted, every telemetry turn, generation, provider response, visual cue,
 semantic object, section, and object identifier is deterministically converted
 to a field-specific, session-scoped opaque token before persistence.
 
-Projection repeats this transformation for malformed direct writes and
-historical typed rows, while recognizing the versioned opaque-token format to
-avoid double hashing. A given field and raw value therefore correlate
-consistently within one session, but not across sessions. Raw identifiers,
-names used as identifiers, transcript sentinels, and credential sentinels must
-not appear in stored metric payloads, parent API logs, or smoke reports.
+Prepared observations always transform input identifiers, including strings
+that imitate the token shape. Stored observations carry server-owned encoding
+metadata and tokens include a prefix derived from the owning session.
+Projection avoids re-encoding only when both the metadata and session prefix
+are valid; malformed metadata, historical rows, and tokens copied from another
+session are transformed again. Input schemas strip attempted encoding
+metadata. A given field and raw value therefore correlate consistently within
+one session, but not across sessions. Raw identifiers, names used as
+identifiers, transcript sentinels, and credential sentinels must not appear in
+stored metric payloads, parent API logs, or smoke reports.
 
 ### Exact response trust and idempotency
 
@@ -93,6 +100,13 @@ positive, row totals must be internally consistent, and summary usage must
 equal the sum of validated timeline rows. Truncation, gaps, malformed data,
 redirects, and mismatches fail closed.
 
+The reporter reconstructs every duration aggregate and lifecycle summary from
+strictly ascending validated timeline rows, including unresolved barge-in
+correlation, navigation, reconnect, disappearance, usage, and gap totals. It
+compares count, minimum, maximum, rounded mean, and latest exactly. Required
+durations must exist in the timeline itself, and all totals use checked safe
+integer addition.
+
 ### API and projection boundaries
 
 The session-log route sets `Cache-Control: no-store` before authentication or
@@ -115,3 +129,17 @@ copy of remotely supplied JSON.
 The design does not promise delivery after an unrecovered browser disconnect,
 add retries or timers, change the voice gate, broaden no-store behavior to
 other parent routes, or implement Phase 1 transport/provider/model/visual work.
+
+## Second-review clarification
+
+The asynchronous contract is a real repository boundary, not only a deferred
+callback. Production SQLite telemetry append and prior-start lookup execute in
+a worker thread because `node:sqlite` is synchronous; Postgres keeps its native
+asynchronous query boundary. Test/in-memory adapters yield before invoking a
+synchronous repository. Writer scheduling also yields before storage work, but
+that scheduling alone is not considered sufficient for production SQLite.
+
+Terminal telemetry uses only the exact provider-response identity map. An
+unknown `response.done` may still use the existing fallback identity for cue
+flush and client finalization, but it cannot emit provider usage, tutor-output
+duration, or cancellation outcome.

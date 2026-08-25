@@ -1,5 +1,14 @@
 # Phase 0 telemetry handoff
 
+## Second-review status
+
+The offline evidence below describes the first hardening wave at `3924e0b` and
+is historical, not final evidence for the current reviewed head. A second
+consolidated wave is in progress to add the production SQLite worker boundary,
+ordered gap barriers, session-owned encoding metadata, complete timeline
+reconciliation, and exact-map-only terminal telemetry. Final commit and gate
+evidence will be replaced only after all required non-browser gates pass.
+
 ## Proven offline
 
 - Final hardening code head: `3924e0b` against pre-wave head `0e1cfaa`.

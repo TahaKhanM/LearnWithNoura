@@ -446,3 +446,26 @@ Gap rows make known loss visible but cannot prove completeness after a browser
 connection that never reaches another accepted `ready`. Final observations can
 also be lost in an unrecovered fallback or failed transport phase. Such runs
 must remain incomplete and cannot support a live telemetry-completeness claim.
+
+## Second-review hardening amendment
+
+This amendment supersedes any earlier wording that treats a deferred
+in-process callback as a sufficient asynchronous repository boundary:
+
+- production SQLite metric append and prior-start lookup execute in a worker
+  thread; Postgres keeps its native asynchronous query boundary, while
+  test/in-memory repositories use a yielding adapter;
+- the writer is one ordered stream of observations and gap barriers. Overflow
+  gaps follow older accepted observations, failed observations become
+  persistence-failure barriers in place, and failed gaps retain their original
+  reason/value while blocking later entries;
+- preparation always encodes raw inputs. Projection preserves an identifier
+  only when server-owned encoding metadata is valid and its token prefix
+  belongs to the current session; copied cross-session tokens and forged
+  metadata are re-encoded;
+- smoke validation reconstructs every aggregate and lifecycle count from
+  strictly ascending timeline rows and compares the full summary exactly with
+  checked safe-integer arithmetic;
+- an unknown `response.done` identity emits no provider usage, tutor-output
+  duration, or cancel-outcome telemetry. Existing cue flush and client
+  finalization behavior remains unchanged.

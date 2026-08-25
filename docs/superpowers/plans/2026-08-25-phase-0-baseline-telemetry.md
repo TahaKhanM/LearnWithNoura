@@ -64,6 +64,26 @@ gate transition. An unrecovered browser/fallback/failed transport can still
 lose final observations before a gap is delivered, so such a run cannot prove
 telemetry completeness.
 
+### Second consolidated review wave
+
+Before final evidence is reconciled, strict RED/GREEN coverage additionally
+requires:
+
+1. a production SQLite worker-thread adapter for metric append and exact
+   prior-start lookup, native async Postgres delegation, and a yielding
+   test/in-memory adapter;
+2. one ordered writer queue containing normal observations and gap barriers,
+   with bounded gap reserve, adjacency-only merging, in-place failure
+   replacement, and original gap reason/value recovery;
+3. server-owned encoding metadata plus a session-derived token prefix;
+   preparation always transforms input, while projection preserves only
+   metadata-valid tokens belonging to the projected session;
+4. exact reconstruction of all duration and lifecycle summary fields from
+   strictly ascending timeline rows, including checked integer addition and
+   required-duration presence in the timeline;
+5. exact-map-only terminal telemetry identity, so unknown `response.done`
+   events remain behaviorally finalized but emit no terminal metrics.
+
 ## File Structure
 
 **Create**
