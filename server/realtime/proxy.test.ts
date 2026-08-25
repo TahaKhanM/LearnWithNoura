@@ -845,7 +845,7 @@ describe('realtime proxy response annotation', () => {
 });
 
 describe('realtime proxy telemetry', () => {
-  it('records client metrics with envelope identity and rejects unknown metrics', async () => {
+  it('records every browser-observed metric without accepting client terminal correlation', async () => {
     vi.stubGlobal('WebSocket', FakeUpstream);
     const repo = new Repo(openTestDb());
     const child = repo.createChild('Maya', 10);
@@ -864,42 +864,193 @@ describe('realtime proxy telemetry', () => {
       turnId: 'turn-authoritative',
       generationId: 'generation-authoritative',
     };
+    const allowed = [
+      { schemaVersion: '1.0.0', name: 'speech_end_to_response_started', unit: 'ms', value: 50 },
+      { schemaVersion: '1.0.0', name: 'speech_end_to_first_audio', unit: 'ms', value: 240 },
+      { schemaVersion: '1.0.0', name: 'ask_to_first_audio', unit: 'ms', value: 300 },
+      {
+        schemaVersion: '1.0.0',
+        name: 'board_reveal_to_narration',
+        unit: 'ms',
+        value: -20,
+        visualCueId: 'cue-1',
+        semanticObjectId: 'object-1',
+      },
+      {
+        schemaVersion: '1.0.0',
+        name: 'barge_in_gate_outcome',
+        unit: 'count',
+        value: 1,
+        dimensions: { outcome: 'local_only_rejected' },
+      },
+      {
+        schemaVersion: '1.0.0',
+        name: 'barge_in_gate_outcome',
+        unit: 'count',
+        value: 1,
+        dimensions: { outcome: 'provider_only_rejected' },
+      },
+      {
+        schemaVersion: '1.0.0',
+        name: 'section_navigation',
+        unit: 'count',
+        value: 1,
+        dimensions: {
+          previousSemanticGroupId: 'section-1',
+          nextSemanticGroupId: 'section-2',
+          cause: 'picker',
+        },
+      },
+      {
+        schemaVersion: '1.0.0',
+        name: 'tutor_object_disappearance',
+        unit: 'count',
+        value: 1,
+        dimensions: { objectId: 'object-1', cause: 'scene_mutation' },
+      },
+    ] as const;
+
+    for (const [sequence, payload] of allowed.entries()) {
+      client.emit('message', JSON.stringify(createRuntimeEvent(
+        active,
+        sequence,
+        'metric',
+        {
+          ...payload,
+          connectionEpoch: 999,
+          turnId: 'turn-payload-forged',
+          generationId: 'generation-payload-forged',
+          providerResponseId: 'response-payload-forged',
+        },
+        { providerResponseId: 'response-envelope-forged' },
+      )));
+    }
+    await flushProxy();
+
+    const observations = repo.listEvents(session.id).map((event) => event.payload as Record<string, unknown>);
+    expect(observations.map((observation) => observation.name)).toEqual([
+      'speech_end_to_response_started',
+      'speech_end_to_first_audio',
+      'ask_to_first_audio',
+      'board_reveal_to_narration',
+      'barge_in_gate_outcome',
+      'barge_in_gate_outcome',
+      'section_navigation',
+      'tutor_object_disappearance',
+    ]);
+    expect(observations).toEqual(observations.map(() => expect.objectContaining({
+      connectionEpoch: 7,
+      turnId: 'turn-authoritative',
+      generationId: 'generation-authoritative',
+    })));
+    expect(observations.every((observation) => !('providerResponseId' in observation))).toBe(true);
+  });
+
+  it.each([
+    ['provider_usage', {
+      schemaVersion: '1.0.0',
+      name: 'provider_usage',
+      unit: 'count',
+      value: 0,
+      dimensions: {
+        totalTokens: 0,
+        inputTextTokens: 0,
+        inputAudioTokens: 0,
+        inputImageTokens: 0,
+        cachedTextTokens: 0,
+        cachedAudioTokens: 0,
+        cachedImageTokens: 0,
+        outputTextTokens: 0,
+        outputAudioTokens: 0,
+      },
+    }],
+    ['tutor_audio_output_duration', {
+      schemaVersion: '1.0.0',
+      name: 'tutor_audio_output_duration',
+      unit: 'ms',
+      value: 10,
+    }],
+    ['session_reconnect', {
+      schemaVersion: '1.0.0',
+      name: 'session_reconnect',
+      unit: 'count',
+      value: 1,
+    }],
+    ['barge_in_cancel_outcome: provider_cancelled', {
+      schemaVersion: '1.0.0',
+      name: 'barge_in_cancel_outcome',
+      unit: 'count',
+      value: 1,
+      dimensions: { outcome: 'provider_cancelled' },
+    }],
+    ['barge_in_cancel_outcome: provider_completed', {
+      schemaVersion: '1.0.0',
+      name: 'barge_in_cancel_outcome',
+      unit: 'count',
+      value: 1,
+      dimensions: { outcome: 'provider_completed' },
+    }],
+    ['barge_in_cancel_outcome: provider_failed', {
+      schemaVersion: '1.0.0',
+      name: 'barge_in_cancel_outcome',
+      unit: 'count',
+      value: 1,
+      dimensions: { outcome: 'provider_failed' },
+    }],
+    ['barge_in_gate_outcome: confirmed', {
+      schemaVersion: '1.0.0',
+      name: 'barge_in_gate_outcome',
+      unit: 'count',
+      value: 1,
+      dimensions: { outcome: 'confirmed' },
+    }],
+    ['unknown_metric', {
+      schemaVersion: '1.0.0',
+      name: 'unknown_metric',
+      unit: 'count',
+      value: 1,
+    }],
+  ] as const)('rejects client-origin %s while recording an allowed control', async (_label, rejected) => {
+    vi.stubGlobal('WebSocket', FakeUpstream);
+    const repo = new Repo(openTestDb());
+    const child = repo.createChild('Maya', 10);
+    const session = repo.createSession(child.id, 'fractions');
+    const client = new FakeClient();
+    await connectRealtimeProxy(client as never, {
+      apiKey: 'offline-fixture',
+      model: 'gpt-realtime-2.1',
+      repo,
+      sessionId: session.id,
+      createUpstream: () => new FakeUpstream() as never,
+    });
+    const active = { ...identity, sessionId: session.id };
 
     client.emit('message', JSON.stringify(createRuntimeEvent(active, 0, 'metric', {
       schemaVersion: '1.0.0',
       name: 'speech_end_to_first_audio',
       unit: 'ms',
       value: 240,
-      connectionEpoch: 999,
-      turnId: 'turn-spoofed',
-      generationId: 'generation-spoofed',
-      providerResponseId: 'response-spoofed',
     })));
-    client.emit('message', JSON.stringify(createRuntimeEvent(active, 1, 'metric', {
-      schemaVersion: '1.0.0',
-      name: 'unknown_metric',
-      unit: 'count',
-      value: 1,
-    })));
+    client.emit('message', JSON.stringify(createRuntimeEvent(
+      active,
+      1,
+      'metric',
+      rejected,
+      { providerResponseId: 'response-client-forged' },
+    )));
     await flushProxy();
 
-    expect(repo.listEvents(session.id)).toEqual([
+    expect(repo.listEvents(session.id).map((event) => event.payload)).toEqual([
       expect.objectContaining({
-        type: 'metric',
-        payload: {
-          schemaVersion: '1.0.0',
-          name: 'speech_end_to_first_audio',
-          unit: 'ms',
-          value: 240,
-          connectionEpoch: 7,
-          turnId: 'turn-authoritative',
-          generationId: 'generation-authoritative',
-        },
+        name: 'speech_end_to_first_audio',
+        connectionEpoch: active.connectionEpoch,
+        turnId: active.turnId,
+        generationId: active.generationId,
       }),
     ]);
   });
 
-  it('records one reconnect only after a prior start, before any transcript exists', async () => {
+  it('records one reconnect after prior history exceeds the old scan bound', async () => {
     vi.stubGlobal('WebSocket', FakeUpstream);
     const repo = new Repo(openTestDb());
     const child = repo.createChild('Maya', 10);
@@ -921,6 +1072,9 @@ describe('realtime proxy telemetry', () => {
     await flushProxy();
 
     expect(repo.listEvents(session.id).filter((event) => event.type === 'metric')).toEqual([]);
+    for (let index = 0; index < 2_001; index += 1) {
+      repo.addEvent(session.id, 'history_filler', { index });
+    }
 
     const secondClient = new FakeClient();
     await connectRealtimeProxy(secondClient as never, {
@@ -938,7 +1092,7 @@ describe('realtime proxy telemetry', () => {
     }, 0, 'start', {})));
     await flushProxy();
 
-    const events = repo.listEvents(session.id);
+    const events = repo.listEvents(session.id, 2_010);
     expect(events.filter((event) => event.type === 'session_started').map((event) => event.payload)).toEqual([
       expect.objectContaining({ connectionEpoch: 1 }),
       expect.objectContaining({ connectionEpoch: 2 }),
@@ -953,6 +1107,92 @@ describe('realtime proxy telemetry', () => {
         }),
       }),
     ]);
+  });
+
+  it('requests the initial response when reconnect telemetry persistence fails', async () => {
+    vi.stubGlobal('WebSocket', FakeUpstream);
+    const repo = new Repo(openTestDb());
+    const child = repo.createChild('Maya', 10);
+    const session = repo.createSession(child.id, 'fractions');
+    repo.addEvent(session.id, 'session_started', { connectionEpoch: 1 });
+    failMetricWrites(repo);
+    const client = new FakeClient();
+    await connectRealtimeProxy(client as never, {
+      apiKey: 'offline-fixture',
+      model: 'gpt-realtime-2.1',
+      repo,
+      sessionId: session.id,
+      createUpstream: () => new FakeUpstream() as never,
+    });
+    const upstream = FakeUpstream.latest;
+
+    client.emit('message', JSON.stringify(createRuntimeEvent({
+      sessionId: session.id,
+      connectionEpoch: 2,
+      turnId: 'turn-reconnect',
+      generationId: 'generation-reconnect',
+    }, 0, 'start', {})));
+    await flushProxy();
+
+    expect(upstream.sent.map((raw) => JSON.parse(raw) as { type: string }))
+      .toContainEqual(expect.objectContaining({ type: 'response.create' }));
+    expect(repo.listEvents(session.id).filter((event) => event.type === 'session_started')).toHaveLength(2);
+    expect(client.sent.some((event) => event.type === 'error')).toBe(false);
+  });
+
+  it('flushes response cues and sends response_done when telemetry persistence fails', async () => {
+    vi.stubGlobal('WebSocket', FakeUpstream);
+    const repo = new Repo(openTestDb());
+    const child = repo.createChild('Maya', 10);
+    const session = repo.createSession(child.id, 'fractions');
+    failMetricWrites(repo);
+    const client = new FakeClient();
+    await connectRealtimeProxy(client as never, {
+      apiKey: 'offline-fixture',
+      model: 'gpt-realtime-2.1',
+      repo,
+      sessionId: session.id,
+      createUpstream: () => new FakeUpstream() as never,
+    });
+    const active = { ...identity, sessionId: session.id };
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 0, 'hello', {})));
+    const upstream = FakeUpstream.latest;
+    const responseId = 'response-observer-failure';
+    upstream.emit({ type: 'response.created', response: { id: responseId } });
+    upstream.emit({
+      type: 'response.function_call_arguments.done',
+      response_id: responseId,
+      call_id: 'move-observer-failure',
+      name: 'propose_teaching_move',
+      arguments: JSON.stringify({
+        rationale: 'fixture',
+        microObjective: 'fraction comparison',
+        strategy: 'shared scale',
+        childFacingText: 'Compare the marks.',
+        proposedAction: 'explain',
+      }),
+    });
+    upstream.emit({
+      type: 'response.output_audio.delta',
+      response_id: responseId,
+      item_id: 'item-observer-failure',
+      delta: Buffer.alloc(2_400 * 2).toString('base64'),
+    });
+    await flushProxy();
+
+    upstream.emit({
+      type: 'response.done',
+      response: { id: responseId, status: 'completed', output: [{ type: 'function_call' }] },
+    });
+    await flushProxy();
+
+    expect(client.sent).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'lesson_state' }),
+      expect.objectContaining({
+        type: 'response_done',
+        payload: expect.objectContaining({ response_id: responseId, status: 'completed' }),
+      }),
+    ]));
   });
 
   it.each([
@@ -1185,4 +1425,12 @@ describe('realtime proxy telemetry', () => {
 
 function flushProxy(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+function failMetricWrites(repo: Repo): void {
+  const addEvent = repo.addEvent.bind(repo);
+  vi.spyOn(repo, 'addEvent').mockImplementation((sessionId, type, payload, released) => {
+    if (type === 'metric') throw new Error('telemetry store unavailable');
+    return addEvent(sessionId, type, payload, released);
+  });
 }

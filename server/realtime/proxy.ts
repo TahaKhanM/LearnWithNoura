@@ -6,7 +6,11 @@ import {
   type GenerationIdentity,
   type RuntimeEventEnvelope,
 } from '../../shared/runtimeProtocol.js';
-import { TELEMETRY_SCHEMA_VERSION } from '../../shared/sessionTelemetry.js';
+import {
+  MetricInputSchema,
+  TELEMETRY_SCHEMA_VERSION,
+  type MetricInput,
+} from '../../shared/sessionTelemetry.js';
 import { buildInstructions } from './instructions.js';
 import { REALTIME_TOOLS } from './tools.js';
 import type { Confidence, Verdict } from '../store/repo.js';
@@ -37,6 +41,23 @@ const OUTPUT_AUDIO_SAMPLES_PER_MS = 24;
 
 /** Stop auto-continuing tool chains after this many rounds per turn. */
 const MAX_TOOL_CONTINUES = 14;
+
+function isAllowedClientMetric(input: MetricInput): boolean {
+  switch (input.name) {
+    case 'speech_end_to_response_started':
+    case 'speech_end_to_first_audio':
+    case 'ask_to_first_audio':
+    case 'board_reveal_to_narration':
+    case 'section_navigation':
+    case 'tutor_object_disappearance':
+      return true;
+    case 'barge_in_gate_outcome':
+      return input.dimensions.outcome === 'local_only_rejected' ||
+        input.dimensions.outcome === 'provider_only_rejected';
+    default:
+      return false;
+  }
+}
 
 interface UpstreamEvent {
   type: string;
@@ -1327,8 +1348,7 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
         if (started) break;
         started = true;
         toolContinues = 0;
-        const hadPriorStart = (await repo.listEvents(sessionId, 2000))
-          .some((event) => event.type === 'session_started' && event.released);
+        const hadPriorStart = (await repo.listEvents(sessionId, 1)).length > 0;
         const resume = await conversationContext();
         if (resume) {
           sendUpstream({
@@ -1560,11 +1580,13 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
       }
 
       case 'metric': {
+        const metric = MetricInputSchema.safeParse(envelope.payload);
+        if (!metric.success || !isAllowedClientMetric(metric.data)) break;
         await recordMetric(
           repo,
           sessionId,
-          envelope.payload,
-          metricContextFromIdentity(envelope, envelope.providerResponseId),
+          metric.data,
+          metricContextFromIdentity(envelope),
         );
         break;
       }

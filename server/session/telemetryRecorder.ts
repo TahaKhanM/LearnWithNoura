@@ -4,11 +4,12 @@ import {
   TELEMETRY_SCHEMA_VERSION,
   attachMetricContext,
   type MetricContext,
+  type MetricObservation,
 } from '../../shared/sessionTelemetry.js';
 import type { GenerationIdentity } from '../../shared/runtimeProtocol.js';
 import type { DomainRepository } from '../store/domain.js';
 
-const providerTokenCount = z.number().finite().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
+const providerTokenCount = z.number().finite().int().nonnegative();
 
 const ProviderUsageSchema = z.object({
   total_tokens: providerTokenCount,
@@ -37,14 +38,13 @@ export async function recordMetric(
   const parsed = MetricInputSchema.safeParse(input);
   if (!parsed.success) return null;
 
-  let observation;
+  let observation: MetricObservation;
   try {
     observation = attachMetricContext(parsed.data, context);
+    return await repo.addEvent(sessionId, 'metric', observation);
   } catch {
     return null;
   }
-
-  return repo.addEvent(sessionId, 'metric', observation);
 }
 
 export async function recordProviderUsage(

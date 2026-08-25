@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { openTestDb } from '../store/db.js';
+import type { DomainRepository } from '../store/domain.js';
 import { Repo } from '../store/repo.js';
 import {
   metricContextFromIdentity,
@@ -56,6 +57,25 @@ describe('telemetry recorder', () => {
 
     expect(id).toBeNull();
     expect(repo.listEvents(session.id)).toEqual([]);
+  });
+
+  it('returns null when metric persistence rejects', async () => {
+    const repo = {
+      addEvent: async () => {
+        throw new Error('telemetry store unavailable');
+      },
+    } as unknown as DomainRepository;
+
+    await expect(recordMetric(repo, 'session-1', {
+      schemaVersion: '1.0.0',
+      name: 'session_reconnect',
+      unit: 'count',
+      value: 1,
+    }, {
+      connectionEpoch: 2,
+      turnId: 'turn-0',
+      generationId: 'generation-0',
+    })).resolves.toBeNull();
   });
 
   it('derives metric context from authoritative identity', () => {
