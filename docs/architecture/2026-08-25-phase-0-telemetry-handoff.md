@@ -2,45 +2,50 @@
 
 ## Second-review status
 
-The offline evidence below describes the first hardening wave at `3924e0b` and
-is historical, not final evidence for the current reviewed head. A second
-consolidated wave is in progress to add the production SQLite worker boundary,
-ordered gap barriers, session-owned encoding metadata, complete timeline
-reconciliation, and exact-map-only terminal telemetry. Final commit and gate
-evidence will be replaced only after all required non-browser gates pass.
+The second consolidated review wave is complete at code head `4fced4d`.
+Browser/visual/accessibility evidence remains intentionally pending controller
+rerun; no live/provider/hardware claim is added.
 
 ## Proven offline
 
-- Final hardening code head: `3924e0b` against pre-wave head `0e1cfaa`.
-  The consolidated wave is `9e5449f` (decision/design), `c513c2f`
-  (ordered telemetry runtime), and `3924e0b` (exact smoke/API/docs).
+- Second-wave hardening code head: `4fced4d` against reviewer head `fef2bc8`.
+  The wave is `99f4f39` (decision/design clarification), `2c7b526`
+  (off-thread ordered telemetry), and `4fced4d` (complete smoke
+  reconciliation/docs).
 - The implemented path is browser/provider observer → trusted runtime envelope
-  → synchronous typed preparation and session-scoped ID pseudonymization →
-  bounded ordered non-blocking writer → released `metric` event →
-  parent-scoped log projection. Repository latency cannot hold initial
-  `response.create`, cancellation, cue/response completion, or later messages.
+  → synchronous typed preparation and session-owned ID encoding → bounded
+  ordered non-blocking writer → real async repository boundary → released
+  `metric` event → parent-scoped log projection. Production SQLite telemetry
+  append/prior-start paging runs in a worker; Postgres stays natively async.
+  Repository latency cannot hold initial `response.create`, cancellation,
+  cue/response completion, or later messages.
 - `telemetry_gap` projects aggregated server queue, server persistence, and
-  browser pre-ready queue loss. Pending server gaps precede later observations;
-  the smoke gate rejects any gap. This is honest known-loss accounting, not a
+  browser pre-ready queue loss as ordered barriers. Overflow follows older
+  accepted observations; failed normal rows become persistence barriers in
+  place; failed gaps retain their original reason/value and block later rows.
+  The smoke gate rejects any gap. This is honest known-loss accounting, not a
   guarantee after an unrecovered browser/fallback/failed transport.
 - Raw turn, generation, provider-response, visual-cue, semantic-object,
   section, and object IDs are absent from prepared writes and are
-  defense-in-depth pseudonymized during projection. Board/narration timing
-  requires exact accepted-response correlation. Duplicate provider terminal
-  events cannot duplicate usage, tutor duration, or cancellation outcome.
+  defense-in-depth pseudonymized during projection. Preparation always
+  transforms input; projection preserves only valid server metadata plus a
+  current-session token prefix. Board/narration timing requires exact accepted
+  response correlation. Duplicate provider terminal events cannot duplicate
+  usage, tutor duration, or cancellation outcome, and unknown terminal response
+  IDs emit no terminal telemetry.
 - The smoke reporter accepts an HTTP(S) origin only, validates exact
   `/api/version` and session-log allowlists, requires origin/session/schema
-  agreement, and reconciles safe positive provider timeline rows exactly to
-  summary totals. Session-log `200`, `401`, `404`, and handled `500` paths are
-  `no-store`.
-- Strict RED was observed before implementation: the focused telemetry command
-  failed 19 tests plus the missing writer module, and the smoke reporter command
-  failed 21 new assertions. GREEN evidence at the code head:
+  agreement, requires strictly ascending event IDs, reconstructs every duration
+  and lifecycle field from timeline rows, and uses checked safe-integer totals.
+  Session-log `200`, `401`, `404`, and handled `500` paths remain `no-store`.
+- Strict second-wave RED was observed before implementation: the focused
+  command failed 11 tests plus the missing adapter module, and the smoke suite
+  failed seven new reconciliation assertions. Final GREEN evidence:
   - focused shared/session-log/recorder/writer/proxy/RealtimeSession/API suite:
-    8 files, 106 tests passed;
-  - `npm test`: 48 files, 323 tests passed;
-  - `npm run test:smoke-report`: 34 tests passed;
-  - `npm run test:integration`: 48 files, 323 tests passed;
+    8 files, 104 tests passed;
+  - `npm test`: 49 files, 329 tests passed;
+  - `npm run test:smoke-report`: 45 tests passed;
+  - `npm run test:integration`: 49 files, 329 tests passed;
   - `npm run test:security`: 3 files, 16 tests passed;
   - `npm run build`: 147 modules transformed;
   - `npm run typecheck:server`, `npm run lint`, `npm run test:brand`,
