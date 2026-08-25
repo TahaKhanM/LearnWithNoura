@@ -44,6 +44,27 @@ The active path is:
 
 See [the active architecture ADR](docs/architecture/2026-08-23-noura-runtime-architecture.md), [Board Intelligence v2](docs/architecture/2026-08-23-board-intelligence-v2.md), [threat model](docs/privacy/threat-model.md) and [traceability matrix](docs/traceability/2026-08-23-noura-traceability.md).
 
+## Phase 0 telemetry and prepared smoke
+
+Privacy-safe observations are validated and stored as released `metric` events in the existing event log. `GET /api/sessions/:id/log` is the parent-authenticated, parent-owned projection of those released events; it returns bounded duration aggregates, interruption outcomes, section/reconnect/disappearance counts, provider token-usage totals and a metric-only timeline. It does not copy transcripts or evidence text.
+
+The Phase 0 timing boundaries are deliberately narrow:
+
+- “First audio” ends when the browser handles the first accepted tutor audio delta for the current response. It is a browser-received boundary, not speaker onset or acoustic evidence.
+- `board_reveal_to_narration` is `first scheduled audible sample − first committed board paint` on one browser monotonic clock. Positive means the board appeared first; negative means scheduled narration came first. It is not animation-completion time.
+
+These offline and browser-observer definitions prevent lifecycle regressions, but no live-provider latency or target-hardware acoustic claim has been made.
+
+The live journey is prepared, not authorized or executed by the default gates:
+
+```bash
+npm run test:smoke-report
+# DO NOT RUN without explicit deployment and live-provider authorization:
+NOURA_BASE_URL=https://authorized-origin.example npm run e2e:live -- --authorized-live-run --text-only
+```
+
+The reporter reads `/api/version` and the parent-scoped session log through the still-authenticated browser context. It distinguishes the configured base URL from the origin actually reached and reports runtime model IDs, exact logged tutor-audio duration, provider-reported token usage projected from `response.done`, Phase 0 aggregates, bounded caption/learner/console counts, hardcoded milestones and unresolved verification items. Retained reports contain no raw caption, learner or browser-console text. A truncated session log or missing provider usage fails the gate. `NOURA_PROVIDER_REPORTED_COST_USD` is optional user-supplied USD copied from the provider billing surface; the provider event does not supply a currency charge and the script never invents one. `--report-fixture <path>` and `npm run test:smoke-report` exercise report construction offline and never establish live-provider evidence. Do not run the normal journey, deploy or make paid/provider calls without explicit authorization.
+
 ## Local setup
 
 Requires Node.js 24+.
@@ -78,6 +99,7 @@ The old database is retained. `NOURA_DATA_DIR` is preferred; the historical envi
 npm run build
 npm run typecheck:server
 npm run lint
+npm run test:smoke-report
 npm test
 npm audit --omit=dev
 npm run test:integration

@@ -873,6 +873,8 @@ EOF
 
 **Files:**
 - Modify: `scripts/e2e-live.mjs`
+- Create: `scripts/e2e-live.node-test.mjs`
+- Modify: `package.json`
 - Modify: `README.md`
 - Modify: `docs/architecture/2026-08-23-noura-runtime-architecture.md`
 - Modify: `docs/operations/testing-and-evaluation.md`
@@ -911,11 +913,21 @@ Print one JSON report containing:
 - `requiresAuthorizedLiveVerification` entries for acoustic onset, target
   hardware, and any absent observations.
 
+Require an explicit `--authorized-live-run` argument before any browser launch
+or application request. `--help`, deterministic fixture reporting, and invalid
+configuration remain offline and side-effect free. Configuration failures must
+return the same structured failure-report shape rather than an uncaught stack.
+The report may include bounded counts of caption lines and browser errors, but
+must never retain raw tutor/learner caption text or raw console-error strings.
+
 If the WAV scenario is selected, set a nonzero exit code when speech response
 metrics or provider usage are absent. In text-only mode, do not require
 speech-end metrics. Never query SQLite directly after browser close.
 
 Do not execute this script in Phase 0.
+Add `test:smoke-report` and `e2e:live` package scripts. The live command must
+still require callers to pass `--authorized-live-run`; the package script must
+not silently opt in for them.
 
 - [ ] **Step 2: Update README**
 
@@ -926,6 +938,7 @@ Document:
 - exact offline meaning of first audio and signed reveal/narration gap;
 - that no live latency claim has been made;
 - the prepared smoke command using `NOURA_BASE_URL`;
+- the explicit `--authorized-live-run` guard and offline reporter test command;
 - the authorization boundary.
 
 - [ ] **Step 3: Update runtime architecture and privacy docs**
@@ -946,7 +959,9 @@ Replace "provider-reported cost" ambiguity with:
 - any local rate-card calculation labelled as an estimate with source date.
 
 Add the prepared command, expected report fields, and an explicit "do not run
-without authorization" warning.
+without authorization" warning. Document that a truncated log or missing
+provider usage fails the smoke gate and that retained reports contain counts,
+not transcript/console text.
 
 - [ ] **Step 5: Write the Phase 0 handoff**
 
@@ -969,6 +984,8 @@ npm run build
 npm run typecheck:server
 npm run lint
 npm run test:brand
+npm run test:smoke-report
+npm test
 ```
 
 Expected: PASS.
@@ -976,7 +993,7 @@ Expected: PASS.
 - [ ] **Step 7: Commit the documentation/smoke milestone**
 
 ```bash
-git add scripts/e2e-live.mjs README.md docs/architecture/2026-08-23-noura-runtime-architecture.md docs/operations/testing-and-evaluation.md docs/privacy/threat-model.md docs/architecture/2026-08-25-phase-0-telemetry-handoff.md
+git add scripts/e2e-live.mjs scripts/e2e-live.node-test.mjs package.json README.md docs/architecture/2026-08-23-noura-runtime-architecture.md docs/operations/testing-and-evaluation.md docs/privacy/threat-model.md docs/architecture/2026-08-25-phase-0-telemetry-handoff.md
 git commit -m "$(cat <<'EOF'
 docs: prepare phase zero telemetry smoke
 EOF
@@ -1012,9 +1029,13 @@ Run:
 
 ```bash
 npm test
+npm run test:smoke-report
+npm audit --omit=dev
+npm run test:integration
 npm run test:security
 npm run test:storage
 npm run test:brand
+npm run test:runtime-models
 ```
 
 Expected: all PASS.
