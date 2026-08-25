@@ -470,6 +470,149 @@ describe('realtime proxy response annotation', () => {
     expect(repo.listEventsForInternalAudit(session.id).filter((event) => event.type === 'semantic_scene')).toEqual([]);
   });
 
+  it('takes fatal shutdown while semantic preflight staging is unresolved', async () => {
+    vi.stubGlobal('WebSocket', FakeUpstream);
+    const repo = new Repo(openTestDb());
+    const child = repo.createChild('Maya', 10);
+    const session = repo.createSession(child.id, 'fractions');
+    const client = new FakeClient();
+    const registry = new ProxyLifecycleRegistry();
+    let lifecycle: ProxyLifecycle | null = null;
+    await connectRealtimeProxy(client as never, {
+      apiKey: 'offline-fixture',
+      model: 'gpt-realtime-2.1',
+      repo,
+      sessionId: session.id,
+      createUpstream: () => new FakeUpstream() as never,
+      preflightTimeoutMs: 50,
+      onLifecycle: (value) => {
+        lifecycle = value;
+        registry.register(value);
+      },
+    });
+    const active = { ...identity, sessionId: session.id };
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 0, 'hello', {})));
+    const upstream = FakeUpstream.latest;
+    createBlueprint(upstream, 'shutdown-stage');
+    await flushProxy();
+    upstream.emit({ type: 'response.created', response: { id: 'shutdown-plan-response' } });
+    upstream.emit({
+      type: 'response.function_call_arguments.done',
+      response_id: 'shutdown-plan-response',
+      call_id: 'shutdown-plan-call',
+      name: 'semantic_visual_plan',
+      arguments: JSON.stringify({
+        schemaVersion: '2.0.0',
+        planId: 'shutdown-plan',
+        intent: {
+          objective: 'Compare fractions',
+          domain: 'quantitative',
+          relevance: 'essential',
+          questionAnswered: 'Which is larger?',
+          rationale: 'One scale.',
+          action: 'establish',
+          density: 'minimal',
+        },
+        groups: [{
+          id: 'fraction-scale',
+          label: 'Fraction number line',
+          revealOrder: ['outline'],
+          template: 'fraction_comparison',
+          parameters: { values: [0.5], labels: ['1/2'] },
+        }],
+      }),
+    });
+    await flushProxy();
+    expect(client.sent.some((event) => event.type === 'visual_preflight')).toBe(true);
+
+    const repositoryClose = vi.fn(async () => {});
+    const fatal = vi.fn();
+    const result = await runQuiescentShutdown({
+      stopAccepting: () => {},
+      closeClients: () => {},
+      closeProxies: () => registry.shutdown(5),
+      closeRepository: repositoryClose,
+      log: () => {},
+      fatal,
+    });
+    expect(result).toBe('fatal');
+    expect(repositoryClose).not.toHaveBeenCalled();
+    expect(fatal).toHaveBeenCalledWith(expect.any(Error));
+    expect(repo.listEventsForInternalAudit(session.id)
+      .filter((event) => event.type === 'semantic_scene')).toEqual([]);
+
+    await expect(lifecycle!.completion).resolves.toBeUndefined();
+  });
+
+  it('gracefully drains settled semantic staging', async () => {
+    vi.stubGlobal('WebSocket', FakeUpstream);
+    const repo = new Repo(openTestDb());
+    const child = repo.createChild('Maya', 10);
+    const session = repo.createSession(child.id, 'fractions');
+    const client = new FakeClient();
+    const registry = new ProxyLifecycleRegistry();
+    await connectRealtimeProxy(client as never, {
+      apiKey: 'offline-fixture',
+      model: 'gpt-realtime-2.1',
+      repo,
+      sessionId: session.id,
+      createUpstream: () => new FakeUpstream() as never,
+      preflightTimeoutMs: 100,
+      onLifecycle: (value) => registry.register(value),
+    });
+    const active = { ...identity, sessionId: session.id };
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 0, 'hello', {})));
+    const upstream = FakeUpstream.latest;
+    createBlueprint(upstream, 'graceful-stage');
+    await flushProxy();
+    upstream.emit({ type: 'response.created', response: { id: 'graceful-plan-response' } });
+    upstream.emit({
+      type: 'response.function_call_arguments.done',
+      response_id: 'graceful-plan-response',
+      call_id: 'graceful-plan-call',
+      name: 'semantic_visual_plan',
+      arguments: JSON.stringify({
+        schemaVersion: '2.0.0',
+        planId: 'graceful-plan',
+        intent: {
+          objective: 'Compare fractions',
+          domain: 'quantitative',
+          relevance: 'essential',
+          questionAnswered: 'Which is larger?',
+          rationale: 'One scale.',
+          action: 'establish',
+          density: 'minimal',
+        },
+        groups: [{
+          id: 'fraction-scale',
+          label: 'Fraction number line',
+          revealOrder: ['outline'],
+          template: 'fraction_comparison',
+          parameters: { values: [0.5], labels: ['1/2'] },
+        }],
+      }),
+    });
+    await flushProxy();
+    const preflight = client.sent.find((event) => event.type === 'visual_preflight');
+    client.emit('message', JSON.stringify(createRuntimeEvent(
+      active,
+      1,
+      'visual_preflight_result',
+      {
+        preflight_id: (preflight!.payload as { preflight_id?: string }).preflight_id,
+        accepted: false,
+        reasons: ['test rejection'],
+      },
+    )));
+    await flushProxy();
+    await flushProxy();
+    expect(toolOutput(upstream, 'graceful-plan-call')).toMatchObject({
+      ok: false,
+      accepted: false,
+    });
+    await expect(registry.shutdown(100)).resolves.toBe('graceful');
+  });
+
   it('rejects every live replace request: visible tutor work never disappears', async () => {
     vi.stubGlobal('WebSocket', FakeUpstream);
     const repo = new Repo(openTestDb());

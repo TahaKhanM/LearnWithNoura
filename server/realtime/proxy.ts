@@ -141,6 +141,7 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
     // App lifecycle tracking observes this promise; this guard also covers
     // direct test callers that intentionally do not install a tracker.
   });
+  const sideEffectTasks = new Set<Promise<void>>();
   const backgroundTelemetry = new Set<Promise<void>>();
   let toolContinues = 0;
   /** response ids we know were cancelled by barge-in. */
@@ -370,7 +371,7 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
     // Captured synchronously: staging may finish after this response seals,
     // in which case cues are delivered directly at its final audio boundary.
     const planSegment = responseSegment(responseId);
-    void (async () => {
+    const stagingTask = (async () => {
       if (!input.skipPreflight && input.ops.length > 0 && groupId) {
         const preflight = await preflightWithClient({ ops: input.ops, semanticGroupId: groupId, groupLabel });
         if (!preflight.accepted) {
@@ -454,6 +455,7 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
       log(`session ${sessionId}: semantic plan staging error ${String(error).slice(0, 200)}`);
       finishTool(callId, responseId, { ok: false, accepted: false, error: String(error).slice(0, 260) });
     });
+    trackSideEffect(stagingTask);
   }
 
   /** The server, not the model, decides which section a plan builds. */
@@ -505,6 +507,11 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
     void task.finally(() => backgroundTelemetry.delete(task)).catch(() => {});
   }
 
+  function trackSideEffect(task: Promise<void>): void {
+    sideEffectTasks.add(task);
+    void task.finally(() => sideEffectTasks.delete(task)).catch(() => {});
+  }
+
   function sealAdmission(): void {
     acceptingFrames = false;
     upstream.onmessage = null;
@@ -531,6 +538,9 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
       sealedClientWork,
       sealedUpstreamWork,
     ]).then(async () => {
+      while (sideEffectTasks.size > 0) {
+        await Promise.allSettled([...sideEffectTasks]);
+      }
       while (backgroundTelemetry.size > 0) {
         await Promise.allSettled([...backgroundTelemetry]);
       }
@@ -558,7 +568,11 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
     } catch {
       /* already closed */
     }
-    if (clientWorkPending > 0 || upstreamWorkPending > 0) {
+    if (
+      clientWorkPending > 0 ||
+      upstreamWorkPending > 0 ||
+      sideEffectTasks.size > 0
+    ) {
       forceTerminalPromise = Promise.reject(
         new Error('Proxy side-effect producer chains remain unsettled.'),
       );
