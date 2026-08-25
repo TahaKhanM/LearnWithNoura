@@ -2,12 +2,16 @@
 
 ## Proven offline
 
-- Commit ledger: Phase 0 began at `d850246`; Task 1 completed through `b4bd342`, Task 2 through `1af8454`, Task 3 through `5210c01`, Task 4 through `89ed343`, and Task 5 through `be4b590`. Task 6 is the commit that introduces this handoff; its hash is recorded in the external Task 6 report because a commit cannot embed its own hash.
+- Verification base: `aec9d54` against pre-Phase-0 base `d8e2258`.
+- Complete plan/milestone/fix ledger through the verification base:
+  - plans and documentation: `e899e5b` (telemetry contract), `d850246` (implementation plan), `fce1a6f` (plan fixture correction), `ac88176` (client response-correlation boundary), `c139629` (board-observer semantics), `93a9899` (telemetry smoke preparation), `00209ee` (safe smoke execution), and `aec9d54` (final gate list);
+  - implementation milestones: `0f9b03b` (typed session telemetry), `912d4c2` (Realtime session telemetry), `f17a53a` (voice/reveal timing), `f12af31` (board permanence observer), and `65ff6ab` (parent-scoped session logs);
+  - fixes: `ee146d3` (session-log projection hardening), `b4bd342` (Task 1 review gaps), `7a6023e` (observer-only Realtime telemetry), `1af8454` (released-start reconnect counting), `5210c01` (voice/response telemetry), `89ed343` (board observer ratification), `be4b590` (session-log cache prevention), and `1e74d49` (smoke-reporter safety boundary).
 - The implemented data path is browser/provider lifecycle observer → versioned runtime envelope → server identity and payload validation → released `metric` event → parent-scoped `GET /api/sessions/:id/log` projection. It does not change lesson, board, interruption, response-creation, model, or transport ownership.
-- `npm run test:smoke-report` passed 14/14 deterministic rows: help and fixtures remain offline, non-fixture execution requires explicit authorization, configuration failures stay structured, sensitive browser text is excluded, truncation/provider-usage failures remain gated, and WAV existence is checked before browser launch.
-- `node scripts/e2e-live.mjs --help`, `node --check scripts/e2e-live.mjs`, `npm run build`, `npm run typecheck:server`, `npm run lint`, `npm run test:brand`, `npm test` (47 files / 311 tests), and `git diff --check` passed.
-- The existing E2E/visual snapshots are unchanged; Task 6 adds no snapshot file and does not execute browser E2E.
-- No provider call, deployment, paid resource, resource creation, authorization request, or push occurred during Task 6. The three pre-existing untracked architecture prompt/review documents remain untouched and uncommitted.
+- Final static and offline gates passed: `npm run build` (147 modules transformed), `npm run typecheck:server`, `npm run lint`, `npm test` (47/47 files, 311/311 tests), `npm run test:smoke-report` (14/14), `npm audit --omit=dev` (0 vulnerabilities), `npm run test:integration` (47/47 files, 311/311 tests), `npm run test:security` (3/3 files, 15/15 tests), `npm run test:storage` (3/3 files, 5/5 tests), `npm run test:brand`, and `npm run test:runtime-models` (8/8 assertions).
+- Browser gates ran sequentially and passed: `npm run test:e2e` (12/12), `npm run test:visual` (48/48 existing baselines without updates), and `npm run test:a11y` (3/3).
+- Scope inspection against `d8e2258` found 32 Phase 0 files at `aec9d54` (6,522 insertions, 202 deletions). `git diff --check` passed. No visual snapshot path, runtime model/provider identifier, `response.create` or VAD ownership, learner-draft/Done behavior, or tutor-permanence behavior changed. The added code contains no explicit `any`, unused export, dead implementation, or commented-out implementation.
+- No live smoke, provider call, deployment, paid resource, resource creation, snapshot update, or push occurred during final verification. The branch remained 21 commits ahead of its remote at the verification base. The three pre-existing untracked architecture prompt/review documents remained untouched and uncommitted.
 - Runtime identifiers remain `gpt-realtime-2.1`, `gpt-4o-mini-transcribe`, and `gpt-5.6-terra`; Realtime reasoning remains `low`, fallback `none`, and summary `low`. WebSocket plus browser-owned PCM, generation cancellation, released-only replay, parent scoping, and every active runtime invariant remain unchanged.
 
 ## Requires authorized live verification
