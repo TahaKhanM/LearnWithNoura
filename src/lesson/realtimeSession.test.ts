@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRuntimeEvent, type GenerationIdentity, type RuntimeEventEnvelope } from '../../shared/runtimeProtocol';
 import { ResponseSegmentAnnotator } from '../../server/realtime/segmentAnnotator';
 import { RealtimeSession } from './realtimeSession';
@@ -6,7 +6,7 @@ import { RealtimeSession } from './realtimeSession';
 interface SessionHarness {
   audioOut: {
     speaking: boolean;
-    append(): void;
+    append(): { playbackStartsInMs: number } | null;
     currentEnergy(): number;
     playedSamples(): number;
     stop(): never[];
@@ -15,10 +15,11 @@ interface SessionHarness {
   handleServer(raw: unknown): void;
   handleMicEnergy(rms: number): void;
   releasePending(): void;
-  ws?: { readyState: number; send(raw: string): void };
+  ws?: { readyState: number; send(raw: string): void; close?(): void };
 }
 
 beforeEach(() => window.sessionStorage.clear());
+afterEach(() => vi.restoreAllMocks());
 
 function envelope(identity: GenerationIdentity, sequence: number, cue: { payload: Record<string, unknown>; optional: Record<string, unknown> }) {
   const { type, ...payload } = cue.payload;
@@ -31,7 +32,7 @@ describe('RealtimeSession sealed response release', () => {
     const harness = session as unknown as SessionHarness;
     let played = 480;
     harness.audioOut = {
-      speaking: true, append: () => {}, currentEnergy: () => 0, playedSamples: () => played,
+      speaking: true, append: () => null, currentEnergy: () => 0, playedSamples: () => played,
       stop: () => [], close: async () => {},
     };
     const board = vi.fn(async () => true);
@@ -66,7 +67,7 @@ describe('RealtimeSession sealed response release', () => {
     const session = new RealtimeSession('session');
     const harness = session as unknown as SessionHarness;
     harness.audioOut = {
-      speaking: true, append: () => {}, currentEnergy: () => 0, playedSamples: () => 0,
+      speaking: true, append: () => null, currentEnergy: () => 0, playedSamples: () => 0,
       stop: () => [], close: async () => {},
     };
     const identity = session.getIdentity();
@@ -76,12 +77,222 @@ describe('RealtimeSession sealed response release', () => {
     expect(session.getIdentity()).toEqual(identity);
   });
 
+  it('emits typed speech and ask timing metrics with identity only in the envelope', () => {
+    const now = vi.spyOn(performance, 'now');
+    const session = new RealtimeSession('session');
+    const harness = session as unknown as SessionHarness;
+    const sent: RuntimeEventEnvelope<Record<string, unknown>>[] = [];
+    harness.ws = {
+      readyState: 1,
+      send: (raw) => sent.push(JSON.parse(raw) as RuntimeEventEnvelope<Record<string, unknown>>),
+      close: () => {},
+    };
+    harness.audioOut = {
+      speaking: false,
+      append: () => ({ playbackStartsInMs: 50 }),
+      currentEnergy: () => 0,
+      playedSamples: () => 0,
+      stop: () => [],
+      close: async () => {},
+    };
+    let identity = session.getIdentity();
+
+    now.mockReturnValue(1_000);
+    harness.handleServer(createRuntimeEvent(identity, 0, 'speech_stopped', {}));
+    now.mockReturnValue(1_180);
+    harness.handleServer(createRuntimeEvent(identity, 1, 'response_started', { response_id: 'voice-reply' }));
+    now.mockReturnValue(1_450);
+    harness.handleServer(createRuntimeEvent(identity, 2, 'audio', {
+      response_id: 'voice-reply', item_id: 'item-voice', delta: btoa('\0\0'),
+    }));
+
+    now.mockReturnValue(2_000);
+    session.sendText('What is one half?');
+    identity = session.getIdentity();
+    now.mockReturnValue(2_300);
+    harness.handleServer(createRuntimeEvent(identity, 0, 'response_started', { response_id: 'text-reply' }));
+    harness.handleServer(createRuntimeEvent(identity, 1, 'audio', {
+      response_id: 'text-reply', item_id: 'item-text', delta: btoa('\0\0'),
+    }));
+
+    const metrics = sent.filter((event) => event.type === 'metric');
+    expect(metrics.map((event) => event.payload)).toEqual([
+      {
+        schemaVersion: '1.0.0',
+        name: 'speech_end_to_response_started',
+        unit: 'ms',
+        value: 180,
+      },
+      {
+        schemaVersion: '1.0.0',
+        name: 'speech_end_to_first_audio',
+        unit: 'ms',
+        value: 450,
+      },
+      {
+        schemaVersion: '1.0.0',
+        name: 'ask_to_first_audio',
+        unit: 'ms',
+        value: 300,
+      },
+    ]);
+    expect(metrics).toEqual(metrics.map(() => expect.objectContaining({
+      sessionId: 'session',
+      connectionEpoch: identity.connectionEpoch,
+      turnId: expect.any(String),
+      generationId: expect.any(String),
+    })));
+    expect(metrics.every((event) => {
+      const payload = event.payload;
+      return !('connectionEpoch' in payload) &&
+        !('turnId' in payload) &&
+        !('generationId' in payload) &&
+        !('providerResponseId' in payload);
+    })).toBe(true);
+    session.end();
+  });
+
+  it('emits rejected local-only and provider-only gate observations', () => {
+    const now = vi.spyOn(performance, 'now');
+    const session = new RealtimeSession('session');
+    const harness = session as unknown as SessionHarness;
+    const sent: RuntimeEventEnvelope<Record<string, unknown>>[] = [];
+    harness.ws = {
+      readyState: 1,
+      send: (raw) => sent.push(JSON.parse(raw) as RuntimeEventEnvelope<Record<string, unknown>>),
+    };
+    harness.audioOut = {
+      speaking: true, append: () => null, currentEnergy: () => 0, playedSamples: () => 0,
+      stop: () => [], close: async () => {},
+    };
+    const identity = session.getIdentity();
+
+    now.mockReturnValue(0);
+    harness.handleServer(createRuntimeEvent(identity, 0, 'speech_started', {}));
+    now.mockReturnValue(100);
+    harness.handleServer(createRuntimeEvent(identity, 1, 'speech_stopped', {}));
+    for (let frame = 1; frame <= 7; frame += 1) {
+      now.mockReturnValue(200 + frame * 40);
+      harness.handleMicEnergy(0.09);
+    }
+    now.mockReturnValue(200 + 7 * 40 + 161);
+    harness.handleMicEnergy(0.005);
+
+    const metrics = sent.filter((event) => event.type === 'metric');
+    expect(metrics.map((event) => event.payload)).toEqual([
+      {
+        schemaVersion: '1.0.0',
+        name: 'barge_in_gate_outcome',
+        unit: 'count',
+        value: 1,
+        dimensions: { outcome: 'provider_only_rejected' },
+      },
+      {
+        schemaVersion: '1.0.0',
+        name: 'barge_in_gate_outcome',
+        unit: 'count',
+        value: 1,
+        dimensions: { outcome: 'local_only_rejected' },
+      },
+    ]);
+    expect(metrics.every((event) => event.providerResponseId === undefined)).toBe(true);
+  });
+
+  it('keeps confirmed voice interruption ownership and generation advancement unchanged', () => {
+    const now = vi.spyOn(performance, 'now');
+    const session = new RealtimeSession('session');
+    const harness = session as unknown as SessionHarness;
+    const sent: RuntimeEventEnvelope<Record<string, unknown>>[] = [];
+    harness.ws = {
+      readyState: 1,
+      send: (raw) => sent.push(JSON.parse(raw) as RuntimeEventEnvelope<Record<string, unknown>>),
+    };
+    harness.audioOut = {
+      speaking: true, append: () => null, currentEnergy: () => 0, playedSamples: () => 0,
+      stop: () => [], close: async () => {},
+    };
+    const identity = session.getIdentity();
+    harness.handleServer(createRuntimeEvent(identity, 0, 'response_started', { response_id: 'response-1' }));
+    now.mockReturnValue(80);
+    harness.handleServer(createRuntimeEvent(identity, 1, 'speech_started', {}));
+    for (let frame = 1; frame <= 7; frame += 1) {
+      now.mockReturnValue(80 + frame * 40);
+      harness.handleMicEnergy(0.09);
+    }
+
+    expect(sent.filter((event) => event.type === 'interrupt').map((event) => event.payload))
+      .toEqual([{ reason: 'voice' }]);
+    expect(session.getIdentity()).toMatchObject({
+      turnId: 'turn-1',
+      generationId: 'generation-1',
+    });
+  });
+
+  it('correlates first-audio scheduling with a current board reveal in the envelope', () => {
+    const now = vi.spyOn(performance, 'now');
+    const session = new RealtimeSession('session');
+    const harness = session as unknown as SessionHarness;
+    const sent: RuntimeEventEnvelope<Record<string, unknown>>[] = [];
+    harness.ws = {
+      readyState: 1,
+      send: (raw) => sent.push(JSON.parse(raw) as RuntimeEventEnvelope<Record<string, unknown>>),
+    };
+    let firstChunk = true;
+    harness.audioOut = {
+      speaking: true,
+      append: () => {
+        if (!firstChunk) return null;
+        firstChunk = false;
+        return { playbackStartsInMs: 50 };
+      },
+      currentEnergy: () => 0,
+      playedSamples: () => 0,
+      stop: () => [],
+      close: async () => {},
+    };
+    const identity = session.getIdentity();
+    harness.handleServer(createRuntimeEvent(identity, 0, 'response_started', { response_id: 'response-1' }));
+    now.mockReturnValue(1_000);
+    harness.handleServer(createRuntimeEvent(identity, 1, 'audio', {
+      response_id: 'response-1', item_id: 'item-1', delta: btoa('\0\0'),
+    }));
+    now.mockReturnValue(1_820);
+    session.noteBoardReveal(identity, {
+      responseId: 'response-1',
+      visualCueId: 'cue-1',
+      semanticObjectId: 'anchor-1',
+    });
+    session.noteBoardReveal({ ...identity, generationId: 'generation-stale' }, {
+      responseId: 'response-1',
+      visualCueId: 'cue-stale',
+    });
+    session.noteBoardReveal(identity, { visualCueId: 'cue-missing-response' });
+
+    const revealMetrics = sent.filter((event) =>
+      event.type === 'metric' &&
+      (event.payload as { name?: unknown }).name === 'board_reveal_to_narration');
+    expect(revealMetrics).toHaveLength(1);
+    expect(revealMetrics[0]).toMatchObject({
+      ...identity,
+      providerResponseId: 'response-1',
+      payload: {
+        schemaVersion: '1.0.0',
+        name: 'board_reveal_to_narration',
+        unit: 'ms',
+        value: -770,
+        visualCueId: 'cue-1',
+        semanticObjectId: 'anchor-1',
+      },
+    });
+    expect(revealMetrics[0]?.payload).not.toHaveProperty('providerResponseId');
+  });
+
   it('moves from speech end to thinking and measures the actual reply gap', () => {
     const now = vi.spyOn(performance, 'now');
     const session = new RealtimeSession('session');
     const harness = session as unknown as SessionHarness;
     harness.audioOut = {
-      speaking: false, append: () => {}, currentEnergy: () => 0, playedSamples: () => 0,
+      speaking: false, append: () => null, currentEnergy: () => 0, playedSamples: () => 0,
       stop: () => [], close: async () => {},
     };
     const identity = session.getIdentity();
@@ -173,7 +384,7 @@ describe('RealtimeSession sealed response release', () => {
     const harness = session as unknown as SessionHarness;
     let played = 0;
     harness.audioOut = {
-      speaking: true, append: () => {}, currentEnergy: () => 0, playedSamples: () => played,
+      speaking: true, append: () => null, currentEnergy: () => 0, playedSamples: () => played,
       stop: () => [], close: async () => {},
     };
     const identity = session.getIdentity();
@@ -218,7 +429,7 @@ describe('RealtimeSession sealed response release', () => {
     const sent: Array<{ type: string; payload: Record<string, unknown> }> = [];
     harness.ws = { readyState: 1, send: (raw) => sent.push(JSON.parse(raw) as { type: string; payload: Record<string, unknown> }) };
     harness.audioOut = {
-      speaking: false, append: () => {}, currentEnergy: () => 0, playedSamples: () => 0,
+      speaking: false, append: () => null, currentEnergy: () => 0, playedSamples: () => 0,
       stop: () => [], close: async () => {},
     };
     session.onBoardOps = async () => false;
@@ -236,7 +447,7 @@ describe('RealtimeSession sealed response release', () => {
     const session = new RealtimeSession('session');
     const harness = session as unknown as SessionHarness;
     harness.audioOut = {
-      speaking: true, append: () => {}, currentEnergy: () => 0, playedSamples: () => 24_000,
+      speaking: true, append: () => null, currentEnergy: () => 0, playedSamples: () => 24_000,
       stop: () => [], close: async () => {},
     };
     const oldIdentity = session.getIdentity();

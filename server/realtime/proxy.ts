@@ -236,6 +236,19 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
     return typeof responseId === 'string' ? responseIdentities.get(responseId) ?? clientIdentity : clientIdentity;
   }
 
+  function trustedClientResponseId(envelope: RuntimeEventEnvelope): string | undefined {
+    const responseId = envelope.providerResponseId;
+    if (!responseId) return undefined;
+    const identity = responseIdentities.get(responseId);
+    if (!identity) return undefined;
+    return identity.sessionId === envelope.sessionId &&
+      identity.connectionEpoch === envelope.connectionEpoch &&
+      identity.turnId === envelope.turnId &&
+      identity.generationId === envelope.generationId
+      ? responseId
+      : undefined;
+  }
+
   function sendUpstream(payload: unknown): void {
     if (upstream.readyState === NodeWebSocket.OPEN) upstream.send(JSON.stringify(payload));
   }
@@ -1614,7 +1627,7 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
           repo,
           sessionId,
           metric.data,
-          metricContextFromIdentity(envelope),
+          metricContextFromIdentity(envelope, trustedClientResponseId(envelope)),
         );
         break;
       }

@@ -845,6 +845,92 @@ describe('realtime proxy response annotation', () => {
 });
 
 describe('realtime proxy telemetry', () => {
+  it('persists client-carried response correlation only for the same accepted generation', async () => {
+    vi.stubGlobal('WebSocket', FakeUpstream);
+    const repo = new Repo(openTestDb());
+    const child = repo.createChild('Maya', 10);
+    const session = repo.createSession(child.id, 'fractions');
+    const client = new FakeClient();
+    await connectRealtimeProxy(client as never, {
+      apiKey: 'offline-fixture',
+      model: 'gpt-realtime-2.1',
+      repo,
+      sessionId: session.id,
+      createUpstream: () => new FakeUpstream() as never,
+    });
+    const accepted = {
+      sessionId: session.id,
+      connectionEpoch: 4,
+      turnId: 'turn-correlated',
+      generationId: 'generation-correlated',
+    };
+    client.emit('message', JSON.stringify(createRuntimeEvent(accepted, 0, 'hello', {})));
+    FakeUpstream.latest.emit({
+      type: 'response.created',
+      response: { id: 'response-correlated' },
+    });
+    await flushProxy();
+
+    const metric = {
+      schemaVersion: '1.0.0',
+      name: 'board_reveal_to_narration',
+      unit: 'ms',
+      value: -40,
+      visualCueId: 'cue-correlated',
+    };
+    client.emit('message', JSON.stringify(createRuntimeEvent(
+      accepted,
+      1,
+      'metric',
+      metric,
+      { providerResponseId: 'response-correlated' },
+    )));
+    client.emit('message', JSON.stringify(createRuntimeEvent(
+      accepted,
+      2,
+      'metric',
+      { ...metric, visualCueId: 'cue-unknown' },
+      { providerResponseId: 'response-unknown' },
+    )));
+    const nextGeneration = {
+      ...accepted,
+      generationId: 'generation-next',
+    };
+    client.emit('message', JSON.stringify(createRuntimeEvent(
+      nextGeneration,
+      0,
+      'metric',
+      { ...metric, visualCueId: 'cue-mismatched' },
+      { providerResponseId: 'response-correlated' },
+    )));
+    await flushProxy();
+
+    const observations = repo.listEvents(session.id)
+      .map((event) => event.payload as Record<string, unknown>);
+    expect(observations).toEqual([
+      expect.objectContaining({
+        name: 'board_reveal_to_narration',
+        generationId: 'generation-correlated',
+        providerResponseId: 'response-correlated',
+        visualCueId: 'cue-correlated',
+      }),
+      expect.not.objectContaining({ providerResponseId: expect.anything() }),
+      expect.objectContaining({
+        name: 'board_reveal_to_narration',
+        generationId: 'generation-next',
+        visualCueId: 'cue-mismatched',
+      }),
+    ]);
+    expect(observations[1]).toMatchObject({
+      name: 'board_reveal_to_narration',
+      generationId: 'generation-correlated',
+      visualCueId: 'cue-unknown',
+    });
+    expect(observations.slice(1).every(
+      (observation) => !('providerResponseId' in observation),
+    )).toBe(true);
+  });
+
   it('records every browser-observed metric without accepting client terminal correlation', async () => {
     vi.stubGlobal('WebSocket', FakeUpstream);
     const repo = new Repo(openTestDb());
