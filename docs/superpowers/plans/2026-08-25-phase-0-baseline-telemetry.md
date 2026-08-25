@@ -84,6 +84,16 @@ requires:
 5. exact-map-only terminal telemetry identity, so unknown `response.done`
    events remain behaviorally finalized but emit no terminal metrics.
 
+### Lifecycle accounting follow-up
+
+Strict RED/GREEN coverage additionally requires fixed enum-keyed exact gap
+counters, bounded client gap values, explicit accounting-overflow
+incompleteness, transactional SQLite end cutoffs under concurrent worker
+append, reconnect-history failure gaps, and a shared writer registry that
+flushes before bounded repository shutdown. Gap counters are completeness
+evidence, not chronological event evidence; only accepted normal observations
+retain FIFO ordering.
+
 ## File Structure
 
 **Create**

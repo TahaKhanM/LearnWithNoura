@@ -143,3 +143,25 @@ Terminal telemetry uses only the exact provider-response identity map. An
 unknown `response.done` may still use the existing fallback identity for cue
 flush and client finalization, but it cannot emit provider usage, tutor-output
 duration, or cancellation outcome.
+
+## Lifecycle and saturation clarification
+
+Exact chronology for an unbounded run of loss markers is incompatible with
+bounded memory. Accepted normal observations therefore remain FIFO, while
+telemetry gaps are fixed-size per-reason completeness counters rather than
+event-order evidence. Counters may aggregate across later observations, but
+their totals remain exact. After the first loss, pending gaps are attempted
+before any newly accepted normal observation. Impossible safe-integer
+accounting overflow records an explicit non-complete reason that the smoke gate
+rejects.
+
+The SQLite session-end cutoff and status transition execute in one
+`BEGIN IMMEDIATE` transaction. A worker append is therefore either committed
+before and included in `ended_event_id`, or rejected after the end transition.
+Postgres already provides the equivalent transaction plus row lock.
+
+Reconnect-history lookup failure is itself a completeness gap and is never
+silently caught. Shared telemetry lifecycle management stops new submissions,
+waits a finite shutdown interval for registered writers to flush, then closes
+the worker with handled errors. The bound is shutdown safety, not a lesson
+timer.

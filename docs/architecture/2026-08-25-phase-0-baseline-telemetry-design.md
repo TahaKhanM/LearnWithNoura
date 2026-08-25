@@ -469,3 +469,17 @@ in-process callback as a sufficient asynchronous repository boundary:
 - an unknown `response.done` identity emits no provider usage, tutor-output
   duration, or cancel-outcome telemetry. Existing cue flush and client
   finalization behavior remains unchanged.
+
+## Lifecycle accounting amendment
+
+- Accepted normal observations are FIFO. Gap observations are fixed-size,
+  exact per-reason completeness counters and do not claim chronology under
+  saturation.
+- Pending loss accounting blocks acceptance of later normal telemetry until a
+  gap attempt succeeds; internal counter overflow creates an explicit
+  smoke-failing incomplete state.
+- SQLite session ending serializes the cutoff and status transition against the
+  worker writer; Postgres retains its transactional row-lock equivalent.
+- Reconnect-history failures record completeness loss.
+- Repository shutdown stops telemetry acceptance, waits a documented finite
+  bound for registered writers, then closes the worker with handled errors.
