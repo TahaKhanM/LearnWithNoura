@@ -14,10 +14,12 @@ import { VoiceInterruptionGate } from './voiceInterruption';
 import type { LearnerBoardAnalysis } from '../../shared/learnerBoard';
 import { DeliveredTaskSchema, type DeliveredTask } from '../../shared/lessonTurn';
 import {
+  MetricInputSchema,
   TELEMETRY_SCHEMA_VERSION,
   type MetricInput,
 } from '../../shared/sessionTelemetry';
 import { ResponseTimingTracker } from './sessionTelemetry';
+import type { NavigationCause } from '../board/renderedObjectTracker';
 
 export type Phase = 'connecting' | 'listening' | 'thinking' | 'speaking' | 'reconnecting' | 'fallback' | 'failed' | 'ended';
 export interface CaptionLine { role: 'tutor' | 'child'; text: string; live: boolean; responseId?: string }
@@ -144,6 +146,39 @@ export class RealtimeSession {
       },
     );
     if (metric) this.emitMetric(metric, identity, cue.responseId);
+  }
+
+  recordSectionNavigation(input: {
+    previousGroupId: string | null;
+    nextGroupId: string;
+    cause: NavigationCause;
+  }): void {
+    const metric = MetricInputSchema.safeParse({
+      schemaVersion: TELEMETRY_SCHEMA_VERSION,
+      name: 'section_navigation',
+      unit: 'count',
+      value: 1,
+      dimensions: {
+        previousSemanticGroupId: input.previousGroupId ?? 'group-root',
+        nextSemanticGroupId: input.nextGroupId,
+        cause: input.cause,
+      },
+    });
+    if (metric.success) this.emitMetric(metric.data);
+  }
+
+  recordTutorObjectDisappearance(input: {
+    objectId: string;
+    cause: 'scene_mutation' | 'unknown';
+  }): void {
+    const metric = MetricInputSchema.safeParse({
+      schemaVersion: TELEMETRY_SCHEMA_VERSION,
+      name: 'tutor_object_disappearance',
+      unit: 'count',
+      value: 1,
+      dimensions: input,
+    });
+    if (metric.success) this.emitMetric(metric.data);
   }
 
   private update(patch: Partial<SessionSnapshot>): void {

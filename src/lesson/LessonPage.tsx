@@ -23,6 +23,11 @@ import { attentionPriority, CharacterAttentionController, type AttentionTargetTy
 import { centerForItemIds, centerForSemanticObject } from './attentionIntegration';
 import type { VisualCueMetadata } from './realtimeSession';
 import { useRouter } from '../routerContext';
+import {
+  RenderedTutorObjectTracker,
+  type AnnouncedBoardNavigation,
+  type NavigationCause,
+} from '../board/renderedObjectTracker';
 import './Lesson.css';
 
 interface LessonPageProps {
@@ -65,6 +70,15 @@ export function LessonPage({ sessionId }: LessonPageProps) {
   const sectionNoticeTimer = useRef<number | null>(null);
   const activeVisualGroupRef = useRef<string | undefined>(undefined);
   const visualGroupsRef = useRef<Array<{ id: string; label: string }>>([]);
+  const pendingNavigationRef = useRef<AnnouncedBoardNavigation | null>(null);
+  const renderedTutorObjectTracker = useRef(new RenderedTutorObjectTracker());
+  const pendingTrackerSnapshotRef = useRef<{
+    visibleTutorIds: string[];
+    allTutorIds: string[];
+    navigation?: AnnouncedBoardNavigation | null;
+  } | null>(null);
+  const trackerObservationScheduledRef = useRef(false);
+  const trackerGenerationRef = useRef(0);
 
   const session = useMemo(() => new RealtimeSession(sessionId), [sessionId]);
   const snap = useSyncExternalStore(session.subscribe, session.getSnapshot);
@@ -86,6 +100,22 @@ export function LessonPage({ sessionId }: LessonPageProps) {
   }, [activeVisualGroupId, visualGroups]);
 
   useEffect(() => {
+    const tracker = renderedTutorObjectTracker.current;
+    trackerGenerationRef.current += 1;
+    trackerObservationScheduledRef.current = false;
+    pendingTrackerSnapshotRef.current = null;
+    tracker.reset();
+    pendingNavigationRef.current = null;
+    return () => {
+      trackerGenerationRef.current += 1;
+      trackerObservationScheduledRef.current = false;
+      pendingTrackerSnapshotRef.current = null;
+      pendingNavigationRef.current = null;
+      tracker.reset();
+    };
+  }, [session]);
+
+  useEffect(() => {
     let cancelled = false;
     fetch(`/api/sessions/${sessionId}`)
       .then(async (r) => {
@@ -103,6 +133,24 @@ export function LessonPage({ sessionId }: LessonPageProps) {
     };
   }, [sessionId]);
 
+  const openSection = useCallback((groupId: string, cause: NavigationCause) => {
+    const previousGroupId = activeVisualGroupRef.current ?? null;
+    if (previousGroupId !== groupId) {
+      const navigation: AnnouncedBoardNavigation = {
+        previousGroupId,
+        nextGroupId: groupId,
+        cause,
+      };
+      pendingNavigationRef.current = navigation;
+      session.recordSectionNavigation(navigation);
+    }
+    activeVisualGroupRef.current = groupId;
+    setActiveVisualGroupId(groupId);
+    setFocusIndex(0);
+    setBoardOverview(false);
+    setSectionNotice((current) => current?.id === groupId ? null : current);
+  }, [session]);
+
   const registerVisualGroup = useCallback((cue?: VisualCueMetadata) => {
     if (!cue?.semanticObjectId) return;
     setVisualGroups((current) => current.some((group) => group.id === cue.semanticObjectId)
@@ -114,24 +162,13 @@ export function LessonPage({ sessionId }: LessonPageProps) {
     // announced and reachable, and the view switches only when the learner
     // (or an explicit navigation action) chooses it.
     if (!activeVisualGroupRef.current && !draftRef.current.isOpen) {
-      activeVisualGroupRef.current = cue.semanticObjectId;
-      setActiveVisualGroupId(cue.semanticObjectId);
-      setFocusIndex(0);
-      setBoardOverview(false);
+      openSection(cue.semanticObjectId, 'initial_anchor');
       return;
     }
     setSectionNotice({ id: cue.semanticObjectId, label: cue.groupLabel ?? cue.semanticObjectId });
     if (sectionNoticeTimer.current !== null) window.clearTimeout(sectionNoticeTimer.current);
     sectionNoticeTimer.current = window.setTimeout(() => setSectionNotice(null), 12_000);
-  }, []);
-
-  const openSection = useCallback((groupId: string) => {
-    activeVisualGroupRef.current = groupId;
-    setActiveVisualGroupId(groupId);
-    setFocusIndex(0);
-    setBoardOverview(false);
-    setSectionNotice((current) => current?.id === groupId ? null : current);
-  }, []);
+  }, [openSection]);
 
   const signalBoardActivity = useCallback((kind: 'noura' | 'learner', durationMs = 1_500) => {
     setBoardActivity(kind);
@@ -187,6 +224,7 @@ export function LessonPage({ sessionId }: LessonPageProps) {
         offerAttention(attention, identity, 'semantic_object', center, cue.semanticObjectId);
       }
       await nextPaint();
+      if (cue) session.noteBoardReveal(identity, cue);
       // Completion acknowledges durable replay. It no longer decides whether
       // an already-visible checkpoint remains on screen.
       const completed = request
@@ -270,7 +308,7 @@ export function LessonPage({ sessionId }: LessonPageProps) {
     if (restored) {
       const result = boardState.current.applyLearner(restored.ops, restored.semanticGroupId);
       setScene(result.scene);
-      if (restored.semanticGroupId) openSection(restored.semanticGroupId);
+      if (restored.semanticGroupId) openSection(restored.semanticGroupId, 'draft_restore');
       setTool('draw');
       session.notifyDraftState(true, restored.draftId);
     }
@@ -446,6 +484,30 @@ export function LessonPage({ sessionId }: LessonPageProps) {
   const activeBoardItemCount = groupItemCount(scene, activeVisualGroupId);
   const draftActive = draftSnap.status === 'open' || draftSnap.status === 'submitting' || draftSnap.status === 'error';
 
+  useEffect(() => {
+    const pendingSnapshot = pendingTrackerSnapshotRef.current;
+    pendingTrackerSnapshotRef.current = {
+      visibleTutorIds: visibleScene.items.filter((item) => item.owner === 'tutor').map((item) => item.id),
+      allTutorIds: scene.items.filter((item) => item.owner === 'tutor').map((item) => item.id),
+      navigation: pendingNavigationRef.current ?? pendingSnapshot?.navigation,
+    };
+    pendingNavigationRef.current = null;
+    if (trackerObservationScheduledRef.current) return;
+
+    trackerObservationScheduledRef.current = true;
+    const generation = trackerGenerationRef.current;
+    queueMicrotask(() => {
+      if (generation !== trackerGenerationRef.current) return;
+      trackerObservationScheduledRef.current = false;
+      const snapshot = pendingTrackerSnapshotRef.current;
+      pendingTrackerSnapshotRef.current = null;
+      if (!snapshot) return;
+      for (const disappearance of renderedTutorObjectTracker.current.observe(snapshot)) {
+        session.recordTutorObjectDisappearance(disappearance);
+      }
+    });
+  }, [scene, session, visibleScene]);
+
   const statusLabel =
     draftSnap.status === 'submitting'
       ? 'Sending your drawing…'
@@ -592,7 +654,7 @@ export function LessonPage({ sessionId }: LessonPageProps) {
                 <select
                   aria-label="Board section"
                   value={activeVisualGroupId}
-                  onChange={(event) => openSection(event.target.value)}
+                  onChange={(event) => openSection(event.target.value, 'picker')}
                 >
                   {visualGroups.map((group) => <option key={group.id} value={group.id}>{group.label}</option>)}
                 </select>
@@ -710,7 +772,7 @@ export function LessonPage({ sessionId }: LessonPageProps) {
         {started && sectionNotice && (
           <p className="lesson__section-notice" role="status" data-testid="section-notice">
             Noura added a new board section: <strong>{sectionNotice.label}</strong>. Your current board stays put.
-            <button className="lesson__section-open" onClick={() => openSection(sectionNotice.id)}>
+            <button className="lesson__section-open" onClick={() => openSection(sectionNotice.id, 'notice_open')}>
               Open it
             </button>
           </p>
