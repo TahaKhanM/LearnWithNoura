@@ -110,6 +110,7 @@ export async function runQuiescentShutdown(phases: {
   closeProxies(): Promise<Exclude<ShutdownDisposition, 'fatal'>>;
   closeRepository(): Promise<void>;
   log(error: unknown): void;
+  fatal?(error: unknown): void;
 }): Promise<ShutdownDisposition> {
   phases.stopAccepting();
   phases.closeClients();
@@ -118,12 +119,14 @@ export async function runQuiescentShutdown(phases: {
     disposition = await phases.closeProxies();
   } catch (error) {
     phases.log(error);
+    phases.fatal?.(error);
     return 'fatal';
   }
   try {
     await phases.closeRepository();
   } catch (error) {
     phases.log(error);
+    phases.fatal?.(error);
     return 'fatal';
   }
   return disposition;

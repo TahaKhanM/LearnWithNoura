@@ -175,6 +175,7 @@ describe('ProxyLifecycleRegistry', () => {
   it('takes a fatal path without repository close when force-terminal fails', async () => {
     const never = new Promise<void>(() => {});
     const repositoryClose = vi.fn(async () => {});
+    const fatal = vi.fn();
     const registry = new ProxyLifecycleRegistry();
     registry.register({
       close: () => never,
@@ -189,8 +190,10 @@ describe('ProxyLifecycleRegistry', () => {
       closeProxies: () => registry.shutdown(5),
       closeRepository: repositoryClose,
       log: () => {},
+      fatal,
     });
     expect(result).toBe('fatal');
     expect(repositoryClose).not.toHaveBeenCalled();
+    expect(fatal).toHaveBeenCalledWith(expect.any(Error));
   });
 });

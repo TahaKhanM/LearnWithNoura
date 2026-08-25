@@ -7,6 +7,10 @@ import { openTestDb } from '../store/db';
 import type { DomainRepository } from '../store/domain';
 import { Repo } from '../store/repo';
 import { connectRealtimeProxy, type ProxyLifecycle } from './proxy';
+import {
+  ProxyLifecycleRegistry,
+  runQuiescentShutdown,
+} from './lifecycle';
 
 class FakeUpstream {
   static OPEN = 1;
@@ -1418,6 +1422,7 @@ describe('realtime proxy telemetry', () => {
     const session = repo.createSession(child.id, 'fractions');
     let resolveHistory!: (value: boolean) => void;
     const history = new Promise<boolean>((resolve) => { resolveHistory = resolve; });
+    const historyStarted = deferred<void>();
     const metrics: MetricObservation[] = [];
     let lifecycle: ProxyLifecycle | null = null;
     const client = new FakeClient();
@@ -1430,7 +1435,10 @@ describe('realtime proxy telemetry', () => {
           metrics.push(observation);
           return metrics.length;
         },
-        hasPriorReleasedSessionStart: () => history,
+        hasPriorReleasedSessionStart: () => {
+          historyStarted.resolve();
+          return history;
+        },
       },
       sessionId: session.id,
       createUpstream: () => new FakeUpstream() as never,
@@ -1442,6 +1450,7 @@ describe('realtime proxy telemetry', () => {
       turnId: 'turn-first',
       generationId: 'generation-first',
     }, 0, 'start', {})));
+    await historyStarted.promise;
     const closing = lifecycle!.close();
     client.emit('message', JSON.stringify(createRuntimeEvent({
       sessionId: session.id,
@@ -1476,6 +1485,7 @@ describe('realtime proxy telemetry', () => {
     const session = repo.createSession(child.id, 'fractions');
     let resolveHistory!: (value: boolean) => void;
     const history = new Promise<boolean>((resolve) => { resolveHistory = resolve; });
+    const historyForceStarted = deferred<void>();
     const metrics: MetricObservation[] = [];
     let lifecycle: ProxyLifecycle | null = null;
     const client = new FakeClient();
@@ -1488,7 +1498,10 @@ describe('realtime proxy telemetry', () => {
           metrics.push(observation);
           return metrics.length;
         },
-        hasPriorReleasedSessionStart: () => history,
+        hasPriorReleasedSessionStart: () => {
+          historyForceStarted.resolve();
+          return history;
+        },
       },
       sessionId: session.id,
       createUpstream: () => new FakeUpstream() as never,
@@ -1500,6 +1513,8 @@ describe('realtime proxy telemetry', () => {
       turnId: 'turn-first',
       generationId: 'generation-first',
     }, 0, 'start', {})));
+    await historyForceStarted.promise;
+    await flushProxy();
     const closing = lifecycle!.close();
     await lifecycle!.forceTerminal();
     await expect(lifecycle!.completion).resolves.toBeUndefined();
@@ -1507,6 +1522,61 @@ describe('realtime proxy telemetry', () => {
     await flushProxy();
     expect(metrics).toEqual([]);
     await expect(closing).resolves.toBeUndefined();
+  });
+
+  it('fails forced shutdown when a sealed client producer is still unsettled', async () => {
+    vi.stubGlobal('WebSocket', FakeUpstream);
+    const repo = new Repo(openTestDb());
+    const child = repo.createChild('Maya', 10);
+    const session = repo.createSession(child.id, 'fractions');
+    const originalListEvents = repo.listEvents.bind(repo);
+    const blockedEvents = deferred<ReturnType<typeof repo.listEvents>>();
+    const producerEntered = deferred<void>();
+    const registry = new ProxyLifecycleRegistry();
+    const client = new FakeClient();
+    let lifecycle: ProxyLifecycle | null = null;
+    await connectRealtimeProxy(client as never, {
+      apiKey: 'offline-fixture',
+      model: 'gpt-realtime-2.1',
+      repo,
+      sessionId: session.id,
+      createUpstream: () => new FakeUpstream() as never,
+      onLifecycle: (value) => {
+        lifecycle = value;
+        registry.register(value);
+      },
+    });
+    const listEvents = vi.spyOn(repo, 'listEvents').mockImplementation(
+      () => {
+        producerEntered.resolve();
+        return blockedEvents.promise as never;
+      },
+    );
+    client.emit('message', JSON.stringify(createRuntimeEvent({
+      sessionId: session.id,
+      connectionEpoch: 1,
+      turnId: 'turn-first',
+      generationId: 'generation-first',
+    }, 0, 'start', {})));
+    await producerEntered.promise;
+
+    const repositoryClose = vi.fn(async () => {});
+    const fatal = vi.fn();
+    const result = await runQuiescentShutdown({
+      stopAccepting: () => {},
+      closeClients: () => {},
+      closeProxies: () => registry.shutdown(5),
+      closeRepository: repositoryClose,
+      log: () => {},
+      fatal,
+    });
+    expect(result).toBe('fatal');
+    expect(repositoryClose).not.toHaveBeenCalled();
+    expect(fatal).toHaveBeenCalledWith(expect.any(Error));
+
+    blockedEvents.resolve(originalListEvents(session.id, 2_000));
+    await expect(lifecycle!.completion).resolves.toBeUndefined();
+    listEvents.mockRestore();
   });
 
   it('flushes response cues and sends response_done when telemetry persistence fails', async () => {

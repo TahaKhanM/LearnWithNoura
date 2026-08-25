@@ -175,6 +175,8 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
   let lastLearnerEventId: number | null = null;
   let upstreamWork = Promise.resolve();
   let clientWork = Promise.resolve();
+  let upstreamWorkPending = 0;
+  let clientWorkPending = 0;
   let acceptingFrames = true;
   /** The learner is composing a drawing; nothing may auto-create a response. */
   let draftOpen = false;
@@ -556,6 +558,13 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
     } catch {
       /* already closed */
     }
+    if (clientWorkPending > 0 || upstreamWorkPending > 0) {
+      forceTerminalPromise = Promise.reject(
+        new Error('Proxy side-effect producer chains remain unsettled.'),
+      );
+      void forceTerminalPromise.catch(() => {});
+      return forceTerminalPromise;
+    }
     resolveCompletion();
     forceTerminalPromise = Promise.resolve();
     return forceTerminalPromise;
@@ -603,11 +612,15 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
     } catch {
       return;
     }
+    upstreamWorkPending += 1;
     upstreamWork = upstreamWork
       .then(() => handleUpstream(event))
       .catch((error) => {
         log(`session ${sessionId}: upstream processing error ${String(error).slice(0, 240)}`);
         sendClient({ type: 'error', message: 'Noura hit a snag — it will recover in a moment.' });
+      })
+      .finally(() => {
+        upstreamWorkPending -= 1;
       });
   }
 
@@ -1417,6 +1430,7 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
 
   function handleClientMessage(raw: unknown): void {
     if (!acceptingFrames) return;
+    clientWorkPending += 1;
     clientWork = clientWork.then(async () => {
       let decoded: unknown;
       try { decoded = JSON.parse(String(raw)); }
@@ -1452,6 +1466,8 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
     }).catch((error) => {
       log(`session ${sessionId}: client processing error ${String(error).slice(0, 240)}`);
       sendClient({ type: 'error', message: 'Noura could not save that turn. Please try again.' });
+    }).finally(() => {
+      clientWorkPending -= 1;
     });
   }
 
