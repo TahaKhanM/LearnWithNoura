@@ -46,7 +46,21 @@ See [the active architecture ADR](docs/architecture/2026-08-23-noura-runtime-arc
 
 ## Phase 0 telemetry and prepared smoke
 
-Privacy-safe observations are validated and stored as released `metric` events in the existing event log. `GET /api/sessions/:id/log` is the parent-authenticated, parent-owned projection of those released events; it returns bounded duration aggregates, interruption outcomes, section/reconnect/disappearance counts, provider token-usage totals and a metric-only timeline. It does not copy transcripts or evidence text.
+Privacy-safe observations are validated, pseudonymized with deterministic
+session-scoped opaque identifiers and submitted to a bounded ordered
+non-blocking writer before storage as released `metric` events in the existing
+event log. Local SQLite metric append and reconnect-history lookup execute in a
+worker thread; managed Postgres remains natively asynchronous. Identifier
+tokens carry server-owned encoding metadata and a session-derived prefix and
+ordered `telemetry_gap` barriers preserve the position, reason and value of
+known server queue, persistence and browser pre-ready queue loss.
+`GET /api/sessions/:id/log` is the
+parent-authenticated, parent-owned projection of those released events; it
+returns bounded duration aggregates, interruption outcomes,
+section/reconnect/disappearance counts, provider token-usage totals, gap totals and a metric-only timeline. The smoke reporter reconstructs the complete
+summary from ascending timeline rows before accepting it. The log does not copy
+transcripts, evidence text or raw turn/generation/provider/visual/section/
+object identifiers.
 
 The Phase 0 timing boundaries are deliberately narrow:
 
@@ -63,7 +77,30 @@ npm run test:smoke-report
 NOURA_BASE_URL=https://authorized-origin.example npm run e2e:live -- --authorized-live-run --text-only
 ```
 
-The reporter reads `/api/version` and the parent-scoped session log through the still-authenticated browser context. It distinguishes the configured base URL from the origin actually reached and reports runtime model IDs, exact logged tutor-audio duration, provider-reported token usage projected from `response.done`, Phase 0 aggregates, bounded caption/learner/console counts, hardcoded milestones and unresolved verification items. Retained reports contain no raw caption, learner or browser-console text. A truncated session log or missing provider usage fails the gate. `NOURA_PROVIDER_REPORTED_COST_USD` is optional user-supplied USD copied from the provider billing surface; the provider event does not supply a currency charge and the script never invents one. `--report-fixture <path>` and `npm run test:smoke-report` exercise report construction offline and never establish live-provider evidence. Do not run the normal journey, deploy or make paid/provider calls without explicit authorization.
+`NOURA_BASE_URL` must be an HTTP(S) origin only: no credentials, non-root path,
+query or fragment. The reporter reads `/api/version` and the parent-scoped
+session log through the still-authenticated browser context, requires the
+navigated origin/session/schema to match and projects exact hand-written
+allowlists rather than copying endpoint objects. Provider evidence requires
+safe positive, internally consistent usage rows whose sum equals the summary.
+It reports runtime model IDs, exact logged tutor-audio duration,
+provider-reported token usage projected from `response.done`, exact Phase 0
+aggregates, bounded caption/learner/console counts, hardcoded milestones and
+unresolved verification items. Retained reports contain no raw caption,
+learner, identifier, browser-console, credential or query text. A truncated
+session log, missing/malformed provider usage, mismatch or any telemetry gap
+fails the gate. `NOURA_PROVIDER_REPORTED_COST_USD` is optional user-supplied USD
+copied from the provider billing surface; the provider event does not supply a
+currency charge and the script never invents one. `--report-fixture <path>`
+and `npm run test:smoke-report` exercise report construction offline and never
+establish live-provider evidence. Do not run the normal journey, deploy or
+make paid/provider calls without explicit authorization.
+
+Gap accounting makes known loss visible but is not an end-to-end delivery
+guarantee. If a browser connection never reaches another accepted `ready` or a
+fallback/failed transport never recovers, final browser observations can be
+lost before their aggregate gap is delivered; that run cannot prove telemetry
+completeness.
 
 ## Local setup
 

@@ -294,10 +294,15 @@ server.on('upgrade', async (request, socket, head) => {
       apiKey: process.env.OPENAI_API_KEY,
       model: runtimeConfig.realtimeModel,
       repo,
+      telemetryRepo: repository.telemetry,
       sessionId,
       log: (line) => console.log(`[realtime] ${line}`),
     }).catch(() => {
       try { client.close(1011, 'lesson service unavailable'); } catch { /* already closed */ }
     });
   });
+});
+
+server.on('close', () => {
+  void repository.close();
 });

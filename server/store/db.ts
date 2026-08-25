@@ -21,15 +21,23 @@ export interface DatabaseLocation {
 }
 
 let db: DatabaseSync | null = null;
+let activeDatabasePath: string | null = null;
 
-export function getDb(): DatabaseSync {
+export function getDb(env: NodeJS.ProcessEnv = process.env): DatabaseSync {
   if (db) return db;
-  const location = prepareDatabaseLocation();
+  const location = prepareDatabaseLocation(env);
+  activeDatabasePath = location.databasePath;
   db = new DatabaseSync(location.databasePath);
   db.exec('PRAGMA journal_mode = WAL');
   db.exec('PRAGMA foreign_keys = ON');
   migrate(db);
   return db;
+}
+
+export function getDatabasePath(
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  return activeDatabasePath ?? prepareDatabaseLocation(env).databasePath;
 }
 
 /** In-memory database for tests. */

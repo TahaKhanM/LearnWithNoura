@@ -29,11 +29,48 @@ The browser rejects malformed, duplicated, non-monotonic or stale identity. The 
 
 Phase 0 adds an observer-only path without changing lesson, board, response, cancellation, model, or transport ownership:
 
-`browser lifecycle/paint observers → versioned runtime metric envelope → server schema and identity validation → released metric event → parent-scoped session-log projection`.
+`browser lifecycle/paint observers → versioned runtime metric envelope → server
+schema/identity trust check → session-scoped identifier pseudonymization →
+bounded ordered writer → released metric event → parent-scoped session-log
+projection`.
 
-Browser observations carry only a closed metric payload. The existing runtime envelope supplies session, connection epoch, turn, generation, sequence, and optional provider-response identity; the server rejects malformed or stale envelopes, reattaches authoritative correlation, and persists only schema-valid released `metric` events. Provider-side observers in the existing Realtime WebSocket proxy read token categories from `response.done.response.usage`, derive tutor-audio duration from that response’s decoded PCM sample total, and use the same released metric event boundary. No observer owns response creation, lesson transitions, board mutation, interruption thresholds, retry behavior, or durable release decisions.
+Browser observations carry only a closed metric payload. The existing runtime
+envelope supplies session, connection epoch, turn, generation, sequence, and
+optional provider-response identity. The server rejects malformed or stale
+envelopes, requires exact accepted-response correlation for board/narration
+timing, then transforms every turn/generation/provider/visual/semantic/section/
+object identifier into a deterministic field-specific token scoped to that
+session. A per-connection `SessionTelemetryWriter` enqueues without awaiting
+repository work and drains one bounded FIFO in order, so metrics cannot delay
+response creation, cancellation, cue/response completion, or later messages.
+Production SQLite telemetry append and prior-start paging run in a worker
+thread; managed Postgres uses its native async boundary. The FIFO contains
+normal observations and ordered gap barriers, so a failed or overflowed item
+is accounted for at its stream position without changing lesson behavior.
+Provider terminal observations are deduplicated by a bounded response-ID set.
+Provider-side observers read token categories from
+`response.done.response.usage`, derive tutor-audio duration from that response’s
+decoded PCM sample total, and use the same released metric event boundary. No
+observer owns response creation, lesson transitions, board mutation,
+interruption thresholds, retry behavior, or durable release decisions.
 
-`GET /api/sessions/:id/log` resolves the session through existing parent ownership, reads the bounded released event path, excludes malformed/unreleased/non-metric rows, and returns duration aggregates, interruption outcome counts, section/reconnect/disappearance counts, provider token-usage totals, plus a metric-only timeline. It returns `401` without parent authentication and `404` across parent scope; transcript and evidence text are not projected.
+`GET /api/sessions/:id/log` sets `Cache-Control: no-store` before authorization,
+resolves the session through existing parent ownership, and uses one shared
+5,000-row limit for the repository query and truncation projection. Projection
+consumes released rows in repository order (ascending event/server chronology),
+excludes malformed/unreleased/non-metric rows, pseudonymizes any raw identifier
+in a malformed direct or historical typed row, and returns duration aggregates,
+per-transition interruption counts, section/reconnect/disappearance counts,
+provider usage, telemetry gaps, and a metric-only timeline. It returns `401`
+without parent authentication and `404` across parent scope; transcript and
+evidence text are not projected.
+
+`telemetry_gap` aggregates `server_queue_overflow`,
+`server_persistence_failure`, and `client_queue_overflow`. Pending server gaps
+are written before later observations; browser pre-ready eviction is reported
+on the next accepted `ready`. A connection that never recovers, and a final
+fallback/failed transport phase, can still lose browser observations before a
+gap reaches the server, so those runs cannot prove complete telemetry delivery.
 
 The first-audio duration ends when the browser handles the first accepted tutor audio delta. It is browser-received timing, not acoustic onset. The signed board metric is `first scheduled audible sample − first committed board paint`: positive means board first and negative means scheduled narration first. It is not animation-completion time. These deterministic boundaries make no live latency or target-hardware claim.
 
@@ -81,7 +118,7 @@ The avatar uses real output energy for mouth state, direct CSS-variable eye moti
 
 ## Persistence and evidence
 
-Local SQLite uses numbered migrations, foreign keys, latest-event pagination, immutable ended-session cutoffs and linked continuation. `noura.db` migration checkpoints and verifies the historical database, writes a verified backup, compares row counts, and retains the source.
+Local SQLite uses numbered migrations, foreign keys, latest-event pagination, immutable ended-session cutoffs and linked continuation. `noura.db` migration checkpoints and verifies the historical database, writes a verified backup, compares row counts, and retains the source. Its general domain adapter remains synchronous, while the Phase 0 telemetry append/prior-start operations alone cross the dedicated bounded worker boundary.
 
 Evidence observations include UUID, child/session, normalized concept, taxonomy, observation, confidence basis, source event IDs, exact normalized excerpt/span, task/opportunity kind, retrieval lineage, independence, domain result, turn/generation, contradiction/supersession and time. `projectConceptHistories` is the single status projection used by summary validation, deterministic summary fallback and Parent concept history. One opportunity is identified by session, task and turn, so duplicate classifications of one answer count once. “Demonstrated” requires distinct independent positive opportunities, explanation/application, and a chronologically later retrieval whose `retrievalOf` names the earlier task. Latest negative or unresolved contradiction/misconception remains uncertain. Explicit correction resolves a misconception but is not confirmation; fresh independent application/explanation plus tied later retrieval is required afterward. Self-correction remains reduced-independence. Summary claims cite evidence IDs and carry a calibrated `progressing|demonstrated` label; invalid IDs, projection overclaims or invented quoted spans cause deterministic fallback.
 

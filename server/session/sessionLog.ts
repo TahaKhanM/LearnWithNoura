@@ -11,7 +11,11 @@ import {
   type ProviderUsageTotals,
   type SessionMetricEntry,
   type SessionTelemetryLog,
+  type TelemetryGapTotals,
 } from '../../shared/sessionTelemetry.js';
+import { pseudonymizeMetricObservation } from './telemetryPrivacy.js';
+
+export const SESSION_TELEMETRY_LOG_EVENT_LIMIT = 5_000;
 
 const emptyBargeInCounts = (): BargeInOutcomeCounts => ({
   localOnlyRejected: 0,
@@ -33,6 +37,12 @@ const emptyProviderUsage = (): ProviderUsageTotals => ({
   cachedImageTokens: 0,
   outputTextTokens: 0,
   outputAudioTokens: 0,
+});
+
+const emptyTelemetryGaps = (): TelemetryGapTotals => ({
+  server_queue_overflow: 0,
+  server_persistence_failure: 0,
+  client_queue_overflow: 0,
 });
 
 function roundMean(total: number, count: number): number {
@@ -141,6 +151,7 @@ export function buildSessionTelemetryLog(
   const durationAggregates: Partial<Record<DurationMetricName, DurationAggregateState>> = {};
   const bargeIn = emptyBargeInCounts();
   const providerUsage = emptyProviderUsage();
+  const telemetryGaps = emptyTelemetryGaps();
   const confirmedByResponseId = new Map<string, number>();
   const resolvedByResponseId = new Map<string, number>();
   let uncorrelatedConfirmedCount = 0;
@@ -152,8 +163,9 @@ export function buildSessionTelemetryLog(
   for (const event of events) {
     if (event.sessionId !== sessionId || !event.released || event.type !== 'metric') continue;
 
-    const metric = normalizeStoredMetric(event.payload);
-    if (!metric) continue;
+    const storedMetric = normalizeStoredMetric(event.payload);
+    if (!storedMetric) continue;
+    const metric = pseudonymizeMetricObservation(sessionId, storedMetric);
 
     timeline.push(toTimelineEntry(event, metric));
 
@@ -226,6 +238,10 @@ export function buildSessionTelemetryLog(
       providerUsage.outputTextTokens += metric.dimensions.outputTextTokens;
       providerUsage.outputAudioTokens += metric.dimensions.outputAudioTokens;
     }
+
+    if (metric.name === 'telemetry_gap' && 'dimensions' in metric) {
+      telemetryGaps[metric.dimensions.reason] += metric.value;
+    }
   }
 
   let unresolved = uncorrelatedConfirmedCount;
@@ -246,6 +262,7 @@ export function buildSessionTelemetryLog(
       reconnectCount,
       tutorObjectDisappearanceCount,
       providerUsage,
+      telemetryGaps,
     },
     timeline,
   };

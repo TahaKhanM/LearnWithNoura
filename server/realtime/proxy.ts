@@ -21,11 +21,12 @@ import { BoardSubmissionSchema, DeliveredTaskSchema, submitPolicyForMode, type D
 import { ResponseSegmentAnnotator } from './segmentAnnotator.js';
 import { loadReleasedBoardContext } from './boardContext.js';
 import type { DomainRepository } from '../store/domain.js';
+import { metricContextFromIdentity } from '../session/telemetryRecorder.js';
+import { SessionTelemetryWriter } from '../session/telemetryWriter.js';
 import {
-  metricContextFromIdentity,
-  recordMetric,
-  recordProviderUsage,
-} from '../session/telemetryRecorder.js';
+  YieldingTelemetryRepository,
+  type SessionTelemetryRepository,
+} from '../session/telemetryRepository.js';
 
 /**
  * Bridges one browser lesson to one OpenAI Realtime session.
@@ -38,37 +39,11 @@ import {
 
 const REALTIME_URL = 'wss://api.openai.com/v1/realtime';
 const OUTPUT_AUDIO_SAMPLES_PER_MS = 24;
-const RECONNECT_HISTORY_PAGE_SIZE = 5_000;
+const MAX_TERMINAL_TELEMETRY_RESPONSES = 512;
+const MAX_PENDING_VOICE_BARGE_INS = 256;
 
 /** Stop auto-continuing tool chains after this many rounds per turn. */
 const MAX_TOOL_CONTINUES = 14;
-
-async function hasReleasedSessionStart(
-  repo: DomainRepository,
-  sessionId: string,
-): Promise<boolean> {
-  let throughEventId: number | null = null;
-
-  try {
-    while (true) {
-      const page = await repo.listEvents(
-        sessionId,
-        RECONNECT_HISTORY_PAGE_SIZE,
-        throughEventId,
-      );
-      if (page.some((event) => event.type === 'session_started')) return true;
-      if (page.length < RECONNECT_HISTORY_PAGE_SIZE) return false;
-
-      const oldestEventId = page[0]?.id;
-      if (oldestEventId === undefined || oldestEventId <= 1) return false;
-      const nextThroughEventId = oldestEventId - 1;
-      if (throughEventId !== null && nextThroughEventId >= throughEventId) return false;
-      throughEventId = nextThroughEventId;
-    }
-  } catch {
-    return false;
-  }
-}
 
 function isAllowedClientMetric(input: MetricInput): boolean {
   switch (input.name) {
@@ -82,6 +57,8 @@ function isAllowedClientMetric(input: MetricInput): boolean {
     case 'barge_in_gate_outcome':
       return input.dimensions.outcome === 'local_only_rejected' ||
         input.dimensions.outcome === 'provider_only_rejected';
+    case 'telemetry_gap':
+      return input.dimensions.reason === 'client_queue_overflow';
     default:
       return false;
   }
@@ -101,6 +78,7 @@ export interface ProxyOptions {
   apiKey: string;
   model: string;
   repo: DomainRepository;
+  telemetryRepo?: SessionTelemetryRepository;
   sessionId: string;
   log?: (line: string) => void;
   createUpstream?: (url: string, apiKey: string) => NodeWebSocket;
@@ -127,6 +105,8 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
     return;
   }
 
+  const telemetryRepo = options.telemetryRepo ?? new YieldingTelemetryRepository(repo);
+  const telemetryWriter = new SessionTelemetryWriter(telemetryRepo, sessionId);
   const lessonGoal = session.goal;
   const baseInstructions = buildInstructions({
     childName: child.name,
@@ -166,6 +146,7 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
   const responseTranscript = new Map<string, string>();
   const responseSegments = new Map<string, ResponseSegmentAnnotator>();
   const pendingVoiceBargeInResponses = new Set<string>();
+  const terminalTelemetryResponses = new Set<string>();
   const pendingBoardOps = new Map<number, { ops: BoardOp[]; semanticGroupId?: string; groupLabel?: string; replacesGroup?: string }>();
   let activeResponseId: string | null = null;
   let speechInProgress = false;
@@ -499,6 +480,7 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
   function teardown(reason: string): void {
     if (closed) return;
     closed = true;
+    void telemetryWriter.flush();
     log(`session ${sessionId}: closed (${reason})`);
     try {
       upstream.close();
@@ -781,12 +763,28 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
         const status = response?.status ?? 'unknown';
         if (status === 'cancelled' && response?.id) cancelledResponses.add(response.id);
         const responseIdentity = identityForResponse(response?.id);
-        if (response?.id && responseIdentity) {
-          const context = metricContextFromIdentity(responseIdentity, response.id);
-          await recordProviderUsage(repo, sessionId, response.usage, context);
+        const terminalTelemetryIdentity = response?.id
+          ? responseIdentities.get(response.id)
+          : undefined;
+        const recordsTerminalTelemetry = Boolean(
+          response?.id &&
+          terminalTelemetryIdentity &&
+          !terminalTelemetryResponses.has(response.id),
+        );
+        if (response?.id && terminalTelemetryIdentity && recordsTerminalTelemetry) {
+          addBounded(
+            terminalTelemetryResponses,
+            response.id,
+            MAX_TERMINAL_TELEMETRY_RESPONSES,
+          );
+          const context = metricContextFromIdentity(
+            terminalTelemetryIdentity,
+            response.id,
+          );
+          telemetryWriter.submitProviderUsage(response.usage, context);
           const outputSamples = responseSegments.get(response.id)?.totalSamples();
           if (outputSamples !== undefined && outputSamples > 0) {
-            await recordMetric(repo, sessionId, {
+            telemetryWriter.submit({
               schemaVersion: TELEMETRY_SCHEMA_VERSION,
               name: 'tutor_audio_output_duration',
               unit: 'ms',
@@ -799,7 +797,7 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
               : status === 'completed'
                 ? 'provider_completed'
                 : 'provider_failed';
-            await recordMetric(repo, sessionId, {
+            telemetryWriter.submit({
               schemaVersion: TELEMETRY_SCHEMA_VERSION,
               name: 'barge_in_cancel_outcome',
               unit: 'count',
@@ -1393,7 +1391,6 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
         if (started) break;
         started = true;
         toolContinues = 0;
-        const hadPriorStart = await hasReleasedSessionStart(repo, sessionId);
         const resume = await conversationContext();
         if (resume) {
           sendUpstream({
@@ -1405,19 +1402,23 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
             },
           });
         }
-        await repo.addEvent(sessionId, 'session_started', {
+        const startEventId = await repo.addEvent(sessionId, 'session_started', {
           resumed: Boolean(resume),
           connectionEpoch: envelope.connectionEpoch,
         });
-        if (hadPriorStart) {
-          await recordMetric(repo, sessionId, {
-            schemaVersion: TELEMETRY_SCHEMA_VERSION,
-            name: 'session_reconnect',
-            unit: 'count',
-            value: 1,
-          }, metricContextFromIdentity(envelope));
-        }
         requestModelResponse('start', 'session-start');
+        void telemetryRepo
+          .hasPriorReleasedSessionStart(sessionId, startEventId)
+          .then((hadPriorStart) => {
+            if (!hadPriorStart) return;
+            telemetryWriter.submit({
+              schemaVersion: TELEMETRY_SCHEMA_VERSION,
+              name: 'session_reconnect',
+              unit: 'count',
+              value: 1,
+            }, metricContextFromIdentity(envelope));
+          })
+          .catch(() => {});
         break;
       }
 
@@ -1453,14 +1454,20 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
           interruptedResponseId !== null &&
           interruptedIdentity !== null &&
           !pendingVoiceBargeInResponses.has(interruptedResponseId);
-        if (recordVoiceGate) pendingVoiceBargeInResponses.add(interruptedResponseId);
+        if (recordVoiceGate) {
+          addBounded(
+            pendingVoiceBargeInResponses,
+            interruptedResponseId,
+            MAX_PENDING_VOICE_BARGE_INS,
+          );
+        }
         childHoldsFloor = true;
         if (activeResponseId) cancelledResponses.add(activeResponseId);
         lessonState = reduceLesson(lessonState, { type: 'INTERRUPTED' });
         if (message.reason === 'voice') setEndpointingEagerness('high');
         sendUpstream({ type: 'response.cancel' });
         if (recordVoiceGate) {
-          await recordMetric(repo, sessionId, {
+          telemetryWriter.submit({
             schemaVersion: TELEMETRY_SCHEMA_VERSION,
             name: 'barge_in_gate_outcome',
             unit: 'count',
@@ -1627,11 +1634,13 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
       case 'metric': {
         const metric = MetricInputSchema.safeParse(envelope.payload);
         if (!metric.success || !isAllowedClientMetric(metric.data)) break;
-        await recordMetric(
-          repo,
-          sessionId,
+        const trustedResponseId = trustedClientResponseId(metric.data, envelope);
+        if (metric.data.name === 'board_reveal_to_narration' && !trustedResponseId) {
+          break;
+        }
+        telemetryWriter.submit(
           metric.data,
-          metricContextFromIdentity(envelope, trustedClientResponseId(metric.data, envelope)),
+          metricContextFromIdentity(envelope, trustedResponseId),
         );
         break;
       }
@@ -1679,6 +1688,13 @@ function learnerBoardOps(raw: unknown): BoardOp[] {
 function safeBoardImage(value: unknown): string | null {
   if (typeof value !== 'string' || value.length > 320_000) return null;
   return /^data:image\/(?:png|jpeg);base64,[a-z0-9+/=]+$/i.test(value) ? value : null;
+}
+
+function addBounded(set: Set<string>, value: string, limit: number): void {
+  set.add(value);
+  if (set.size <= limit) return;
+  const oldest = set.values().next().value;
+  if (oldest !== undefined) set.delete(oldest);
 }
 
 function semanticTurnDetection(eagerness: 'medium' | 'high') {

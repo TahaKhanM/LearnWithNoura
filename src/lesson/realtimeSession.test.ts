@@ -72,8 +72,15 @@ describe('RealtimeSession connecting metric queue', () => {
     harness.handleServer(createRuntimeEvent(acceptedIdentity, 0, 'ready', {}));
 
     const metrics = sent.filter((event) => event.type === 'metric');
-    expect(metrics).toHaveLength(64);
-    expect(metrics.slice(0, -1).map((event) =>
+    expect(metrics).toHaveLength(65);
+    expect(metrics[0]?.payload).toEqual({
+      schemaVersion: '1.0.0',
+      name: 'telemetry_gap',
+      unit: 'count',
+      value: 7,
+      dimensions: { reason: 'client_queue_overflow' },
+    });
+    expect(metrics.slice(1, -1).map((event) =>
       (event.payload as { dimensions: { objectId: string } }).dimensions.objectId,
     )).toEqual(Array.from({ length: 63 }, (_, index) => `object-${index + 7}`));
     expect(metrics.at(-1)?.payload).toEqual({

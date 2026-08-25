@@ -3,6 +3,7 @@ import { Buffer } from 'node:buffer';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createRuntimeEvent, type GenerationIdentity, type RuntimeEventEnvelope } from '../../shared/runtimeProtocol';
 import { openTestDb } from '../store/db';
+import type { DomainRepository } from '../store/domain';
 import { Repo } from '../store/repo';
 import { connectRealtimeProxy } from './proxy';
 
@@ -910,25 +911,15 @@ describe('realtime proxy telemetry', () => {
     expect(observations).toEqual([
       expect.objectContaining({
         name: 'board_reveal_to_narration',
-        generationId: 'generation-correlated',
-        providerResponseId: 'response-correlated',
-        visualCueId: 'cue-correlated',
-      }),
-      expect.not.objectContaining({ providerResponseId: expect.anything() }),
-      expect.objectContaining({
-        name: 'board_reveal_to_narration',
-        generationId: 'generation-next',
-        visualCueId: 'cue-mismatched',
+        generationId: expect.stringMatching(/^tel2_/),
+        providerResponseId: expect.stringMatching(/^tel2_/),
+        visualCueId: expect.stringMatching(/^tel2_/),
       }),
     ]);
-    expect(observations[1]).toMatchObject({
-      name: 'board_reveal_to_narration',
-      generationId: 'generation-correlated',
-      visualCueId: 'cue-unknown',
-    });
-    expect(observations.slice(1).every(
-      (observation) => !('providerResponseId' in observation),
-    )).toBe(true);
+    expect(JSON.stringify(observations)).not.toContain('response-correlated');
+    expect(JSON.stringify(observations)).not.toContain('cue-correlated');
+    expect(JSON.stringify(observations)).not.toContain('response-unknown');
+    expect(JSON.stringify(observations)).not.toContain('cue-mismatched');
   });
 
   it('omits real client-carried response correlation from other allowed metrics', async () => {
@@ -1103,7 +1094,6 @@ describe('realtime proxy telemetry', () => {
       'speech_end_to_response_started',
       'speech_end_to_first_audio',
       'ask_to_first_audio',
-      'board_reveal_to_narration',
       'barge_in_gate_outcome',
       'barge_in_gate_outcome',
       'section_navigation',
@@ -1111,9 +1101,11 @@ describe('realtime proxy telemetry', () => {
     ]);
     expect(observations).toEqual(observations.map(() => expect.objectContaining({
       connectionEpoch: 7,
-      turnId: 'turn-authoritative',
-      generationId: 'generation-authoritative',
+      turnId: expect.stringMatching(/^tel2_/),
+      generationId: expect.stringMatching(/^tel2_/),
     })));
+    expect(JSON.stringify(observations)).not.toContain('turn-authoritative');
+    expect(JSON.stringify(observations)).not.toContain('generation-authoritative');
     expect(observations.every((observation) => !('providerResponseId' in observation))).toBe(true);
   });
 
@@ -1215,8 +1207,8 @@ describe('realtime proxy telemetry', () => {
       expect.objectContaining({
         name: 'speech_end_to_first_audio',
         connectionEpoch: active.connectionEpoch,
-        turnId: active.turnId,
-        generationId: active.generationId,
+        turnId: expect.stringMatching(/^tel2_/),
+        generationId: expect.stringMatching(/^tel2_/),
       }),
     ]);
   });
@@ -1307,8 +1299,12 @@ describe('realtime proxy telemetry', () => {
     }, 0, 'start', {})));
     await flushProxy();
 
-    expect(listEventsSpy.mock.calls.slice(0, 2)).toEqual([
-      [session.id, 5_000, null],
+    const reconnectQueries = listEventsSpy.mock.calls.filter((call) => call[1] === 5_000);
+    const newestStart = listEvents(session.id, 5_010)
+      .filter((event) => event.type === 'session_started')
+      .at(-1);
+    expect(reconnectQueries).toEqual([
+      [session.id, 5_000, (newestStart?.id ?? 1) - 1],
       [session.id, 5_000, (originalStart?.id ?? 0) + 1],
     ]);
     const events = listEvents(session.id, 5_010);
@@ -1321,8 +1317,8 @@ describe('realtime proxy telemetry', () => {
         payload: expect.objectContaining({
           name: 'session_reconnect',
           connectionEpoch: 2,
-          turnId: 'turn-second',
-          generationId: 'generation-second',
+          turnId: expect.stringMatching(/^tel2_/),
+          generationId: expect.stringMatching(/^tel2_/),
         }),
       }),
     ]);
@@ -1374,13 +1370,14 @@ describe('realtime proxy telemetry', () => {
     });
     const upstream = FakeUpstream.latest;
     const listEvents = repo.listEvents.bind(repo);
-    vi.spyOn(repo, 'listEvents')
-      .mockImplementationOnce(() => {
-        throw new Error('telemetry history unavailable');
-      })
-      .mockImplementation(
-        (targetSessionId, limit, throughEventId) => listEvents(targetSessionId, limit, throughEventId),
-      );
+    vi.spyOn(repo, 'listEvents').mockImplementation(
+      (targetSessionId, limit, throughEventId) => {
+        if (throughEventId !== undefined && throughEventId !== null) {
+          throw new Error('telemetry history unavailable');
+        }
+        return listEvents(targetSessionId, limit, throughEventId);
+      },
+    );
 
     client.emit('message', JSON.stringify(createRuntimeEvent({
       sessionId: session.id,
@@ -1485,7 +1482,7 @@ describe('realtime proxy telemetry', () => {
       expect.objectContaining({
         name: 'barge_in_gate_outcome',
         dimensions: { outcome: 'confirmed' },
-        providerResponseId: 'response-active',
+        providerResponseId: expect.stringMatching(/^tel2_/),
       }),
     ]);
 
@@ -1495,18 +1492,24 @@ describe('realtime proxy telemetry', () => {
 
     upstream.emit({ type: 'response.done', response: { id: 'response-active', status, output: [] } });
     await flushProxy();
-    expect(repo.listEvents(session.id).filter((event) => event.type === 'metric').map((event) => event.payload)).toEqual([
+    const terminalMetrics = repo.listEvents(session.id)
+      .filter((event) => event.type === 'metric')
+      .map((event) => event.payload as Record<string, unknown>);
+    expect(terminalMetrics).toEqual([
       expect.objectContaining({
         name: 'barge_in_gate_outcome',
         dimensions: { outcome: 'confirmed' },
-        providerResponseId: 'response-active',
+        providerResponseId: expect.stringMatching(/^tel2_/),
       }),
       expect.objectContaining({
         name: 'barge_in_cancel_outcome',
         dimensions: { outcome },
-        providerResponseId: 'response-active',
+        providerResponseId: expect.stringMatching(/^tel2_/),
       }),
     ]);
+    expect(terminalMetrics[0]?.providerResponseId)
+      .toBe(terminalMetrics[1]?.providerResponseId);
+    expect(JSON.stringify(terminalMetrics)).not.toContain('response-active');
   });
 
   it('does not record a voice gate outcome for a non-voice interruption', async () => {
@@ -1547,8 +1550,8 @@ describe('realtime proxy telemetry', () => {
         name: 'speech_end_to_response_started',
         value: 50,
         connectionEpoch: active.connectionEpoch,
-        turnId: active.turnId,
-        generationId: active.generationId,
+        turnId: expect.stringMatching(/^tel2_/),
+        generationId: expect.stringMatching(/^tel2_/),
       }),
     ]);
   });
@@ -1606,7 +1609,7 @@ describe('realtime proxy telemetry', () => {
       expect.objectContaining({
         name: 'provider_usage',
         value: 253,
-        providerResponseId: 'response-usage',
+        providerResponseId: expect.stringMatching(/^tel2_/),
         dimensions: {
           totalTokens: 253,
           inputTextTokens: 119,
@@ -1623,9 +1626,14 @@ describe('realtime proxy telemetry', () => {
         name: 'tutor_audio_output_duration',
         unit: 'ms',
         value: 500,
-        providerResponseId: 'response-usage',
+        providerResponseId: expect.stringMatching(/^tel2_/),
       }),
     ]);
+    const providerIds = metrics.map(
+      (event) => (event.payload as { providerResponseId?: string }).providerResponseId,
+    );
+    expect(providerIds[0]).toBe(providerIds[1]);
+    expect(JSON.stringify(metrics)).not.toContain('response-usage');
     expect(JSON.stringify(metrics)).not.toContain('secret provider response text');
     expect(JSON.stringify(metrics)).not.toContain('secret-provider-audio-bytes');
   });
@@ -1675,12 +1683,279 @@ describe('realtime proxy telemetry', () => {
     expect(metrics.map((event) => (event.payload as { name?: unknown }).name)).toEqual([
       'tutor_audio_output_duration',
     ]);
-    expect(metrics[0]?.payload).toMatchObject({ value: 5, providerResponseId: 'response-partial-usage' });
+    expect(metrics[0]?.payload).toMatchObject({
+      value: 5,
+      providerResponseId: expect.stringMatching(/^tel2_/),
+    });
+    expect(JSON.stringify(metrics)).not.toContain('response-partial-usage');
+  });
+
+  it('does not emit terminal telemetry for an unknown response.done identity', async () => {
+    vi.stubGlobal('WebSocket', FakeUpstream);
+    const repo = new Repo(openTestDb());
+    const child = repo.createChild('Maya', 10);
+    const session = repo.createSession(child.id, 'fractions');
+    const client = new FakeClient();
+    await connectRealtimeProxy(client as never, {
+      apiKey: 'offline-fixture',
+      model: 'gpt-realtime-2.1',
+      repo,
+      sessionId: session.id,
+      createUpstream: () => new FakeUpstream() as never,
+    });
+    const active = { ...identity, sessionId: session.id };
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 0, 'hello', {})));
+    const upstream = FakeUpstream.latest;
+    upstream.emit({
+      type: 'response.output_audio.delta',
+      response_id: 'unknown-response',
+      item_id: 'unknown-item',
+      delta: Buffer.alloc(2_400 * 2).toString('base64'),
+    });
+    upstream.emit({
+      type: 'response.done',
+      response: {
+        id: 'unknown-response',
+        status: 'cancelled',
+        output: [],
+        usage: {
+          total_tokens: 2,
+          input_token_details: {
+            text_tokens: 1,
+            audio_tokens: 0,
+            image_tokens: 0,
+            cached_tokens_details: {
+              text_tokens: 0,
+              audio_tokens: 0,
+              image_tokens: 0,
+            },
+          },
+          output_token_details: { text_tokens: 1, audio_tokens: 0 },
+        },
+      },
+    });
+    await flushProxy();
+
+    expect(repo.listEvents(session.id).filter((event) => event.type === 'metric')).toEqual([]);
+    expect(client.sent).toContainEqual(expect.objectContaining({
+      type: 'response_done',
+      payload: expect.objectContaining({
+        response_id: 'unknown-response',
+        status: 'cancelled',
+      }),
+    }));
+  });
+
+  it('requests the initial response and processes later client input before prior-start lookup resolves', async () => {
+    vi.stubGlobal('WebSocket', FakeUpstream);
+    const baseRepo = new Repo(openTestDb());
+    const child = baseRepo.createChild('Maya', 10);
+    const session = baseRepo.createSession(child.id, 'fractions');
+    baseRepo.addEvent(session.id, 'session_started', { connectionEpoch: 1 });
+    const history = deferred<ReturnType<Repo['listEvents']>>();
+    const boundedQueries: number[] = [];
+    const repo = Object.create(baseRepo) as DomainRepository;
+    repo.listEvents = (targetSessionId, limit, throughEventId) => {
+      if (throughEventId !== undefined && throughEventId !== null) {
+        boundedQueries.push(throughEventId);
+        return history.promise;
+      }
+      return baseRepo.listEvents(targetSessionId, limit, throughEventId);
+    };
+    const client = new FakeClient();
+    await connectRealtimeProxy(client as never, {
+      apiKey: 'offline-fixture',
+      model: 'gpt-realtime-2.1',
+      repo,
+      sessionId: session.id,
+      createUpstream: () => new FakeUpstream() as never,
+    });
+    const active = {
+      sessionId: session.id,
+      connectionEpoch: 2,
+      turnId: 'turn-reconnect-private',
+      generationId: 'generation-reconnect-private',
+    };
+    const upstream = FakeUpstream.latest;
+
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 0, 'start', {})));
+    await flushProxy();
+    expect(upstream.sent.map((raw) => JSON.parse(raw) as { type: string }))
+      .toContainEqual(expect.objectContaining({ type: 'response.create' }));
+    const currentStart = baseRepo.listEvents(session.id).at(-1);
+    expect(currentStart?.type).toBe('session_started');
+    expect(boundedQueries).toEqual([(currentStart?.id ?? 0) - 1]);
+
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 1, 'input_audio', {
+      audio: Buffer.from('later-client-input').toString('base64'),
+    })));
+    await flushProxy();
+    expect(upstream.sent.map((raw) => JSON.parse(raw) as { type: string }))
+      .toContainEqual(expect.objectContaining({ type: 'input_audio_buffer.append' }));
+
+    history.resolve(baseRepo.listEvents(session.id, 5_000, (currentStart?.id ?? 1) - 1));
+    await flushProxy();
+    await flushProxy();
+    expect(baseRepo.listEvents(session.id).some(
+      (event) => event.type === 'metric'
+        && (event.payload as { name?: unknown }).name === 'session_reconnect',
+    )).toBe(true);
+  });
+
+  it('sends cancel and processes later client messages before telemetry persistence resolves', async () => {
+    vi.stubGlobal('WebSocket', FakeUpstream);
+    const baseRepo = new Repo(openTestDb());
+    const child = baseRepo.createChild('Maya', 10);
+    const session = baseRepo.createSession(child.id, 'fractions');
+    const metricWrite = deferred<number>();
+    const repo = Object.create(baseRepo) as DomainRepository;
+    repo.addEvent = (targetSessionId, type, payload, released) => type === 'metric'
+      ? metricWrite.promise
+      : baseRepo.addEvent(targetSessionId, type, payload, released);
+    const client = new FakeClient();
+    await connectRealtimeProxy(client as never, {
+      apiKey: 'offline-fixture',
+      model: 'gpt-realtime-2.1',
+      repo,
+      sessionId: session.id,
+      createUpstream: () => new FakeUpstream() as never,
+    });
+    const active = { ...identity, sessionId: session.id };
+    const upstream = FakeUpstream.latest;
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 0, 'hello', {})));
+    upstream.emit({ type: 'response.created', response: { id: 'response-delayed-cancel' } });
+    await flushProxy();
+
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 1, 'interrupt', { reason: 'voice' })));
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 2, 'input_audio', {
+      audio: Buffer.from('later-after-cancel').toString('base64'),
+    })));
+    await flushProxy();
+
+    const sent = upstream.sent.map((raw) => JSON.parse(raw) as { type: string });
+    expect(sent).toContainEqual(expect.objectContaining({ type: 'response.cancel' }));
+    expect(sent).toContainEqual(expect.objectContaining({ type: 'input_audio_buffer.append' }));
+    metricWrite.resolve(1);
+  });
+
+  it('flushes cues and response_done before delayed terminal telemetry writes resolve', async () => {
+    vi.stubGlobal('WebSocket', FakeUpstream);
+    const baseRepo = new Repo(openTestDb());
+    const child = baseRepo.createChild('Maya', 10);
+    const session = baseRepo.createSession(child.id, 'fractions');
+    const metricWrite = deferred<number>();
+    const repo = Object.create(baseRepo) as DomainRepository;
+    repo.addEvent = (targetSessionId, type, payload, released) => type === 'metric'
+      ? metricWrite.promise
+      : baseRepo.addEvent(targetSessionId, type, payload, released);
+    const client = new FakeClient();
+    await connectRealtimeProxy(client as never, {
+      apiKey: 'offline-fixture',
+      model: 'gpt-realtime-2.1',
+      repo,
+      sessionId: session.id,
+      createUpstream: () => new FakeUpstream() as never,
+    });
+    const active = { ...identity, sessionId: session.id };
+    const upstream = FakeUpstream.latest;
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 0, 'hello', {})));
+    upstream.emit({ type: 'response.created', response: { id: 'response-delayed-done' } });
+    upstream.emit({
+      type: 'response.function_call_arguments.done',
+      response_id: 'response-delayed-done',
+      call_id: 'move-delayed-done',
+      name: 'propose_teaching_move',
+      arguments: JSON.stringify({
+        rationale: 'fixture',
+        microObjective: 'fraction comparison',
+        strategy: 'shared scale',
+        childFacingText: 'Compare the marks.',
+        proposedAction: 'explain',
+      }),
+    });
+    upstream.emit({
+      type: 'response.output_audio.delta',
+      response_id: 'response-delayed-done',
+      item_id: 'item-delayed-done',
+      delta: Buffer.alloc(2_400 * 2).toString('base64'),
+    });
+    await flushProxy();
+
+    upstream.emit({
+      type: 'response.done',
+      response: {
+        id: 'response-delayed-done',
+        status: 'completed',
+        output: [{ type: 'function_call' }],
+        usage: completeProviderUsage(9),
+      },
+    });
+    await flushProxy();
+
+    expect(client.sent).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'lesson_state' }),
+      expect.objectContaining({
+        type: 'response_done',
+        payload: expect.objectContaining({ response_id: 'response-delayed-done' }),
+      }),
+    ]));
+    metricWrite.resolve(1);
+  });
+
+  it('records terminal provider telemetry once for duplicate response.done', async () => {
+    vi.stubGlobal('WebSocket', FakeUpstream);
+    const repo = new Repo(openTestDb());
+    const child = repo.createChild('Maya', 10);
+    const session = repo.createSession(child.id, 'fractions');
+    const client = new FakeClient();
+    await connectRealtimeProxy(client as never, {
+      apiKey: 'offline-fixture',
+      model: 'gpt-realtime-2.1',
+      repo,
+      sessionId: session.id,
+      createUpstream: () => new FakeUpstream() as never,
+    });
+    const active = { ...identity, sessionId: session.id };
+    const upstream = FakeUpstream.latest;
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 0, 'hello', {})));
+    upstream.emit({ type: 'response.created', response: { id: 'response-duplicate-done' } });
+    upstream.emit({
+      type: 'response.output_audio.delta',
+      response_id: 'response-duplicate-done',
+      item_id: 'item-duplicate-done',
+      delta: Buffer.alloc(2_400 * 2).toString('base64'),
+    });
+    await flushProxy();
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 1, 'interrupt', { reason: 'voice' })));
+    await flushProxy();
+
+    const done = {
+      type: 'response.done',
+      response: {
+        id: 'response-duplicate-done',
+        status: 'cancelled',
+        output: [],
+        usage: completeProviderUsage(9),
+      },
+    };
+    upstream.emit(done);
+    upstream.emit(done);
+    await flushProxy();
+    await flushProxy();
+
+    const names = repo.listEvents(session.id)
+      .filter((event) => event.type === 'metric')
+      .map((event) => (event.payload as { name?: unknown }).name);
+    expect(names.filter((name) => name === 'provider_usage')).toHaveLength(1);
+    expect(names.filter((name) => name === 'tutor_audio_output_duration')).toHaveLength(1);
+    expect(names.filter((name) => name === 'barge_in_cancel_outcome')).toHaveLength(1);
   });
 });
 
-function flushProxy(): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, 0));
+async function flushProxy(): Promise<void> {
+  for (let index = 0; index < 20; index += 1) {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
 }
 
 function failMetricWrites(repo: Repo): void {
@@ -1689,4 +1964,27 @@ function failMetricWrites(repo: Repo): void {
     if (type === 'metric') throw new Error('telemetry store unavailable');
     return addEvent(sessionId, type, payload, released);
   });
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: Error) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, reject, resolve };
+}
+
+function completeProviderUsage(totalTokens: number) {
+  return {
+    total_tokens: totalTokens,
+    input_token_details: {
+      text_tokens: Math.max(0, totalTokens - 2),
+      audio_tokens: 0,
+      image_tokens: 0,
+      cached_tokens_details: { text_tokens: 0, audio_tokens: 0, image_tokens: 0 },
+    },
+    output_token_details: { text_tokens: 1, audio_tokens: 1 },
+  };
 }

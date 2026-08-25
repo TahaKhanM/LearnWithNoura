@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 export const TELEMETRY_SCHEMA_VERSION = '1.0.0' as const;
+export const TELEMETRY_ENCODING_VERSION = 'hmac-sha256-v2' as const;
 
 const finiteInt = z.number().finite().int();
 const nonNegativeInt = finiteInt.nonnegative();
@@ -43,6 +44,14 @@ const SectionNavigationCauseSchema = z.enum([
 ]);
 
 const TutorObjectDisappearanceCauseSchema = z.enum(['scene_mutation', 'unknown']);
+
+export const TELEMETRY_GAP_REASONS = [
+  'server_queue_overflow',
+  'server_persistence_failure',
+  'client_queue_overflow',
+] as const;
+
+const TelemetryGapReasonSchema = z.enum(TELEMETRY_GAP_REASONS);
 
 const ProviderUsageDimensionsSchema = z.object({
   totalTokens: nonNegativeInt,
@@ -117,6 +126,13 @@ export const MetricInputSchema = z.discriminatedUnion('name', [
   }),
   z.object({
     schemaVersion,
+    name: z.literal('telemetry_gap'),
+    unit: z.literal('count'),
+    value: finiteInt.positive(),
+    dimensions: z.object({ reason: TelemetryGapReasonSchema }),
+  }),
+  z.object({
+    schemaVersion,
     name: z.literal('provider_usage'),
     unit: z.literal('count'),
     value: nonNegativeInt,
@@ -141,11 +157,17 @@ export type MetricContext = {
   providerResponseId?: string;
 };
 
+const telemetryEncodingSchema = z.object({
+  version: z.literal(TELEMETRY_ENCODING_VERSION),
+  sessionTag: z.string().regex(/^[A-Za-z0-9_-]{10}$/),
+});
+
 const metricContextFields = {
   connectionEpoch: nonNegativeInt,
   turnId: boundedId,
   generationId: boundedId,
   providerResponseId: boundedId.optional(),
+  telemetryEncoding: telemetryEncodingSchema.optional(),
 };
 
 const LEGACY_DURATION_NAMES = [
@@ -187,7 +209,8 @@ export function attachMetricContext(
 }
 
 export function normalizeStoredMetric(payload: unknown): NormalizedMetric | null {
-  const observation = newMetricObservationSchema.safeParse(payload);
+  const storedCandidate = sanitizeStoredEncoding(payload);
+  const observation = newMetricObservationSchema.safeParse(storedCandidate);
   if (observation.success) {
     return observation.data;
   }
@@ -203,6 +226,17 @@ export function normalizeStoredMetric(payload: unknown): NormalizedMetric | null
   }
 
   return null;
+}
+
+function sanitizeStoredEncoding(payload: unknown): unknown {
+  if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) {
+    return payload;
+  }
+  const candidate = { ...(payload as Record<string, unknown>) };
+  const encoding = telemetryEncodingSchema.safeParse(candidate.telemetryEncoding);
+  delete candidate.telemetryEncoding;
+  if (encoding.success) candidate.telemetryEncoding = encoding.data;
+  return candidate;
 }
 
 export type DurationAggregate = {
@@ -235,6 +269,10 @@ export type ProviderUsageTotals = {
   outputAudioTokens: number;
 };
 
+export type TelemetryGapReason = (typeof TELEMETRY_GAP_REASONS)[number];
+
+export type TelemetryGapTotals = Record<TelemetryGapReason, number>;
+
 export type SessionMetricEntry = {
   eventId: number;
   ts: number;
@@ -262,6 +300,7 @@ export type SessionTelemetryLog = {
     reconnectCount: number;
     tutorObjectDisappearanceCount: number;
     providerUsage: ProviderUsageTotals;
+    telemetryGaps: TelemetryGapTotals;
   };
   timeline: SessionMetricEntry[];
 };

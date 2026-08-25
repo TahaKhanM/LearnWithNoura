@@ -2,11 +2,33 @@
 
 ## Default offline gates
 
-Run the commands in README, including `npm run test:smoke-report` before `npm test`. The deterministic Node reporter suite checks the explicit authorization boundary, structured configuration failures, truncation/provider-usage gates, and privacy redaction without opening a browser or claiming live evidence. Unit/property coverage includes state transitions, response taxonomy, evidence projection, event identity, 1,000 reordered stale-event runs, storage cutoffs, owner-aware operations, render inspection, committed animation cancellation, character priority/smoothing, Postgres snapshot parity, summary citation validation, security capabilities and Production fail-closed configuration.
+Run the commands in README, including `npm run test:smoke-report` before
+`npm test`. The deterministic Node reporter suite checks the explicit
+authorization boundary, origin-only configuration, redirect/session/schema
+mismatches, exact endpoint allowlists, safe-integer duration/provider rows,
+strictly ascending timeline order, complete duration/lifecycle/usage/gap
+summary reconstruction, telemetry-gap/truncation gates, and
+privacy redaction without opening a browser or claiming live evidence.
+Unit/property coverage also uses a synchronous-blocking fake plus the
+production SQLite worker adapter to prove telemetry
+cannot delay response creation, cancellation, cue/response completion, or
+later messages; verifies writer ordering/gap recovery, identifier
+pseudonymization, strict response correlation, terminal deduplication, storage
+cutoffs, owner-aware operations, render inspection, committed animation
+cancellation, character priority/smoothing, Postgres snapshot parity, summary
+citation validation, security capabilities, and Production fail-closed
+configuration.
 
 Browser suites use a dedicated synthetic SQLite directory and separate ports. Visual baselines cover Noura Home at 1440×900, 834×1112, 390×844 and 844×390 plus every canonical semantic scene at desktop, tablet and mobile-focus widths.
 
-Voice-interruption unit/integration rows cover short loud noise plus server VAD, sustained local energy without server confirmation, adaptive room-noise calibration, sustained speech with both detectors, one-turn high-eagerness endpointing with medium restoration, the `speech_stopped → thinking` phase, and speech-end-to-response/audio metrics. These deterministic checks prevent false cancellation and turn-latency lifecycle regressions but do not replace physical-room microphone testing.
+Voice-interruption unit/integration rows cover short loud noise plus server VAD,
+sustained local energy without server confirmation, adaptive room-noise
+calibration, sustained speech with both detectors, one-turn high-eagerness
+endpointing with medium restoration, the `speech_stopped → thinking` phase, and
+speech-end-to-response/audio metrics. Reported gate outcomes count observed
+state transitions, not semantic speech episodes or proven false positives.
+These deterministic checks prevent cancellation and turn-latency lifecycle
+regressions but do not replace labelled or physical-room microphone testing.
 
 The actual Lesson browser rows require an animated tutor object to survive callback/phase re-renders and mid-animation learner interruption, finish visibly, emit replay acknowledgement after identity replacement, retain the learner stroke, and send a board-only response request with sanitized path operations plus a size-bounded JPEG board context. Another adversarial browser row reconstructs the reported triangle/text overlap, requires the annotation coordinate to move, samples the rendered triangle path every two board units and fails if any stroke enters the padded text box. A separate row verifies the visible thinking state at speech stop before reply audio.
 
@@ -25,7 +47,17 @@ The synthetic live reporter is prepared but remains unexecuted:
 NOURA_BASE_URL=https://authorized-origin.example npm run e2e:live -- --authorized-live-run --text-only
 ```
 
-The WAV form supplies one synthetic capture path instead of `--text-only`. The script captures the created lesson session ID, then uses the still-authenticated browser context to read `/api/version` and `GET /api/sessions/:id/log`; it never queries SQLite directly. A WAV report exits nonzero when speech-end-to-response-start, speech-end-to-first-audio, tutor-audio-duration, or provider-usage observations are absent. Text-only mode requires its text-ask first-audio boundary and does not require either speech-end metric.
+`NOURA_BASE_URL` must be exactly an HTTP(S) origin: userinfo, a non-root path,
+query, and fragment are rejected before any browser launch and are never copied
+into a failure report. The WAV form supplies one synthetic capture path instead
+of `--text-only`. The script captures the created lesson session ID, then uses
+the still-authenticated browser context to read `/api/version` and
+`GET /api/sessions/:id/log`; it never queries SQLite directly. It requires the
+actual origin, session ID, and both schema versions to match. A WAV report exits
+nonzero when speech-end-to-response-start, speech-end-to-first-audio,
+tutor-audio-duration, or provider-usage observations are absent. Text-only mode
+requires its text-ask first-audio boundary and does not require either
+speech-end metric.
 
 The one JSON report contains:
 
@@ -33,11 +65,26 @@ The one JSON report contains:
 - the exact sum of logged `tutor_audio_output_duration` rows;
 - provider-reported token-usage totals projected from `response.done.response.usage`;
 - optional `NOURA_PROVIDER_REPORTED_COST_USD`, explicitly identified as user-supplied from the provider billing surface;
-- the complete Phase 0 duration/count summary and truncation state;
+- the exact allowlisted Phase 0 duration/count/gap summary and truncation state;
 - bounded tutor-caption, learner-line, board-item, and browser-console-error counts plus hardcoded milestone labels, never raw caption, learner, or console strings;
 - smoke-gate missing observations plus `requiresAuthorizedLiveVerification` entries for acoustic onset/silence and target hardware.
 
-The smoke gate fails if the parent-scoped log is truncated or provider usage is missing. `response.done` does not contain a per-response currency charge. After an authorized run, any currency amount must be manually reconciled from the provider billing surface. A local rate-card multiplication is allowed only when labelled **estimate**, with the rate-card source and source date; it is never “provider-reported cost.” `--report-fixture <path>` and `npm run test:smoke-report` are offline deterministic report checks and remain explicitly non-provider evidence even if a fixture contains token counts.
+The smoke gate fails if the parent-scoped log is truncated, any telemetry gap
+is present, or provider usage is absent, non-positive, unsafe, internally
+inconsistent, or unequal to the sum of validated timeline usage rows.
+`response.done` does not contain a per-response currency charge. After an
+authorized run, any currency amount must be manually reconciled from the
+provider billing surface. A local rate-card multiplication is allowed only when
+labelled **estimate**, with the rate-card source and source date; it is never
+“provider-reported cost.” `--report-fixture <path>` and
+`npm run test:smoke-report` are offline deterministic report checks and remain
+explicitly non-provider evidence even if a fixture contains token counts.
+
+Known gaps are honest incompleteness evidence, not proof that every loss can be
+reported. If the browser never reaches another accepted `ready`, or a
+fallback/failed transport phase never recovers, final observations can be lost
+before the aggregate client gap is delivered. Reject such a run as unable to
+prove telemetry completeness.
 
 A future authorized pre-merge live smoke remains limited to two short synthetic sessions. Never loop paid calls for screenshots. Until that authorization and run occur, live-provider behavior, live latency, billed currency, acoustic silence, and target-hardware results remain UNVERIFIED.
 
