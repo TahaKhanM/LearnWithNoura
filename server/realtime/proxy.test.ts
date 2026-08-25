@@ -484,7 +484,7 @@ describe('realtime proxy response annotation', () => {
       repo,
       sessionId: session.id,
       createUpstream: () => new FakeUpstream() as never,
-      preflightTimeoutMs: 50,
+      preflightTimeoutMs: 60_000,
       onLifecycle: (value) => {
         lifecycle = value;
         registry.register(value);
@@ -495,6 +495,7 @@ describe('realtime proxy response annotation', () => {
     const upstream = FakeUpstream.latest;
     createBlueprint(upstream, 'shutdown-stage');
     await flushProxy();
+    vi.useFakeTimers({ toFake: ['setTimeout'] });
     upstream.emit({ type: 'response.created', response: { id: 'shutdown-plan-response' } });
     upstream.emit({
       type: 'response.function_call_arguments.done',
@@ -523,11 +524,17 @@ describe('realtime proxy response annotation', () => {
       }),
     });
     await flushProxy();
-    expect(client.sent.some((event) => event.type === 'visual_preflight')).toBe(true);
+    const preflight = client.sent.find((event) => event.type === 'visual_preflight');
+    expect(preflight).toBeDefined();
+    const preflightId = (preflight!.payload as { preflight_id?: unknown }).preflight_id;
+    expect(preflightId).toEqual(expect.stringMatching(/^preflight-/));
+    expect(toolOutput(upstream, 'shutdown-plan-call')).toEqual({});
+    expect(repo.listEventsForInternalAudit(session.id)
+      .filter((event) => event.type === 'semantic_scene')).toEqual([]);
 
     const repositoryClose = vi.fn(async () => {});
     const fatal = vi.fn();
-    const result = await runQuiescentShutdown({
+    const shutdown = runQuiescentShutdown({
       stopAccepting: () => {},
       closeClients: () => {},
       closeProxies: () => registry.shutdown(5),
@@ -535,13 +542,27 @@ describe('realtime proxy response annotation', () => {
       log: () => {},
       fatal,
     });
+    await vi.advanceTimersByTimeAsync(6);
+    const result = await shutdown;
     expect(result).toBe('fatal');
     expect(repositoryClose).not.toHaveBeenCalled();
     expect(fatal).toHaveBeenCalledWith(expect.any(Error));
     expect(repo.listEventsForInternalAudit(session.id)
       .filter((event) => event.type === 'semantic_scene')).toEqual([]);
 
+    client.emit('message', JSON.stringify(createRuntimeEvent(
+      active,
+      1,
+      'visual_preflight_result',
+      {
+        preflight_id: preflightId,
+        accepted: false,
+        reasons: ['shutdown test cleanup'],
+      },
+    )));
+    await vi.advanceTimersByTimeAsync(60_000);
     await expect(lifecycle!.completion).resolves.toBeUndefined();
+    vi.useRealTimers();
   });
 
   it('gracefully drains settled semantic staging', async () => {
