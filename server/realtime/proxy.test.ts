@@ -931,6 +931,91 @@ describe('realtime proxy telemetry', () => {
     )).toBe(true);
   });
 
+  it('omits real client-carried response correlation from other allowed metrics', async () => {
+    vi.stubGlobal('WebSocket', FakeUpstream);
+    const repo = new Repo(openTestDb());
+    const child = repo.createChild('Maya', 10);
+    const session = repo.createSession(child.id, 'fractions');
+    const client = new FakeClient();
+    await connectRealtimeProxy(client as never, {
+      apiKey: 'offline-fixture',
+      model: 'gpt-realtime-2.1',
+      repo,
+      sessionId: session.id,
+      createUpstream: () => new FakeUpstream() as never,
+    });
+    const accepted = {
+      sessionId: session.id,
+      connectionEpoch: 5,
+      turnId: 'turn-known-response',
+      generationId: 'generation-known-response',
+    };
+    client.emit('message', JSON.stringify(createRuntimeEvent(accepted, 0, 'hello', {})));
+    FakeUpstream.latest.emit({
+      type: 'response.created',
+      response: { id: 'response-known' },
+    });
+    await flushProxy();
+
+    const metrics = [
+      { schemaVersion: '1.0.0', name: 'speech_end_to_response_started', unit: 'ms', value: 50 },
+      { schemaVersion: '1.0.0', name: 'speech_end_to_first_audio', unit: 'ms', value: 240 },
+      { schemaVersion: '1.0.0', name: 'ask_to_first_audio', unit: 'ms', value: 300 },
+      {
+        schemaVersion: '1.0.0',
+        name: 'barge_in_gate_outcome',
+        unit: 'count',
+        value: 1,
+        dimensions: { outcome: 'local_only_rejected' },
+      },
+      {
+        schemaVersion: '1.0.0',
+        name: 'barge_in_gate_outcome',
+        unit: 'count',
+        value: 1,
+        dimensions: { outcome: 'provider_only_rejected' },
+      },
+      {
+        schemaVersion: '1.0.0',
+        name: 'section_navigation',
+        unit: 'count',
+        value: 1,
+        dimensions: {
+          previousSemanticGroupId: 'section-1',
+          nextSemanticGroupId: 'section-2',
+          cause: 'picker',
+        },
+      },
+      {
+        schemaVersion: '1.0.0',
+        name: 'tutor_object_disappearance',
+        unit: 'count',
+        value: 1,
+        dimensions: { objectId: 'object-1', cause: 'scene_mutation' },
+      },
+    ] as const;
+
+    for (const [index, metric] of metrics.entries()) {
+      client.emit('message', JSON.stringify(createRuntimeEvent(
+        accepted,
+        index + 1,
+        'metric',
+        metric,
+        { providerResponseId: 'response-known' },
+      )));
+    }
+    await flushProxy();
+
+    const observations = repo.listEvents(session.id)
+      .map((event) => event.payload as Record<string, unknown>);
+    expect(observations.map((observation) => observation.name)).toEqual(
+      metrics.map((metric) => metric.name),
+    );
+    expect(observations.every(
+      (observation) => !('providerResponseId' in observation),
+    )).toBe(true);
+  });
+
   it('records every browser-observed metric without accepting client terminal correlation', async () => {
     vi.stubGlobal('WebSocket', FakeUpstream);
     const repo = new Repo(openTestDb());

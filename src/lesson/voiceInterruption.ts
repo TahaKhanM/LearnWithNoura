@@ -24,9 +24,15 @@ export class VoiceInterruptionGate {
   observeEnergy(rms: number, tutorActive: boolean, now: number): VoiceGateDecision {
     const energy = Number.isFinite(rms) ? Math.max(0, rms) : 0;
     if (!tutorActive) {
+      const rejectedOutcome = this.localCandidateAt > Number.NEGATIVE_INFINITY
+        ? 'local_only_rejected' as const
+        : undefined;
       this.noiseFloor = this.noiseFloor * 0.94 + Math.min(energy, 0.08) * 0.06;
       this.clearCandidate();
-      return { shouldInterrupt: false };
+      return {
+        shouldInterrupt: false,
+        ...(rejectedOutcome ? { rejectedOutcome } : {}),
+      };
     }
 
     const threshold = Math.min(0.14, Math.max(MIN_SPEECH_RMS, this.noiseFloor * 2.2 + 0.012));

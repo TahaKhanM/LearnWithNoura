@@ -15,7 +15,7 @@ export class ResponseTimingTracker {
   private seenVisualCueIds = new Set<string>();
 
   noteNarrationScheduled(responseId: string, boundaryMs: number): void {
-    if (!responseId || !isMonotonicBoundary(boundaryMs) || this.narrationBoundaries.has(responseId)) return;
+    if (!responseId || !isUsableBoundary(boundaryMs) || this.narrationBoundaries.has(responseId)) return;
     this.narrationBoundaries.set(responseId, boundaryMs);
     trimOldest(this.narrationBoundaries);
   }
@@ -25,7 +25,7 @@ export class ResponseTimingTracker {
     revealMs: number,
     correlation: BoardRevealCorrelation,
   ): MetricInput | null {
-    if (!responseId || !isMonotonicBoundary(revealMs)) return null;
+    if (!responseId || !isUsableBoundary(revealMs)) return null;
     const narrationMs = this.narrationBoundaries.get(responseId);
     if (narrationMs === undefined) return null;
     if (correlation.visualCueId) {
@@ -49,7 +49,7 @@ export class ResponseTimingTracker {
   }
 }
 
-function isMonotonicBoundary(value: number): boolean {
+function isUsableBoundary(value: number): boolean {
   return Number.isFinite(value) && value >= 0;
 }
 
