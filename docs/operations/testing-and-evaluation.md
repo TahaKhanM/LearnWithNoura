@@ -14,11 +14,31 @@ Board Intelligence v2 tests reconstruct released tutor and learner objects while
 
 Canonical geometry includes every exact subject template plus relationship-map, worked-step, comparison and proportional part–whole grammars at desktop, tablet and mobile-focus sizes. Compact traversal must expose every required annotation/equation without clipping. The real Lesson has desktop/mobile board-awareness baselines; adversarial browser coverage verifies section isolation, section-bound learner marks, specific highlight de-emphasis, status semantics and the original triangle/text stroke collision.
 
-## Live-provider budget
+## Prepared live-provider smoke
 
 Offline fixtures are the default. `npm run test:av` drives the production `ResponseCueTimeline` and `CharacterAttentionController`; it derives one caption-cue error and one visual-cue error from observed scheduler releases, final correction from observed playback completion, pending/stale cues from post-cancel scheduler state, interruption attention from controller output, and audio resumption/silence from PCM windows. It retains seven non-redundant gates and publishes a full 7×7 negative-control matrix. Every row mutates captured trace or PCM input, must make its named gate false, and must leave all six unrelated gates at the passing baseline; the evaluator exits nonzero if isolation fails. It does not report distribution percentiles from single observations. The JSON report and WAV are written under `artifacts/evaluation/`; they are deterministic offline production-module evidence, not provider, rendered-browser, frame-performance or target-hardware evidence. The former generic drawbox MP4 and assigned mobile-frame/render-phase metrics were removed because they did not observe a Noura application surface.
 
-A pre-merge live smoke is limited to two short synthetic sessions. Record runtime model IDs, audio duration, token usage and provider-reported cost. Never loop paid calls for screenshots.
+The synthetic live reporter is prepared but remains unexecuted:
+
+```bash
+# DO NOT RUN without explicit deployment and live-provider authorization.
+NOURA_BASE_URL=https://authorized-origin.example node scripts/e2e-live.mjs --text-only
+```
+
+The WAV form supplies one synthetic capture path instead of `--text-only`. The script captures the created lesson session ID, then uses the still-authenticated browser context to read `/api/version` and `GET /api/sessions/:id/log`; it never queries SQLite directly. A WAV report exits nonzero when speech-end-to-response-start, speech-end-to-first-audio, tutor-audio-duration, or provider-usage observations are absent. Text-only mode requires its text-ask first-audio boundary and does not require either speech-end metric.
+
+The one JSON report contains:
+
+- preparation/evidence mode, base URL, git SHA, runtime model IDs, scenario, session ID, and elapsed smoke duration;
+- the exact sum of logged `tutor_audio_output_duration` rows;
+- provider-reported token-usage totals projected from `response.done.response.usage`;
+- optional `NOURA_PROVIDER_REPORTED_COST_USD`, explicitly identified as user-supplied from the provider billing surface;
+- the complete Phase 0 duration/count summary and truncation state;
+- smoke-gate missing observations plus `requiresAuthorizedLiveVerification` entries for acoustic onset/silence and target hardware.
+
+`response.done` does not contain a per-response currency charge. After an authorized run, any currency amount must be manually reconciled from the provider billing surface. A local rate-card multiplication is allowed only when labelled **estimate**, with the rate-card source and source date; it is never “provider-reported cost.” `--report-fixture <path>` is an offline deterministic report check and remains explicitly non-provider evidence even if its fixture contains token counts.
+
+A future authorized pre-merge live smoke remains limited to two short synthetic sessions. Never loop paid calls for screenshots. Until that authorization and run occur, live-provider behavior, live latency, billed currency, acoustic silence, and target-hardware results remain UNVERIFIED.
 
 ## Target hardware
 

@@ -11,6 +11,29 @@ Status: engineering controls implemented for local, access-gated and public-v0 s
 - Noura stores provider-independent transcript events, committed semantic scenes and evidence. Raw audio is not stored.
 - Parent summaries receive the immutable event cutoff and evidence IDs. Unsupported claims fall back deterministically.
 - Pointer/touch/focus events stay in the active browser interaction path. Committed learner board marks are stored as bounded learner-owned path BoardOps so they can replay; transient pointer movement is not stored. Noura also stores bounded deterministic stroke features (gesture class, bounds, closure, direction, nearest/touched board object IDs and section) as calibrated spatial hints. A compressed composite of the visible section plus an enlarged learner-mark detail may be sent to the configured AI provider after a committed learner change, but Noura does not persist that image. Coarse camera input is not implemented.
+- Browser and provider lifecycle observers send closed-schema metrics through the existing runtime envelope. The server validates identity and payload before storing a released `metric` event. The parent-scoped `GET /api/sessions/:id/log` endpoint projects only released metric rows and aggregate counts; it does not expose the session’s transcript, evidence, board, or profile records.
+
+## Telemetry allowlist and prohibited content
+
+The released telemetry payload and session-log projection allow only these field classes:
+
+- event metadata: session ID in the parent-scoped response, event ID, server timestamp, telemetry schema version, and the bounded/truncated marker;
+- closed metric identity: the enumerated metric name, `ms` or `count` unit, and a finite integer value;
+- server-authoritative correlation: non-negative connection epoch plus bounded turn, generation, and optional provider response IDs;
+- bounded visual correlation: optional visual cue and semantic object IDs;
+- closed lifecycle dimensions: enumerated barge-in gate/cancellation outcomes, bounded previous/next section IDs with enumerated navigation cause, and bounded tutor object ID with enumerated disappearance cause;
+- provider usage integers: total; input text/audio/image; cached input text/audio/image; and output text/audio token counts from `response.done.response.usage`;
+- derived numeric projections: duration count/minimum/maximum/mean/latest, barge-in outcome counts, section-switch count, reconnect count, tutor-object-disappearance count, and provider-usage totals.
+
+No free-form telemetry dimension or content field is allowed. Telemetry events and the session-log endpoint explicitly prohibit:
+
+- transcript, caption, typed-message, lesson-goal, evidence observation/excerpt, or summary text;
+- learner, parent, or other person names and profile content;
+- image content, screenshots, board composites, image data URLs, or raw board descriptions;
+- raw or encoded audio, recordings, PCM samples, microphone samples, or acoustic content;
+- raw pointer, touch, focus, gaze, mouse, or learner-stroke coordinates, trails, and event content;
+- authentication/session/capability token content, cookies, API/provider/Vercel/database tokens, or other bearer secrets (integer token-usage counts are allowed; token strings are not);
+- credentials, keys, database URLs, billing-account identifiers, or other authorization content.
 
 ## Threats and controls
 

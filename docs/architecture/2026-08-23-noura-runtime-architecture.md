@@ -25,6 +25,20 @@ The browser rejects malformed, duplicated, non-monotonic or stale identity. The 
 
 `GenerationScope` owns its `AbortController`, provider response IDs, PCM/caption/visual/character identifiers, timers, animation frames and cleanups. Interrupt, transport replacement, reconnect, navigation and end cancel the whole scope.
 
+## Phase 0 telemetry path
+
+Phase 0 adds an observer-only path without changing lesson, board, response, cancellation, model, or transport ownership:
+
+`browser lifecycle/paint observers → versioned runtime metric envelope → server schema and identity validation → released metric event → parent-scoped session-log projection`.
+
+Browser observations carry only a closed metric payload. The existing runtime envelope supplies session, connection epoch, turn, generation, sequence, and optional provider-response identity; the server rejects malformed or stale envelopes, reattaches authoritative correlation, and persists only schema-valid released `metric` events. Provider-side observers in the existing Realtime WebSocket proxy read token categories from `response.done.response.usage`, derive tutor-audio duration from that response’s decoded PCM sample total, and use the same released metric event boundary. No observer owns response creation, lesson transitions, board mutation, interruption thresholds, retry behavior, or durable release decisions.
+
+`GET /api/sessions/:id/log` resolves the session through existing parent ownership, reads the bounded released event path, excludes malformed/unreleased/non-metric rows, and returns duration aggregates, interruption outcome counts, section/reconnect/disappearance counts, provider token-usage totals, plus a metric-only timeline. It returns `401` without parent authentication and `404` across parent scope; transcript and evidence text are not projected.
+
+The first-audio duration ends when the browser handles the first accepted tutor audio delta. It is browser-received timing, not acoustic onset. The signed board metric is `first scheduled audible sample − first committed board paint`: positive means board first and negative means scheduled narration first. It is not animation-completion time. These deterministic boundaries make no live latency or target-hardware claim.
+
+This milestone preserves WebSocket plus browser-owned PCM and the runtime models above. It does not implement or imply WebRTC, a sideband transport, or later blueprint phases.
+
 ## Deterministic lesson orchestration
 
 `server/lesson/orchestrator.ts` owns legal phase transitions, owed action, turn owner, delivered task, interruption recovery and completion boundaries. `AWAIT_LEARNER` throws unless a non-empty question/task ID and text were delivered.
