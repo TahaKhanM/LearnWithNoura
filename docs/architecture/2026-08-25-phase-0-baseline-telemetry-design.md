@@ -494,3 +494,6 @@ in-process callback as a sufficient asynchronous repository boundary:
   Upgrade authorization is rechecked immediately before WebSocket acceptance,
   and connection setup plus late lifecycle registration drain repeatedly to
   empty under the one shutdown deadline.
+- Deadline expiry force-terminalizes every remaining proxy and writer before
+  repository close and returns a `forced` disposition. Failed terminalization
+  returns `fatal` and skips graceful repository closure.

@@ -203,3 +203,17 @@ also tracks connection setup promises and repeatedly drains connections plus
 late lifecycle registrations until empty under the original shutdown deadline.
 Repository shutdown therefore cannot overtake an authorized upgrade or proxy
 producer that was already in flight when shutdown began.
+
+## Timeout terminalization
+
+A quiescence deadline is not permission to close storage under live producers.
+Every registered proxy exposes a force-terminal operation. On timeout it seals
+frame admission, force-terminalizes and unregisters the writer, clears queued
+telemetry state, and makes later history/in-flight callbacks unable to submit
+follow-up telemetry. The registry awaits successful terminalization and only
+then allows normal ordered repository closure, reporting a `forced` shutdown.
+
+If any producer cannot be force-terminalized, shutdown reports explicit
+`fatal`, logs the failure, and skips graceful repository closure. This avoids
+both a false graceful claim and closing storage while a producer remains
+capable of submission.
