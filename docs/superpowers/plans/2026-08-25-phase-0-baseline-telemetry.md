@@ -1029,9 +1029,13 @@ Run:
 
 ```bash
 npm test
+npm run test:smoke-report
+npm audit --omit=dev
+npm run test:integration
 npm run test:security
 npm run test:storage
 npm run test:brand
+npm run test:runtime-models
 ```
 
 Expected: all PASS.
