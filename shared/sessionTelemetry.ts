@@ -10,6 +10,7 @@ const schemaVersion = z.literal(TELEMETRY_SCHEMA_VERSION);
 
 const durationValue = nonNegativeInt;
 const boardDurationValue = finiteInt;
+const historicalDurationValue = z.number().finite().nonnegative();
 
 const durationMetricBase = {
   schemaVersion,
@@ -147,12 +148,16 @@ const metricContextFields = {
   providerResponseId: boundedId.optional(),
 };
 
+const LEGACY_DURATION_NAMES = [
+  'speech_end_to_response_started',
+  'speech_end_to_first_audio',
+  'ask_to_first_audio',
+] as const;
+
+const LegacyDurationNameSchema = z.enum(LEGACY_DURATION_NAMES);
+
 const legacyObservationSchema = z.object({
-  name: z.enum([
-    'speech_end_to_response_started',
-    'speech_end_to_first_audio',
-    'ask_to_first_audio',
-  ]),
+  name: LegacyDurationNameSchema,
   unit: z.literal('ms'),
   value: durationValue,
   legacy: z.literal(true),
@@ -170,12 +175,8 @@ export type MetricObservation = z.infer<typeof MetricObservationSchema>;
 export type NormalizedMetric = MetricObservation;
 
 const historicalDurationSchema = z.object({
-  name: z.enum([
-    'speech_end_to_response_started',
-    'speech_end_to_first_audio',
-    'ask_to_first_audio',
-  ]),
-  ms: durationValue,
+  name: LegacyDurationNameSchema,
+  ms: historicalDurationValue,
 });
 
 export function attachMetricContext(
@@ -196,7 +197,7 @@ export function normalizeStoredMetric(payload: unknown): NormalizedMetric | null
     return {
       name: historical.data.name,
       unit: 'ms',
-      value: historical.data.ms,
+      value: Math.round(historical.data.ms),
       legacy: true,
     };
   }

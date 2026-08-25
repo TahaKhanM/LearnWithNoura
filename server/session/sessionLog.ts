@@ -1,11 +1,13 @@
 import type { EventRow } from '../store/repo.js';
 import {
+  DURATION_METRIC_NAMES,
   TELEMETRY_SCHEMA_VERSION,
   isDurationMetricName,
   normalizeStoredMetric,
   type BargeInOutcomeCounts,
   type DurationAggregate,
   type DurationMetricName,
+  type NormalizedMetric,
   type ProviderUsageTotals,
   type SessionMetricEntry,
   type SessionTelemetryLog,
@@ -37,22 +39,23 @@ function roundMean(total: number, count: number): number {
   return Math.round(total / count);
 }
 
+type DurationAggregateState = Omit<DurationAggregate, 'mean'> & {
+  total: number;
+};
+
 function updateDurationAggregate(
-  aggregates: Partial<Record<DurationMetricName, DurationAggregate>>,
-  totals: Partial<Record<DurationMetricName, number>>,
+  aggregates: Partial<Record<DurationMetricName, DurationAggregateState>>,
   name: DurationMetricName,
   value: number,
 ): void {
-  const total = (totals[name] ?? 0) + value;
-  totals[name] = total;
   const current = aggregates[name];
   if (!current) {
     aggregates[name] = {
       count: 1,
       min: value,
       max: value,
-      mean: value,
       latest: value,
+      total: value,
     };
     return;
   }
@@ -61,7 +64,28 @@ function updateDurationAggregate(
   current.min = Math.min(current.min, value);
   current.max = Math.max(current.max, value);
   current.latest = value;
-  current.mean = roundMean(total, current.count);
+  current.total += value;
+}
+
+function projectDurationAggregates(
+  aggregates: Partial<Record<DurationMetricName, DurationAggregateState>>,
+): Partial<Record<DurationMetricName, DurationAggregate>> {
+  const projected: Partial<Record<DurationMetricName, DurationAggregate>> = {};
+
+  for (const name of DURATION_METRIC_NAMES) {
+    const aggregate = aggregates[name];
+    if (!aggregate) continue;
+
+    projected[name] = {
+      count: aggregate.count,
+      min: aggregate.min,
+      max: aggregate.max,
+      mean: roundMean(aggregate.total, aggregate.count),
+      latest: aggregate.latest,
+    };
+  }
+
+  return projected;
 }
 
 function toTimelineDimensions(
@@ -78,7 +102,7 @@ function toTimelineDimensions(
   return Object.keys(bounded).length > 0 ? bounded : undefined;
 }
 
-function toTimelineEntry(event: EventRow, metric: NonNullable<ReturnType<typeof normalizeStoredMetric>>): SessionMetricEntry {
+function toTimelineEntry(event: EventRow, metric: NormalizedMetric): SessionMetricEntry {
   const entry: SessionMetricEntry = {
     eventId: event.id,
     ts: event.ts,
@@ -114,8 +138,7 @@ export function buildSessionTelemetryLog(
   events: EventRow[],
   limit: number,
 ): SessionTelemetryLog {
-  const durations: Partial<Record<DurationMetricName, DurationAggregate>> = {};
-  const durationTotals: Partial<Record<DurationMetricName, number>> = {};
+  const durationAggregates: Partial<Record<DurationMetricName, DurationAggregateState>> = {};
   const bargeIn = emptyBargeInCounts();
   const providerUsage = emptyProviderUsage();
   const confirmedByResponseId = new Map<string, number>();
@@ -127,7 +150,7 @@ export function buildSessionTelemetryLog(
   const timeline: SessionMetricEntry[] = [];
 
   for (const event of events) {
-    if (!event.released || event.type !== 'metric') continue;
+    if (event.sessionId !== sessionId || !event.released || event.type !== 'metric') continue;
 
     const metric = normalizeStoredMetric(event.payload);
     if (!metric) continue;
@@ -135,7 +158,7 @@ export function buildSessionTelemetryLog(
     timeline.push(toTimelineEntry(event, metric));
 
     if (isDurationMetricName(metric.name)) {
-      updateDurationAggregate(durations, durationTotals, metric.name, metric.value);
+      updateDurationAggregate(durationAggregates, metric.name, metric.value);
     }
 
     if (metric.name === 'barge_in_gate_outcome' && 'dimensions' in metric) {
@@ -217,7 +240,7 @@ export function buildSessionTelemetryLog(
     sessionId,
     truncated: events.length >= limit,
     summary: {
-      durations,
+      durations: projectDurationAggregates(durationAggregates),
       bargeIn,
       sectionSwitchCount,
       reconnectCount,

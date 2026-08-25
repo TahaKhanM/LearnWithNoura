@@ -14,15 +14,22 @@ function metricEvent(
   payload: MetricInput,
   options: {
     released?: boolean;
+    sessionId?: string;
     ts?: number;
     providerResponseId?: string;
     extraPayloadFields?: Record<string, unknown>;
   } = {},
 ): EventRow {
-  const { released = true, ts = id * 1_000, providerResponseId, extraPayloadFields = {} } = options;
+  const {
+    released = true,
+    sessionId = 'session-1',
+    ts = id * 1_000,
+    providerResponseId,
+    extraPayloadFields = {},
+  } = options;
   return {
     id,
-    sessionId: 'session-1',
+    sessionId,
     ts,
     type: 'metric',
     released,
@@ -281,6 +288,34 @@ describe('buildSessionTelemetryLog', () => {
     ];
 
     expect(buildSessionTelemetryLog('session-1', events, 5_000).summary.reconnectCount).toBe(1);
+  });
+
+  it('excludes released metric events belonging to another session', () => {
+    const events = [
+      metricEvent(1, {
+        schemaVersion: '1.0.0',
+        name: 'speech_end_to_first_audio',
+        unit: 'ms',
+        value: 900,
+      }, { sessionId: 'session-2' }),
+      metricEvent(2, {
+        schemaVersion: '1.0.0',
+        name: 'speech_end_to_first_audio',
+        unit: 'ms',
+        value: 200,
+      }),
+    ];
+
+    const log = buildSessionTelemetryLog('session-1', events, 5_000);
+
+    expect(log.summary.durations.speech_end_to_first_audio).toEqual({
+      count: 1,
+      min: 200,
+      max: 200,
+      mean: 200,
+      latest: 200,
+    });
+    expect(log.timeline.map((entry) => entry.eventId)).toEqual([2]);
   });
 
   it('sums every provider usage category across observations', () => {
