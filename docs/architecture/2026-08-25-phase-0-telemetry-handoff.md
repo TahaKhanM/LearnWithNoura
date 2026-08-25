@@ -3,8 +3,10 @@
 ## Proven offline
 
 - Final reviewed code head: `e03cde8` against pre-Phase-0 base `d8e2258`.
-  The final whole-branch reviewer verdict is **Ready to merge**, with no
-  Critical or Important findings.
+  The final whole-branch reviewer retained its **Ready to merge** verdict, with
+  no Critical or Important findings, after reviewing the final test-only
+  `e03cde8` change; this does not claim another full rerun at a later handoff
+  head.
 - Complete Phase 0 commit ledger through the reviewed head:
   - contract, plan, and initial implementation:
     `e899e5b`, `d850246`, `0f9b03b`, `fce1a6f`, `ee146d3`, `b4bd342`,
@@ -68,8 +70,11 @@
     Playwright 59.3 s, wall 60.031 s;
   - `npm run test:a11y`: 3/3 Chromium rows, Playwright 8.6 s, wall 9.409 s;
   - `git diff --check`: pass, wall 0.225 s.
-- Final scope against `d8e2258` is 49 Phase 0 files, 11,134 insertions, and 245
-  deletions. No snapshot path changed. Added-code review found no explicit
+- Expected non-fatal Node SQLite experimental, jsdom canvas, and Playwright
+  color-environment warnings appeared on otherwise passing definitive gates.
+- Final code scope for `d8e2258..e03cde8` is 49 Phase 0 files, 11,134
+  insertions, and 245 deletions; it excludes the later handoff commit. No
+  snapshot path changed. Added-code review found no explicit
   TypeScript `any`, dead implementation, unused export, commented-out
   implementation, or deferred-code marker.
 - No visual snapshot, runtime model/provider identifier, `response.create` or
