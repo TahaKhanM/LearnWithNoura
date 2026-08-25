@@ -2,12 +2,13 @@
 
 ## Second-review status
 
-The producer-authority follow-up is complete at code head `ddc2ad1`.
+The semantic-producer follow-up is complete at code head `4115c0e`.
 Browser/visual/accessibility evidence remains intentionally pending controller
 rerun; no live/provider/hardware claim is added.
 
 ## Proven offline
 
+- Semantic-producer code head: `4115c0e` against reviewer head `f8f0c6d`.
 - Producer-authority code head: `ddc2ad1` against reviewer head `2706aca`.
 - Timeout terminalization code head: `bc79203` against reviewer head `9f31e96`.
 - Shutdown admission code head: `011861e` against reviewer head `2b089c2`.
@@ -50,9 +51,9 @@ rerun; no live/provider/hardware claim is added.
   failed seven new reconciliation assertions. Final GREEN evidence:
   - focused shared/session-log/recorder/writer/proxy/RealtimeSession/API suite:
     8 files, 104 tests passed;
-  - `npm test`: 50 files, 349 tests passed;
+  - `npm test`: 50 files, 351 tests passed;
   - `npm run test:smoke-report`: 45 tests passed;
-  - `npm run test:integration`: 50 files, 349 tests passed;
+  - `npm run test:integration`: 50 files, 351 tests passed;
   - `npm run test:security`: 3 files, 16 tests passed;
   - `npm run test:storage`: 3 files, 6 tests passed;
   - `npm run build`: 147 modules transformed;
@@ -62,7 +63,7 @@ rerun; no live/provider/hardware claim is added.
 - Per instruction, browser/visual/accessibility suites were not run in this fix
   wave. Their earlier pre-hardening results are historical only; the controller
   must rerun every browser gate against the reviewed head.
-- Final producer-authority lifecycle/proxy/writer focus: 3 files, 69 tests.
+- Final semantic-producer lifecycle/proxy/writer focus: 3 files, 71 tests.
   Deadline expiry reports forced only when sealed side-effect chains are
   settled; otherwise the injected fatal process hook runs and repository close
   is skipped.

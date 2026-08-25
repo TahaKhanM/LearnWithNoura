@@ -227,3 +227,11 @@ and invokes the production fatal process-exit hook. Tests inject that hook so
 the process path is verified without exiting the test runner. History-only
 telemetry work may still force successfully because writer terminalization
 makes its eventual callback unable to submit.
+
+Detached semantic-plan staging is also lifecycle-owned. Every detached proxy
+task capable of repository writes, board/runtime mutation, or socket sends is
+registered in `sideEffectTasks`. Graceful teardown seals admission, awaits the
+sealed client/upstream chains, repeatedly drains side effects to stability,
+then drains telemetry/history and closes the writer. Force succeeds only when
+the sealed chains and side-effect set are empty; unresolved preflight/staging
+therefore takes the same fatal, no-repository-close path.

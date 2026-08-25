@@ -501,3 +501,6 @@ in-process callback as a sufficient asynchronous repository boundary:
   side-effect chains to be settled. Unsettled chains invoke the injectable
   fatal process path; only history-only telemetry continuations may be
   terminalized by disabling their writer authority.
+- Detached semantic staging is registered in one side-effect task set.
+  Graceful close drains it repeatedly before telemetry; force requires it to be
+  empty, so unresolved preflight/staging fails fatal without repository close.
