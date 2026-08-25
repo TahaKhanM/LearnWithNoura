@@ -1442,7 +1442,6 @@ describe('realtime proxy telemetry', () => {
       turnId: 'turn-first',
       generationId: 'generation-first',
     }, 0, 'start', {})));
-    await flushProxy();
     const closing = lifecycle!.close();
     let settled = false;
     void closing.then(() => { settled = true; });

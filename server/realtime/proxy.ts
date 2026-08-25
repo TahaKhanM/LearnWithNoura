@@ -516,8 +516,10 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
     teardownPromise = Promise.allSettled([
       clientWork,
       upstreamWork,
-      ...backgroundTelemetry,
     ]).then(async () => {
+      while (backgroundTelemetry.size > 0) {
+        await Promise.allSettled([...backgroundTelemetry]);
+      }
       await telemetryWriter.close();
       resolveCompletion();
     }).catch((error: unknown) => {
