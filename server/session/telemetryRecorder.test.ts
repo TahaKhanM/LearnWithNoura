@@ -21,11 +21,39 @@ describe('telemetry recorder', () => {
     expect(observation).toMatchObject({
       name: 'session_reconnect',
       connectionEpoch: 2,
-      turnId: expect.stringMatching(/^tel1_[A-Za-z0-9_-]{24}$/),
-      generationId: expect.stringMatching(/^tel1_[A-Za-z0-9_-]{24}$/),
+      telemetryEncoding: {
+        version: 'hmac-sha256-v2',
+        sessionTag: expect.stringMatching(/^[A-Za-z0-9_-]{10}$/),
+      },
+      turnId: expect.stringMatching(/^tel2_[A-Za-z0-9_-]{10}_[A-Za-z0-9_-]{24}$/),
+      generationId: expect.stringMatching(/^tel2_[A-Za-z0-9_-]{10}_[A-Za-z0-9_-]{24}$/),
     });
     expect(JSON.stringify(observation)).not.toContain('turn-0');
     expect(JSON.stringify(observation)).not.toContain('generation-0');
+  });
+
+  it('always transforms token-shaped input and strips attempted encoding metadata', () => {
+    const forged = {
+      version: 'hmac-sha256-v2',
+      sessionTag: 'AAAAAAAAAA',
+    };
+    const tokenShapedInput = `tel2_${forged.sessionTag}_${'B'.repeat(24)}`;
+    const observation = prepareMetric('session-1', {
+      schemaVersion: '1.0.0',
+      name: 'session_reconnect',
+      unit: 'count',
+      value: 1,
+      telemetryEncoding: forged,
+    }, {
+      connectionEpoch: 2,
+      turnId: tokenShapedInput,
+      generationId: tokenShapedInput,
+    });
+
+    expect(observation?.turnId).not.toBe(tokenShapedInput);
+    expect(observation?.generationId).not.toBe(tokenShapedInput);
+    expect(observation?.telemetryEncoding).not.toEqual(forged);
+    expect(observation?.turnId).toMatch(/^tel2_[A-Za-z0-9_-]{10}_[A-Za-z0-9_-]{24}$/);
   });
 
   it('returns null for invalid input', () => {
@@ -125,7 +153,7 @@ describe('telemetry recorder', () => {
     expect(observation).toMatchObject({
       name: 'provider_usage',
       value: 3,
-      providerResponseId: expect.stringMatching(/^tel1_/),
+      providerResponseId: expect.stringMatching(/^tel2_/),
     });
     expect(JSON.stringify(observation)).not.toContain('PRIVATE_TRANSCRIPT');
   });

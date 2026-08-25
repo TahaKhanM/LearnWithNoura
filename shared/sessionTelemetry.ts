@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 export const TELEMETRY_SCHEMA_VERSION = '1.0.0' as const;
+export const TELEMETRY_ENCODING_VERSION = 'hmac-sha256-v2' as const;
 
 const finiteInt = z.number().finite().int();
 const nonNegativeInt = finiteInt.nonnegative();
@@ -156,11 +157,17 @@ export type MetricContext = {
   providerResponseId?: string;
 };
 
+const telemetryEncodingSchema = z.object({
+  version: z.literal(TELEMETRY_ENCODING_VERSION),
+  sessionTag: z.string().regex(/^[A-Za-z0-9_-]{10}$/),
+});
+
 const metricContextFields = {
   connectionEpoch: nonNegativeInt,
   turnId: boundedId,
   generationId: boundedId,
   providerResponseId: boundedId.optional(),
+  telemetryEncoding: telemetryEncodingSchema.optional(),
 };
 
 const LEGACY_DURATION_NAMES = [
@@ -202,7 +209,8 @@ export function attachMetricContext(
 }
 
 export function normalizeStoredMetric(payload: unknown): NormalizedMetric | null {
-  const observation = newMetricObservationSchema.safeParse(payload);
+  const storedCandidate = sanitizeStoredEncoding(payload);
+  const observation = newMetricObservationSchema.safeParse(storedCandidate);
   if (observation.success) {
     return observation.data;
   }
@@ -218,6 +226,17 @@ export function normalizeStoredMetric(payload: unknown): NormalizedMetric | null
   }
 
   return null;
+}
+
+function sanitizeStoredEncoding(payload: unknown): unknown {
+  if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) {
+    return payload;
+  }
+  const candidate = { ...(payload as Record<string, unknown>) };
+  const encoding = telemetryEncodingSchema.safeParse(candidate.telemetryEncoding);
+  delete candidate.telemetryEncoding;
+  if (encoding.success) candidate.telemetryEncoding = encoding.data;
+  return candidate;
 }
 
 export type DurationAggregate = {

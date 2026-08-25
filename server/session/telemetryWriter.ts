@@ -4,151 +4,221 @@ import {
   type MetricObservation,
   type TelemetryGapReason,
 } from '../../shared/sessionTelemetry.js';
-import type { DomainRepository } from '../store/domain.js';
 import { prepareMetric, prepareProviderUsage } from './telemetryRecorder.js';
+import type { SessionTelemetryRepository } from './telemetryRepository.js';
 
 const DEFAULT_CAPACITY = 256;
 
-type PendingGap = {
+type ObservationEntry = {
+  kind: 'observation';
+  observation: Exclude<MetricObservation, { legacy: true }>;
+  context: MetricContext;
+};
+
+type GapEntry = {
+  kind: 'gap';
+  reason: TelemetryGapReason;
   value: number;
   context: MetricContext;
 };
 
+type QueueEntry = ObservationEntry | GapEntry;
+
 export class SessionTelemetryWriter {
-  private readonly queue: MetricObservation[] = [];
-  private readonly pendingGaps = new Map<TelemetryGapReason, PendingGap>();
+  private readonly queue: QueueEntry[] = [];
+  private readonly pressureTotals = new Map<TelemetryGapReason, GapEntry>();
   private readonly capacity: number;
+  private readonly gapCapacity: number;
   private drainPromise: Promise<void> | null = null;
-  private retryRequested = false;
+  private normalCount = 0;
+  private gapCount = 0;
 
   constructor(
-    private readonly repo: DomainRepository,
+    private readonly repo: SessionTelemetryRepository,
     private readonly sessionId: string,
     options: { capacity?: number } = {},
   ) {
     this.capacity = Math.max(1, Math.floor(options.capacity ?? DEFAULT_CAPACITY));
+    this.gapCapacity = this.capacity + 3;
   }
 
   submit(input: unknown, context: MetricContext): boolean {
     const observation = prepareMetric(this.sessionId, input, context);
-    return observation ? this.enqueue(observation) : false;
+    return observation ? this.enqueue(observation, context) : false;
   }
 
   submitProviderUsage(usage: unknown, context: MetricContext): boolean {
     const observation = prepareProviderUsage(this.sessionId, usage, context);
-    return observation ? this.enqueue(observation) : false;
+    return observation ? this.enqueue(observation, context) : false;
   }
 
   async flush(): Promise<void> {
     this.startDrain();
-    while (this.drainPromise) {
-      const current = this.drainPromise;
-      await current;
-      if (this.drainPromise === current) await Promise.resolve();
-    }
+    const current = this.drainPromise;
+    if (current) await current;
   }
 
-  private enqueue(observation: MetricObservation): boolean {
-    if ('legacy' in observation) return false;
-    if (this.queue.length >= this.capacity) {
-      this.addGap(
+  private enqueue(
+    observation: Exclude<MetricObservation, { legacy: true }>,
+    context: MetricContext,
+  ): boolean {
+    if (observation.name === 'telemetry_gap') {
+      this.appendGap(
+        observation.dimensions.reason,
+        observation.value,
+        context,
+      );
+      this.startDrain();
+      return true;
+    }
+    const inFlightNormal = this.drainPromise &&
+      this.queue[0]?.kind === 'observation'
+      ? 1
+      : 0;
+    if (
+      this.normalCount - inFlightNormal >= this.capacity ||
+      this.pressureTotals.size > 0
+    ) {
+      this.appendGap(
         'server_queue_overflow',
         1,
-        contextFromObservation(observation),
+        context,
       );
       this.startDrain();
       return false;
     }
-    this.queue.push(observation);
+    this.queue.push({ kind: 'observation', observation, context });
+    this.normalCount += 1;
     this.startDrain();
     return true;
   }
 
-  private addGap(
+  private appendGap(
     reason: TelemetryGapReason,
     value: number,
     context: MetricContext,
   ): void {
-    const current = this.pendingGaps.get(reason);
-    if (current) {
-      current.value += value;
+    const previous = this.queue.at(-1);
+    if (
+      previous?.kind === 'gap' &&
+      previous.reason === reason &&
+      sameContext(previous.context, context) &&
+      Number.isSafeInteger(previous.value + value)
+    ) {
+      previous.value += value;
       return;
     }
-    this.pendingGaps.set(reason, { value, context });
+    if (this.gapCount >= this.gapCapacity) {
+      const pending = this.pressureTotals.get(reason);
+      if (pending && Number.isSafeInteger(pending.value + value)) {
+        pending.value += value;
+      } else if (!pending) {
+        this.pressureTotals.set(reason, {
+          kind: 'gap',
+          reason,
+          value,
+          context,
+        });
+      }
+      return;
+    }
+    this.queue.push({ kind: 'gap', reason, value, context });
+    this.gapCount += 1;
   }
 
   private startDrain(): void {
-    if (this.drainPromise) {
-      this.retryRequested = true;
-      return;
-    }
-    if (this.queue.length === 0 && this.pendingGaps.size === 0) return;
+    if (this.drainPromise) return;
+    this.materializePressureTotals();
+    if (this.queue.length === 0) return;
 
-    this.retryRequested = false;
-    const current = this.drain();
+    let blocked = false;
+    const current = Promise.resolve()
+      .then(() => this.drain())
+      .then((wasBlocked) => {
+        blocked = wasBlocked;
+      });
     this.drainPromise = current;
-    void current.finally(() => {
+    void current.then(() => {
       if (this.drainPromise !== current) return;
       this.drainPromise = null;
-      if (this.retryRequested) {
-        this.retryRequested = false;
+      if (!blocked && this.queue.length > 0) {
         this.startDrain();
       }
     });
   }
 
-  private async drain(): Promise<void> {
-    while (this.queue.length > 0 || this.pendingGaps.size > 0) {
-      const pendingGap = this.pendingGaps.entries().next().value as
-        | [TelemetryGapReason, PendingGap]
-        | undefined;
-      if (pendingGap) {
-        const [reason, gap] = pendingGap;
-        const observation = prepareMetric(this.sessionId, {
-          schemaVersion: TELEMETRY_SCHEMA_VERSION,
-          name: 'telemetry_gap',
-          unit: 'count',
-          value: gap.value,
-          dimensions: { reason },
-        }, gap.context);
-        if (!observation) {
-          this.pendingGaps.delete(reason);
-          continue;
-        }
+  private async drain(): Promise<boolean> {
+    while (this.queue.length > 0) {
+      const entry = this.queue[0];
+      if (!entry) return false;
+      if (entry.kind === 'gap') {
+        const observation = gapObservation(
+          this.sessionId,
+          entry.reason,
+          entry.value,
+          entry.context,
+        );
+        if (!observation) return true;
         try {
-          await this.repo.addEvent(this.sessionId, 'metric', observation);
-          this.pendingGaps.delete(reason);
+          await this.repo.appendMetric(this.sessionId, observation);
+          this.queue.shift();
+          this.gapCount -= 1;
+          this.materializePressureTotals();
         } catch {
-          return;
+          return true;
         }
         continue;
       }
 
-      const observation = this.queue.shift();
-      if (!observation || 'legacy' in observation) continue;
       try {
-        await this.repo.addEvent(this.sessionId, 'metric', observation);
+        await this.repo.appendMetric(this.sessionId, entry.observation);
+        this.queue.shift();
+        this.normalCount -= 1;
       } catch {
-        this.addGap(
-          'server_persistence_failure',
-          1,
-          contextFromObservation(observation),
-        );
+        this.queue[0] = {
+          kind: 'gap',
+          reason: 'server_persistence_failure',
+          value: 1,
+          context: entry.context,
+        };
+        this.normalCount -= 1;
+        this.gapCount += 1;
       }
+    }
+    return false;
+  }
+
+  private materializePressureTotals(): void {
+    while (this.gapCount < this.gapCapacity && this.pressureTotals.size > 0) {
+      const pending = this.pressureTotals.entries().next().value as
+        | [TelemetryGapReason, GapEntry]
+        | undefined;
+      if (!pending) return;
+      this.pressureTotals.delete(pending[0]);
+      this.queue.push(pending[1]);
+      this.gapCount += 1;
     }
   }
 }
 
-function contextFromObservation(observation: MetricObservation): MetricContext {
-  if ('legacy' in observation) {
-    throw new Error('Legacy observations cannot enter the telemetry writer.');
-  }
-  return {
-    connectionEpoch: observation.connectionEpoch,
-    turnId: observation.turnId,
-    generationId: observation.generationId,
-    ...(observation.providerResponseId
-      ? { providerResponseId: observation.providerResponseId }
-      : {}),
-  };
+function gapObservation(
+  sessionId: string,
+  reason: TelemetryGapReason,
+  value: number,
+  context: MetricContext,
+): Exclude<MetricObservation, { legacy: true }> | null {
+  return prepareMetric(sessionId, {
+    schemaVersion: TELEMETRY_SCHEMA_VERSION,
+    name: 'telemetry_gap',
+    unit: 'count',
+    value,
+    dimensions: { reason },
+  }, context);
+}
+
+function sameContext(left: MetricContext, right: MetricContext): boolean {
+  return left.connectionEpoch === right.connectionEpoch &&
+    left.turnId === right.turnId &&
+    left.generationId === right.generationId &&
+    left.providerResponseId === right.providerResponseId;
 }

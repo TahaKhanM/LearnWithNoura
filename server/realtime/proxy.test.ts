@@ -911,9 +911,9 @@ describe('realtime proxy telemetry', () => {
     expect(observations).toEqual([
       expect.objectContaining({
         name: 'board_reveal_to_narration',
-        generationId: expect.stringMatching(/^tel1_/),
-        providerResponseId: expect.stringMatching(/^tel1_/),
-        visualCueId: expect.stringMatching(/^tel1_/),
+        generationId: expect.stringMatching(/^tel2_/),
+        providerResponseId: expect.stringMatching(/^tel2_/),
+        visualCueId: expect.stringMatching(/^tel2_/),
       }),
     ]);
     expect(JSON.stringify(observations)).not.toContain('response-correlated');
@@ -1101,8 +1101,8 @@ describe('realtime proxy telemetry', () => {
     ]);
     expect(observations).toEqual(observations.map(() => expect.objectContaining({
       connectionEpoch: 7,
-      turnId: expect.stringMatching(/^tel1_/),
-      generationId: expect.stringMatching(/^tel1_/),
+      turnId: expect.stringMatching(/^tel2_/),
+      generationId: expect.stringMatching(/^tel2_/),
     })));
     expect(JSON.stringify(observations)).not.toContain('turn-authoritative');
     expect(JSON.stringify(observations)).not.toContain('generation-authoritative');
@@ -1207,8 +1207,8 @@ describe('realtime proxy telemetry', () => {
       expect.objectContaining({
         name: 'speech_end_to_first_audio',
         connectionEpoch: active.connectionEpoch,
-        turnId: expect.stringMatching(/^tel1_/),
-        generationId: expect.stringMatching(/^tel1_/),
+        turnId: expect.stringMatching(/^tel2_/),
+        generationId: expect.stringMatching(/^tel2_/),
       }),
     ]);
   });
@@ -1317,8 +1317,8 @@ describe('realtime proxy telemetry', () => {
         payload: expect.objectContaining({
           name: 'session_reconnect',
           connectionEpoch: 2,
-          turnId: expect.stringMatching(/^tel1_/),
-          generationId: expect.stringMatching(/^tel1_/),
+          turnId: expect.stringMatching(/^tel2_/),
+          generationId: expect.stringMatching(/^tel2_/),
         }),
       }),
     ]);
@@ -1482,7 +1482,7 @@ describe('realtime proxy telemetry', () => {
       expect.objectContaining({
         name: 'barge_in_gate_outcome',
         dimensions: { outcome: 'confirmed' },
-        providerResponseId: expect.stringMatching(/^tel1_/),
+        providerResponseId: expect.stringMatching(/^tel2_/),
       }),
     ]);
 
@@ -1499,12 +1499,12 @@ describe('realtime proxy telemetry', () => {
       expect.objectContaining({
         name: 'barge_in_gate_outcome',
         dimensions: { outcome: 'confirmed' },
-        providerResponseId: expect.stringMatching(/^tel1_/),
+        providerResponseId: expect.stringMatching(/^tel2_/),
       }),
       expect.objectContaining({
         name: 'barge_in_cancel_outcome',
         dimensions: { outcome },
-        providerResponseId: expect.stringMatching(/^tel1_/),
+        providerResponseId: expect.stringMatching(/^tel2_/),
       }),
     ]);
     expect(terminalMetrics[0]?.providerResponseId)
@@ -1550,8 +1550,8 @@ describe('realtime proxy telemetry', () => {
         name: 'speech_end_to_response_started',
         value: 50,
         connectionEpoch: active.connectionEpoch,
-        turnId: expect.stringMatching(/^tel1_/),
-        generationId: expect.stringMatching(/^tel1_/),
+        turnId: expect.stringMatching(/^tel2_/),
+        generationId: expect.stringMatching(/^tel2_/),
       }),
     ]);
   });
@@ -1609,7 +1609,7 @@ describe('realtime proxy telemetry', () => {
       expect.objectContaining({
         name: 'provider_usage',
         value: 253,
-        providerResponseId: expect.stringMatching(/^tel1_/),
+        providerResponseId: expect.stringMatching(/^tel2_/),
         dimensions: {
           totalTokens: 253,
           inputTextTokens: 119,
@@ -1626,7 +1626,7 @@ describe('realtime proxy telemetry', () => {
         name: 'tutor_audio_output_duration',
         unit: 'ms',
         value: 500,
-        providerResponseId: expect.stringMatching(/^tel1_/),
+        providerResponseId: expect.stringMatching(/^tel2_/),
       }),
     ]);
     const providerIds = metrics.map(
@@ -1685,9 +1685,65 @@ describe('realtime proxy telemetry', () => {
     ]);
     expect(metrics[0]?.payload).toMatchObject({
       value: 5,
-      providerResponseId: expect.stringMatching(/^tel1_/),
+      providerResponseId: expect.stringMatching(/^tel2_/),
     });
     expect(JSON.stringify(metrics)).not.toContain('response-partial-usage');
+  });
+
+  it('does not emit terminal telemetry for an unknown response.done identity', async () => {
+    vi.stubGlobal('WebSocket', FakeUpstream);
+    const repo = new Repo(openTestDb());
+    const child = repo.createChild('Maya', 10);
+    const session = repo.createSession(child.id, 'fractions');
+    const client = new FakeClient();
+    await connectRealtimeProxy(client as never, {
+      apiKey: 'offline-fixture',
+      model: 'gpt-realtime-2.1',
+      repo,
+      sessionId: session.id,
+      createUpstream: () => new FakeUpstream() as never,
+    });
+    const active = { ...identity, sessionId: session.id };
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 0, 'hello', {})));
+    const upstream = FakeUpstream.latest;
+    upstream.emit({
+      type: 'response.output_audio.delta',
+      response_id: 'unknown-response',
+      item_id: 'unknown-item',
+      delta: Buffer.alloc(2_400 * 2).toString('base64'),
+    });
+    upstream.emit({
+      type: 'response.done',
+      response: {
+        id: 'unknown-response',
+        status: 'cancelled',
+        output: [],
+        usage: {
+          total_tokens: 2,
+          input_token_details: {
+            text_tokens: 1,
+            audio_tokens: 0,
+            image_tokens: 0,
+            cached_tokens_details: {
+              text_tokens: 0,
+              audio_tokens: 0,
+              image_tokens: 0,
+            },
+          },
+          output_token_details: { text_tokens: 1, audio_tokens: 0 },
+        },
+      },
+    });
+    await flushProxy();
+
+    expect(repo.listEvents(session.id).filter((event) => event.type === 'metric')).toEqual([]);
+    expect(client.sent).toContainEqual(expect.objectContaining({
+      type: 'response_done',
+      payload: expect.objectContaining({
+        response_id: 'unknown-response',
+        status: 'cancelled',
+      }),
+    }));
   });
 
   it('requests the initial response and processes later client input before prior-start lookup resolves', async () => {
@@ -1896,8 +1952,10 @@ describe('realtime proxy telemetry', () => {
   });
 });
 
-function flushProxy(): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, 0));
+async function flushProxy(): Promise<void> {
+  for (let index = 0; index < 20; index += 1) {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
 }
 
 function failMetricWrites(repo: Repo): void {

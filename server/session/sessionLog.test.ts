@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { EventRow } from '../store/repo.js';
 import type { MetricInput } from '../../shared/sessionTelemetry.js';
 import { buildSessionTelemetryLog } from './sessionLog.js';
+import { prepareMetric } from './telemetryRecorder.js';
 
 const identity = {
   connectionEpoch: 2,
@@ -425,8 +426,30 @@ describe('buildSessionTelemetryLog', () => {
     });
   });
 
-  it('pseudonymizes raw stored identifiers and does not double-hash opaque tokens', () => {
-    const opaque = `tel1_${'A'.repeat(24)}`;
+  it('preserves only current-session server-encoded identifiers and re-encodes copied tokens', () => {
+    const currentEncoded = prepareMetric('session-1', {
+      schemaVersion: '1.0.0',
+      name: 'session_reconnect',
+      unit: 'count',
+      value: 1,
+    }, {
+      connectionEpoch: 2,
+      turnId: 'current-turn',
+      generationId: 'current-generation',
+    });
+    const copiedEncoded = prepareMetric('session-other', {
+      schemaVersion: '1.0.0',
+      name: 'session_reconnect',
+      unit: 'count',
+      value: 1,
+    }, {
+      connectionEpoch: 2,
+      turnId: 'copied-turn',
+      generationId: 'copied-generation',
+    });
+    expect(currentEncoded).not.toBeNull();
+    expect(copiedEncoded).not.toBeNull();
+    const forgedToken = `tel2_${'A'.repeat(10)}_${'B'.repeat(24)}`;
     const secretValues = [
       'PRIVATE_NAME_AS_TURN',
       'PRIVATE_TRANSCRIPT_AS_GENERATION',
@@ -476,9 +499,29 @@ describe('buildSessionTelemetryLog', () => {
         unit: 'count',
         value: 1,
       }, {
+        extraPayloadFields: currentEncoded ?? {},
+      }),
+      metricEvent(5, {
+        schemaVersion: '1.0.0',
+        name: 'session_reconnect',
+        unit: 'count',
+        value: 1,
+      }, {
+        extraPayloadFields: copiedEncoded ?? {},
+      }),
+      metricEvent(6, {
+        schemaVersion: '1.0.0',
+        name: 'session_reconnect',
+        unit: 'count',
+        value: 1,
+      }, {
         extraPayloadFields: {
-          turnId: opaque,
-          generationId: opaque,
+          turnId: forgedToken,
+          generationId: forgedToken,
+          telemetryEncoding: {
+            version: 'forged-version',
+            sessionTag: 'AAAAAAAAAA',
+          },
         },
       }),
     ];
@@ -487,13 +530,24 @@ describe('buildSessionTelemetryLog', () => {
     const serialized = JSON.stringify(log);
     for (const secret of secretValues) expect(serialized).not.toContain(secret);
     expect(log.timeline[0]).toMatchObject({
-      turnId: expect.stringMatching(/^tel1_/),
-      generationId: expect.stringMatching(/^tel1_/),
-      providerResponseId: expect.stringMatching(/^tel1_/),
-      visualCueId: expect.stringMatching(/^tel1_/),
-      semanticObjectId: expect.stringMatching(/^tel1_/),
+      turnId: expect.stringMatching(/^tel2_/),
+      generationId: expect.stringMatching(/^tel2_/),
+      providerResponseId: expect.stringMatching(/^tel2_/),
+      visualCueId: expect.stringMatching(/^tel2_/),
+      semanticObjectId: expect.stringMatching(/^tel2_/),
     });
-    expect(log.timeline[3]).toMatchObject({ turnId: opaque, generationId: opaque });
+    expect(log.timeline[3]).toMatchObject({
+      turnId: currentEncoded?.turnId,
+      generationId: currentEncoded?.generationId,
+    });
+    expect(log.timeline[4]?.turnId).not.toBe(copiedEncoded?.turnId);
+    expect(log.timeline[4]?.generationId).not.toBe(copiedEncoded?.generationId);
+    expect(log.timeline[4]).toMatchObject({
+      turnId: expect.stringMatching(/^tel2_/),
+      generationId: expect.stringMatching(/^tel2_/),
+    });
+    expect(log.timeline[5]?.turnId).not.toBe(forgedToken);
+    expect(log.timeline[5]?.generationId).not.toBe(forgedToken);
   });
 
   it('does not expose payload text outside typed dimensions', () => {
@@ -519,8 +573,8 @@ describe('buildSessionTelemetryLog', () => {
     expect(JSON.stringify(log)).not.toContain('secret learner text');
     expect(JSON.stringify(log)).not.toContain('Maya');
     expect(log.timeline[0]?.dimensions).toEqual({
-      previousSemanticGroupId: expect.stringMatching(/^tel1_/),
-      nextSemanticGroupId: expect.stringMatching(/^tel1_/),
+      previousSemanticGroupId: expect.stringMatching(/^tel2_/),
+      nextSemanticGroupId: expect.stringMatching(/^tel2_/),
       cause: 'picker',
     });
   });

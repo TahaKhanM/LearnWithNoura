@@ -23,6 +23,10 @@ import { loadReleasedBoardContext } from './boardContext.js';
 import type { DomainRepository } from '../store/domain.js';
 import { metricContextFromIdentity } from '../session/telemetryRecorder.js';
 import { SessionTelemetryWriter } from '../session/telemetryWriter.js';
+import {
+  YieldingTelemetryRepository,
+  type SessionTelemetryRepository,
+} from '../session/telemetryRepository.js';
 
 /**
  * Bridges one browser lesson to one OpenAI Realtime session.
@@ -35,41 +39,11 @@ import { SessionTelemetryWriter } from '../session/telemetryWriter.js';
 
 const REALTIME_URL = 'wss://api.openai.com/v1/realtime';
 const OUTPUT_AUDIO_SAMPLES_PER_MS = 24;
-const RECONNECT_HISTORY_PAGE_SIZE = 5_000;
 const MAX_TERMINAL_TELEMETRY_RESPONSES = 512;
 const MAX_PENDING_VOICE_BARGE_INS = 256;
 
 /** Stop auto-continuing tool chains after this many rounds per turn. */
 const MAX_TOOL_CONTINUES = 14;
-
-async function hasReleasedSessionStart(
-  repo: DomainRepository,
-  sessionId: string,
-  exclusiveUpperEventId: number,
-): Promise<boolean> {
-  let throughEventId = exclusiveUpperEventId - 1;
-  if (throughEventId < 1) return false;
-
-  try {
-    while (true) {
-      const page = await repo.listEvents(
-        sessionId,
-        RECONNECT_HISTORY_PAGE_SIZE,
-        throughEventId,
-      );
-      if (page.some((event) => event.type === 'session_started')) return true;
-      if (page.length < RECONNECT_HISTORY_PAGE_SIZE) return false;
-
-      const oldestEventId = page[0]?.id;
-      if (oldestEventId === undefined || oldestEventId <= 1) return false;
-      const nextThroughEventId = oldestEventId - 1;
-      if (nextThroughEventId >= throughEventId) return false;
-      throughEventId = nextThroughEventId;
-    }
-  } catch {
-    return false;
-  }
-}
 
 function isAllowedClientMetric(input: MetricInput): boolean {
   switch (input.name) {
@@ -104,6 +78,7 @@ export interface ProxyOptions {
   apiKey: string;
   model: string;
   repo: DomainRepository;
+  telemetryRepo?: SessionTelemetryRepository;
   sessionId: string;
   log?: (line: string) => void;
   createUpstream?: (url: string, apiKey: string) => NodeWebSocket;
@@ -130,7 +105,8 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
     return;
   }
 
-  const telemetryWriter = new SessionTelemetryWriter(repo, sessionId);
+  const telemetryRepo = options.telemetryRepo ?? new YieldingTelemetryRepository(repo);
+  const telemetryWriter = new SessionTelemetryWriter(telemetryRepo, sessionId);
   const lessonGoal = session.goal;
   const baseInstructions = buildInstructions({
     childName: child.name,
@@ -787,18 +763,24 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
         const status = response?.status ?? 'unknown';
         if (status === 'cancelled' && response?.id) cancelledResponses.add(response.id);
         const responseIdentity = identityForResponse(response?.id);
+        const terminalTelemetryIdentity = response?.id
+          ? responseIdentities.get(response.id)
+          : undefined;
         const recordsTerminalTelemetry = Boolean(
           response?.id &&
-          responseIdentity &&
+          terminalTelemetryIdentity &&
           !terminalTelemetryResponses.has(response.id),
         );
-        if (response?.id && responseIdentity && recordsTerminalTelemetry) {
+        if (response?.id && terminalTelemetryIdentity && recordsTerminalTelemetry) {
           addBounded(
             terminalTelemetryResponses,
             response.id,
             MAX_TERMINAL_TELEMETRY_RESPONSES,
           );
-          const context = metricContextFromIdentity(responseIdentity, response.id);
+          const context = metricContextFromIdentity(
+            terminalTelemetryIdentity,
+            response.id,
+          );
           telemetryWriter.submitProviderUsage(response.usage, context);
           const outputSamples = responseSegments.get(response.id)?.totalSamples();
           if (outputSamples !== undefined && outputSamples > 0) {
@@ -1425,15 +1407,18 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
           connectionEpoch: envelope.connectionEpoch,
         });
         requestModelResponse('start', 'session-start');
-        void hasReleasedSessionStart(repo, sessionId, startEventId).then((hadPriorStart) => {
-          if (!hadPriorStart) return;
-          telemetryWriter.submit({
-            schemaVersion: TELEMETRY_SCHEMA_VERSION,
-            name: 'session_reconnect',
-            unit: 'count',
-            value: 1,
-          }, metricContextFromIdentity(envelope));
-        });
+        void telemetryRepo
+          .hasPriorReleasedSessionStart(sessionId, startEventId)
+          .then((hadPriorStart) => {
+            if (!hadPriorStart) return;
+            telemetryWriter.submit({
+              schemaVersion: TELEMETRY_SCHEMA_VERSION,
+              name: 'session_reconnect',
+              unit: 'count',
+              value: 1,
+            }, metricContextFromIdentity(envelope));
+          })
+          .catch(() => {});
         break;
       }
 

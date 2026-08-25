@@ -7,7 +7,7 @@ import {
   type MetricObservation,
 } from '../../shared/sessionTelemetry.js';
 import type { GenerationIdentity } from '../../shared/runtimeProtocol.js';
-import { pseudonymizeMetricObservation } from './telemetryPrivacy.js';
+import { encodeMetricObservation } from './telemetryPrivacy.js';
 
 type PreparedMetricObservation = Exclude<MetricObservation, { legacy: true }>;
 
@@ -40,7 +40,7 @@ export function prepareMetric(
   if (!parsed.success) return null;
 
   try {
-    const observation = pseudonymizeMetricObservation(
+    const observation = encodeMetricObservation(
       sessionId,
       attachMetricContext(parsed.data, context),
     );
