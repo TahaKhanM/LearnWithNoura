@@ -2,14 +2,14 @@
 
 ## Second-review status
 
-The distributed lifecycle follow-up is complete at code head `f2d02c5`.
+The distributed lifecycle follow-up is complete at code head `a3c72a1`.
 Browser/visual/accessibility evidence remains intentionally pending controller
 rerun; no live/provider/hardware claim is added.
 
 ## Proven offline
 
-- Distributed lifecycle code head: `f2d02c5` against reviewer head `887d21a`.
-  The code commit is `f2d02c5`.
+- Distributed lifecycle code head: `a3c72a1` against reviewer head `887d21a`.
+  Code commits are `f2d02c5` and `a3c72a1`.
 - Lifecycle hardening code head: `fcf8a64` against reviewer head `b4281da`.
   Commits are `524af68` (ratified contract) and `fcf8a64` (lifecycle fixes).
   The preceding wave was `4fced4d` against `fef2bc8`.
