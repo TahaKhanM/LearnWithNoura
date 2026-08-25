@@ -242,6 +242,35 @@ describe('LessonPage board observations', () => {
     });
   });
 
+  it('preserves an existing section notice when first-anchor registration opens that section', async () => {
+    window.sessionStorage.setItem('noura.draft.session-1', JSON.stringify({
+      draftId: 'draft-restored',
+      entries: [{
+        op: {
+          op: 'add',
+          id: 'learner-restored',
+          spec: { kind: 'path', points: [[10, 10], [20, 20]] },
+        },
+        inverse: { op: 'erase', id: 'learner-restored' },
+        note: 'restored mark',
+      }],
+    }));
+    const { session } = await renderStartedLesson();
+
+    await replayTutor(session, [circle('object-a', 180)], 'group-a', 'First');
+    expect((await screen.findByTestId('section-notice')).textContent).toContain('First');
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel your drawing' }));
+
+    await replayTutor(session, [circle('object-a-2', 280)], 'group-a', 'First');
+
+    expect(session.recordSectionNavigation).toHaveBeenCalledWith({
+      previousGroupId: null,
+      nextGroupId: 'group-a',
+      cause: 'initial_anchor',
+    });
+    expect(screen.getByTestId('section-notice').textContent).toContain('First');
+  });
+
   it('suppresses section-filter changes but reports a true tutor scene removal', async () => {
     const { session } = await renderStartedLesson();
     await replayTutor(session, [circle('object-a', 180)], 'group-a', 'First');
@@ -278,7 +307,7 @@ describe('LessonPage board observations', () => {
     expect(session.recordTutorObjectDisappearance).not.toHaveBeenCalled();
   });
 
-  it('coalesces transient committed absence within the microtask grace period', async () => {
+  it('observes each committed tutor scene directly, including a remove followed by a later re-add', async () => {
     const { session } = await renderStartedLesson();
     await replayTutor(session, [circle('object-a', 180)], 'group-a', 'First');
 
@@ -290,6 +319,13 @@ describe('LessonPage board observations', () => {
         { semanticObjectId: 'group-a', groupLabel: 'First' },
       );
     });
+
+    expect(session.recordTutorObjectDisappearance).toHaveBeenCalledOnce();
+    expect(session.recordTutorObjectDisappearance).toHaveBeenCalledWith({
+      objectId: 'object-a',
+      cause: 'scene_mutation',
+    });
+
     act(() => {
       void session.onBoardOps(
         [circle('object-a', 180)],
@@ -298,9 +334,47 @@ describe('LessonPage board observations', () => {
         { semanticObjectId: 'group-a', groupLabel: 'First' },
       );
     });
-    await act(async () => {});
 
-    expect(session.recordTutorObjectDisappearance).not.toHaveBeenCalled();
+    expect(session.recordTutorObjectDisappearance).toHaveBeenCalledOnce();
+  });
+
+  it('suppresses only tutor IDs retired by an atomic replacement in the same committed scene', async () => {
+    const { session } = await renderStartedLesson();
+    await replayTutor(
+      session,
+      [circle('retired-a', 180), circle('retired-b', 280)],
+      'group-a',
+      'First',
+    );
+    await act(async () => {
+      await session.onBoardOps(
+        [circle('unrelated-global', 420)],
+        false,
+        session.getIdentity(),
+      );
+    });
+
+    await act(async () => {
+      await session.onBoardOps(
+        [
+          { op: 'erase', id: 'unrelated-global' },
+          circle('replacement', 240),
+        ],
+        false,
+        session.getIdentity(),
+        {
+          semanticObjectId: 'group-a',
+          groupLabel: 'First',
+          replacesGroup: 'group-a',
+        },
+      );
+    });
+
+    expect(session.recordTutorObjectDisappearance).toHaveBeenCalledOnce();
+    expect(session.recordTutorObjectDisappearance).toHaveBeenCalledWith({
+      objectId: 'unrelated-global',
+      cause: 'scene_mutation',
+    });
   });
 
   it('records tutor reveal only after the committed paint and before completion', async () => {

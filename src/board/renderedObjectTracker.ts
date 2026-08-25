@@ -10,6 +10,7 @@ export interface RenderedTutorObjectSnapshot {
   visibleTutorIds: readonly string[];
   allTutorIds: readonly string[];
   navigation?: AnnouncedBoardNavigation | null;
+  intentionallyRetiredTutorIds?: readonly string[];
 }
 
 export interface TutorObjectDisappearance {
@@ -23,6 +24,7 @@ export class RenderedTutorObjectTracker {
   observe(snapshot: RenderedTutorObjectSnapshot): TutorObjectDisappearance[] {
     const visible = new Set(snapshot.visibleTutorIds);
     const all = new Set(snapshot.allTutorIds);
+    const intentionallyRetired = new Set(snapshot.intentionallyRetiredTutorIds);
     const previous = this.previouslyVisible;
     this.previouslyVisible = visible;
     if (!previous) return [];
@@ -31,7 +33,9 @@ export class RenderedTutorObjectTracker {
     for (const objectId of previous) {
       if (visible.has(objectId)) continue;
       if (!all.has(objectId)) {
-        disappearances.push({ objectId, cause: 'scene_mutation' });
+        if (!intentionallyRetired.has(objectId)) {
+          disappearances.push({ objectId, cause: 'scene_mutation' });
+        }
       } else if (!snapshot.navigation) {
         disappearances.push({ objectId, cause: 'unknown' });
       }

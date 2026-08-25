@@ -64,6 +64,20 @@ describe('RenderedTutorObjectTracker', () => {
     })).toEqual([{ objectId: 'retired', cause: 'scene_mutation' }]);
   });
 
+  it('suppresses only the exact tutor IDs retired by an atomic group replacement', () => {
+    const tracker = new RenderedTutorObjectTracker();
+    tracker.observe({
+      visibleTutorIds: ['retired-a', 'retired-b', 'unrelated'],
+      allTutorIds: ['retired-a', 'retired-b', 'unrelated'],
+    });
+
+    expect(tracker.observe({
+      visibleTutorIds: ['replacement'],
+      allTutorIds: ['replacement'],
+      intentionallyRetiredTutorIds: ['retired-a', 'retired-b'],
+    })).toEqual([{ objectId: 'unrelated', cause: 'scene_mutation' }]);
+  });
+
   it('reports an unannounced visibility-filter removal as unknown', () => {
     const tracker = new RenderedTutorObjectTracker();
     tracker.observe({

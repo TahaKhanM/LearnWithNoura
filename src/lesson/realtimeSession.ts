@@ -72,6 +72,7 @@ export interface VisualCueMetadata { responseId?: string; visualCueId?: string; 
 type Listener = () => void;
 const CONNECT_TIMEOUT_MS = 8_000;
 const MAX_RECONNECTS = 2;
+const MAX_PENDING_UNCORRELATED_METRICS = 64;
 
 export class RealtimeSession {
   private ws: WebSocket | null = null;
@@ -107,6 +108,7 @@ export class RealtimeSession {
   private draftId: string | null = null;
   private submissionAckTimer: number | null = null;
   private responseTiming = new ResponseTimingTracker();
+  private pendingUncorrelatedMetrics: MetricInput[] = [];
 
   onBoardOps: (ops: BoardOp[], animate: boolean, identity: GenerationIdentity, cue?: VisualCueMetadata) => Promise<boolean | void> | boolean | void = () => {};
   onLearnerBoardReplay: (ops: BoardOp[], semanticGroupId?: string) => void = () => {};
@@ -257,6 +259,7 @@ export class RealtimeSession {
   end(): void {
     if (this.closedByUs) return;
     this.closedByUs = true;
+    this.pendingUncorrelatedMetrics = [];
     this.cancelGeneration('lesson ended');
     this.audioIn?.stop();
     this.audioIn = null;
@@ -470,6 +473,7 @@ export class RealtimeSession {
         // A reconnect must not lose an open drawing draft: re-arm the
         // server-side "learner is composing" guard for the new connection.
         if (this.draftOpen && this.draftId) this.send('draft_state', { open: true, draftId: this.draftId });
+        this.flushPendingUncorrelatedMetrics();
         const ask = this.latestQueuedAsk;
         this.latestQueuedAsk = null;
         if (ask && this.isCurrent(ask.identity)) {
@@ -915,7 +919,33 @@ export class RealtimeSession {
     identity = this.scope.identity,
     providerResponseId?: string,
   ): void {
-    this.sendUsingIdentity(identity, 'metric', input, { providerResponseId });
+    const metric = MetricInputSchema.safeParse(input);
+    if (!metric.success) return;
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.sendUsingIdentity(identity, 'metric', metric.data, { providerResponseId });
+      return;
+    }
+    if (
+      providerResponseId ||
+      this.closedByUs ||
+      (this.snapshot.phase !== 'connecting' && this.snapshot.phase !== 'reconnecting')
+    ) {
+      return;
+    }
+    if (this.pendingUncorrelatedMetrics.length >= MAX_PENDING_UNCORRELATED_METRICS) {
+      this.pendingUncorrelatedMetrics.shift();
+    }
+    this.pendingUncorrelatedMetrics.push(metric.data);
+  }
+
+  private flushPendingUncorrelatedMetrics(): void {
+    if (this.ws?.readyState !== WebSocket.OPEN || this.pendingUncorrelatedMetrics.length === 0) return;
+    const pending = this.pendingUncorrelatedMetrics;
+    this.pendingUncorrelatedMetrics = [];
+    const identity = this.scope.identity;
+    for (const metric of pending) {
+      this.sendUsingIdentity(identity, 'metric', metric);
+    }
   }
 
   private send(type: string, payload: Record<string, unknown>): void { this.sendUsingIdentity(this.scope.identity, type, payload); }

@@ -71,14 +71,8 @@ export function LessonPage({ sessionId }: LessonPageProps) {
   const activeVisualGroupRef = useRef<string | undefined>(undefined);
   const visualGroupsRef = useRef<Array<{ id: string; label: string }>>([]);
   const pendingNavigationRef = useRef<AnnouncedBoardNavigation | null>(null);
+  const pendingReplacementIdsRef = useRef<string[] | null>(null);
   const renderedTutorObjectTracker = useRef(new RenderedTutorObjectTracker());
-  const pendingTrackerSnapshotRef = useRef<{
-    visibleTutorIds: string[];
-    allTutorIds: string[];
-    navigation?: AnnouncedBoardNavigation | null;
-  } | null>(null);
-  const trackerObservationScheduledRef = useRef(false);
-  const trackerGenerationRef = useRef(0);
 
   const session = useMemo(() => new RealtimeSession(sessionId), [sessionId]);
   const snap = useSyncExternalStore(session.subscribe, session.getSnapshot);
@@ -101,16 +95,12 @@ export function LessonPage({ sessionId }: LessonPageProps) {
 
   useEffect(() => {
     const tracker = renderedTutorObjectTracker.current;
-    trackerGenerationRef.current += 1;
-    trackerObservationScheduledRef.current = false;
-    pendingTrackerSnapshotRef.current = null;
     tracker.reset();
     pendingNavigationRef.current = null;
+    pendingReplacementIdsRef.current = null;
     return () => {
-      trackerGenerationRef.current += 1;
-      trackerObservationScheduledRef.current = false;
-      pendingTrackerSnapshotRef.current = null;
       pendingNavigationRef.current = null;
+      pendingReplacementIdsRef.current = null;
       tracker.reset();
     };
   }, [session]);
@@ -148,7 +138,9 @@ export function LessonPage({ sessionId }: LessonPageProps) {
     setActiveVisualGroupId(groupId);
     setFocusIndex(0);
     setBoardOverview(false);
-    setSectionNotice((current) => current?.id === groupId ? null : current);
+    if (cause !== 'initial_anchor') {
+      setSectionNotice((current) => current?.id === groupId ? null : current);
+    }
   }, [session]);
 
   const registerVisualGroup = useCallback((cue?: VisualCueMetadata) => {
@@ -177,18 +169,35 @@ export function LessonPage({ sessionId }: LessonPageProps) {
   }, []);
 
   const applyTutorOps = useCallback((ops: BoardOp[], animate: boolean, identity: GenerationIdentity, cue?: VisualCueMetadata) => {
+    const tutorIdsForReplacement = () => cue?.replacesGroup
+      ? boardState.current.current.items
+          .filter((item) => item.owner === 'tutor' && item.semanticGroupId === cue.replacesGroup)
+          .map((item) => item.id)
+      : [];
+    const announceReplacement = (intentionallyRetiredTutorIds: readonly string[]) => {
+      if (!cue?.replacesGroup) return;
+      pendingReplacementIdsRef.current = [
+        ...new Set([
+          ...(pendingReplacementIdsRef.current ?? []),
+          ...intentionallyRetiredTutorIds,
+        ]),
+      ];
+    };
     if (!animate) {
+      const intentionallyRetiredTutorIds = tutorIdsForReplacement();
       const result = boardState.current.applyReplay(ops, 'tutor', cue?.semanticObjectId, cue?.replacesGroup);
       if (!result) return Promise.resolve(false);
       // Replays are already-committed board truth, never a new performance.
       animator.current?.finishAll();
       setBoardAnimation(null);
+      announceReplacement(intentionallyRetiredTutorIds);
       setScene(result.scene);
       registerVisualGroup(cue);
       return Promise.resolve(true);
     }
     const transaction = visualChain.current.then(async () => {
       if (!sameIdentity(session.getIdentity(), identity)) return false;
+      const intentionallyRetiredTutorIds = tutorIdsForReplacement();
       // The cue has crossed the heard-audio boundary, so it is now true on the
       // visible board. Promote it before animation; learner input and ordinary
       // re-renders must build on this state rather than an older checkpoint.
@@ -209,6 +218,7 @@ export function LessonPage({ sessionId }: LessonPageProps) {
         animator.current?.beginTransaction(request.id);
         setBoardAnimation(request);
       }
+      announceReplacement(intentionallyRetiredTutorIds);
       setScene(candidate);
       if (applied.highlighted.length > 0) {
         const center = centerForItemIds(candidate, applied.highlighted);
@@ -485,27 +495,17 @@ export function LessonPage({ sessionId }: LessonPageProps) {
   const draftActive = draftSnap.status === 'open' || draftSnap.status === 'submitting' || draftSnap.status === 'error';
 
   useEffect(() => {
-    const pendingSnapshot = pendingTrackerSnapshotRef.current;
-    pendingTrackerSnapshotRef.current = {
+    const snapshot = {
       visibleTutorIds: visibleScene.items.filter((item) => item.owner === 'tutor').map((item) => item.id),
       allTutorIds: scene.items.filter((item) => item.owner === 'tutor').map((item) => item.id),
-      navigation: pendingNavigationRef.current ?? pendingSnapshot?.navigation,
+      navigation: pendingNavigationRef.current,
+      intentionallyRetiredTutorIds: pendingReplacementIdsRef.current ?? undefined,
     };
     pendingNavigationRef.current = null;
-    if (trackerObservationScheduledRef.current) return;
-
-    trackerObservationScheduledRef.current = true;
-    const generation = trackerGenerationRef.current;
-    queueMicrotask(() => {
-      if (generation !== trackerGenerationRef.current) return;
-      trackerObservationScheduledRef.current = false;
-      const snapshot = pendingTrackerSnapshotRef.current;
-      pendingTrackerSnapshotRef.current = null;
-      if (!snapshot) return;
-      for (const disappearance of renderedTutorObjectTracker.current.observe(snapshot)) {
-        session.recordTutorObjectDisappearance(disappearance);
-      }
-    });
+    pendingReplacementIdsRef.current = null;
+    for (const disappearance of renderedTutorObjectTracker.current.observe(snapshot)) {
+      session.recordTutorObjectDisappearance(disappearance);
+    }
   }, [scene, session, visibleScene]);
 
   const statusLabel =

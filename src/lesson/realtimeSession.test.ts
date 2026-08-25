@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRuntimeEvent, type GenerationIdentity, type RuntimeEventEnvelope } from '../../shared/runtimeProtocol';
 import { ResponseSegmentAnnotator } from '../../server/realtime/segmentAnnotator';
+import type { MetricInput } from '../../shared/sessionTelemetry';
 import { RealtimeSession } from './realtimeSession';
 
 interface SessionHarness {
@@ -18,6 +19,12 @@ interface SessionHarness {
   ws?: { readyState: number; send(raw: string): void; close?(): void };
 }
 
+interface MetricQueueHarness extends SessionHarness {
+  connectionEpoch: number;
+  activateScope(advanceGeneration: boolean): void;
+  emitMetric(input: MetricInput, identity?: GenerationIdentity, providerResponseId?: string): void;
+}
+
 beforeEach(() => window.sessionStorage.clear());
 afterEach(() => vi.restoreAllMocks());
 
@@ -25,6 +32,95 @@ function envelope(identity: GenerationIdentity, sequence: number, cue: { payload
   const { type, ...payload } = cue.payload;
   return createRuntimeEvent(identity, sequence, String(type), payload, cue.optional);
 }
+
+describe('RealtimeSession connecting metric queue', () => {
+  it('flushes draft_restore in a bounded FIFO with the identity accepted by ready', () => {
+    const session = new RealtimeSession('session');
+    const harness = session as unknown as MetricQueueHarness;
+    const sent: RuntimeEventEnvelope<Record<string, unknown>>[] = [];
+    let readyState: number = WebSocket.CONNECTING;
+    harness.ws = {
+      get readyState() { return readyState; },
+      send: (raw) => sent.push(JSON.parse(raw) as RuntimeEventEnvelope<Record<string, unknown>>),
+      close: () => {},
+    };
+    const staleIdentity = session.getIdentity();
+
+    for (let index = 0; index < 70; index += 1) {
+      session.recordTutorObjectDisappearance({
+        objectId: `object-${index}`,
+        cause: 'scene_mutation',
+      });
+    }
+    session.recordSectionNavigation({
+      previousGroupId: null,
+      nextGroupId: 'restored-group',
+      cause: 'draft_restore',
+    });
+    harness.emitMetric({
+      schemaVersion: '1.0.0',
+      name: 'board_reveal_to_narration',
+      unit: 'ms',
+      value: 10,
+    }, staleIdentity, 'response-before-boundary');
+    expect(sent).toEqual([]);
+
+    harness.connectionEpoch += 1;
+    harness.activateScope(false);
+    const acceptedIdentity = session.getIdentity();
+    readyState = WebSocket.OPEN;
+    harness.handleServer(createRuntimeEvent(acceptedIdentity, 0, 'ready', {}));
+
+    const metrics = sent.filter((event) => event.type === 'metric');
+    expect(metrics).toHaveLength(64);
+    expect(metrics.slice(0, -1).map((event) =>
+      (event.payload as { dimensions: { objectId: string } }).dimensions.objectId,
+    )).toEqual(Array.from({ length: 63 }, (_, index) => `object-${index + 7}`));
+    expect(metrics.at(-1)?.payload).toEqual({
+      schemaVersion: '1.0.0',
+      name: 'section_navigation',
+      unit: 'count',
+      value: 1,
+      dimensions: {
+        previousSemanticGroupId: 'group-root',
+        nextSemanticGroupId: 'restored-group',
+        cause: 'draft_restore',
+      },
+    });
+    expect(metrics).toEqual(metrics.map(() => expect.objectContaining(acceptedIdentity)));
+    expect(metrics.every((event) => event.providerResponseId === undefined)).toBe(true);
+    session.end();
+  });
+
+  it('clears queued metrics when the lesson ends', () => {
+    const session = new RealtimeSession('session');
+    const harness = session as unknown as MetricQueueHarness;
+    const sent: RuntimeEventEnvelope<Record<string, unknown>>[] = [];
+    let readyState: number = WebSocket.CONNECTING;
+    harness.ws = {
+      get readyState() { return readyState; },
+      send: (raw) => sent.push(JSON.parse(raw) as RuntimeEventEnvelope<Record<string, unknown>>),
+      close: () => {},
+    };
+    const identity = session.getIdentity();
+
+    session.recordSectionNavigation({
+      previousGroupId: null,
+      nextGroupId: 'restored-group',
+      cause: 'draft_restore',
+    });
+    session.end();
+
+    harness.ws = {
+      get readyState() { return readyState; },
+      send: (raw) => sent.push(JSON.parse(raw) as RuntimeEventEnvelope<Record<string, unknown>>),
+      close: () => {},
+    };
+    readyState = WebSocket.OPEN;
+    harness.handleServer(createRuntimeEvent(identity, 0, 'ready', {}));
+    expect(sent.filter((event) => event.type === 'metric')).toEqual([]);
+  });
+});
 
 describe('RealtimeSession sealed response release', () => {
   it('does not release future caption, board, pen/character state, or final text before heard PCM', async () => {
