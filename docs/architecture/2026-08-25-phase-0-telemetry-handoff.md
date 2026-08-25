@@ -2,14 +2,15 @@
 
 ## Second-review status
 
-The distributed lifecycle follow-up is complete at code head `a3c72a1`.
+The shutdown admission follow-up is complete at code head `011861e`.
 Browser/visual/accessibility evidence remains intentionally pending controller
 rerun; no live/provider/hardware claim is added.
 
 ## Proven offline
 
+- Shutdown admission code head: `011861e` against reviewer head `2b089c2`.
 - Distributed lifecycle code head: `a3c72a1` against reviewer head `887d21a`.
-  Code commits are `f2d02c5` and `a3c72a1`.
+  Code commits are `f2d02c5`, `a3c72a1`, and `011861e`.
 - Lifecycle hardening code head: `fcf8a64` against reviewer head `b4281da`.
   Commits are `524af68` (ratified contract) and `fcf8a64` (lifecycle fixes).
   The preceding wave was `4fced4d` against `fef2bc8`.
@@ -47,9 +48,9 @@ rerun; no live/provider/hardware claim is added.
   failed seven new reconciliation assertions. Final GREEN evidence:
   - focused shared/session-log/recorder/writer/proxy/RealtimeSession/API suite:
     8 files, 104 tests passed;
-  - `npm test`: 50 files, 342 tests passed;
+  - `npm test`: 50 files, 344 tests passed;
   - `npm run test:smoke-report`: 45 tests passed;
-  - `npm run test:integration`: 50 files, 342 tests passed;
+  - `npm run test:integration`: 50 files, 344 tests passed;
   - `npm run test:security`: 3 files, 16 tests passed;
   - `npm run test:storage`: 3 files, 6 tests passed;
   - `npm run build`: 147 modules transformed;
@@ -60,7 +61,7 @@ rerun; no live/provider/hardware claim is added.
   wave. Their earlier pre-hardening results are historical only; the controller
   must rerun every browser gate against the reviewed head.
 - Final distributed focused writer/repository/proxy/lifecycle/Postgres/storage
-  suite: 7 files, 73 tests passed. Flush now rejects incomplete state, proxy
+  suite: 7 files, 75 tests passed. Flush now rejects incomplete state, proxy
   completion awaits history producers, shutdown is quiescent, and Postgres
   append locks the session row before insert.
 - No visual snapshot, runtime model/provider identifier, `response.create` or

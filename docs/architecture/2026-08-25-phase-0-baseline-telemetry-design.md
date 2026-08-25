@@ -490,3 +490,7 @@ in-process callback as a sufficient asynchronous repository boundary:
   awaits these handles before repository shutdown.
 - PostgreSQL append locks the session row transactionally before active-state
   validation and insert, serializing across instances with the end cutoff lock.
+- Teardown seals both frame handlers before snapshotting producer chains.
+  Upgrade authorization is rechecked immediately before WebSocket acceptance,
+  and connection setup plus late lifecycle registration drain repeatedly to
+  empty under the one shutdown deadline.

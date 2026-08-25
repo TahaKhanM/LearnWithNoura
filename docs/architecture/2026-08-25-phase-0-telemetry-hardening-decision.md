@@ -188,3 +188,18 @@ precedes the end transaction's cutoff query; if end wins, append observes
 blocking, so the deterministic test asserts transaction and query order
 (`BEGIN` → session `FOR UPDATE` → insert → `COMMIT`); the immutable-end contract
 test separately verifies rejection after end.
+
+## Shutdown admission sealing
+
+Proxy teardown synchronously closes frame admission before taking any promise
+snapshot: client and upstream message handlers are gated and detached, then the
+sealed client/upstream chains, tracked telemetry producers, and writer close
+are awaited in that order. Frames arriving after teardown starts cannot mutate
+lesson, session, or telemetry state.
+
+Upgrade admission is checked again immediately before `handleUpgrade`, after
+all asynchronous repository and authorization work. The lifecycle registry
+also tracks connection setup promises and repeatedly drains connections plus
+late lifecycle registrations until empty under the original shutdown deadline.
+Repository shutdown therefore cannot overtake an authorized upgrade or proxy
+producer that was already in flight when shutdown began.
