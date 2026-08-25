@@ -625,6 +625,7 @@ EOF
 - Modify: `src/lesson/LessonPage.tsx`
 - Create: `src/lesson/LessonPage.test.tsx`
 - Modify: `src/lesson/realtimeSession.ts`
+- Modify: `src/lesson/realtimeSession.test.ts`
 
 **Interfaces:**
 - Produces:
@@ -656,6 +657,8 @@ Also assert:
 - additive updates emit nothing;
 - an announced section navigation suppresses IDs that remain in the full scene;
 - a real full-scene removal still emits during the same navigation render;
+- an announced atomic group replacement suppresses only the tutor IDs retired
+  by that replacement;
 - an unannounced visibility-filter removal emits `unknown`;
 - `reset` prevents teardown/reinitialization events.
 
@@ -684,8 +687,12 @@ Using the existing component harness:
 - open a notice with cause `notice_open` and assert one section switch;
 - change the picker with cause `picker`;
 - restore a draft with cause `draft_restore`;
+- prove a draft-restore metric queued while the socket is connecting is sent
+  after `ready`;
 - assert navigation does not emit disappearance for tutor IDs still present in
   the full scene;
+- apply an atomic group replacement and assert retired tutor IDs do not emit
+  disappearance;
 - apply a scene mutation that removes a previously rendered tutor ID and assert
   one disappearance metric;
 - unmount and assert no disappearance.
@@ -710,6 +717,9 @@ recordTutorObjectDisappearance(input: {
 ```
 
 Each method validates through `MetricInputSchema` before sending.
+Keep a bounded queue for validated, uncorrelated client metrics emitted while
+the socket is connecting and flush it with the current accepted identity after
+`ready`. Do not queue response-correlated metrics across a connection boundary.
 
 - [ ] **Step 7: Integrate exact navigation correlation in LessonPage**
 
@@ -729,15 +739,21 @@ tracker.observe({
   visibleTutorIds: visibleScene.items.filter((item) => item.owner === 'tutor').map((item) => item.id),
   allTutorIds: scene.items.filter((item) => item.owner === 'tutor').map((item) => item.id),
   navigation: pendingNavigationRef.current,
+  intentionallyRetiredTutorIds: pendingReplacementIdsRef.current,
 });
 ```
 
-Consume the pending navigation exactly once. Reset the tracker on session
-change/unmount.
+Observe the committed React state directly; do not add timer or microtask
+coalescing whose browser semantics differ from the test harness. Consume the
+pending navigation and exact replacement-ID set once. Reset the tracker on
+session change/unmount.
 
 In `applyTutorOps`, include `responseId` in cue metadata and call
 `session.noteBoardReveal(identity, cue)` immediately after `await nextPaint()`,
-before waiting for animation completion.
+before waiting for animation completion. When `cue.replacesGroup` is present,
+announce only the tutor IDs currently owned by that group as intentionally
+retired before committing the atomic replacement; other removals in the same
+render remain observable.
 
 - [ ] **Step 8: Run focused UI and board tests**
 
@@ -759,7 +775,7 @@ and tutor-object permanence.
 - [ ] **Step 10: Commit the board observer milestone**
 
 ```bash
-git add src/board/renderedObjectTracker.ts src/board/renderedObjectTracker.test.ts src/lesson/LessonPage.tsx src/lesson/LessonPage.test.tsx src/lesson/realtimeSession.ts
+git add src/board/renderedObjectTracker.ts src/board/renderedObjectTracker.test.ts src/lesson/LessonPage.tsx src/lesson/LessonPage.test.tsx src/lesson/realtimeSession.ts src/lesson/realtimeSession.test.ts
 git commit -m "$(cat <<'EOF'
 feat: observe board permanence
 EOF
