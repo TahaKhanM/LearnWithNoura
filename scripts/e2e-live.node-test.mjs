@@ -107,6 +107,8 @@ function telemetryFixture(overrides = {}) {
         telemetryGaps: {
           server_queue_overflow: 0,
           server_persistence_failure: 0,
+          server_history_failure: 0,
+          server_accounting_overflow: 0,
           client_queue_overflow: 0,
         },
       },
@@ -561,6 +563,8 @@ test('any telemetry gap fails the deterministic smoke gate', () => {
   assert.deepEqual(report.telemetryGaps, {
     server_queue_overflow: 0,
     server_persistence_failure: 0,
+    server_history_failure: 0,
+    server_accounting_overflow: 0,
     client_queue_overflow: 2,
   });
   assert(report.smokeGate.missingObservationIds.includes('telemetry_gaps_present'));

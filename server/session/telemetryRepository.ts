@@ -4,6 +4,11 @@ import type { DomainRepository } from '../store/domain.js';
 
 const DEFAULT_HISTORY_PAGE_SIZE = 5_000;
 const DEFAULT_MAX_PENDING = 1_024;
+export const TELEMETRY_SHUTDOWN_TIMEOUT_MS = 5_000;
+
+export interface TelemetryWriterLifecycle {
+  flush(): Promise<void>;
+}
 
 export interface SessionTelemetryRepository {
   appendMetric(sessionId: string, observation: MetricObservation): Promise<number>;
@@ -11,15 +16,18 @@ export interface SessionTelemetryRepository {
     sessionId: string,
     exclusiveUpperEventId: number,
   ): Promise<boolean>;
+  registerWriter?(writer: TelemetryWriterLifecycle): () => void;
 }
 
 export interface ManagedSessionTelemetryRepository
   extends SessionTelemetryRepository {
-  close(): Promise<void>;
+  shutdown(timeoutMs?: number): Promise<void>;
 }
 
 export class AsyncDomainTelemetryRepository
 implements SessionTelemetryRepository {
+  private readonly writers = new Set<TelemetryWriterLifecycle>();
+  private acceptingWriters = true;
   constructor(
     private readonly repo: DomainRepository,
     private readonly historyPageSize = DEFAULT_HISTORY_PAGE_SIZE,
@@ -30,6 +38,22 @@ implements SessionTelemetryRepository {
     observation: MetricObservation,
   ): Promise<number> {
     return await this.repo.addEvent(sessionId, 'metric', observation);
+  }
+
+  registerWriter(writer: TelemetryWriterLifecycle): () => void {
+    if (!this.acceptingWriters) {
+      throw new Error('Telemetry repository is shutting down.');
+    }
+    this.writers.add(writer);
+    return () => this.writers.delete(writer);
+  }
+
+  async shutdown(timeoutMs = TELEMETRY_SHUTDOWN_TIMEOUT_MS): Promise<void> {
+    this.acceptingWriters = false;
+    await withShutdownBound(
+      Promise.all([...this.writers].map((writer) => writer.flush())),
+      timeoutMs,
+    );
   }
 
   async hasPriorReleasedSessionStart(
@@ -102,11 +126,12 @@ type PendingRequest = {
 export class SqliteWorkerTelemetryRepository
 implements ManagedSessionTelemetryRepository {
   private readonly worker: Worker;
+  private readonly writers = new Set<TelemetryWriterLifecycle>();
   private readonly pending = new Map<number, PendingRequest>();
   private readonly historyPageSize: number;
   private readonly maxPending: number;
   private nextRequestId = 1;
-  private state: 'open' | 'closing' | 'closed' = 'open';
+  private state: 'open' | 'draining' | 'closing' | 'closed' = 'open';
   private closePromise: Promise<void> | null = null;
 
   constructor(
@@ -122,7 +147,6 @@ implements ManagedSessionTelemetryRepository {
       eval: true,
       workerData: { databasePath },
     });
-    this.worker.unref();
     this.worker.on('message', (message: unknown) => this.handleMessage(message));
     this.worker.on('error', (error) => this.failAll(error));
     this.worker.on('exit', (code) => {
@@ -165,14 +189,28 @@ implements ManagedSessionTelemetryRepository {
     return value;
   }
 
-  close(): Promise<void> {
+  registerWriter(writer: TelemetryWriterLifecycle): () => void {
+    if (this.state !== 'open') {
+      throw new Error('Telemetry repository is shutting down.');
+    }
+    this.writers.add(writer);
+    return () => this.writers.delete(writer);
+  }
+
+  shutdown(timeoutMs = TELEMETRY_SHUTDOWN_TIMEOUT_MS): Promise<void> {
     if (this.closePromise) return this.closePromise;
     if (this.state === 'closed') return Promise.resolve();
-    this.state = 'closing';
-    this.closePromise = this.request({
+    this.state = 'draining';
+    this.closePromise = withShutdownBound(
+      Promise.all([...this.writers].map((writer) => writer.flush())),
+      timeoutMs,
+    ).then(() => {
+      this.state = 'closing';
+      return this.request({
       id: this.nextRequestId++,
       type: 'close',
-    }, true).then(async () => {
+      }, true);
+    }).then(async () => {
       await this.worker.terminate();
       this.state = 'closed';
     }).catch(async (error: unknown) => {
@@ -187,7 +225,8 @@ implements ManagedSessionTelemetryRepository {
     message: WorkerRequest,
     allowClosing = false,
   ): Promise<number | boolean | null> {
-    if (this.state !== 'open' && !(allowClosing && this.state === 'closing')) {
+    if (!['open', 'draining'].includes(this.state) &&
+        !(allowClosing && this.state === 'closing')) {
       return Promise.reject(new Error('Telemetry SQLite worker is closed.'));
     }
     if (!allowClosing && this.pending.size >= this.maxPending) {
@@ -216,6 +255,25 @@ implements ManagedSessionTelemetryRepository {
     this.pending.clear();
     if (this.state === 'open') this.state = 'closed';
   }
+}
+
+function withShutdownBound<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error('Telemetry shutdown timed out.')),
+      timeoutMs,
+    );
+    void promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error: unknown) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
 }
 
 function yieldToEventLoop(): Promise<void> {

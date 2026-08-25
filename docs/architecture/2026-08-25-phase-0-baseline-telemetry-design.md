@@ -469,3 +469,28 @@ in-process callback as a sufficient asynchronous repository boundary:
 - an unknown `response.done` identity emits no provider usage, tutor-output
   duration, or cancel-outcome telemetry. Existing cue flush and client
   finalization behavior remains unchanged.
+
+## Lifecycle accounting amendment
+
+- Accepted normal observations are FIFO. Gap observations are fixed-size,
+  exact per-reason completeness counters and do not claim chronology under
+  saturation.
+- Pending loss accounting blocks acceptance of later normal telemetry until a
+  gap attempt succeeds; internal counter overflow creates an explicit
+  smoke-failing incomplete state.
+- SQLite session ending serializes the cutoff and status transition against the
+  worker writer; Postgres retains its transactional row-lock equivalent.
+- Reconnect-history failures record completeness loss.
+- Repository shutdown stops telemetry acceptance, waits a documented finite
+  bound for registered writers, then closes the worker with handled errors.
+- Writer flush rejects with typed incompleteness unless every normal row and
+  gap counter is empty; failed close remains registered for shutdown retry.
+- Proxy lifecycle completion includes client/upstream chains and prior-start
+  callbacks before writer close. Server shutdown closes active WebSockets and
+  awaits these handles before repository shutdown.
+- PostgreSQL append locks the session row transactionally before active-state
+  validation and insert, serializing across instances with the end cutoff lock.
+- Teardown seals both frame handlers before snapshotting producer chains.
+  Upgrade authorization is rechecked immediately before WebSocket acceptance,
+  and connection setup plus late lifecycle registration drain repeatedly to
+  empty under the one shutdown deadline.

@@ -58,7 +58,8 @@ function isAllowedClientMetric(input: MetricInput): boolean {
       return input.dimensions.outcome === 'local_only_rejected' ||
         input.dimensions.outcome === 'provider_only_rejected';
     case 'telemetry_gap':
-      return input.dimensions.reason === 'client_queue_overflow';
+      return input.dimensions.reason === 'client_queue_overflow' &&
+        input.value <= 64;
     default:
       return false;
   }
@@ -86,6 +87,12 @@ export interface ProxyOptions {
   preflightTimeoutMs?: number;
   /** How long to wait for the browser to confirm a staged plan is visible. */
   visibilityTimeoutMs?: number;
+  onLifecycle?: (lifecycle: ProxyLifecycle) => void;
+}
+
+export interface ProxyLifecycle {
+  completion: Promise<void>;
+  close(): Promise<void>;
 }
 
 export async function connectRealtimeProxy(client: ClientSocket, options: ProxyOptions): Promise<void> {
@@ -121,7 +128,18 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
   });
 
   let upstreamReady = false;
-  let closed = false;
+  let teardownPromise: Promise<void> | null = null;
+  let resolveCompletion!: () => void;
+  let rejectCompletion!: (error: unknown) => void;
+  const lifecycleCompletion = new Promise<void>((resolve, reject) => {
+    resolveCompletion = resolve;
+    rejectCompletion = reject;
+  });
+  void lifecycleCompletion.catch(() => {
+    // App lifecycle tracking observes this promise; this guard also covers
+    // direct test callers that intentionally do not install a tracker.
+  });
+  const backgroundTelemetry = new Set<Promise<void>>();
   let toolContinues = 0;
   /** response ids we know were cancelled by barge-in. */
   const cancelledResponses = new Set<string>();
@@ -155,6 +173,7 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
   let lastLearnerEventId: number | null = null;
   let upstreamWork = Promise.resolve();
   let clientWork = Promise.resolve();
+  let acceptingFrames = true;
   /** The learner is composing a drawing; nothing may auto-create a response. */
   let draftOpen = false;
   /** Board submissions already answered — duplicate Done must be a no-op. */
@@ -477,10 +496,18 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
     }
   }
 
-  function teardown(reason: string): void {
-    if (closed) return;
-    closed = true;
-    void telemetryWriter.flush();
+  function trackTelemetry(task: Promise<void>): void {
+    backgroundTelemetry.add(task);
+    void task.finally(() => backgroundTelemetry.delete(task)).catch(() => {});
+  }
+
+  function beginTeardown(reason: string): Promise<void> {
+    if (teardownPromise) return teardownPromise;
+    acceptingFrames = false;
+    upstream.onmessage = null;
+    client.off('message', handleClientMessage);
+    const sealedClientWork = clientWork;
+    const sealedUpstreamWork = upstreamWork;
     log(`session ${sessionId}: closed (${reason})`);
     try {
       upstream.close();
@@ -492,7 +519,32 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
     } catch {
       /* already closed */
     }
+    teardownPromise = Promise.allSettled([
+      sealedClientWork,
+      sealedUpstreamWork,
+    ]).then(async () => {
+      while (backgroundTelemetry.size > 0) {
+        await Promise.allSettled([...backgroundTelemetry]);
+      }
+      await telemetryWriter.close();
+      resolveCompletion();
+    }).catch((error: unknown) => {
+      rejectCompletion(error);
+      throw error;
+    });
+    return teardownPromise;
   }
+
+  function teardown(reason: string): void {
+    void beginTeardown(reason).catch((error: unknown) => {
+      log(`session ${sessionId}: telemetry close error ${String(error).slice(0, 160)}`);
+    });
+  }
+
+  options.onLifecycle?.({
+    completion: lifecycleCompletion,
+    close: () => beginTeardown('server shutdown'),
+  });
 
   upstream.onopen = () => {
     sendUpstream({
@@ -516,7 +568,8 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
     });
   };
 
-  upstream.onmessage = (raw) => {
+  function handleUpstreamMessage(raw: { data: unknown }): void {
+    if (!acceptingFrames) return;
     let event: UpstreamEvent;
     try {
       event = JSON.parse(String(raw.data));
@@ -529,7 +582,9 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
         log(`session ${sessionId}: upstream processing error ${String(error).slice(0, 240)}`);
         sendClient({ type: 'error', message: 'Noura hit a snag — it will recover in a moment.' });
       });
-  };
+  }
+
+  upstream.onmessage = handleUpstreamMessage;
 
   upstream.onerror = () => {
     sendClient({ type: 'error', message: 'Lost the connection to the tutor voice service.' });
@@ -1333,7 +1388,8 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
     sendUpstream({ type: 'response.create' });
   }
 
-  client.on('message', (raw) => {
+  function handleClientMessage(raw: unknown): void {
+    if (!acceptingFrames) return;
     clientWork = clientWork.then(async () => {
       let decoded: unknown;
       try { decoded = JSON.parse(String(raw)); }
@@ -1370,7 +1426,9 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
       log(`session ${sessionId}: client processing error ${String(error).slice(0, 240)}`);
       sendClient({ type: 'error', message: 'Noura could not save that turn. Please try again.' });
     });
-  });
+  }
+
+  client.on('message', handleClientMessage);
 
   client.on('close', () => teardown('client closed'));
   client.on('error', () => teardown('client error'));
@@ -1407,7 +1465,7 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
           connectionEpoch: envelope.connectionEpoch,
         });
         requestModelResponse('start', 'session-start');
-        void telemetryRepo
+        const historyTask = telemetryRepo
           .hasPriorReleasedSessionStart(sessionId, startEventId)
           .then((hadPriorStart) => {
             if (!hadPriorStart) return;
@@ -1418,7 +1476,16 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
               value: 1,
             }, metricContextFromIdentity(envelope));
           })
-          .catch(() => {});
+          .catch(() => {
+            telemetryWriter.submit({
+              schemaVersion: TELEMETRY_SCHEMA_VERSION,
+              name: 'telemetry_gap',
+              unit: 'count',
+              value: 1,
+              dimensions: { reason: 'server_history_failure' },
+            }, metricContextFromIdentity(envelope));
+          });
+        trackTelemetry(historyTask);
         break;
       }
 

@@ -6,6 +6,11 @@ import { WebSocketServer } from 'ws';
 import { createApi } from './api.js';
 import { fallbackTurns } from './fallbackTutor.js';
 import { connectRealtimeProxy } from './realtime/proxy.js';
+import {
+  ProxyLifecycleRegistry,
+  ShutdownGate,
+  runQuiescentShutdown,
+} from './realtime/lifecycle.js';
 import { assertRealtimePromptReadable } from './realtime/instructions.js';
 import { readRuntimeConfig, productionReadinessErrors, EVENT_SCHEMA_VERSION } from './runtimeConfig.js';
 import { createRepositoryRuntime } from './store/createRepository.js';
@@ -259,8 +264,14 @@ const wss = new WebSocketServer({
   maxPayload: 400_000,
   handleProtocols: (protocols) => protocols.has('noura.v1') ? 'noura.v1' : false,
 });
+const proxyLifecycles = new ProxyLifecycleRegistry();
+const shutdownGate = new ShutdownGate();
 
 server.on('upgrade', async (request, socket, head) => {
+  if (!shutdownGate.allowsUpgrade()) {
+    socket.destroy();
+    return;
+  }
   const url = new URL(request.url ?? '/', 'http://localhost');
   if (url.pathname !== '/ws/lesson' && url.pathname !== '/api/ws') {
     socket.destroy();
@@ -284,25 +295,60 @@ server.on('upgrade', async (request, socket, head) => {
     socket.destroy();
     return;
   }
+  if (!shutdownGate.allowsUpgrade()) {
+    socket.destroy();
+    return;
+  }
   wss.handleUpgrade(request, socket, head, (client) => {
     if (!process.env.OPENAI_API_KEY || !sessionId) {
       client.send(JSON.stringify({ type: 'error', message: process.env.OPENAI_API_KEY ? 'Missing session id.' : 'Noura is not configured on this server.' }));
       client.close(4400);
       return;
     }
-    void connectRealtimeProxy(client, {
+    const connection = connectRealtimeProxy(client, {
       apiKey: process.env.OPENAI_API_KEY,
       model: runtimeConfig.realtimeModel,
       repo,
       telemetryRepo: repository.telemetry,
       sessionId,
       log: (line) => console.log(`[realtime] ${line}`),
+      onLifecycle: (lifecycle) => proxyLifecycles.register(lifecycle),
     }).catch(() => {
       try { client.close(1011, 'lesson service unavailable'); } catch { /* already closed */ }
     });
+    proxyLifecycles.trackConnection(connection);
   });
 });
 
-server.on('close', () => {
-  void repository.close();
-});
+let repositoryClose: Promise<void> | null = null;
+let serverShutdown: Promise<void> | null = null;
+
+export function closeRepository(): Promise<void> {
+  repositoryClose ??= repository.close();
+  return repositoryClose;
+}
+
+export function shutdownServer(): Promise<void> {
+  serverShutdown ??= runQuiescentShutdown({
+    stopAccepting: () => {
+      shutdownGate.begin();
+      server.close();
+    },
+    closeClients: () => {
+      for (const client of wss.clients) client.close(1001, 'server shutdown');
+    },
+    closeProxies: () => proxyLifecycles.shutdown(),
+    closeRepository,
+    log: (error: unknown) => {
+      console.error(`[shutdown] ${String(error).slice(0, 240)}`);
+      process.exitCode = 1;
+    },
+  });
+  return serverShutdown;
+}
+
+for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+  process.once(signal, () => {
+    void shutdownServer();
+  });
+}

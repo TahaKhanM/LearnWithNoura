@@ -37,11 +37,13 @@ export function createRepositoryRuntime(
         : { rejectUnauthorized: true },
     });
     const managed = new PostgresRepo(pool, env.NOURA_POSTGRES_AUTO_MIGRATE === 'true');
+    const telemetry = new AsyncDomainTelemetryRepository(managed);
     return {
       repo: managed,
-      telemetry: new AsyncDomainTelemetryRepository(managed),
+      telemetry,
       ready: () => managed.initialize(),
       close: async () => {
+        await telemetry.shutdown();
         await pool.end();
       },
       managed,
@@ -55,7 +57,7 @@ export function createRepositoryRuntime(
     repo,
     telemetry,
     ready: () => Promise.resolve(),
-    close: () => telemetry.close(),
+    close: () => telemetry.shutdown(),
     managed: null,
   };
 }

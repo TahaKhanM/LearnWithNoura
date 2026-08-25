@@ -143,3 +143,63 @@ Terminal telemetry uses only the exact provider-response identity map. An
 unknown `response.done` may still use the existing fallback identity for cue
 flush and client finalization, but it cannot emit provider usage, tutor-output
 duration, or cancellation outcome.
+
+## Lifecycle and saturation clarification
+
+Exact chronology for an unbounded run of loss markers is incompatible with
+bounded memory. Accepted normal observations therefore remain FIFO, while
+telemetry gaps are fixed-size per-reason completeness counters rather than
+event-order evidence. Counters may aggregate across later observations, but
+their totals remain exact. After the first loss, pending gaps are attempted
+before any newly accepted normal observation. Impossible safe-integer
+accounting overflow records an explicit non-complete reason that the smoke gate
+rejects.
+
+The SQLite session-end cutoff and status transition execute in one
+`BEGIN IMMEDIATE` transaction. A worker append is therefore either committed
+before and included in `ended_event_id`, or rejected after the end transition.
+Postgres already provides the equivalent transaction plus row lock.
+
+Reconnect-history lookup failure is itself a completeness gap and is never
+silently caught. Shared telemetry lifecycle management stops new submissions,
+waits a finite shutdown interval for registered writers to flush, then closes
+the worker with handled errors. The bound is shutdown safety, not a lesson
+timer.
+
+## Distributed shutdown and cutoff clarification
+
+`flush()` is a truth boundary: it succeeds only when both the normal FIFO and
+all fixed gap counters are empty. A persistence attempt that cannot progress
+raises typed `TELEMETRY_INCOMPLETE_FLUSH`; failed `close()` retains
+registration so repository shutdown can retry. Closing stops new submissions,
+and a counter added after its enum position was visited restarts the drain
+until the global empty condition is true.
+
+Server shutdown is quiescent and ordered: reject new upgrades, close active
+WebSockets, await each proxy's client/upstream work and prior-start telemetry,
+close its writer, then stop repository writer registration and flush registered
+writers before worker closure. The two five-second bounds apply only to process
+shutdown and never to lesson behavior.
+
+Postgres event append and session end now acquire conflicting `FOR UPDATE`
+locks on the same session row inside transactions. If append wins, its commit
+precedes the end transaction's cutoff query; if end wins, append observes
+`ended` and rejects. `pg-mem` does not model real PostgreSQL concurrent row-lock
+blocking, so the deterministic test asserts transaction and query order
+(`BEGIN` → session `FOR UPDATE` → insert → `COMMIT`); the immutable-end contract
+test separately verifies rejection after end.
+
+## Shutdown admission sealing
+
+Proxy teardown synchronously closes frame admission before taking any promise
+snapshot: client and upstream message handlers are gated and detached, then the
+sealed client/upstream chains, tracked telemetry producers, and writer close
+are awaited in that order. Frames arriving after teardown starts cannot mutate
+lesson, session, or telemetry state.
+
+Upgrade admission is checked again immediately before `handleUpgrade`, after
+all asynchronous repository and authorization work. The lifecycle registry
+also tracks connection setup promises and repeatedly drains connections plus
+late lifecycle registrations until empty under the original shutdown deadline.
+Repository shutdown therefore cannot overtake an authorized upgrade or proxy
+producer that was already in flight when shutdown began.

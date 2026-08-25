@@ -42,6 +42,8 @@ const emptyProviderUsage = (): ProviderUsageTotals => ({
 const emptyTelemetryGaps = (): TelemetryGapTotals => ({
   server_queue_overflow: 0,
   server_persistence_failure: 0,
+  server_history_failure: 0,
+  server_accounting_overflow: 0,
   client_queue_overflow: 0,
 });
 

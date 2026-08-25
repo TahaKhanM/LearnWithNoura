@@ -52,8 +52,9 @@ non-blocking writer before storage as released `metric` events in the existing
 event log. Local SQLite metric append and reconnect-history lookup execute in a
 worker thread; managed Postgres remains natively asynchronous. Identifier
 tokens carry server-owned encoding metadata and a session-derived prefix and
-ordered `telemetry_gap` barriers preserve the position, reason and value of
-known server queue, persistence and browser pre-ready queue loss.
+fixed per-reason `telemetry_gap` counters preserve exact totals for known server
+queue, persistence, history, accounting and browser pre-ready loss. Gap rows
+are completeness evidence, not chronology evidence under saturation.
 `GET /api/sessions/:id/log` is the
 parent-authenticated, parent-owned projection of those released events; it
 returns bounded duration aggregates, interruption outcomes,
