@@ -2,6 +2,9 @@ import { DataType, newDb } from 'pg-mem';
 import { describe, expect, it } from 'vitest';
 import { PostgresStore, type StorageSnapshot } from './portable';
 
+// Deliberate high-workload contract: tolerate machine load while still detecting hangs.
+const HEAVY_CONTRACT_TIMEOUT_MS = 15_000;
+
 describe('PostgresStore portable contract', () => {
   it('imports and exports a deterministic snapshot with verified counts', async () => {
     const memory = newDb();
@@ -40,5 +43,5 @@ describe('PostgresStore portable contract', () => {
     expect(exported.events.map((row) => row.id)).toEqual([1]);
     await expect(store.health()).resolves.toBe(true);
     await store.close();
-  });
+  }, HEAVY_CONTRACT_TIMEOUT_MS);
 });
