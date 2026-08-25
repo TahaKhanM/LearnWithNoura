@@ -58,10 +58,12 @@ These offline and browser-observer definitions prevent lifecycle regressions, bu
 The live journey is prepared, not authorized or executed by the default gates:
 
 ```bash
-NOURA_BASE_URL=https://authorized-origin.example node scripts/e2e-live.mjs --text-only
+npm run test:smoke-report
+# DO NOT RUN without explicit deployment and live-provider authorization:
+NOURA_BASE_URL=https://authorized-origin.example npm run e2e:live -- --authorized-live-run --text-only
 ```
 
-The reporter reads `/api/version` and the parent-scoped session log through the still-authenticated browser context. It reports runtime model IDs, exact logged tutor-audio duration, provider-reported token usage projected from `response.done`, Phase 0 aggregates and unresolved verification items. `NOURA_PROVIDER_REPORTED_COST_USD` is optional user-supplied USD copied from the provider billing surface; the provider event does not supply a currency charge and the script never invents one. `--report-fixture <path>` exercises report construction offline and is explicitly not provider evidence. Do not run the normal journey, deploy or make paid/provider calls without explicit authorization.
+The reporter reads `/api/version` and the parent-scoped session log through the still-authenticated browser context. It distinguishes the configured base URL from the origin actually reached and reports runtime model IDs, exact logged tutor-audio duration, provider-reported token usage projected from `response.done`, Phase 0 aggregates, bounded caption/learner/console counts, hardcoded milestones and unresolved verification items. Retained reports contain no raw caption, learner or browser-console text. A truncated session log or missing provider usage fails the gate. `NOURA_PROVIDER_REPORTED_COST_USD` is optional user-supplied USD copied from the provider billing surface; the provider event does not supply a currency charge and the script never invents one. `--report-fixture <path>` and `npm run test:smoke-report` exercise report construction offline and never establish live-provider evidence. Do not run the normal journey, deploy or make paid/provider calls without explicit authorization.
 
 ## Local setup
 
@@ -97,6 +99,7 @@ The old database is retained. `NOURA_DATA_DIR` is preferred; the historical envi
 npm run build
 npm run typecheck:server
 npm run lint
+npm run test:smoke-report
 npm test
 npm audit --omit=dev
 npm run test:integration

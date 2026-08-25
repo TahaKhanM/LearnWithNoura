@@ -20,6 +20,7 @@ The released telemetry payload and session-log projection allow only these field
 - event metadata: session ID in the parent-scoped response, event ID, server timestamp, telemetry schema version, and the bounded/truncated marker;
 - closed metric identity: the enumerated metric name, `ms` or `count` unit, and a finite integer value;
 - server-authoritative correlation: non-negative connection epoch plus bounded turn, generation, and optional provider response IDs;
+- historical compatibility: the literal bounded `legacy: true` boolean only on normalized historical duration timeline rows;
 - bounded visual correlation: optional visual cue and semantic object IDs;
 - closed lifecycle dimensions: enumerated barge-in gate/cancellation outcomes, bounded previous/next section IDs with enumerated navigation cause, and bounded tutor object ID with enumerated disappearance cause;
 - provider usage integers: total; input text/audio/image; cached input text/audio/image; and output text/audio token counts from `response.done.response.usage`;

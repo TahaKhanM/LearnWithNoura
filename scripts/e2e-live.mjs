@@ -1,16 +1,35 @@
 // Prepared synthetic journey: home -> learner -> lesson -> parent telemetry.
 // Normal execution can reach the configured provider and requires authorization.
 // --help and --report-fixture are offline-only and make no live evidence claim.
-import { mkdir, readFile } from 'node:fs/promises';
+import { mkdir, readFile, stat } from 'node:fs/promises';
+
+const MAX_RETAINED_COUNT = 10_000;
+const MAX_RETAINED_MILESTONES = 32;
+const MAX_RETAINED_ELAPSED_MS = 86_400_000;
+const MILESTONE_LABELS = new Set([
+  'home_loaded',
+  'synthetic_learner_created',
+  'lesson_page_loaded',
+  'lesson_started',
+  'first_caption_observed',
+  'first_board_mark_observed',
+  'first_board_mark_absent_after_40s',
+  'synthetic_speech_transcript_observed',
+  'synthetic_speech_transcript_absent_after_45s',
+  'synthetic_text_interruption_sent',
+  'parent_dashboard_loaded',
+  'telemetry_log_retrieved',
+]);
 
 const HELP = `Prepared Noura synthetic live smoke reporter
 
 Usage:
-  NOURA_BASE_URL=https://example.test node scripts/e2e-live.mjs --text-only
-  NOURA_BASE_URL=https://example.test node scripts/e2e-live.mjs synthetic.wav
-  node scripts/e2e-live.mjs --report-fixture fixture.json --text-only
+  NOURA_BASE_URL=https://example.test npm run e2e:live -- --authorized-live-run --text-only
+  NOURA_BASE_URL=https://example.test npm run e2e:live -- --authorized-live-run synthetic.wav
+  npm run e2e:live -- --report-fixture fixture.json --text-only
 
 Options:
+  --authorized-live-run       Explicitly authorize a non-fixture browser/provider journey.
   --text-only                 Type the synthetic learner interruption; no microphone.
   --report-fixture <path>     Build the report from an offline deterministic fixture.
   --help                      Show this offline help without opening a browser.
@@ -29,46 +48,81 @@ if (process.argv.includes('--help')) {
   process.exit(0);
 }
 
-const baseUrl = new URL(process.env.NOURA_BASE_URL ?? 'http://localhost:5173');
-const providerReportedCostUsd = process.env.NOURA_PROVIDER_REPORTED_COST_USD
-  ? Number(process.env.NOURA_PROVIDER_REPORTED_COST_USD)
-  : null;
+class SmokeReportError extends Error {
+  constructor(code, message) {
+    super(message);
+    this.name = 'SmokeReportError';
+    this.code = code;
+  }
+}
 
-const options = parseArguments(process.argv.slice(2));
-validateConfiguration(baseUrl, providerReportedCostUsd);
+await main(process.argv.slice(2));
 
-try {
-  const observation = options.reportFixturePath
-    ? await loadReportFixture(options.reportFixturePath)
-    : await runLiveJourney(baseUrl, options);
-  const report = buildReport({
-    baseUrl,
-    providerReportedCostUsd,
-    scenario: options.wavPath ? 'wav' : 'text_only',
-    observation,
-    offlineFixture: Boolean(options.reportFixturePath),
-  });
+async function main(argv) {
+  const context = {
+    authorizedLiveRun: argv.includes('--authorized-live-run'),
+    baseUrl: null,
+    offlineFixture: argv.includes('--report-fixture'),
+    providerReportedCostUsd: null,
+    scenario: inferScenario(argv),
+  };
 
-  console.log(JSON.stringify(report, null, 2));
-  if (!report.smokeGate.passed) process.exitCode = 1;
-} catch (error) {
-  console.log(JSON.stringify(buildFailureReport({
-    baseUrl,
-    providerReportedCostUsd,
-    scenario: options.wavPath ? 'wav' : 'text_only',
-    offlineFixture: Boolean(options.reportFixturePath),
-    error,
-  }), null, 2));
-  process.exitCode = 1;
+  try {
+    const options = parseArguments(argv);
+    context.authorizedLiveRun = options.authorizedLiveRun;
+    context.offlineFixture = Boolean(options.reportFixturePath);
+    context.scenario = options.wavPath ? 'wav' : 'text_only';
+
+    const baseUrl = parseBaseUrl(process.env.NOURA_BASE_URL);
+    context.baseUrl = baseUrl;
+    const providerReportedCostUsd = parseProviderReportedCost(
+      process.env.NOURA_PROVIDER_REPORTED_COST_USD,
+    );
+    context.providerReportedCostUsd = providerReportedCostUsd;
+    validateConfiguration(baseUrl);
+
+    if (!options.reportFixturePath && !options.authorizedLiveRun) {
+      throw new SmokeReportError(
+        'authorization_required',
+        'A non-fixture journey requires the explicit --authorized-live-run argument.',
+      );
+    }
+
+    if (options.wavPath && !options.reportFixturePath) {
+      await validateWavFile(options.wavPath);
+    }
+
+    const observation = options.reportFixturePath
+      ? await loadReportFixture(options.reportFixturePath)
+      : await runLiveJourney(baseUrl, options);
+    const report = buildReport({
+      baseUrl,
+      providerReportedCostUsd,
+      scenario: context.scenario,
+      observation,
+      offlineFixture: context.offlineFixture,
+    });
+
+    console.log(JSON.stringify(report, null, 2));
+    if (!report.smokeGate.passed) process.exitCode = 1;
+  } catch (error) {
+    console.log(JSON.stringify(buildFailureReport({ ...context, error }), null, 2));
+    process.exitCode = 1;
+  }
 }
 
 function parseArguments(argv) {
+  let authorizedLiveRun = false;
   let wavPath = null;
   let reportFixturePath = null;
   let textOnly = false;
 
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
+    if (argument === '--authorized-live-run') {
+      authorizedLiveRun = true;
+      continue;
+    }
     if (argument === '--text-only') {
       textOnly = true;
       continue;
@@ -76,65 +130,112 @@ function parseArguments(argv) {
     if (argument === '--report-fixture') {
       const path = argv[index + 1];
       if (!path || path.startsWith('--')) {
-        throw new Error('--report-fixture requires a JSON file path.');
+        throw new SmokeReportError(
+          'invalid_arguments',
+          '--report-fixture requires a JSON file path.',
+        );
       }
       reportFixturePath = path;
       index += 1;
       continue;
     }
     if (argument.startsWith('--')) {
-      throw new Error(`Unknown option: ${argument}`);
+      throw new SmokeReportError('invalid_arguments', 'An unknown option was supplied.');
     }
     if (wavPath) {
-      throw new Error('Only one WAV path may be supplied.');
+      throw new SmokeReportError('invalid_arguments', 'Only one WAV path may be supplied.');
     }
     wavPath = argument;
   }
 
   if (wavPath && textOnly) {
-    throw new Error('Choose either a WAV scenario or --text-only, not both.');
+    throw new SmokeReportError(
+      'invalid_arguments',
+      'Choose either a WAV scenario or --text-only, not both.',
+    );
   }
 
   return {
+    authorizedLiveRun,
     reportFixturePath,
     textOnly: textOnly || !wavPath,
     wavPath,
   };
 }
 
-function validateConfiguration(url, costUsd) {
-  if (!['http:', 'https:'].includes(url.protocol)) {
-    throw new Error('NOURA_BASE_URL must use http or https.');
+function parseBaseUrl(value) {
+  try {
+    return new URL(value ?? 'http://localhost:5173');
+  } catch {
+    throw new SmokeReportError(
+      'invalid_base_url',
+      'NOURA_BASE_URL must be a valid absolute HTTP or HTTPS URL.',
+    );
   }
-  if (costUsd !== null && (!Number.isFinite(costUsd) || costUsd < 0)) {
-    throw new Error(
-      'NOURA_PROVIDER_REPORTED_COST_USD must be a finite, non-negative user-supplied amount.',
+}
+
+function parseProviderReportedCost(value) {
+  if (value === undefined || value.trim() === '') return null;
+  const costUsd = Number(value);
+  if (!Number.isFinite(costUsd) || costUsd < 0) {
+    throw new SmokeReportError(
+      'invalid_provider_reported_cost',
+      'NOURA_PROVIDER_REPORTED_COST_USD must be a finite, non-negative amount.',
+    );
+  }
+  return costUsd;
+}
+
+function validateConfiguration(url) {
+  if (!['http:', 'https:'].includes(url.protocol)) {
+    throw new SmokeReportError(
+      'invalid_base_url',
+      'NOURA_BASE_URL must be a valid absolute HTTP or HTTPS URL.',
     );
   }
 }
 
 async function loadReportFixture(path) {
-  const fixture = JSON.parse(await readFile(path, 'utf8'));
-  if (!isRecord(fixture)) throw new Error('Report fixture must be a JSON object.');
-  if (!isRecord(fixture.version)) throw new Error('Report fixture must include version.');
-  if (!isRecord(fixture.log)) throw new Error('Report fixture must include log.');
-  if (typeof fixture.sessionId !== 'string' || fixture.sessionId.length === 0) {
-    throw new Error('Report fixture must include sessionId.');
+  try {
+    const fixture = JSON.parse(await readFile(path, 'utf8'));
+    if (!isRecord(fixture)) throw new Error();
+    if (!isRecord(fixture.version)) throw new Error();
+    if (!isRecord(fixture.log)) throw new Error();
+    if (typeof fixture.sessionId !== 'string' || fixture.sessionId.length === 0) {
+      throw new Error();
+    }
+    if (
+      typeof fixture.elapsedSmokeDurationMs !== 'number'
+      || !Number.isFinite(fixture.elapsedSmokeDurationMs)
+      || fixture.elapsedSmokeDurationMs < 0
+    ) {
+      throw new Error();
+    }
+    return fixture;
+  } catch {
+    throw new SmokeReportError(
+      'fixture_load_failed',
+      'The report fixture could not be loaded as a valid fixture.',
+    );
   }
-  if (
-    typeof fixture.elapsedSmokeDurationMs !== 'number'
-    || !Number.isFinite(fixture.elapsedSmokeDurationMs)
-    || fixture.elapsedSmokeDurationMs < 0
-  ) {
-    throw new Error('Report fixture must include a non-negative elapsedSmokeDurationMs.');
+}
+
+async function validateWavFile(path) {
+  try {
+    const wav = await stat(path);
+    if (!wav.isFile()) throw new Error();
+  } catch {
+    throw new SmokeReportError(
+      'wav_file_unavailable',
+      'The WAV scenario requires an existing readable file.',
+    );
   }
-  return fixture;
 }
 
 async function runLiveJourney(url, { textOnly, wavPath }) {
   const startedAt = Date.now();
   const milestones = [];
-  const browserConsoleErrors = [];
+  let browserConsoleErrorCount = 0;
   const mark = (label) => milestones.push({ elapsedMs: Date.now() - startedAt, label });
   const shots = '/tmp/noura-shots';
   await mkdir(shots, { recursive: true });
@@ -157,11 +258,14 @@ async function runLiveJourney(url, { textOnly, wavPath }) {
     });
     const page = await context.newPage();
     page.on('console', (message) => {
-      if (message.type() === 'error') browserConsoleErrors.push(message.text());
+      if (message.type() === 'error') browserConsoleErrorCount += 1;
     });
-    page.on('pageerror', (error) => browserConsoleErrors.push(String(error)));
+    page.on('pageerror', () => {
+      browserConsoleErrorCount += 1;
+    });
 
     await page.goto(new URL('/', url).href, { waitUntil: 'networkidle' });
+    const navigatedOrigin = new URL(page.url()).origin;
     mark('home_loaded');
     await page.screenshot({ path: `${shots}/e2e-home.png` });
 
@@ -224,11 +328,11 @@ async function runLiveJourney(url, { textOnly, wavPath }) {
     await page.waitForTimeout(9_000);
     await page.screenshot({ path: `${shots}/e2e-teaching-2.png` });
     const journeyState = await page.evaluate(() => ({
-      captions: [...document.querySelectorAll('.lesson__caption, .lesson__child-line')]
-        .map((element) => element.textContent),
-      boardItems: document.querySelectorAll('.board__item').length,
-      concept: document.querySelector('[data-testid=active-concept]')?.textContent ?? null,
-      status: document.querySelector('.lesson__status')?.textContent ?? null,
+      tutorCaptionLineCount: document.querySelectorAll(
+        '.lesson__caption:not(.lesson__caption--placeholder)',
+      ).length,
+      learnerLineCount: document.querySelectorAll('.lesson__child-line').length,
+      boardItemCount: document.querySelectorAll('.board__item').length,
     }));
 
     await page.waitForTimeout(8_000);
@@ -259,11 +363,12 @@ async function runLiveJourney(url, { textOnly, wavPath }) {
     mark('telemetry_log_retrieved');
 
     return {
-      browserConsoleErrors: browserConsoleErrors.slice(0, 20),
+      browserConsoleErrorCount,
       elapsedSmokeDurationMs: Date.now() - startedAt,
       journeyState,
       log,
       milestones,
+      navigatedOrigin,
       sessionId,
       version,
     };
@@ -301,13 +406,7 @@ function buildReport({
   const providerTokenUsage = hasProviderUsage && isRecord(summary.providerUsage)
     ? summary.providerUsage
     : null;
-  const requiredDurationNames = scenario === 'wav'
-    ? [
-        'speech_end_to_response_started',
-        'speech_end_to_first_audio',
-        'tutor_audio_output_duration',
-      ]
-    : ['ask_to_first_audio', 'tutor_audio_output_duration'];
+  const requiredDurationNames = requiredDurationNamesForScenario(scenario);
   const missingDurationNames = requiredDurationNames.filter(
     (name) => !hasDurationAggregate(durations[name]),
   );
@@ -353,7 +452,8 @@ function buildReport({
       ? 'provider_token_usage_from_response_done_only'
       : null,
     liveLatencyClaim: null,
-    baseUrl: url.href,
+    configuredBaseUrl: url.href,
+    navigatedOrigin: normalizedOrigin(observation.navigatedOrigin),
     gitSha: typeof version.gitSha === 'string' ? version.gitSha : null,
     runtimeModelIds: isRecord(version.runtimeModels) ? version.runtimeModels : null,
     scenario,
@@ -380,31 +480,40 @@ function buildReport({
       missingObservationIds,
     },
     requiresAuthorizedLiveVerification,
-    journey: {
-      milestones: Array.isArray(observation.milestones) ? observation.milestones : [],
-      state: isRecord(observation.journeyState) ? observation.journeyState : null,
-      browserConsoleErrors: Array.isArray(observation.browserConsoleErrors)
-        ? observation.browserConsoleErrors
-        : [],
-    },
+    journey: buildJourneyReport(observation),
   };
 }
 
 function buildFailureReport({
+  authorizedLiveRun,
   baseUrl: url,
   providerReportedCostUsd: costUsd,
   scenario,
   offlineFixture,
   error,
 }) {
+  const normalizedError = normalizeReportError(error, offlineFixture);
+  const requiredDurationNames = requiredDurationNamesForScenario(scenario);
+  const preparationStatus = offlineFixture
+    ? 'offline_fixture_failed'
+    : normalizedError.code === 'authorization_required'
+      ? 'live_smoke_not_authorized'
+      : authorizedLiveRun
+        ? 'authorized_live_smoke_failed'
+        : 'live_smoke_preparation_failed';
   return {
     reportSchemaVersion: '1.0.0',
-    preparationStatus: offlineFixture ? 'offline_fixture_failed' : 'authorized_live_smoke_failed',
-    evidenceMode: offlineFixture ? 'offline_fixture_only' : 'live_journey_incomplete',
+    preparationStatus,
+    evidenceMode: offlineFixture
+      ? 'offline_fixture_only'
+      : authorizedLiveRun
+        ? 'authorized_live_journey_incomplete'
+        : 'live_journey_not_started',
     liveProviderEvidenceVerified: false,
     liveProviderEvidenceScope: null,
     liveLatencyClaim: null,
-    baseUrl: url.href,
+    configuredBaseUrl: url instanceof URL ? url.href : null,
+    navigatedOrigin: null,
     scenario,
     providerReportedCostUsd: costUsd,
     providerReportedCostSource: costUsd === null
@@ -412,6 +521,7 @@ function buildFailureReport({
       : 'optional_user_supplied_provider_billing_surface',
     smokeGate: {
       passed: false,
+      requiredDurationNames,
       missingObservationIds: ['complete_smoke_report'],
     },
     requiresAuthorizedLiveVerification: [
@@ -421,15 +531,107 @@ function buildFailureReport({
       ),
       verificationEntry('target_hardware', 'No target-hardware observation was completed.'),
       verificationEntry(
-        offlineFixture ? 'valid_offline_fixture' : 'complete_authorized_live_run',
-        error instanceof Error ? error.message : String(error),
+        offlineFixture
+          ? 'valid_offline_fixture'
+          : authorizedLiveRun
+            ? 'complete_authorized_live_run'
+            : 'explicit_live_authorization',
+        normalizedError.message,
       ),
     ],
     error: {
-      name: error instanceof Error ? error.name : 'Error',
-      message: error instanceof Error ? error.message : String(error),
+      code: normalizedError.code,
+      name: normalizedError.name,
+      message: normalizedError.message,
     },
   };
+}
+
+function inferScenario(argv) {
+  let skipNext = false;
+  for (const argument of argv) {
+    if (skipNext) {
+      skipNext = false;
+      continue;
+    }
+    if (argument === '--report-fixture') {
+      skipNext = true;
+      continue;
+    }
+    if (!argument.startsWith('--')) return 'wav';
+  }
+  return 'text_only';
+}
+
+function requiredDurationNamesForScenario(scenario) {
+  return scenario === 'wav'
+    ? [
+        'speech_end_to_response_started',
+        'speech_end_to_first_audio',
+        'tutor_audio_output_duration',
+      ]
+    : ['ask_to_first_audio', 'tutor_audio_output_duration'];
+}
+
+function buildJourneyReport(observation) {
+  const state = isRecord(observation.journeyState) ? observation.journeyState : {};
+  return {
+    milestones: sanitizeMilestones(observation.milestones),
+    tutorCaptionLineCount: boundedCount(state.tutorCaptionLineCount),
+    learnerLineCount: boundedCount(state.learnerLineCount),
+    boardItemCount: boundedCount(state.boardItemCount),
+    browserConsoleErrorCount: boundedCount(observation.browserConsoleErrorCount),
+  };
+}
+
+function sanitizeMilestones(value) {
+  if (!Array.isArray(value)) return [];
+  const milestones = [];
+  for (const candidate of value) {
+    if (milestones.length >= MAX_RETAINED_MILESTONES) break;
+    if (
+      !isRecord(candidate)
+      || typeof candidate.label !== 'string'
+      || !MILESTONE_LABELS.has(candidate.label)
+      || typeof candidate.elapsedMs !== 'number'
+      || !Number.isFinite(candidate.elapsedMs)
+      || candidate.elapsedMs < 0
+    ) {
+      continue;
+    }
+    milestones.push({
+      elapsedMs: Math.min(Math.round(candidate.elapsedMs), MAX_RETAINED_ELAPSED_MS),
+      label: candidate.label,
+    });
+  }
+  return milestones;
+}
+
+function boundedCount(value) {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return 0;
+  return Math.min(Math.round(value), MAX_RETAINED_COUNT);
+}
+
+function normalizedOrigin(value) {
+  if (typeof value !== 'string') return null;
+  try {
+    const url = new URL(value);
+    return ['http:', 'https:'].includes(url.protocol) ? url.origin : null;
+  } catch {
+    return null;
+  }
+}
+
+function normalizeReportError(error, offlineFixture) {
+  if (error instanceof SmokeReportError) {
+    return error;
+  }
+  return new SmokeReportError(
+    offlineFixture ? 'fixture_load_failed' : 'live_journey_failed',
+    offlineFixture
+      ? 'The report fixture could not be loaded as a valid fixture.'
+      : 'The authorized live journey did not complete.',
+  );
 }
 
 function hasDurationAggregate(value) {

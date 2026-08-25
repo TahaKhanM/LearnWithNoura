@@ -2,7 +2,7 @@
 
 ## Default offline gates
 
-Run the commands in README. Unit/property coverage includes state transitions, response taxonomy, evidence projection, event identity, 1,000 reordered stale-event runs, storage cutoffs, owner-aware operations, render inspection, committed animation cancellation, character priority/smoothing, Postgres snapshot parity, summary citation validation, security capabilities and Production fail-closed configuration.
+Run the commands in README, including `npm run test:smoke-report` before `npm test`. The deterministic Node reporter suite checks the explicit authorization boundary, structured configuration failures, truncation/provider-usage gates, and privacy redaction without opening a browser or claiming live evidence. Unit/property coverage includes state transitions, response taxonomy, evidence projection, event identity, 1,000 reordered stale-event runs, storage cutoffs, owner-aware operations, render inspection, committed animation cancellation, character priority/smoothing, Postgres snapshot parity, summary citation validation, security capabilities and Production fail-closed configuration.
 
 Browser suites use a dedicated synthetic SQLite directory and separate ports. Visual baselines cover Noura Home at 1440×900, 834×1112, 390×844 and 844×390 plus every canonical semantic scene at desktop, tablet and mobile-focus widths.
 
@@ -22,21 +22,22 @@ The synthetic live reporter is prepared but remains unexecuted:
 
 ```bash
 # DO NOT RUN without explicit deployment and live-provider authorization.
-NOURA_BASE_URL=https://authorized-origin.example node scripts/e2e-live.mjs --text-only
+NOURA_BASE_URL=https://authorized-origin.example npm run e2e:live -- --authorized-live-run --text-only
 ```
 
 The WAV form supplies one synthetic capture path instead of `--text-only`. The script captures the created lesson session ID, then uses the still-authenticated browser context to read `/api/version` and `GET /api/sessions/:id/log`; it never queries SQLite directly. A WAV report exits nonzero when speech-end-to-response-start, speech-end-to-first-audio, tutor-audio-duration, or provider-usage observations are absent. Text-only mode requires its text-ask first-audio boundary and does not require either speech-end metric.
 
 The one JSON report contains:
 
-- preparation/evidence mode, base URL, git SHA, runtime model IDs, scenario, session ID, and elapsed smoke duration;
+- preparation/evidence mode, configured base URL, actual navigated origin, git SHA, runtime model IDs, scenario, session ID, and elapsed smoke duration;
 - the exact sum of logged `tutor_audio_output_duration` rows;
 - provider-reported token-usage totals projected from `response.done.response.usage`;
 - optional `NOURA_PROVIDER_REPORTED_COST_USD`, explicitly identified as user-supplied from the provider billing surface;
 - the complete Phase 0 duration/count summary and truncation state;
+- bounded tutor-caption, learner-line, board-item, and browser-console-error counts plus hardcoded milestone labels, never raw caption, learner, or console strings;
 - smoke-gate missing observations plus `requiresAuthorizedLiveVerification` entries for acoustic onset/silence and target hardware.
 
-`response.done` does not contain a per-response currency charge. After an authorized run, any currency amount must be manually reconciled from the provider billing surface. A local rate-card multiplication is allowed only when labelled **estimate**, with the rate-card source and source date; it is never “provider-reported cost.” `--report-fixture <path>` is an offline deterministic report check and remains explicitly non-provider evidence even if its fixture contains token counts.
+The smoke gate fails if the parent-scoped log is truncated or provider usage is missing. `response.done` does not contain a per-response currency charge. After an authorized run, any currency amount must be manually reconciled from the provider billing surface. A local rate-card multiplication is allowed only when labelled **estimate**, with the rate-card source and source date; it is never “provider-reported cost.” `--report-fixture <path>` and `npm run test:smoke-report` are offline deterministic report checks and remain explicitly non-provider evidence even if a fixture contains token counts.
 
 A future authorized pre-merge live smoke remains limited to two short synthetic sessions. Never loop paid calls for screenshots. Until that authorization and run occur, live-provider behavior, live latency, billed currency, acoustic silence, and target-hardware results remain UNVERIFIED.
 
