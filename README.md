@@ -49,12 +49,18 @@ See [the active architecture ADR](docs/architecture/2026-08-23-noura-runtime-arc
 Privacy-safe observations are validated, pseudonymized with deterministic
 session-scoped opaque identifiers and submitted to a bounded ordered
 non-blocking writer before storage as released `metric` events in the existing
-event log. Known server queue, persistence and browser pre-ready queue loss is
-recorded as `telemetry_gap`. `GET /api/sessions/:id/log` is the
+event log. Local SQLite metric append and reconnect-history lookup execute in a
+worker thread; managed Postgres remains natively asynchronous. Identifier
+tokens carry server-owned encoding metadata and a session-derived prefix and
+ordered `telemetry_gap` barriers preserve the position, reason and value of
+known server queue, persistence and browser pre-ready queue loss.
+`GET /api/sessions/:id/log` is the
 parent-authenticated, parent-owned projection of those released events; it
 returns bounded duration aggregates, interruption outcomes,
-section/reconnect/disappearance counts, provider token-usage totals, gap totals and a metric-only timeline. It does not copy transcripts, evidence text or raw
-turn/generation/provider/visual/section/object identifiers.
+section/reconnect/disappearance counts, provider token-usage totals, gap totals and a metric-only timeline. The smoke reporter reconstructs the complete
+summary from ascending timeline rows before accepting it. The log does not copy
+transcripts, evidence text or raw turn/generation/provider/visual/section/
+object identifiers.
 
 The Phase 0 timing boundaries are deliberately narrow:
 

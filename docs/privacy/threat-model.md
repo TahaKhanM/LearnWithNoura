@@ -55,8 +55,11 @@ No free-form telemetry dimension or content field is allowed. Telemetry events a
 
 Pseudonymization occurs only after runtime trust checks. The same identifier
 field correlates within one session but not across sessions. Projection repeats
-the transform for historical or direct typed rows and recognizes the versioned
-opaque format to avoid double hashing.
+the transform for historical or direct typed rows. Preparation always
+transforms input, even if it imitates a token. Projection preserves a token
+only when server-owned encoding metadata is valid and the token's
+session-derived prefix belongs to the projected session; forged metadata and
+cross-session copied tokens are transformed again.
 
 Gap rows expose known bounded-queue and persistence loss, but they do not prove
 delivery after an unrecovered browser disconnect. Final observations in a

@@ -43,6 +43,10 @@ object identifier into a deterministic field-specific token scoped to that
 session. A per-connection `SessionTelemetryWriter` enqueues without awaiting
 repository work and drains one bounded FIFO in order, so metrics cannot delay
 response creation, cancellation, cue/response completion, or later messages.
+Production SQLite telemetry append and prior-start paging run in a worker
+thread; managed Postgres uses its native async boundary. The FIFO contains
+normal observations and ordered gap barriers, so a failed or overflowed item
+is accounted for at its stream position without changing lesson behavior.
 Provider terminal observations are deduplicated by a bounded response-ID set.
 Provider-side observers read token categories from
 `response.done.response.usage`, derive tutor-audio duration from that response’s
@@ -114,7 +118,7 @@ The avatar uses real output energy for mouth state, direct CSS-variable eye moti
 
 ## Persistence and evidence
 
-Local SQLite uses numbered migrations, foreign keys, latest-event pagination, immutable ended-session cutoffs and linked continuation. `noura.db` migration checkpoints and verifies the historical database, writes a verified backup, compares row counts, and retains the source.
+Local SQLite uses numbered migrations, foreign keys, latest-event pagination, immutable ended-session cutoffs and linked continuation. `noura.db` migration checkpoints and verifies the historical database, writes a verified backup, compares row counts, and retains the source. Its general domain adapter remains synchronous, while the Phase 0 telemetry append/prior-start operations alone cross the dedicated bounded worker boundary.
 
 Evidence observations include UUID, child/session, normalized concept, taxonomy, observation, confidence basis, source event IDs, exact normalized excerpt/span, task/opportunity kind, retrieval lineage, independence, domain result, turn/generation, contradiction/supersession and time. `projectConceptHistories` is the single status projection used by summary validation, deterministic summary fallback and Parent concept history. One opportunity is identified by session, task and turn, so duplicate classifications of one answer count once. “Demonstrated” requires distinct independent positive opportunities, explanation/application, and a chronologically later retrieval whose `retrievalOf` names the earlier task. Latest negative or unresolved contradiction/misconception remains uncertain. Explicit correction resolves a misconception but is not confirmation; fresh independent application/explanation plus tied later retrieval is required afterward. Self-correction remains reduced-independence. Summary claims cite evidence IDs and carry a calibrated `progressing|demonstrated` label; invalid IDs, projection overclaims or invented quoted spans cause deterministic fallback.
 

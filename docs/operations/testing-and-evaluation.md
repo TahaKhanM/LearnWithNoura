@@ -6,9 +6,11 @@ Run the commands in README, including `npm run test:smoke-report` before
 `npm test`. The deterministic Node reporter suite checks the explicit
 authorization boundary, origin-only configuration, redirect/session/schema
 mismatches, exact endpoint allowlists, safe-integer duration/provider rows,
-timeline/summary provider reconciliation, telemetry-gap/truncation gates, and
+strictly ascending timeline order, complete duration/lifecycle/usage/gap
+summary reconstruction, telemetry-gap/truncation gates, and
 privacy redaction without opening a browser or claiming live evidence.
-Unit/property coverage also delays repository reads/writes to prove telemetry
+Unit/property coverage also uses a synchronous-blocking fake plus the
+production SQLite worker adapter to prove telemetry
 cannot delay response creation, cancellation, cue/response completion, or
 later messages; verifies writer ordering/gap recovery, identifier
 pseudonymization, strict response correlation, terminal deduplication, storage

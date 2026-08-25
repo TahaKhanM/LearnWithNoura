@@ -111,11 +111,24 @@ function telemetryFixture(overrides = {}) {
         },
       },
       timeline: [
-        { eventId: 1, ts: 1, name: 'tutor_audio_output_duration', unit: 'ms', value: 250 },
-        { eventId: 2, ts: 2, name: 'tutor_audio_output_duration', unit: 'ms', value: 300 },
+        { eventId: 1, ts: 1, name: 'ask_to_first_audio', unit: 'ms', value: 420 },
+        { eventId: 2, ts: 2, name: 'tutor_audio_output_duration', unit: 'ms', value: 250 },
+        { eventId: 3, ts: 3, name: 'tutor_audio_output_duration', unit: 'ms', value: 300 },
         {
-          eventId: 3,
-          ts: 3,
+          eventId: 4,
+          ts: 4,
+          name: 'section_navigation',
+          unit: 'count',
+          value: 1,
+          dimensions: {
+            previousSemanticGroupId: 'encoded-a',
+            nextSemanticGroupId: 'encoded-b',
+            cause: 'picker',
+          },
+        },
+        {
+          eventId: 5,
+          ts: 5,
           name: 'provider_usage',
           unit: 'count',
           value: providerUsage.totalTokens,
@@ -329,24 +342,26 @@ test('fixture reporting rejects redirect, session, schema, and runtime-model mis
 
 test('provider evidence requires safe, positive, internally consistent timeline rows and matching summary totals', async (t) => {
   const unsafe = Number.MAX_SAFE_INTEGER + 1;
+  const usageRow = (fixture) =>
+    fixture.log.timeline.find((entry) => entry.name === 'provider_usage');
   const cases = [
     {
       name: 'zero provider total',
       mutate(fixture) {
-        fixture.log.timeline[2].value = 0;
-        fixture.log.timeline[2].dimensions.totalTokens = 0;
+        usageRow(fixture).value = 0;
+        usageRow(fixture).dimensions.totalTokens = 0;
       },
     },
     {
       name: 'row value mismatch',
       mutate(fixture) {
-        fixture.log.timeline[2].value = 179;
+        usageRow(fixture).value = 179;
       },
     },
     {
       name: 'row token breakdown mismatch',
       mutate(fixture) {
-        fixture.log.timeline[2].dimensions.outputAudioTokens = 54;
+        usageRow(fixture).dimensions.outputAudioTokens = 54;
       },
     },
     {
@@ -364,7 +379,29 @@ test('provider evidence requires safe, positive, internally consistent timeline 
     {
       name: 'unsafe provider row',
       mutate(fixture) {
-        fixture.log.timeline[2].dimensions.inputTextTokens = unsafe;
+        usageRow(fixture).dimensions.inputTextTokens = unsafe;
+      },
+    },
+    {
+      name: 'provider summary addition overflow',
+      mutate(fixture) {
+        const row = usageRow(fixture);
+        const duplicate = structuredClone(row);
+        row.value = Number.MAX_SAFE_INTEGER;
+        row.dimensions = {
+          ...Object.fromEntries(Object.keys(row.dimensions).map((key) => [key, 0])),
+          totalTokens: Number.MAX_SAFE_INTEGER,
+          inputTextTokens: Number.MAX_SAFE_INTEGER,
+        };
+        duplicate.eventId = 6;
+        duplicate.ts = 6;
+        duplicate.value = 1;
+        duplicate.dimensions = {
+          ...Object.fromEntries(Object.keys(duplicate.dimensions).map((key) => [key, 0])),
+          totalTokens: 1,
+          inputTextTokens: 1,
+        };
+        fixture.log.timeline.push(duplicate);
       },
     },
   ];
@@ -383,12 +420,130 @@ test('provider evidence requires safe, positive, internally consistent timeline 
   }
 });
 
+test('summary is reconstructed exactly from ascending lifecycle timeline rows', async (t) => {
+  const cases = [
+    {
+      name: 'summary-only required duration',
+      mutate(fixture) {
+        fixture.log.timeline = fixture.log.timeline.filter(
+          (entry) => entry.name !== 'ask_to_first_audio',
+        );
+      },
+    },
+    {
+      name: 'lifecycle count mismatch',
+      mutate(fixture) {
+        fixture.log.summary.sectionSwitchCount = 2;
+      },
+    },
+    {
+      name: 'reconnect count mismatch',
+      mutate(fixture) {
+        fixture.log.timeline.push({
+          eventId: 6,
+          ts: 6,
+          name: 'session_reconnect',
+          unit: 'count',
+          value: 1,
+        });
+      },
+    },
+    {
+      name: 'disappearance count mismatch',
+      mutate(fixture) {
+        fixture.log.timeline.push({
+          eventId: 6,
+          ts: 6,
+          name: 'tutor_object_disappearance',
+          unit: 'count',
+          value: 1,
+          dimensions: { objectId: 'encoded-object', cause: 'scene_mutation' },
+        });
+      },
+    },
+    {
+      name: 'unresolved barge-in correlation mismatch',
+      mutate(fixture) {
+        fixture.log.timeline.push(
+          {
+            eventId: 6,
+            ts: 6,
+            name: 'barge_in_gate_outcome',
+            unit: 'count',
+            value: 1,
+            providerResponseId: 'encoded-response',
+            dimensions: { outcome: 'confirmed' },
+          },
+          {
+            eventId: 7,
+            ts: 7,
+            name: 'barge_in_cancel_outcome',
+            unit: 'count',
+            value: 1,
+            providerResponseId: 'encoded-response',
+            dimensions: { outcome: 'provider_completed' },
+          },
+        );
+        fixture.log.summary.bargeIn.confirmed = 1;
+        fixture.log.summary.bargeIn.providerCompleted = 1;
+        fixture.log.summary.bargeIn.unresolved = 1;
+      },
+    },
+    {
+      name: 'wrong duration latest',
+      mutate(fixture) {
+        fixture.log.summary.durations.tutor_audio_output_duration.latest = 250;
+      },
+    },
+    {
+      name: 'wrong rounded duration mean',
+      mutate(fixture) {
+        fixture.log.summary.durations.tutor_audio_output_duration.mean = 274;
+      },
+    },
+    {
+      name: 'out-of-order event ids',
+      mutate(fixture) {
+        fixture.log.timeline[1].eventId = 3;
+        fixture.log.timeline[2].eventId = 2;
+      },
+    },
+    {
+      name: 'tutor duration total overflow',
+      mutate(fixture) {
+        fixture.log.timeline[1].value = Number.MAX_SAFE_INTEGER;
+        fixture.log.timeline[2].value = 1;
+        fixture.log.summary.durations.tutor_audio_output_duration = {
+          count: 2,
+          min: 1,
+          max: Number.MAX_SAFE_INTEGER,
+          mean: 4_503_599_627_370_496,
+          latest: 1,
+        };
+      },
+    },
+  ];
+
+  for (const row of cases) {
+    await t.test(row.name, () => {
+      const fixture = telemetryFixture();
+      row.mutate(fixture);
+      const result = runScript([
+        '--report-fixture',
+        writeFixture(`summary-reconciliation-${row.name}`, fixture),
+        '--text-only',
+      ]);
+      assertStructuredFailure(result, 'fixture_load_failed');
+    });
+  }
+});
+
 test('any telemetry gap fails the deterministic smoke gate', () => {
   const fixture = telemetryFixture();
   fixture.log.summary.telemetryGaps.client_queue_overflow = 2;
   fixture.log.timeline.push({
-    eventId: 4,
-    ts: 4,
+    eventId: 6,
+    ts: 6,
     name: 'telemetry_gap',
     unit: 'count',
     value: 2,
@@ -415,6 +570,7 @@ test('WAV fixture fails when speech metrics and provider usage are absent', () =
   const emptyUsage = Object.fromEntries(Object.keys(providerUsage).map((key) => [key, 0]));
   const fixture = telemetryFixture();
   fixture.log.summary.durations = {};
+  fixture.log.summary.sectionSwitchCount = 0;
   fixture.log.summary.providerUsage = emptyUsage;
   fixture.log.timeline = [];
   const fixturePath = writeFixture('wav-missing-observations', fixture);
@@ -473,10 +629,10 @@ test('retained report serializes counts and hardcoded labels without raw browser
       { elapsedMs: 20, label: milestoneSecret },
     ],
   });
-  fixture.log.timeline[2].turnId = tutorSecret;
-  fixture.log.timeline[2].generationId = learnerSecret;
-  fixture.log.timeline[2].providerResponseId = consoleSecret;
-  fixture.log.timeline[2].semanticObjectId = milestoneSecret;
+  fixture.log.timeline[4].turnId = tutorSecret;
+  fixture.log.timeline[4].generationId = learnerSecret;
+  fixture.log.timeline[4].providerResponseId = consoleSecret;
+  fixture.log.timeline[4].semanticObjectId = milestoneSecret;
   const fixturePath = writeFixture('privacy-sentinels', fixture);
   const result = runScript(['--report-fixture', fixturePath, '--text-only']);
 
