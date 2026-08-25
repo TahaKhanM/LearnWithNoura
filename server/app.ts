@@ -10,6 +10,7 @@ import {
   ProxyLifecycleRegistry,
   ShutdownGate,
   runQuiescentShutdown,
+  type ShutdownDisposition,
 } from './realtime/lifecycle.js';
 import { assertRealtimePromptReadable } from './realtime/instructions.js';
 import { readRuntimeConfig, productionReadinessErrors, EVENT_SCHEMA_VERSION } from './runtimeConfig.js';
@@ -321,14 +322,14 @@ server.on('upgrade', async (request, socket, head) => {
 });
 
 let repositoryClose: Promise<void> | null = null;
-let serverShutdown: Promise<void> | null = null;
+let serverShutdown: Promise<ShutdownDisposition> | null = null;
 
 export function closeRepository(): Promise<void> {
   repositoryClose ??= repository.close();
   return repositoryClose;
 }
 
-export function shutdownServer(): Promise<void> {
+export function shutdownServer(): Promise<ShutdownDisposition> {
   serverShutdown ??= runQuiescentShutdown({
     stopAccepting: () => {
       shutdownGate.begin();

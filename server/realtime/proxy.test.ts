@@ -1469,6 +1469,46 @@ describe('realtime proxy telemetry', () => {
       event.type === 'learner_said')).toEqual([]);
   });
 
+  it('force-terminalizes unresolved history without late telemetry submission', async () => {
+    vi.stubGlobal('WebSocket', FakeUpstream);
+    const repo = new Repo(openTestDb());
+    const child = repo.createChild('Maya', 10);
+    const session = repo.createSession(child.id, 'fractions');
+    let resolveHistory!: (value: boolean) => void;
+    const history = new Promise<boolean>((resolve) => { resolveHistory = resolve; });
+    const metrics: MetricObservation[] = [];
+    let lifecycle: ProxyLifecycle | null = null;
+    const client = new FakeClient();
+    await connectRealtimeProxy(client as never, {
+      apiKey: 'offline-fixture',
+      model: 'gpt-realtime-2.1',
+      repo,
+      telemetryRepo: {
+        async appendMetric(_sessionId, observation) {
+          metrics.push(observation);
+          return metrics.length;
+        },
+        hasPriorReleasedSessionStart: () => history,
+      },
+      sessionId: session.id,
+      createUpstream: () => new FakeUpstream() as never,
+      onLifecycle: (value) => { lifecycle = value; },
+    });
+    client.emit('message', JSON.stringify(createRuntimeEvent({
+      sessionId: session.id,
+      connectionEpoch: 1,
+      turnId: 'turn-first',
+      generationId: 'generation-first',
+    }, 0, 'start', {})));
+    const closing = lifecycle!.close();
+    await lifecycle!.forceTerminal();
+    await expect(lifecycle!.completion).resolves.toBeUndefined();
+    resolveHistory(true);
+    await flushProxy();
+    expect(metrics).toEqual([]);
+    await expect(closing).resolves.toBeUndefined();
+  });
+
   it('flushes response cues and sends response_done when telemetry persistence fails', async () => {
     vi.stubGlobal('WebSocket', FakeUpstream);
     const repo = new Repo(openTestDb());

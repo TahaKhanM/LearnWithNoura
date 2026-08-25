@@ -93,6 +93,7 @@ export interface ProxyOptions {
 export interface ProxyLifecycle {
   completion: Promise<void>;
   close(): Promise<void>;
+  forceTerminal(): Promise<void>;
 }
 
 export async function connectRealtimeProxy(client: ClientSocket, options: ProxyOptions): Promise<void> {
@@ -129,6 +130,7 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
 
   let upstreamReady = false;
   let teardownPromise: Promise<void> | null = null;
+  let forceTerminalPromise: Promise<void> | null = null;
   let resolveCompletion!: () => void;
   let rejectCompletion!: (error: unknown) => void;
   const lifecycleCompletion = new Promise<void>((resolve, reject) => {
@@ -501,11 +503,15 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
     void task.finally(() => backgroundTelemetry.delete(task)).catch(() => {});
   }
 
-  function beginTeardown(reason: string): Promise<void> {
-    if (teardownPromise) return teardownPromise;
+  function sealAdmission(): void {
     acceptingFrames = false;
     upstream.onmessage = null;
     client.off('message', handleClientMessage);
+  }
+
+  function beginTeardown(reason: string): Promise<void> {
+    if (teardownPromise) return teardownPromise;
+    sealAdmission();
     const sealedClientWork = clientWork;
     const sealedUpstreamWork = upstreamWork;
     log(`session ${sessionId}: closed (${reason})`);
@@ -535,6 +541,26 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
     return teardownPromise;
   }
 
+  function forceTerminal(): Promise<void> {
+    if (forceTerminalPromise) return forceTerminalPromise;
+    sealAdmission();
+    telemetryWriter.forceTerminal();
+    backgroundTelemetry.clear();
+    try {
+      upstream.close();
+    } catch {
+      /* already closed */
+    }
+    try {
+      client.close();
+    } catch {
+      /* already closed */
+    }
+    resolveCompletion();
+    forceTerminalPromise = Promise.resolve();
+    return forceTerminalPromise;
+  }
+
   function teardown(reason: string): void {
     void beginTeardown(reason).catch((error: unknown) => {
       log(`session ${sessionId}: telemetry close error ${String(error).slice(0, 160)}`);
@@ -544,6 +570,7 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
   options.onLifecycle?.({
     completion: lifecycleCompletion,
     close: () => beginTeardown('server shutdown'),
+    forceTerminal,
   });
 
   upstream.onopen = () => {
