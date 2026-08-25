@@ -172,6 +172,8 @@ describe('buildSessionTelemetryLog', () => {
     expect(log.summary.telemetryGaps).toEqual({
       server_queue_overflow: 0,
       server_persistence_failure: 0,
+      server_history_failure: 0,
+      server_accounting_overflow: 0,
       client_queue_overflow: 0,
     });
     expect(log.timeline.map((entry) => entry.eventId)).toEqual([
@@ -422,6 +424,8 @@ describe('buildSessionTelemetryLog', () => {
     expect(buildSessionTelemetryLog('session-1', events, 5_000).summary.telemetryGaps).toEqual({
       server_queue_overflow: 4,
       server_persistence_failure: 2,
+      server_history_failure: 0,
+      server_accounting_overflow: 0,
       client_queue_overflow: 4,
     });
   });

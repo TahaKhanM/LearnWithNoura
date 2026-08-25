@@ -303,6 +303,26 @@ server.on('upgrade', async (request, socket, head) => {
   });
 });
 
+let repositoryClose: Promise<void> | null = null;
+
+export function closeRepository(): Promise<void> {
+  repositoryClose ??= repository.close();
+  return repositoryClose;
+}
+
 server.on('close', () => {
-  void repository.close();
+  void closeRepository().catch((error: unknown) => {
+    console.error(`[shutdown] telemetry repository close failed: ${String(error).slice(0, 240)}`);
+  });
 });
+
+for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+  process.once(signal, () => {
+    server.close(() => {
+      void closeRepository().catch((error: unknown) => {
+        console.error(`[shutdown] ${signal} close failed: ${String(error).slice(0, 240)}`);
+        process.exitCode = 1;
+      });
+    });
+  });
+}

@@ -78,7 +78,7 @@ describe('SessionTelemetryWriter', () => {
     expect(persisted.every((entry) => JSON.stringify(entry).includes('turn-private'))).toBe(false);
   });
 
-  it('persists A, B, then the overflow gap for C without moving the gap forward', async () => {
+  it('keeps accepted normal observations FIFO and reports later overflow', async () => {
     const firstWrite = deferred<number>();
     const firstWriteStarted = deferred<void>();
     const persisted: MetricObservation[] = [];
@@ -135,10 +135,10 @@ describe('SessionTelemetryWriter', () => {
     await expect(writer.flush()).resolves.toBeUndefined();
 
     expect(persisted.map((entry) => entry.name)).toEqual([
-      'telemetry_gap',
       'speech_end_to_first_audio',
+      'telemetry_gap',
     ]);
-    expect(persisted[0]).toMatchObject({
+    expect(persisted[1]).toMatchObject({
       value: 1,
       dimensions: { reason: 'server_persistence_failure' },
     });
@@ -166,10 +166,9 @@ describe('SessionTelemetryWriter', () => {
     await writer.flush();
     expect(persisted.map((entry) => entry.name)).toEqual([
       'telemetry_gap',
-      'speech_end_to_first_audio',
     ]);
     expect(persisted[0]).toMatchObject({
-      value: 1,
+      value: 2,
       dimensions: { reason: 'server_persistence_failure' },
     });
   });
@@ -203,20 +202,94 @@ describe('SessionTelemetryWriter', () => {
     }, context);
     writer.submit(metric(20), context);
     await writer.flush();
-    expect(persisted).toEqual([]);
+    expect(persisted).toEqual([
+      expect.objectContaining({
+        name: 'telemetry_gap',
+        value: 1,
+        dimensions: { reason: 'server_queue_overflow' },
+      }),
+    ]);
 
     failClientGap = false;
     await writer.flush();
     expect(persisted).toEqual([
       expect.objectContaining({
         name: 'telemetry_gap',
+        value: 1,
+        dimensions: { reason: 'server_queue_overflow' },
+      }),
+      expect.objectContaining({
+        name: 'telemetry_gap',
         value: 7,
         dimensions: { reason: 'client_queue_overflow' },
       }),
-      expect.objectContaining({ name: 'speech_end_to_first_audio', value: 20 }),
     ]);
     expect(attempted.filter((entry) =>
       entry.name === 'telemetry_gap' &&
       entry.dimensions.reason === 'server_persistence_failure')).toEqual([]);
+  });
+
+  it('keeps fixed exact per-reason totals under alternating saturation', async () => {
+    const persisted: MetricObservation[] = [];
+    const writer = new SessionTelemetryWriter({
+      async appendMetric(_sessionId, observation) {
+        persisted.push(observation);
+        return persisted.length;
+      },
+      hasPriorReleasedSessionStart: async () => false,
+    }, 'session-1', { capacity: 1 });
+    const reasons = [
+      'server_queue_overflow',
+      'server_persistence_failure',
+      'server_history_failure',
+      'client_queue_overflow',
+    ] as const;
+    for (let index = 0; index < 400; index += 1) {
+      const reason = reasons[index % reasons.length]!;
+      writer.submit({
+        schemaVersion: '1.0.0',
+        name: 'telemetry_gap',
+        unit: 'count',
+        value: 1,
+        dimensions: { reason },
+      }, { ...context, connectionEpoch: index });
+    }
+    expect(writer.submit(metric(99), context)).toBe(false);
+    await writer.flush();
+    const totals = Object.fromEntries(persisted
+      .filter((entry) => entry.name === 'telemetry_gap')
+      .map((entry) => [entry.dimensions.reason, entry.value]));
+    expect(totals).toMatchObject({
+      server_queue_overflow: 101,
+      server_persistence_failure: 100,
+      server_history_failure: 100,
+      client_queue_overflow: 100,
+    });
+  });
+
+  it('fails completeness closed when an internal counter cannot add safely', async () => {
+    const persisted: MetricObservation[] = [];
+    const writer = new SessionTelemetryWriter({
+      async appendMetric(_sessionId, observation) {
+        persisted.push(observation);
+        return persisted.length;
+      },
+      hasPriorReleasedSessionStart: async () => false,
+    }, 'session-1');
+    for (const value of [Number.MAX_SAFE_INTEGER, 1]) {
+      writer.submit({
+        schemaVersion: '1.0.0',
+        name: 'telemetry_gap',
+        unit: 'count',
+        value,
+        dimensions: { reason: 'server_queue_overflow' },
+      }, context);
+    }
+    await writer.flush();
+    expect(persisted).toContainEqual(expect.objectContaining({
+      name: 'telemetry_gap',
+      dimensions: { reason: 'server_accounting_overflow' },
+      value: 1,
+    }));
   });
 });

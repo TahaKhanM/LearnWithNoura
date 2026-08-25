@@ -4,8 +4,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { DomainRepository } from '../store/domain.js';
+import { Repo } from '../store/repo.js';
 import type { MetricObservation } from '../../shared/sessionTelemetry.js';
 import {
+  AsyncDomainTelemetryRepository,
   SqliteWorkerTelemetryRepository,
   YieldingTelemetryRepository,
 } from './telemetryRepository.js';
@@ -31,6 +33,26 @@ function observation(value: number): MetricObservation {
 }
 
 describe('telemetry repository adapters', () => {
+  it('awaits registered writers and surfaces failing shutdown flushes', async () => {
+    const adapter = new AsyncDomainTelemetryRepository({} as DomainRepository);
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => { release = resolve; });
+    adapter.registerWriter({ flush: () => pending });
+    const shutdown = adapter.shutdown(1_000);
+    let settled = false;
+    void shutdown.then(() => { settled = true; });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    release();
+    await expect(shutdown).resolves.toBeUndefined();
+
+    const failing = new AsyncDomainTelemetryRepository({} as DomainRepository);
+    failing.registerWriter({
+      flush: async () => { throw new Error('flush failed'); },
+    });
+    await expect(failing.shutdown(1_000)).rejects.toThrow('flush failed');
+  });
+
   it('yields before invoking a synchronous in-memory repository', async () => {
     const calls: string[] = [];
     const repo = {
@@ -93,7 +115,7 @@ describe('telemetry repository adapters', () => {
     expect(heartbeat).toHaveBeenCalledOnce();
     await expect(append).resolves.toBeGreaterThan(1);
     await expect(lookup).resolves.toBe(true);
-    await expect(adapter.close()).resolves.toBeUndefined();
+    await expect(adapter.shutdown()).resolves.toBeUndefined();
     await expect(adapter.appendMetric('session-1', observation(13)))
       .rejects.toThrow(/closed/i);
 
@@ -104,5 +126,43 @@ describe('telemetry repository adapters', () => {
     verify.close();
     expect(row?.type).toBe('metric');
     expect(JSON.parse(row?.payload ?? '{}')).toMatchObject({ value: 12 });
+  });
+
+  it('serializes worker append against the immutable SQLite end cutoff', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'noura-end-race-'));
+    directories.push(directory);
+    const databasePath = join(directory, 'noura.db');
+    const database = new DatabaseSync(databasePath);
+    database.exec(`
+      PRAGMA journal_mode = WAL;
+      CREATE TABLE children (
+        id TEXT PRIMARY KEY, parent_id TEXT NOT NULL, name TEXT NOT NULL,
+        age INTEGER, created_at INTEGER NOT NULL
+      );
+      CREATE TABLE sessions (
+        id TEXT PRIMARY KEY, child_id TEXT NOT NULL, goal TEXT NOT NULL,
+        status TEXT NOT NULL, started_at INTEGER NOT NULL, ended_at INTEGER,
+        summary_json TEXT, parent_session_id TEXT, ended_event_id INTEGER,
+        summary_version INTEGER, summary_through_event_id INTEGER
+      );
+      CREATE TABLE events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL,
+        ts INTEGER NOT NULL, type TEXT NOT NULL, payload TEXT NOT NULL,
+        released INTEGER NOT NULL DEFAULT 1, release_requested INTEGER NOT NULL DEFAULT 0
+      );
+    `);
+    const repo = new Repo(database);
+    const child = repo.createChild('Synthetic', 10);
+    const session = repo.createSession(child.id, 'cutoff race');
+    const adapter = new SqliteWorkerTelemetryRepository(databasePath);
+    const append = adapter.appendMetric(session.id, observation(12));
+    const ended = repo.endSession(session.id, null);
+    await Promise.allSettled([append]);
+    const events = repo.listEventsForInternalAudit(session.id);
+    expect(ended?.endedEventId).toBe(repo.getSession(session.id)?.endedEventId);
+    expect(events.every((event) =>
+      event.id <= (ended?.endedEventId ?? 0))).toBe(true);
+    await adapter.shutdown();
+    database.close();
   });
 });

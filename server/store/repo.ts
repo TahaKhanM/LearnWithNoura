@@ -222,14 +222,22 @@ export class Repo {
   }
 
   endSession(id: string, summary: SessionSummary | null): Session | null {
-    const current = this.getSession(id);
-    if (!current) return null;
-    if (current.status === 'active') {
-      const cutoff = this.latestEventId(id);
-      this.db
-        .prepare("UPDATE sessions SET status = 'ended', ended_at = ?, ended_event_id = ? WHERE id = ? AND status = 'active'")
-        .run(Date.now(), cutoff, id);
+    this.db.exec('BEGIN IMMEDIATE');
+    let current: Session | null;
+    try {
+      current = this.getSession(id);
+      if (current?.status === 'active') {
+        const cutoff = this.latestEventId(id);
+        this.db
+          .prepare("UPDATE sessions SET status = 'ended', ended_at = ?, ended_event_id = ? WHERE id = ? AND status = 'active'")
+          .run(Date.now(), cutoff, id);
+      }
+      this.db.exec('COMMIT');
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
     }
+    if (!current) return null;
     if (summary) this.setSessionSummary(id, summary, current.summaryVersion ?? 1);
     return this.getSession(id);
   }

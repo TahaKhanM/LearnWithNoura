@@ -58,7 +58,8 @@ function isAllowedClientMetric(input: MetricInput): boolean {
       return input.dimensions.outcome === 'local_only_rejected' ||
         input.dimensions.outcome === 'provider_only_rejected';
     case 'telemetry_gap':
-      return input.dimensions.reason === 'client_queue_overflow';
+      return input.dimensions.reason === 'client_queue_overflow' &&
+        input.value <= 64;
     default:
       return false;
   }
@@ -480,7 +481,9 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
   function teardown(reason: string): void {
     if (closed) return;
     closed = true;
-    void telemetryWriter.flush();
+    void telemetryWriter.close().catch((error: unknown) => {
+      log(`session ${sessionId}: telemetry close error ${String(error).slice(0, 160)}`);
+    });
     log(`session ${sessionId}: closed (${reason})`);
     try {
       upstream.close();
@@ -1418,7 +1421,15 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
               value: 1,
             }, metricContextFromIdentity(envelope));
           })
-          .catch(() => {});
+          .catch(() => {
+            telemetryWriter.submit({
+              schemaVersion: TELEMETRY_SCHEMA_VERSION,
+              name: 'telemetry_gap',
+              unit: 'count',
+              value: 1,
+              dimensions: { reason: 'server_history_failure' },
+            }, metricContextFromIdentity(envelope));
+          });
         break;
       }
 

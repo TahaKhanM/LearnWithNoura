@@ -15,6 +15,8 @@ const LIFECYCLE_NAMES = new Set([
 const GAP_REASONS = [
   'server_queue_overflow',
   'server_persistence_failure',
+  'server_history_failure',
+  'server_accounting_overflow',
   'client_queue_overflow',
 ];
 const USAGE_KEYS = [

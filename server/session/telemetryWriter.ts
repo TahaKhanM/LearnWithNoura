@@ -10,28 +10,33 @@ import type { SessionTelemetryRepository } from './telemetryRepository.js';
 const DEFAULT_CAPACITY = 256;
 
 type ObservationEntry = {
-  kind: 'observation';
   observation: Exclude<MetricObservation, { legacy: true }>;
   context: MetricContext;
 };
 
-type GapEntry = {
-  kind: 'gap';
-  reason: TelemetryGapReason;
+type GapCounter = {
   value: number;
-  context: MetricContext;
+  context: MetricContext | null;
 };
 
-type QueueEntry = ObservationEntry | GapEntry;
+const GAP_REASONS: readonly TelemetryGapReason[] = [
+  'server_queue_overflow',
+  'server_persistence_failure',
+  'server_history_failure',
+  'server_accounting_overflow',
+  'client_queue_overflow',
+];
 
 export class SessionTelemetryWriter {
-  private readonly queue: QueueEntry[] = [];
-  private readonly pressureTotals = new Map<TelemetryGapReason, GapEntry>();
+  private readonly queue: ObservationEntry[] = [];
+  private readonly gaps: Record<TelemetryGapReason, GapCounter> =
+    Object.fromEntries(GAP_REASONS.map((reason) => [
+      reason,
+      { value: 0, context: null },
+    ])) as Record<TelemetryGapReason, GapCounter>;
   private readonly capacity: number;
-  private readonly gapCapacity: number;
   private drainPromise: Promise<void> | null = null;
-  private normalCount = 0;
-  private gapCount = 0;
+  private unregister: (() => void) | null = null;
 
   constructor(
     private readonly repo: SessionTelemetryRepository,
@@ -39,7 +44,7 @@ export class SessionTelemetryWriter {
     options: { capacity?: number } = {},
   ) {
     this.capacity = Math.max(1, Math.floor(options.capacity ?? DEFAULT_CAPACITY));
-    this.gapCapacity = this.capacity + 3;
+    this.unregister = repo.registerWriter?.(this) ?? null;
   }
 
   submit(input: unknown, context: MetricContext): boolean {
@@ -58,12 +63,21 @@ export class SessionTelemetryWriter {
     if (current) await current;
   }
 
+  async close(): Promise<void> {
+    try {
+      await this.flush();
+    } finally {
+      this.unregister?.();
+      this.unregister = null;
+    }
+  }
+
   private enqueue(
     observation: Exclude<MetricObservation, { legacy: true }>,
     context: MetricContext,
   ): boolean {
     if (observation.name === 'telemetry_gap') {
-      this.appendGap(
+      this.addGap(
         observation.dimensions.reason,
         observation.value,
         context,
@@ -71,15 +85,8 @@ export class SessionTelemetryWriter {
       this.startDrain();
       return true;
     }
-    const inFlightNormal = this.drainPromise &&
-      this.queue[0]?.kind === 'observation'
-      ? 1
-      : 0;
-    if (
-      this.normalCount - inFlightNormal >= this.capacity ||
-      this.pressureTotals.size > 0
-    ) {
-      this.appendGap(
+    if (this.hasPendingGap() || this.queue.length >= this.capacity) {
+      this.addGap(
         'server_queue_overflow',
         1,
         context,
@@ -87,49 +94,30 @@ export class SessionTelemetryWriter {
       this.startDrain();
       return false;
     }
-    this.queue.push({ kind: 'observation', observation, context });
-    this.normalCount += 1;
+    this.queue.push({ observation, context });
     this.startDrain();
     return true;
   }
 
-  private appendGap(
+  private addGap(
     reason: TelemetryGapReason,
     value: number,
     context: MetricContext,
   ): void {
-    const previous = this.queue.at(-1);
-    if (
-      previous?.kind === 'gap' &&
-      previous.reason === reason &&
-      sameContext(previous.context, context) &&
-      Number.isSafeInteger(previous.value + value)
-    ) {
-      previous.value += value;
+    const counter = this.gaps[reason];
+    const next = counter.value + value;
+    if (!Number.isSafeInteger(next)) {
+      this.gaps.server_accounting_overflow.value = 1;
+      this.gaps.server_accounting_overflow.context ??= context;
       return;
     }
-    if (this.gapCount >= this.gapCapacity) {
-      const pending = this.pressureTotals.get(reason);
-      if (pending && Number.isSafeInteger(pending.value + value)) {
-        pending.value += value;
-      } else if (!pending) {
-        this.pressureTotals.set(reason, {
-          kind: 'gap',
-          reason,
-          value,
-          context,
-        });
-      }
-      return;
-    }
-    this.queue.push({ kind: 'gap', reason, value, context });
-    this.gapCount += 1;
+    counter.value = next;
+    counter.context ??= context;
   }
 
   private startDrain(): void {
     if (this.drainPromise) return;
-    this.materializePressureTotals();
-    if (this.queue.length === 0) return;
+    if (this.queue.length === 0 && !this.hasPendingGap()) return;
 
     let blocked = false;
     const current = Promise.resolve()
@@ -149,55 +137,39 @@ export class SessionTelemetryWriter {
 
   private async drain(): Promise<boolean> {
     while (this.queue.length > 0) {
-      const entry = this.queue[0];
-      if (!entry) return false;
-      if (entry.kind === 'gap') {
-        const observation = gapObservation(
-          this.sessionId,
-          entry.reason,
-          entry.value,
-          entry.context,
-        );
-        if (!observation) return true;
-        try {
-          await this.repo.appendMetric(this.sessionId, observation);
-          this.queue.shift();
-          this.gapCount -= 1;
-          this.materializePressureTotals();
-        } catch {
-          return true;
-        }
-        continue;
-      }
-
+      const entry = this.queue.shift();
+      if (!entry) break;
       try {
         await this.repo.appendMetric(this.sessionId, entry.observation);
-        this.queue.shift();
-        this.normalCount -= 1;
       } catch {
-        this.queue[0] = {
-          kind: 'gap',
-          reason: 'server_persistence_failure',
-          value: 1,
-          context: entry.context,
-        };
-        this.normalCount -= 1;
-        this.gapCount += 1;
+        this.addGap('server_persistence_failure', 1, entry.context);
+      }
+    }
+    for (const reason of GAP_REASONS) {
+      const counter = this.gaps[reason];
+      if (counter.value < 1 || !counter.context) continue;
+      const attemptedValue = counter.value;
+      const attemptedContext = counter.context;
+      const observation = gapObservation(
+        this.sessionId,
+        reason,
+        attemptedValue,
+        attemptedContext,
+      );
+      if (!observation) return true;
+      try {
+        await this.repo.appendMetric(this.sessionId, observation);
+        counter.value -= attemptedValue;
+        if (counter.value === 0) counter.context = null;
+      } catch {
+        return true;
       }
     }
     return false;
   }
 
-  private materializePressureTotals(): void {
-    while (this.gapCount < this.gapCapacity && this.pressureTotals.size > 0) {
-      const pending = this.pressureTotals.entries().next().value as
-        | [TelemetryGapReason, GapEntry]
-        | undefined;
-      if (!pending) return;
-      this.pressureTotals.delete(pending[0]);
-      this.queue.push(pending[1]);
-      this.gapCount += 1;
-    }
+  private hasPendingGap(): boolean {
+    return GAP_REASONS.some((reason) => this.gaps[reason].value > 0);
   }
 }
 
@@ -216,9 +188,3 @@ function gapObservation(
   }, context);
 }
 
-function sameContext(left: MetricContext, right: MetricContext): boolean {
-  return left.connectionEpoch === right.connectionEpoch &&
-    left.turnId === right.turnId &&
-    left.generationId === right.generationId &&
-    left.providerResponseId === right.providerResponseId;
-}

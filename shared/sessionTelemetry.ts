@@ -48,6 +48,8 @@ const TutorObjectDisappearanceCauseSchema = z.enum(['scene_mutation', 'unknown']
 export const TELEMETRY_GAP_REASONS = [
   'server_queue_overflow',
   'server_persistence_failure',
+  'server_history_failure',
+  'server_accounting_overflow',
   'client_queue_overflow',
 ] as const;
 

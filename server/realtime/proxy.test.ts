@@ -1167,6 +1167,13 @@ describe('realtime proxy telemetry', () => {
       value: 1,
       dimensions: { outcome: 'confirmed' },
     }],
+    ['oversized client_queue_overflow', {
+      schemaVersion: '1.0.0',
+      name: 'telemetry_gap',
+      unit: 'count',
+      value: Number.MAX_SAFE_INTEGER,
+      dimensions: { reason: 'client_queue_overflow' },
+    }],
     ['unknown_metric', {
       schemaVersion: '1.0.0',
       name: 'unknown_metric',
@@ -1360,6 +1367,7 @@ describe('realtime proxy telemetry', () => {
     const repo = new Repo(openTestDb());
     const child = repo.createChild('Maya', 10);
     const session = repo.createSession(child.id, 'fractions');
+    repo.addEvent(session.id, 'learner_said', { text: 'released history' });
     const client = new FakeClient();
     await connectRealtimeProxy(client as never, {
       apiKey: 'offline-fixture',
@@ -1390,6 +1398,15 @@ describe('realtime proxy telemetry', () => {
     expect(upstream.sent.map((raw) => JSON.parse(raw) as { type: string }))
       .toContainEqual(expect.objectContaining({ type: 'response.create' }));
     expect(listEvents(session.id).filter((event) => event.type === 'session_started')).toHaveLength(1);
+    expect(listEvents(session.id).filter((event) => event.type === 'metric').map(
+      (event) => event.payload,
+    )).toEqual([
+      expect.objectContaining({
+        name: 'telemetry_gap',
+        dimensions: { reason: 'server_history_failure' },
+        value: 1,
+      }),
+    ]);
     expect(client.sent.some((event) => event.type === 'error')).toBe(false);
   });
 
