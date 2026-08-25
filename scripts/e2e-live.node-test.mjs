@@ -20,7 +20,7 @@ function runScript(args, env = {}) {
     encoding: 'utf8',
     env: {
       ...process.env,
-      NOURA_BASE_URL: 'https://smoke.example.test/base-path',
+      NOURA_BASE_URL: 'https://smoke.example.test',
       NOURA_PROVIDER_REPORTED_COST_USD: '',
       ...env,
     },
@@ -69,9 +69,13 @@ function telemetryFixture(overrides = {}) {
   return {
     elapsedSmokeDurationMs: 12_345,
     sessionId: 'session-fixture',
-    navigatedOrigin: 'https://navigated.example.test',
+    navigatedOrigin: 'https://smoke.example.test',
     version: {
+      brand: 'Noura',
+      version: '1.0.0',
       gitSha: 'fixture-sha',
+      environment: 'test',
+      schemaVersion: '1.0.0',
       runtimeModels: {
         realtime: 'gpt-realtime-fixture',
         transcription: 'transcription-fixture',
@@ -99,7 +103,12 @@ function telemetryFixture(overrides = {}) {
         sectionSwitchCount: 1,
         reconnectCount: 0,
         tutorObjectDisappearanceCount: 0,
-        providerUsage,
+        providerUsage: { ...providerUsage },
+        telemetryGaps: {
+          server_queue_overflow: 0,
+          server_persistence_failure: 0,
+          client_queue_overflow: 0,
+        },
       },
       timeline: [
         { eventId: 1, ts: 1, name: 'tutor_audio_output_duration', unit: 'ms', value: 250 },
@@ -110,7 +119,7 @@ function telemetryFixture(overrides = {}) {
           name: 'provider_usage',
           unit: 'count',
           value: providerUsage.totalTokens,
-          dimensions: providerUsage,
+          dimensions: { ...providerUsage },
         },
       ],
     },
@@ -131,7 +140,7 @@ test('help is immediate offline success and documents explicit authorization', (
     NOURA_PROVIDER_REPORTED_COST_USD: 'not a cost',
   });
 
-  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.status, 0, result.stdout || result.stderr);
   assert.equal(result.stderr, '');
   assert.match(result.stdout, /npm run e2e:live -- --authorized-live-run/);
   assert.match(result.stdout, /does not verify live provider evidence/i);
@@ -165,12 +174,12 @@ test('offline fixture reports telemetry without claiming live provider verificat
     NOURA_PROVIDER_REPORTED_COST_USD: '1.25',
   });
 
-  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.status, 0, result.stdout || result.stderr);
   const report = parseReport(result);
   assert.equal(report.preparationStatus, 'offline_fixture');
   assert.equal(report.liveProviderEvidenceVerified, false);
-  assert.equal(report.configuredBaseUrl, 'https://smoke.example.test/base-path');
-  assert.equal(report.navigatedOrigin, 'https://navigated.example.test');
+  assert.equal(report.configuredBaseUrl, 'https://smoke.example.test');
+  assert.equal(report.navigatedOrigin, 'https://smoke.example.test');
   assert.equal(report.gitSha, 'fixture-sha');
   assert.deepEqual(report.runtimeModelIds, fixture.version.runtimeModels);
   assert.equal(report.sessionId, 'session-fixture');
@@ -232,6 +241,174 @@ test('argument, URL, cost, and fixture errors use the structured failure report'
       assertStructuredFailure(runScript(row.args, row.env), row.code);
     });
   }
+});
+
+test('base URL accepts only a credential-free HTTP(S) origin and never reports URL secrets', async (t) => {
+  const fixturePath = writeFixture('valid-origin-only', telemetryFixture());
+  const secret = 'PRIVATE_QUERY_CREDENTIAL_SENTINEL';
+  const invalidUrls = [
+    `https://user:${secret}@smoke.example.test`,
+    `https://smoke.example.test/private/${secret}`,
+    `https://smoke.example.test/?token=${secret}`,
+    `https://smoke.example.test/#${secret}`,
+    'ftp://smoke.example.test',
+  ];
+
+  for (const value of invalidUrls) {
+    await t.test(value.replace(secret, '[secret]'), () => {
+      const result = runScript(['--report-fixture', fixturePath, '--text-only'], {
+        NOURA_BASE_URL: value,
+      });
+      const report = assertStructuredFailure(result, 'invalid_base_url');
+      assert.equal(report.configuredBaseUrl, null);
+      assert.doesNotMatch(JSON.stringify(report), new RegExp(secret));
+    });
+  }
+});
+
+test('fixture reporting rejects redirect, session, schema, and runtime-model mismatches', async (t) => {
+  const secret = 'MALICIOUS_ENDPOINT_SENTINEL';
+  const cases = [
+    {
+      name: 'redirected origin',
+      fixture: telemetryFixture({ navigatedOrigin: 'https://redirected.example.test' }),
+    },
+    {
+      name: 'session mismatch',
+      fixture: telemetryFixture({
+        log: {
+          ...telemetryFixture().log,
+          sessionId: 'different-session',
+        },
+      }),
+    },
+    {
+      name: 'log schema mismatch',
+      fixture: telemetryFixture({
+        log: {
+          ...telemetryFixture().log,
+          schemaVersion: '9.9.9',
+        },
+      }),
+    },
+    {
+      name: 'version schema mismatch',
+      fixture: telemetryFixture({
+        version: {
+          ...telemetryFixture().version,
+          schemaVersion: '9.9.9',
+        },
+      }),
+    },
+    {
+      name: 'arbitrary runtime model field',
+      fixture: telemetryFixture({
+        version: {
+          ...telemetryFixture().version,
+          runtimeModels: {
+            ...telemetryFixture().version.runtimeModels,
+            credential: secret,
+          },
+        },
+      }),
+    },
+  ];
+
+  for (const row of cases) {
+    await t.test(row.name, () => {
+      const result = runScript([
+        '--report-fixture',
+        writeFixture(`mismatch-${row.name}`, row.fixture),
+        '--text-only',
+      ]);
+      assertStructuredFailure(result, 'fixture_load_failed');
+      assert.doesNotMatch(result.stdout, new RegExp(secret));
+    });
+  }
+});
+
+test('provider evidence requires safe, positive, internally consistent timeline rows and matching summary totals', async (t) => {
+  const unsafe = Number.MAX_SAFE_INTEGER + 1;
+  const cases = [
+    {
+      name: 'zero provider total',
+      mutate(fixture) {
+        fixture.log.timeline[2].value = 0;
+        fixture.log.timeline[2].dimensions.totalTokens = 0;
+      },
+    },
+    {
+      name: 'row value mismatch',
+      mutate(fixture) {
+        fixture.log.timeline[2].value = 179;
+      },
+    },
+    {
+      name: 'row token breakdown mismatch',
+      mutate(fixture) {
+        fixture.log.timeline[2].dimensions.outputAudioTokens = 54;
+      },
+    },
+    {
+      name: 'summary mismatch',
+      mutate(fixture) {
+        fixture.log.summary.providerUsage.totalTokens = 181;
+      },
+    },
+    {
+      name: 'unsafe duration aggregate',
+      mutate(fixture) {
+        fixture.log.summary.durations.ask_to_first_audio.latest = unsafe;
+      },
+    },
+    {
+      name: 'unsafe provider row',
+      mutate(fixture) {
+        fixture.log.timeline[2].dimensions.inputTextTokens = unsafe;
+      },
+    },
+  ];
+
+  for (const row of cases) {
+    await t.test(row.name, () => {
+      const fixture = telemetryFixture();
+      row.mutate(fixture);
+      const result = runScript([
+        '--report-fixture',
+        writeFixture(`malformed-${row.name}`, fixture),
+        '--text-only',
+      ]);
+      assertStructuredFailure(result, 'fixture_load_failed');
+    });
+  }
+});
+
+test('any telemetry gap fails the deterministic smoke gate', () => {
+  const fixture = telemetryFixture();
+  fixture.log.summary.telemetryGaps.client_queue_overflow = 2;
+  fixture.log.timeline.push({
+    eventId: 4,
+    ts: 4,
+    name: 'telemetry_gap',
+    unit: 'count',
+    value: 2,
+    dimensions: { reason: 'client_queue_overflow' },
+  });
+  const result = runScript([
+    '--report-fixture',
+    writeFixture('telemetry-gap', fixture),
+    '--text-only',
+  ]);
+
+  assert.equal(result.status, 1, result.stderr);
+  const report = parseReport(result);
+  assert.equal(report.smokeGate.passed, false);
+  assert.deepEqual(report.telemetryGaps, {
+    server_queue_overflow: 0,
+    server_persistence_failure: 0,
+    client_queue_overflow: 2,
+  });
+  assert(report.smokeGate.missingObservationIds.includes('telemetry_gaps_present'));
 });
 
 test('WAV fixture fails when speech metrics and provider usage are absent', () => {
@@ -296,10 +473,14 @@ test('retained report serializes counts and hardcoded labels without raw browser
       { elapsedMs: 20, label: milestoneSecret },
     ],
   });
+  fixture.log.timeline[2].turnId = tutorSecret;
+  fixture.log.timeline[2].generationId = learnerSecret;
+  fixture.log.timeline[2].providerResponseId = consoleSecret;
+  fixture.log.timeline[2].semanticObjectId = milestoneSecret;
   const fixturePath = writeFixture('privacy-sentinels', fixture);
   const result = runScript(['--report-fixture', fixturePath, '--text-only']);
 
-  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.status, 0, result.stdout || result.stderr);
   const report = parseReport(result);
   const serialized = JSON.stringify(report);
   assert.doesNotMatch(serialized, new RegExp(tutorSecret));
