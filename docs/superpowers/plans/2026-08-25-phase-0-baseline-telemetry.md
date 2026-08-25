@@ -94,6 +94,12 @@ flushes before bounded repository shutdown. Gap counters are completeness
 evidence, not chronological event evidence; only accepted normal observations
 retain FIFO ordering.
 
+The final distributed follow-up additionally requires truthful typed flush
+failure, close-without-unregister on incomplete persistence, global gap-empty
+draining, proxy lifecycle tracking through prior-start settlement, ordered
+WebSocket/proxy/repository/worker shutdown, and a transactional PostgreSQL
+session-row lock before every event insert.
+
 ## File Structure
 
 **Create**

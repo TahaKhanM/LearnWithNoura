@@ -2,12 +2,14 @@
 
 ## Second-review status
 
-The lifecycle/accounting follow-up is complete at code head `fcf8a64`.
+The distributed lifecycle follow-up is complete at code head `f2d02c5`.
 Browser/visual/accessibility evidence remains intentionally pending controller
 rerun; no live/provider/hardware claim is added.
 
 ## Proven offline
 
+- Distributed lifecycle code head: `f2d02c5` against reviewer head `887d21a`.
+  The code commit is `f2d02c5`.
 - Lifecycle hardening code head: `fcf8a64` against reviewer head `b4281da`.
   Commits are `524af68` (ratified contract) and `fcf8a64` (lifecycle fixes).
   The preceding wave was `4fced4d` against `fef2bc8`.
@@ -45,11 +47,11 @@ rerun; no live/provider/hardware claim is added.
   failed seven new reconciliation assertions. Final GREEN evidence:
   - focused shared/session-log/recorder/writer/proxy/RealtimeSession/API suite:
     8 files, 104 tests passed;
-  - `npm test`: 49 files, 334 tests passed;
+  - `npm test`: 50 files, 342 tests passed;
   - `npm run test:smoke-report`: 45 tests passed;
-  - `npm run test:integration`: 49 files, 329 tests passed;
+  - `npm run test:integration`: 50 files, 342 tests passed;
   - `npm run test:security`: 3 files, 16 tests passed;
-  - `npm run test:storage`: 3 files, 5 tests passed;
+  - `npm run test:storage`: 3 files, 6 tests passed;
   - `npm run build`: 147 modules transformed;
   - `npm run typecheck:server`, `npm run lint`, `npm run test:brand`,
     `npm run test:runtime-models` (8/8 assertions), and `git diff --check`
@@ -57,6 +59,10 @@ rerun; no live/provider/hardware claim is added.
 - Per instruction, browser/visual/accessibility suites were not run in this fix
   wave. Their earlier pre-hardening results are historical only; the controller
   must rerun every browser gate against the reviewed head.
+- Final distributed focused writer/repository/proxy/lifecycle/Postgres/storage
+  suite: 7 files, 73 tests passed. Flush now rejects incomplete state, proxy
+  completion awaits history producers, shutdown is quiescent, and Postgres
+  append locks the session row before insert.
 - No visual snapshot, runtime model/provider identifier, `response.create` or
   VAD ownership, learner draft/Done behavior, tutor permanence behavior, broad
   parent-route cache policy, dependency, migration, table, or service changed.

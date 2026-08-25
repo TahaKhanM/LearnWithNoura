@@ -165,3 +165,26 @@ silently caught. Shared telemetry lifecycle management stops new submissions,
 waits a finite shutdown interval for registered writers to flush, then closes
 the worker with handled errors. The bound is shutdown safety, not a lesson
 timer.
+
+## Distributed shutdown and cutoff clarification
+
+`flush()` is a truth boundary: it succeeds only when both the normal FIFO and
+all fixed gap counters are empty. A persistence attempt that cannot progress
+raises typed `TELEMETRY_INCOMPLETE_FLUSH`; failed `close()` retains
+registration so repository shutdown can retry. Closing stops new submissions,
+and a counter added after its enum position was visited restarts the drain
+until the global empty condition is true.
+
+Server shutdown is quiescent and ordered: reject new upgrades, close active
+WebSockets, await each proxy's client/upstream work and prior-start telemetry,
+close its writer, then stop repository writer registration and flush registered
+writers before worker closure. The two five-second bounds apply only to process
+shutdown and never to lesson behavior.
+
+Postgres event append and session end now acquire conflicting `FOR UPDATE`
+locks on the same session row inside transactions. If append wins, its commit
+precedes the end transaction's cutoff query; if end wins, append observes
+`ended` and rejects. `pg-mem` does not model real PostgreSQL concurrent row-lock
+blocking, so the deterministic test asserts transaction and query order
+(`BEGIN` → session `FOR UPDATE` → insert → `COMMIT`); the immutable-end contract
+test separately verifies rejection after end.

@@ -483,3 +483,10 @@ in-process callback as a sufficient asynchronous repository boundary:
 - Reconnect-history failures record completeness loss.
 - Repository shutdown stops telemetry acceptance, waits a documented finite
   bound for registered writers, then closes the worker with handled errors.
+- Writer flush rejects with typed incompleteness unless every normal row and
+  gap counter is empty; failed close remains registered for shutdown retry.
+- Proxy lifecycle completion includes client/upstream chains and prior-start
+  callbacks before writer close. Server shutdown closes active WebSockets and
+  awaits these handles before repository shutdown.
+- PostgreSQL append locks the session row transactionally before active-state
+  validation and insert, serializing across instances with the end cutoff lock.
