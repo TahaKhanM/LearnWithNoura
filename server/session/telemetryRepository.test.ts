@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { DomainRepository } from '../store/domain.js';
 import { Repo } from '../store/repo.js';
+import { SessionTelemetryWriter } from './telemetryWriter.js';
 import type { MetricObservation } from '../../shared/sessionTelemetry.js';
 import {
   AsyncDomainTelemetryRepository,
@@ -51,6 +52,34 @@ describe('telemetry repository adapters', () => {
       flush: async () => { throw new Error('flush failed'); },
     });
     await expect(failing.shutdown(1_000)).rejects.toThrow('flush failed');
+  });
+
+  it('retries a writer retained after close failure during repository shutdown', async () => {
+    let available = false;
+    const stored: MetricObservation[] = [];
+    const domain = {
+      async addEvent(_sessionId: string, _type: string, payload: unknown) {
+        if (!available) throw new Error('offline');
+        stored.push(payload as MetricObservation);
+        return stored.length;
+      },
+    } as DomainRepository;
+    const adapter = new AsyncDomainTelemetryRepository(domain);
+    const writer = new SessionTelemetryWriter(adapter, 'session-1');
+    writer.submit(observation(7), {
+      connectionEpoch: 1,
+      turnId: 'turn-1',
+      generationId: 'generation-1',
+    });
+    await expect(writer.close()).rejects.toThrow(/incomplete/i);
+    available = true;
+    await expect(adapter.shutdown()).resolves.toBeUndefined();
+    expect(stored).toEqual([
+      expect.objectContaining({
+        name: 'telemetry_gap',
+        dimensions: { reason: 'server_persistence_failure' },
+      }),
+    ]);
   });
 
   it('yields before invoking a synchronous in-memory repository', async () => {

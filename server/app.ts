@@ -6,6 +6,10 @@ import { WebSocketServer } from 'ws';
 import { createApi } from './api.js';
 import { fallbackTurns } from './fallbackTutor.js';
 import { connectRealtimeProxy } from './realtime/proxy.js';
+import {
+  ProxyLifecycleRegistry,
+  runQuiescentShutdown,
+} from './realtime/lifecycle.js';
 import { assertRealtimePromptReadable } from './realtime/instructions.js';
 import { readRuntimeConfig, productionReadinessErrors, EVENT_SCHEMA_VERSION } from './runtimeConfig.js';
 import { createRepositoryRuntime } from './store/createRepository.js';
@@ -259,8 +263,14 @@ const wss = new WebSocketServer({
   maxPayload: 400_000,
   handleProtocols: (protocols) => protocols.has('noura.v1') ? 'noura.v1' : false,
 });
+const proxyLifecycles = new ProxyLifecycleRegistry();
+let shuttingDown = false;
 
 server.on('upgrade', async (request, socket, head) => {
+  if (shuttingDown) {
+    socket.destroy();
+    return;
+  }
   const url = new URL(request.url ?? '/', 'http://localhost');
   if (url.pathname !== '/ws/lesson' && url.pathname !== '/api/ws') {
     socket.destroy();
@@ -297,6 +307,7 @@ server.on('upgrade', async (request, socket, head) => {
       telemetryRepo: repository.telemetry,
       sessionId,
       log: (line) => console.log(`[realtime] ${line}`),
+      onLifecycle: (lifecycle) => proxyLifecycles.register(lifecycle),
     }).catch(() => {
       try { client.close(1011, 'lesson service unavailable'); } catch { /* already closed */ }
     });
@@ -304,25 +315,34 @@ server.on('upgrade', async (request, socket, head) => {
 });
 
 let repositoryClose: Promise<void> | null = null;
+let serverShutdown: Promise<void> | null = null;
 
 export function closeRepository(): Promise<void> {
   repositoryClose ??= repository.close();
   return repositoryClose;
 }
 
-server.on('close', () => {
-  void closeRepository().catch((error: unknown) => {
-    console.error(`[shutdown] telemetry repository close failed: ${String(error).slice(0, 240)}`);
+export function shutdownServer(): Promise<void> {
+  serverShutdown ??= runQuiescentShutdown({
+    stopAccepting: () => {
+      shuttingDown = true;
+      server.close();
+    },
+    closeClients: () => {
+      for (const client of wss.clients) client.close(1001, 'server shutdown');
+    },
+    closeProxies: () => proxyLifecycles.shutdown(),
+    closeRepository,
+    log: (error: unknown) => {
+      console.error(`[shutdown] ${String(error).slice(0, 240)}`);
+      process.exitCode = 1;
+    },
   });
-});
+  return serverShutdown;
+}
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.once(signal, () => {
-    server.close(() => {
-      void closeRepository().catch((error: unknown) => {
-        console.error(`[shutdown] ${signal} close failed: ${String(error).slice(0, 240)}`);
-        process.exitCode = 1;
-      });
-    });
+    void shutdownServer();
   });
 }

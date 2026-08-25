@@ -87,6 +87,12 @@ export interface ProxyOptions {
   preflightTimeoutMs?: number;
   /** How long to wait for the browser to confirm a staged plan is visible. */
   visibilityTimeoutMs?: number;
+  onLifecycle?: (lifecycle: ProxyLifecycle) => void;
+}
+
+export interface ProxyLifecycle {
+  completion: Promise<void>;
+  close(): Promise<void>;
 }
 
 export async function connectRealtimeProxy(client: ClientSocket, options: ProxyOptions): Promise<void> {
@@ -122,7 +128,18 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
   });
 
   let upstreamReady = false;
-  let closed = false;
+  let teardownPromise: Promise<void> | null = null;
+  let resolveCompletion!: () => void;
+  let rejectCompletion!: (error: unknown) => void;
+  const lifecycleCompletion = new Promise<void>((resolve, reject) => {
+    resolveCompletion = resolve;
+    rejectCompletion = reject;
+  });
+  void lifecycleCompletion.catch(() => {
+    // App lifecycle tracking observes this promise; this guard also covers
+    // direct test callers that intentionally do not install a tracker.
+  });
+  const backgroundTelemetry = new Set<Promise<void>>();
   let toolContinues = 0;
   /** response ids we know were cancelled by barge-in. */
   const cancelledResponses = new Set<string>();
@@ -478,12 +495,13 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
     }
   }
 
-  function teardown(reason: string): void {
-    if (closed) return;
-    closed = true;
-    void telemetryWriter.close().catch((error: unknown) => {
-      log(`session ${sessionId}: telemetry close error ${String(error).slice(0, 160)}`);
-    });
+  function trackTelemetry(task: Promise<void>): void {
+    backgroundTelemetry.add(task);
+    void task.finally(() => backgroundTelemetry.delete(task)).catch(() => {});
+  }
+
+  function beginTeardown(reason: string): Promise<void> {
+    if (teardownPromise) return teardownPromise;
     log(`session ${sessionId}: closed (${reason})`);
     try {
       upstream.close();
@@ -495,7 +513,30 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
     } catch {
       /* already closed */
     }
+    teardownPromise = Promise.allSettled([
+      clientWork,
+      upstreamWork,
+      ...backgroundTelemetry,
+    ]).then(async () => {
+      await telemetryWriter.close();
+      resolveCompletion();
+    }).catch((error: unknown) => {
+      rejectCompletion(error);
+      throw error;
+    });
+    return teardownPromise;
   }
+
+  function teardown(reason: string): void {
+    void beginTeardown(reason).catch((error: unknown) => {
+      log(`session ${sessionId}: telemetry close error ${String(error).slice(0, 160)}`);
+    });
+  }
+
+  options.onLifecycle?.({
+    completion: lifecycleCompletion,
+    close: () => beginTeardown('server shutdown'),
+  });
 
   upstream.onopen = () => {
     sendUpstream({
@@ -1410,7 +1451,7 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
           connectionEpoch: envelope.connectionEpoch,
         });
         requestModelResponse('start', 'session-start');
-        void telemetryRepo
+        const historyTask = telemetryRepo
           .hasPriorReleasedSessionStart(sessionId, startEventId)
           .then((hadPriorStart) => {
             if (!hadPriorStart) return;
@@ -1430,6 +1471,7 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
               dimensions: { reason: 'server_history_failure' },
             }, metricContextFromIdentity(envelope));
           });
+        trackTelemetry(historyTask);
         break;
       }
 

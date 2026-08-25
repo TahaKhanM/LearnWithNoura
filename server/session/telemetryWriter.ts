@@ -27,6 +27,15 @@ const GAP_REASONS: readonly TelemetryGapReason[] = [
   'client_queue_overflow',
 ];
 
+export class TelemetryIncompleteFlushError extends Error {
+  readonly code = 'TELEMETRY_INCOMPLETE_FLUSH';
+
+  constructor(message = 'Telemetry persistence made no progress; flush is incomplete.') {
+    super(message);
+    this.name = 'TelemetryIncompleteFlushError';
+  }
+}
+
 export class SessionTelemetryWriter {
   private readonly queue: ObservationEntry[] = [];
   private readonly gaps: Record<TelemetryGapReason, GapCounter> =
@@ -37,6 +46,7 @@ export class SessionTelemetryWriter {
   private readonly capacity: number;
   private drainPromise: Promise<void> | null = null;
   private unregister: (() => void) | null = null;
+  private accepting = true;
 
   constructor(
     private readonly repo: SessionTelemetryRepository,
@@ -48,28 +58,33 @@ export class SessionTelemetryWriter {
   }
 
   submit(input: unknown, context: MetricContext): boolean {
+    if (!this.accepting) return false;
     const observation = prepareMetric(this.sessionId, input, context);
     return observation ? this.enqueue(observation, context) : false;
   }
 
   submitProviderUsage(usage: unknown, context: MetricContext): boolean {
+    if (!this.accepting) return false;
     const observation = prepareProviderUsage(this.sessionId, usage, context);
     return observation ? this.enqueue(observation, context) : false;
   }
 
   async flush(): Promise<void> {
-    this.startDrain();
-    const current = this.drainPromise;
-    if (current) await current;
+    while (this.queue.length > 0 || this.hasPendingGap()) {
+      this.startDrain();
+      const current = this.drainPromise;
+      if (!current) {
+        throw new TelemetryIncompleteFlushError();
+      }
+      await current;
+    }
   }
 
   async close(): Promise<void> {
-    try {
-      await this.flush();
-    } finally {
-      this.unregister?.();
-      this.unregister = null;
-    }
+    this.accepting = false;
+    await this.flush();
+    this.unregister?.();
+    this.unregister = null;
   }
 
   private enqueue(
@@ -119,19 +134,18 @@ export class SessionTelemetryWriter {
     if (this.drainPromise) return;
     if (this.queue.length === 0 && !this.hasPendingGap()) return;
 
-    let blocked = false;
     const current = Promise.resolve()
       .then(() => this.drain())
-      .then((wasBlocked) => {
-        blocked = wasBlocked;
+      .then((complete) => {
+        if (!complete) throw new TelemetryIncompleteFlushError();
       });
     this.drainPromise = current;
-    void current.then(() => {
+    void current.finally(() => {
       if (this.drainPromise !== current) return;
       this.drainPromise = null;
-      if (!blocked && this.queue.length > 0) {
-        this.startDrain();
-      }
+    }).catch(() => {
+      // The original promise remains rejected for flush/close; this observer
+      // prevents a background drain from becoming an unhandled rejection.
     });
   }
 
@@ -145,27 +159,32 @@ export class SessionTelemetryWriter {
         this.addGap('server_persistence_failure', 1, entry.context);
       }
     }
-    for (const reason of GAP_REASONS) {
-      const counter = this.gaps[reason];
-      if (counter.value < 1 || !counter.context) continue;
-      const attemptedValue = counter.value;
-      const attemptedContext = counter.context;
-      const observation = gapObservation(
-        this.sessionId,
-        reason,
-        attemptedValue,
-        attemptedContext,
-      );
-      if (!observation) return true;
-      try {
-        await this.repo.appendMetric(this.sessionId, observation);
-        counter.value -= attemptedValue;
-        if (counter.value === 0) counter.context = null;
-      } catch {
-        return true;
+    while (this.hasPendingGap()) {
+      let progressed = false;
+      for (const reason of GAP_REASONS) {
+        const counter = this.gaps[reason];
+        if (counter.value < 1 || !counter.context) continue;
+        const attemptedValue = counter.value;
+        const attemptedContext = counter.context;
+        const observation = gapObservation(
+          this.sessionId,
+          reason,
+          attemptedValue,
+          attemptedContext,
+        );
+        if (!observation) return false;
+        try {
+          await this.repo.appendMetric(this.sessionId, observation);
+          counter.value -= attemptedValue;
+          if (counter.value === 0) counter.context = null;
+          progressed = true;
+        } catch {
+          return false;
+        }
       }
+      if (!progressed) return false;
     }
-    return false;
+    return this.queue.length === 0 && !this.hasPendingGap();
   }
 
   private hasPendingGap(): boolean {

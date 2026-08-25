@@ -27,6 +27,7 @@ export interface ManagedSessionTelemetryRepository
 export class AsyncDomainTelemetryRepository
 implements SessionTelemetryRepository {
   private readonly writers = new Set<TelemetryWriterLifecycle>();
+  private acceptingWriters = true;
   constructor(
     private readonly repo: DomainRepository,
     private readonly historyPageSize = DEFAULT_HISTORY_PAGE_SIZE,
@@ -40,11 +41,15 @@ implements SessionTelemetryRepository {
   }
 
   registerWriter(writer: TelemetryWriterLifecycle): () => void {
+    if (!this.acceptingWriters) {
+      throw new Error('Telemetry repository is shutting down.');
+    }
     this.writers.add(writer);
     return () => this.writers.delete(writer);
   }
 
   async shutdown(timeoutMs = TELEMETRY_SHUTDOWN_TIMEOUT_MS): Promise<void> {
+    this.acceptingWriters = false;
     await withShutdownBound(
       Promise.all([...this.writers].map((writer) => writer.flush())),
       timeoutMs,
@@ -185,6 +190,9 @@ implements ManagedSessionTelemetryRepository {
   }
 
   registerWriter(writer: TelemetryWriterLifecycle): () => void {
+    if (this.state !== 'open') {
+      throw new Error('Telemetry repository is shutting down.');
+    }
     this.writers.add(writer);
     return () => this.writers.delete(writer);
   }

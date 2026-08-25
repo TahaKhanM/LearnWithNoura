@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { MetricObservation } from '../../shared/sessionTelemetry.js';
 import type { SessionTelemetryRepository } from './telemetryRepository.js';
-import { SessionTelemetryWriter } from './telemetryWriter.js';
+import {
+  SessionTelemetryWriter,
+  TelemetryIncompleteFlushError,
+} from './telemetryWriter.js';
 
 const context = {
   connectionEpoch: 1,
@@ -159,11 +162,11 @@ describe('SessionTelemetryWriter', () => {
 
     writer.submit(metric(10), context);
     writer.submit(metric(20), context);
-    await writer.flush();
+    await expect(writer.flush()).rejects.toBeInstanceOf(TelemetryIncompleteFlushError);
     expect(persisted).toEqual([]);
 
     available = true;
-    await writer.flush();
+    await expect(writer.flush()).resolves.toBeUndefined();
     expect(persisted.map((entry) => entry.name)).toEqual([
       'telemetry_gap',
     ]);
@@ -201,7 +204,7 @@ describe('SessionTelemetryWriter', () => {
       dimensions: { reason: 'client_queue_overflow' },
     }, context);
     writer.submit(metric(20), context);
-    await writer.flush();
+    await expect(writer.flush()).rejects.toBeInstanceOf(TelemetryIncompleteFlushError);
     expect(persisted).toEqual([
       expect.objectContaining({
         name: 'telemetry_gap',
@@ -291,5 +294,58 @@ describe('SessionTelemetryWriter', () => {
       dimensions: { reason: 'server_accounting_overflow' },
       value: 1,
     }));
+  });
+
+  it('keeps a failed close registered and retries after persistence recovers', async () => {
+    let available = false;
+    let registered = true;
+    const repo = {
+      async appendMetric() {
+        if (!available) throw new Error('offline');
+        return 1;
+      },
+      hasPriorReleasedSessionStart: async () => false,
+      registerWriter() {
+        return () => { registered = false; };
+      },
+    } satisfies SessionTelemetryRepository;
+    const writer = new SessionTelemetryWriter(repo, 'session-1');
+    writer.submit(metric(10), context);
+    await expect(writer.close()).rejects.toBeInstanceOf(TelemetryIncompleteFlushError);
+    expect(registered).toBe(true);
+    expect(writer.submit(metric(20), context)).toBe(false);
+    available = true;
+    await expect(writer.close()).resolves.toBeUndefined();
+    expect(registered).toBe(false);
+  });
+
+  it('revisits an earlier gap reason added while a later reason persists', async () => {
+    const clientGap = deferred<number>();
+    const persisted: MetricObservation[] = [];
+    const writer = new SessionTelemetryWriter({
+      async appendMetric(_sessionId, observation) {
+        persisted.push(observation);
+        if (
+          observation.name === 'telemetry_gap' &&
+          observation.dimensions.reason === 'client_queue_overflow'
+        ) return clientGap.promise;
+        return persisted.length;
+      },
+      hasPriorReleasedSessionStart: async () => false,
+    }, 'session-1');
+    writer.submit({
+      schemaVersion: '1.0.0', name: 'telemetry_gap', unit: 'count', value: 1,
+      dimensions: { reason: 'client_queue_overflow' },
+    }, context);
+    await Promise.resolve();
+    writer.submit({
+      schemaVersion: '1.0.0', name: 'telemetry_gap', unit: 'count', value: 2,
+      dimensions: { reason: 'server_queue_overflow' },
+    }, context);
+    clientGap.resolve(1);
+    await writer.flush();
+    expect(persisted.map((entry) =>
+      entry.name === 'telemetry_gap' ? entry.dimensions.reason : entry.name))
+      .toEqual(['client_queue_overflow', 'server_queue_overflow']);
   });
 });
