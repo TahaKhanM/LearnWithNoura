@@ -404,3 +404,45 @@ Phase 0 is complete only when:
 At that point the phase stops and requests explicit authorization for the
 deployment and synthetic live smoke. Phase 1 does not start until Phase 0's
 acceptance criteria are met.
+
+## Final hardening amendment
+
+The approved hardening decision in
+`2026-08-25-phase-0-telemetry-hardening-decision.md` is part of this design.
+It supersedes the earlier direct-write and reconnect-path wording where they
+conflict.
+
+- Server observations are synchronously prepared, pseudonymized, and submitted
+  to a bounded per-connection `SessionTelemetryWriter`. Its single FIFO drain
+  is never awaited by lesson-critical message handling. Tests and connection
+  close have an explicit `flush()` boundary.
+- The server appends `session_started`, requests the initial model response,
+  then asynchronously pages released history below that new row's exclusive
+  event-ID bound to determine whether to enqueue `session_reconnect`.
+- `telemetry_gap` records positive aggregated loss counts for
+  `server_queue_overflow`, `server_persistence_failure`, and
+  `client_queue_overflow`. Pending server gaps precede later successful
+  observations; client pre-ready eviction is reported after the next `ready`.
+- Raw turn, generation, provider-response, visual-cue, semantic-object,
+  section, and object identifiers are transformed into deterministic
+  field-specific session-scoped opaque tokens only after proxy trust checks.
+  Projection applies the same defense to historical/direct typed rows and does
+  not double-hash versioned opaque tokens.
+- `board_reveal_to_narration` requires exact accepted provider-response
+  correlation. Provider terminal telemetry and pending voice-cancel
+  correlation use bounded per-connection sets and are idempotent by provider
+  response ID.
+- Barge-in summary counts are per observed gate transition, not per semantic
+  speech episode.
+- The session-log repository input is ascending event/server chronology. One
+  exported 5,000-row limit is used by both the endpoint query and truncation
+  projection.
+- The smoke reporter accepts an HTTP(S) origin only and constructs reports from
+  exact endpoint allowlists. It verifies origin, session, schema, safe-integer
+  durations, internally consistent positive provider usage, timeline/summary
+  equality, and absence of telemetry gaps.
+
+Gap rows make known loss visible but cannot prove completeness after a browser
+connection that never reaches another accepted `ready`. Final observations can
+also be lost in an unrecovered fallback or failed transport phase. Such runs
+must remain incomplete and cannot support a live telemetry-completeness claim.
