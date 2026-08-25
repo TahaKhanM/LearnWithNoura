@@ -138,6 +138,20 @@ describe('session telemetry contract', () => {
         dimensions: { objectId: 'object-a', cause },
       }).success).toBe(true);
     }
+
+    for (const reason of [
+      'server_queue_overflow',
+      'server_persistence_failure',
+      'client_queue_overflow',
+    ] as const) {
+      expect(MetricInputSchema.safeParse({
+        schemaVersion: '1.0.0',
+        name: 'telemetry_gap',
+        unit: 'count',
+        value: 3,
+        dimensions: { reason },
+      }).success).toBe(true);
+    }
   });
 
   it('rejects values outside every bounded lifecycle enum', () => {
@@ -173,6 +187,20 @@ describe('session telemetry contract', () => {
         unit: 'count',
         value: 1,
         dimensions: { objectId: 'object-a', cause: 'timeout' },
+      },
+      {
+        schemaVersion: '1.0.0',
+        name: 'telemetry_gap',
+        unit: 'count',
+        value: 0,
+        dimensions: { reason: 'server_queue_overflow' },
+      },
+      {
+        schemaVersion: '1.0.0',
+        name: 'telemetry_gap',
+        unit: 'count',
+        value: 1,
+        dimensions: { reason: 'arbitrary_loss' },
       },
     ];
 

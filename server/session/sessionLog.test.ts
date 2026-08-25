@@ -168,6 +168,11 @@ describe('buildSessionTelemetryLog', () => {
     expect(log.summary.sectionSwitchCount).toBe(1);
     expect(log.summary.reconnectCount).toBe(2);
     expect(log.summary.tutorObjectDisappearanceCount).toBe(1);
+    expect(log.summary.telemetryGaps).toEqual({
+      server_queue_overflow: 0,
+      server_persistence_failure: 0,
+      client_queue_overflow: 0,
+    });
     expect(log.timeline.map((entry) => entry.eventId)).toEqual([
       11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
     ]);
@@ -381,6 +386,116 @@ describe('buildSessionTelemetryLog', () => {
     expect(buildSessionTelemetryLog('session-1', events.slice(0, 99), 100).truncated).toBe(false);
   });
 
+  it('projects aggregated telemetry gaps by bounded reason', () => {
+    const events = [
+      metricEvent(1, {
+        schemaVersion: '1.0.0',
+        name: 'telemetry_gap',
+        unit: 'count',
+        value: 3,
+        dimensions: { reason: 'server_queue_overflow' },
+      }),
+      metricEvent(2, {
+        schemaVersion: '1.0.0',
+        name: 'telemetry_gap',
+        unit: 'count',
+        value: 2,
+        dimensions: { reason: 'server_persistence_failure' },
+      }),
+      metricEvent(3, {
+        schemaVersion: '1.0.0',
+        name: 'telemetry_gap',
+        unit: 'count',
+        value: 4,
+        dimensions: { reason: 'client_queue_overflow' },
+      }),
+      metricEvent(4, {
+        schemaVersion: '1.0.0',
+        name: 'telemetry_gap',
+        unit: 'count',
+        value: 1,
+        dimensions: { reason: 'server_queue_overflow' },
+      }),
+    ];
+
+    expect(buildSessionTelemetryLog('session-1', events, 5_000).summary.telemetryGaps).toEqual({
+      server_queue_overflow: 4,
+      server_persistence_failure: 2,
+      client_queue_overflow: 4,
+    });
+  });
+
+  it('pseudonymizes raw stored identifiers and does not double-hash opaque tokens', () => {
+    const opaque = `tel1_${'A'.repeat(24)}`;
+    const secretValues = [
+      'PRIVATE_NAME_AS_TURN',
+      'PRIVATE_TRANSCRIPT_AS_GENERATION',
+      'sk-secret-provider-response',
+      'private-visual-cue',
+      'private-semantic-object',
+      'private-section-a',
+      'private-section-b',
+      'private-object-id',
+    ];
+    const events = [
+      metricEvent(1, {
+        schemaVersion: '1.0.0',
+        name: 'board_reveal_to_narration',
+        unit: 'ms',
+        value: -10,
+        visualCueId: secretValues[3],
+        semanticObjectId: secretValues[4],
+      }, {
+        providerResponseId: secretValues[2],
+        extraPayloadFields: {
+          turnId: secretValues[0],
+          generationId: secretValues[1],
+        },
+      }),
+      metricEvent(2, {
+        schemaVersion: '1.0.0',
+        name: 'section_navigation',
+        unit: 'count',
+        value: 1,
+        dimensions: {
+          previousSemanticGroupId: secretValues[5],
+          nextSemanticGroupId: secretValues[6],
+          cause: 'picker',
+        },
+      }),
+      metricEvent(3, {
+        schemaVersion: '1.0.0',
+        name: 'tutor_object_disappearance',
+        unit: 'count',
+        value: 1,
+        dimensions: { objectId: secretValues[7], cause: 'scene_mutation' },
+      }),
+      metricEvent(4, {
+        schemaVersion: '1.0.0',
+        name: 'session_reconnect',
+        unit: 'count',
+        value: 1,
+      }, {
+        extraPayloadFields: {
+          turnId: opaque,
+          generationId: opaque,
+        },
+      }),
+    ];
+
+    const log = buildSessionTelemetryLog('session-1', events, 5_000);
+    const serialized = JSON.stringify(log);
+    for (const secret of secretValues) expect(serialized).not.toContain(secret);
+    expect(log.timeline[0]).toMatchObject({
+      turnId: expect.stringMatching(/^tel1_/),
+      generationId: expect.stringMatching(/^tel1_/),
+      providerResponseId: expect.stringMatching(/^tel1_/),
+      visualCueId: expect.stringMatching(/^tel1_/),
+      semanticObjectId: expect.stringMatching(/^tel1_/),
+    });
+    expect(log.timeline[3]).toMatchObject({ turnId: opaque, generationId: opaque });
+  });
+
   it('does not expose payload text outside typed dimensions', () => {
     const log = buildSessionTelemetryLog('session-1', [
       metricEvent(1, {
@@ -404,8 +519,8 @@ describe('buildSessionTelemetryLog', () => {
     expect(JSON.stringify(log)).not.toContain('secret learner text');
     expect(JSON.stringify(log)).not.toContain('Maya');
     expect(log.timeline[0]?.dimensions).toEqual({
-      previousSemanticGroupId: 'group-a',
-      nextSemanticGroupId: 'group-b',
+      previousSemanticGroupId: expect.stringMatching(/^tel1_/),
+      nextSemanticGroupId: expect.stringMatching(/^tel1_/),
       cause: 'picker',
     });
   });

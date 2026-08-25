@@ -1,19 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { openTestDb } from '../store/db.js';
-import type { DomainRepository } from '../store/domain.js';
-import { Repo } from '../store/repo.js';
 import {
   metricContextFromIdentity,
-  recordMetric,
+  prepareMetric,
+  prepareProviderUsage,
 } from './telemetryRecorder.js';
 
 describe('telemetry recorder', () => {
-  it('validates and records a released metric with server-owned context', async () => {
-    const repo = new Repo(openTestDb());
-    const child = repo.createChild('Maya', 10);
-    const session = repo.createSession(child.id, 'fractions');
-
-    const id = await recordMetric(repo, session.id, {
+  it('validates and prepares a metric with pseudonymous server-owned context', () => {
+    const observation = prepareMetric('session-1', {
       schemaVersion: '1.0.0',
       name: 'session_reconnect',
       unit: 'count',
@@ -24,27 +18,18 @@ describe('telemetry recorder', () => {
       generationId: 'generation-0',
     });
 
-    expect(id).toEqual(expect.any(Number));
-    expect(repo.listEvents(session.id)).toEqual([
-      expect.objectContaining({
-        type: 'metric',
-        released: true,
-        payload: expect.objectContaining({
-          name: 'session_reconnect',
-          connectionEpoch: 2,
-          turnId: 'turn-0',
-          generationId: 'generation-0',
-        }),
-      }),
-    ]);
+    expect(observation).toMatchObject({
+      name: 'session_reconnect',
+      connectionEpoch: 2,
+      turnId: expect.stringMatching(/^tel1_[A-Za-z0-9_-]{24}$/),
+      generationId: expect.stringMatching(/^tel1_[A-Za-z0-9_-]{24}$/),
+    });
+    expect(JSON.stringify(observation)).not.toContain('turn-0');
+    expect(JSON.stringify(observation)).not.toContain('generation-0');
   });
 
-  it('returns null and creates no event for invalid input', async () => {
-    const repo = new Repo(openTestDb());
-    const child = repo.createChild('Maya', 10);
-    const session = repo.createSession(child.id, 'fractions');
-
-    const id = await recordMetric(repo, session.id, {
+  it('returns null for invalid input', () => {
+    const observation = prepareMetric('session-1', {
       schemaVersion: '1.0.0',
       name: 'unknown_metric',
       unit: 'count',
@@ -55,27 +40,94 @@ describe('telemetry recorder', () => {
       generationId: 'generation-0',
     });
 
-    expect(id).toBeNull();
-    expect(repo.listEvents(session.id)).toEqual([]);
+    expect(observation).toBeNull();
   });
 
-  it('returns null when metric persistence rejects', async () => {
-    const repo = {
-      addEvent: async () => {
-        throw new Error('telemetry store unavailable');
+  it('pseudonymizes every identifier field consistently within one session', () => {
+    const secretSentinels = {
+      turnId: 'MAYA_PRIVATE_NAME',
+      generationId: 'TRANSCRIPT_SECRET',
+      providerResponseId: 'sk-provider-secret',
+      visualCueId: 'visual-private',
+      semanticObjectId: 'semantic-private',
+      previousSemanticGroupId: 'section-private-a',
+      nextSemanticGroupId: 'section-private-b',
+      objectId: 'object-private',
+    };
+    const context = {
+      connectionEpoch: 3,
+      turnId: secretSentinels.turnId,
+      generationId: secretSentinels.generationId,
+      providerResponseId: secretSentinels.providerResponseId,
+    };
+    const reveal = prepareMetric('session-private', {
+      schemaVersion: '1.0.0',
+      name: 'board_reveal_to_narration',
+      unit: 'ms',
+      value: -20,
+      visualCueId: secretSentinels.visualCueId,
+      semanticObjectId: secretSentinels.semanticObjectId,
+    }, context);
+    const navigation = prepareMetric('session-private', {
+      schemaVersion: '1.0.0',
+      name: 'section_navigation',
+      unit: 'count',
+      value: 1,
+      dimensions: {
+        previousSemanticGroupId: secretSentinels.previousSemanticGroupId,
+        nextSemanticGroupId: secretSentinels.nextSemanticGroupId,
+        cause: 'picker',
       },
-    } as unknown as DomainRepository;
+    }, context);
+    const disappearance = prepareMetric('session-private', {
+      schemaVersion: '1.0.0',
+      name: 'tutor_object_disappearance',
+      unit: 'count',
+      value: 1,
+      dimensions: { objectId: secretSentinels.objectId, cause: 'scene_mutation' },
+    }, context);
+    const serialized = JSON.stringify([reveal, navigation, disappearance]);
 
-    await expect(recordMetric(repo, 'session-1', {
+    for (const secret of Object.values(secretSentinels)) {
+      expect(serialized).not.toContain(secret);
+    }
+    expect(reveal).toMatchObject({
+      turnId: navigation?.turnId,
+      generationId: navigation?.generationId,
+      providerResponseId: navigation?.providerResponseId,
+    });
+    expect(prepareMetric('different-session', {
       schemaVersion: '1.0.0',
       name: 'session_reconnect',
       unit: 'count',
       value: 1,
+    }, context)?.turnId).not.toBe(reveal?.turnId);
+  });
+
+  it('prepares provider usage without retaining provider content', () => {
+    const observation = prepareProviderUsage('session-1', {
+      total_tokens: 3,
+      input_token_details: {
+        text_tokens: 1,
+        audio_tokens: 0,
+        image_tokens: 0,
+        cached_tokens_details: { text_tokens: 0, audio_tokens: 0, image_tokens: 0 },
+      },
+      output_token_details: { text_tokens: 1, audio_tokens: 1 },
+      transcript: 'PRIVATE_TRANSCRIPT',
     }, {
-      connectionEpoch: 2,
-      turnId: 'turn-0',
-      generationId: 'generation-0',
-    })).resolves.toBeNull();
+      connectionEpoch: 1,
+      turnId: 'turn-1',
+      generationId: 'generation-1',
+      providerResponseId: 'response-1',
+    });
+
+    expect(observation).toMatchObject({
+      name: 'provider_usage',
+      value: 3,
+      providerResponseId: expect.stringMatching(/^tel1_/),
+    });
+    expect(JSON.stringify(observation)).not.toContain('PRIVATE_TRANSCRIPT');
   });
 
   it('derives metric context from authoritative identity', () => {

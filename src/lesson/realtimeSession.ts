@@ -109,6 +109,7 @@ export class RealtimeSession {
   private submissionAckTimer: number | null = null;
   private responseTiming = new ResponseTimingTracker();
   private pendingUncorrelatedMetrics: MetricInput[] = [];
+  private pendingClientMetricGapCount = 0;
 
   onBoardOps: (ops: BoardOp[], animate: boolean, identity: GenerationIdentity, cue?: VisualCueMetadata) => Promise<boolean | void> | boolean | void = () => {};
   onLearnerBoardReplay: (ops: BoardOp[], semanticGroupId?: string) => void = () => {};
@@ -260,6 +261,7 @@ export class RealtimeSession {
     if (this.closedByUs) return;
     this.closedByUs = true;
     this.pendingUncorrelatedMetrics = [];
+    this.pendingClientMetricGapCount = 0;
     this.cancelGeneration('lesson ended');
     this.audioIn?.stop();
     this.audioIn = null;
@@ -934,15 +936,26 @@ export class RealtimeSession {
     }
     if (this.pendingUncorrelatedMetrics.length >= MAX_PENDING_UNCORRELATED_METRICS) {
       this.pendingUncorrelatedMetrics.shift();
+      this.pendingClientMetricGapCount += 1;
     }
     this.pendingUncorrelatedMetrics.push(metric.data);
   }
 
   private flushPendingUncorrelatedMetrics(): void {
-    if (this.ws?.readyState !== WebSocket.OPEN || this.pendingUncorrelatedMetrics.length === 0) return;
+    if (this.ws?.readyState !== WebSocket.OPEN) return;
     const pending = this.pendingUncorrelatedMetrics;
     this.pendingUncorrelatedMetrics = [];
     const identity = this.scope.identity;
+    if (this.pendingClientMetricGapCount > 0) {
+      this.sendUsingIdentity(identity, 'metric', {
+        schemaVersion: TELEMETRY_SCHEMA_VERSION,
+        name: 'telemetry_gap',
+        unit: 'count',
+        value: this.pendingClientMetricGapCount,
+        dimensions: { reason: 'client_queue_overflow' },
+      });
+      this.pendingClientMetricGapCount = 0;
+    }
     for (const metric of pending) {
       this.sendUsingIdentity(identity, 'metric', metric);
     }

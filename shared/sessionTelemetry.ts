@@ -44,6 +44,14 @@ const SectionNavigationCauseSchema = z.enum([
 
 const TutorObjectDisappearanceCauseSchema = z.enum(['scene_mutation', 'unknown']);
 
+export const TELEMETRY_GAP_REASONS = [
+  'server_queue_overflow',
+  'server_persistence_failure',
+  'client_queue_overflow',
+] as const;
+
+const TelemetryGapReasonSchema = z.enum(TELEMETRY_GAP_REASONS);
+
 const ProviderUsageDimensionsSchema = z.object({
   totalTokens: nonNegativeInt,
   inputTextTokens: nonNegativeInt,
@@ -114,6 +122,13 @@ export const MetricInputSchema = z.discriminatedUnion('name', [
       objectId: boundedId,
       cause: TutorObjectDisappearanceCauseSchema,
     }),
+  }),
+  z.object({
+    schemaVersion,
+    name: z.literal('telemetry_gap'),
+    unit: z.literal('count'),
+    value: finiteInt.positive(),
+    dimensions: z.object({ reason: TelemetryGapReasonSchema }),
   }),
   z.object({
     schemaVersion,
@@ -235,6 +250,10 @@ export type ProviderUsageTotals = {
   outputAudioTokens: number;
 };
 
+export type TelemetryGapReason = (typeof TELEMETRY_GAP_REASONS)[number];
+
+export type TelemetryGapTotals = Record<TelemetryGapReason, number>;
+
 export type SessionMetricEntry = {
   eventId: number;
   ts: number;
@@ -262,6 +281,7 @@ export type SessionTelemetryLog = {
     reconnectCount: number;
     tutorObjectDisappearanceCount: number;
     providerUsage: ProviderUsageTotals;
+    telemetryGaps: TelemetryGapTotals;
   };
   timeline: SessionMetricEntry[];
 };

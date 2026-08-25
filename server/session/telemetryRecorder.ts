@@ -7,7 +7,9 @@ import {
   type MetricObservation,
 } from '../../shared/sessionTelemetry.js';
 import type { GenerationIdentity } from '../../shared/runtimeProtocol.js';
-import type { DomainRepository } from '../store/domain.js';
+import { pseudonymizeMetricObservation } from './telemetryPrivacy.js';
+
+type PreparedMetricObservation = Exclude<MetricObservation, { legacy: true }>;
 
 const providerTokenCount = z.number().finite().int().nonnegative();
 
@@ -29,37 +31,37 @@ const ProviderUsageSchema = z.object({
   }),
 });
 
-export async function recordMetric(
-  repo: DomainRepository,
+export function prepareMetric(
   sessionId: string,
   input: unknown,
   context: MetricContext,
-): Promise<number | null> {
+): PreparedMetricObservation | null {
   const parsed = MetricInputSchema.safeParse(input);
   if (!parsed.success) return null;
 
-  let observation: MetricObservation;
   try {
-    observation = attachMetricContext(parsed.data, context);
-    return await repo.addEvent(sessionId, 'metric', observation);
+    const observation = pseudonymizeMetricObservation(
+      sessionId,
+      attachMetricContext(parsed.data, context),
+    );
+    return 'legacy' in observation ? null : observation;
   } catch {
     return null;
   }
 }
 
-export async function recordProviderUsage(
-  repo: DomainRepository,
+export function prepareProviderUsage(
   sessionId: string,
   usage: unknown,
   context: MetricContext,
-): Promise<number | null> {
+): PreparedMetricObservation | null {
   const parsed = ProviderUsageSchema.safeParse(usage);
   if (!parsed.success) return null;
 
   const input = parsed.data.input_token_details;
   const cached = input.cached_tokens_details;
   const output = parsed.data.output_token_details;
-  return recordMetric(repo, sessionId, {
+  return prepareMetric(sessionId, {
     schemaVersion: TELEMETRY_SCHEMA_VERSION,
     name: 'provider_usage',
     unit: 'count',
