@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { EventRow } from '../store/repo.js';
 import type { MetricInput } from '../../shared/sessionTelemetry.js';
 import { buildSessionTelemetryLog } from './sessionLog.js';
+import { prepareMetric } from './telemetryRecorder.js';
 
 const identity = {
   connectionEpoch: 2,
@@ -168,6 +169,13 @@ describe('buildSessionTelemetryLog', () => {
     expect(log.summary.sectionSwitchCount).toBe(1);
     expect(log.summary.reconnectCount).toBe(2);
     expect(log.summary.tutorObjectDisappearanceCount).toBe(1);
+    expect(log.summary.telemetryGaps).toEqual({
+      server_queue_overflow: 0,
+      server_persistence_failure: 0,
+      server_history_failure: 0,
+      server_accounting_overflow: 0,
+      client_queue_overflow: 0,
+    });
     expect(log.timeline.map((entry) => entry.eventId)).toEqual([
       11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
     ]);
@@ -381,6 +389,171 @@ describe('buildSessionTelemetryLog', () => {
     expect(buildSessionTelemetryLog('session-1', events.slice(0, 99), 100).truncated).toBe(false);
   });
 
+  it('projects aggregated telemetry gaps by bounded reason', () => {
+    const events = [
+      metricEvent(1, {
+        schemaVersion: '1.0.0',
+        name: 'telemetry_gap',
+        unit: 'count',
+        value: 3,
+        dimensions: { reason: 'server_queue_overflow' },
+      }),
+      metricEvent(2, {
+        schemaVersion: '1.0.0',
+        name: 'telemetry_gap',
+        unit: 'count',
+        value: 2,
+        dimensions: { reason: 'server_persistence_failure' },
+      }),
+      metricEvent(3, {
+        schemaVersion: '1.0.0',
+        name: 'telemetry_gap',
+        unit: 'count',
+        value: 4,
+        dimensions: { reason: 'client_queue_overflow' },
+      }),
+      metricEvent(4, {
+        schemaVersion: '1.0.0',
+        name: 'telemetry_gap',
+        unit: 'count',
+        value: 1,
+        dimensions: { reason: 'server_queue_overflow' },
+      }),
+    ];
+
+    expect(buildSessionTelemetryLog('session-1', events, 5_000).summary.telemetryGaps).toEqual({
+      server_queue_overflow: 4,
+      server_persistence_failure: 2,
+      server_history_failure: 0,
+      server_accounting_overflow: 0,
+      client_queue_overflow: 4,
+    });
+  });
+
+  it('preserves only current-session server-encoded identifiers and re-encodes copied tokens', () => {
+    const currentEncoded = prepareMetric('session-1', {
+      schemaVersion: '1.0.0',
+      name: 'session_reconnect',
+      unit: 'count',
+      value: 1,
+    }, {
+      connectionEpoch: 2,
+      turnId: 'current-turn',
+      generationId: 'current-generation',
+    });
+    const copiedEncoded = prepareMetric('session-other', {
+      schemaVersion: '1.0.0',
+      name: 'session_reconnect',
+      unit: 'count',
+      value: 1,
+    }, {
+      connectionEpoch: 2,
+      turnId: 'copied-turn',
+      generationId: 'copied-generation',
+    });
+    expect(currentEncoded).not.toBeNull();
+    expect(copiedEncoded).not.toBeNull();
+    const forgedToken = `tel2_${'A'.repeat(10)}_${'B'.repeat(24)}`;
+    const secretValues = [
+      'PRIVATE_NAME_AS_TURN',
+      'PRIVATE_TRANSCRIPT_AS_GENERATION',
+      'sk-secret-provider-response',
+      'private-visual-cue',
+      'private-semantic-object',
+      'private-section-a',
+      'private-section-b',
+      'private-object-id',
+    ];
+    const events = [
+      metricEvent(1, {
+        schemaVersion: '1.0.0',
+        name: 'board_reveal_to_narration',
+        unit: 'ms',
+        value: -10,
+        visualCueId: secretValues[3],
+        semanticObjectId: secretValues[4],
+      }, {
+        providerResponseId: secretValues[2],
+        extraPayloadFields: {
+          turnId: secretValues[0],
+          generationId: secretValues[1],
+        },
+      }),
+      metricEvent(2, {
+        schemaVersion: '1.0.0',
+        name: 'section_navigation',
+        unit: 'count',
+        value: 1,
+        dimensions: {
+          previousSemanticGroupId: secretValues[5],
+          nextSemanticGroupId: secretValues[6],
+          cause: 'picker',
+        },
+      }),
+      metricEvent(3, {
+        schemaVersion: '1.0.0',
+        name: 'tutor_object_disappearance',
+        unit: 'count',
+        value: 1,
+        dimensions: { objectId: secretValues[7], cause: 'scene_mutation' },
+      }),
+      metricEvent(4, {
+        schemaVersion: '1.0.0',
+        name: 'session_reconnect',
+        unit: 'count',
+        value: 1,
+      }, {
+        extraPayloadFields: currentEncoded ?? {},
+      }),
+      metricEvent(5, {
+        schemaVersion: '1.0.0',
+        name: 'session_reconnect',
+        unit: 'count',
+        value: 1,
+      }, {
+        extraPayloadFields: copiedEncoded ?? {},
+      }),
+      metricEvent(6, {
+        schemaVersion: '1.0.0',
+        name: 'session_reconnect',
+        unit: 'count',
+        value: 1,
+      }, {
+        extraPayloadFields: {
+          turnId: forgedToken,
+          generationId: forgedToken,
+          telemetryEncoding: {
+            version: 'forged-version',
+            sessionTag: 'AAAAAAAAAA',
+          },
+        },
+      }),
+    ];
+
+    const log = buildSessionTelemetryLog('session-1', events, 5_000);
+    const serialized = JSON.stringify(log);
+    for (const secret of secretValues) expect(serialized).not.toContain(secret);
+    expect(log.timeline[0]).toMatchObject({
+      turnId: expect.stringMatching(/^tel2_/),
+      generationId: expect.stringMatching(/^tel2_/),
+      providerResponseId: expect.stringMatching(/^tel2_/),
+      visualCueId: expect.stringMatching(/^tel2_/),
+      semanticObjectId: expect.stringMatching(/^tel2_/),
+    });
+    expect(log.timeline[3]).toMatchObject({
+      turnId: currentEncoded?.turnId,
+      generationId: currentEncoded?.generationId,
+    });
+    expect(log.timeline[4]?.turnId).not.toBe(copiedEncoded?.turnId);
+    expect(log.timeline[4]?.generationId).not.toBe(copiedEncoded?.generationId);
+    expect(log.timeline[4]).toMatchObject({
+      turnId: expect.stringMatching(/^tel2_/),
+      generationId: expect.stringMatching(/^tel2_/),
+    });
+    expect(log.timeline[5]?.turnId).not.toBe(forgedToken);
+    expect(log.timeline[5]?.generationId).not.toBe(forgedToken);
+  });
+
   it('does not expose payload text outside typed dimensions', () => {
     const log = buildSessionTelemetryLog('session-1', [
       metricEvent(1, {
@@ -404,8 +577,8 @@ describe('buildSessionTelemetryLog', () => {
     expect(JSON.stringify(log)).not.toContain('secret learner text');
     expect(JSON.stringify(log)).not.toContain('Maya');
     expect(log.timeline[0]?.dimensions).toEqual({
-      previousSemanticGroupId: 'group-a',
-      nextSemanticGroupId: 'group-b',
+      previousSemanticGroupId: expect.stringMatching(/^tel2_/),
+      nextSemanticGroupId: expect.stringMatching(/^tel2_/),
       cause: 'picker',
     });
   });

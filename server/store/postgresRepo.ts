@@ -293,15 +293,22 @@ export class PostgresRepo implements DomainRepository, ManagedDomainRepository {
 
   async addEvent(sessionId: string, type: string, payload: unknown, released = true): Promise<number> {
     await this.initialize();
-    const result = await this.pool.query(
-      `INSERT INTO noura.events (session_id, ts, type, payload, released)
-       SELECT $1::text, $2::bigint, $3::text, $4::jsonb, $5::boolean
-       WHERE EXISTS (SELECT 1 FROM noura.sessions WHERE id = $1 AND status = 'active')
-       RETURNING id`,
-      [sessionId, Date.now(), type, JSON.stringify(payload ?? {}), released],
-    );
-    if (result.rowCount !== 1) throw new Error('Session has ended and is immutable.');
-    return Number(result.rows[0].id);
+    return this.transaction(async (client) => {
+      const session = await client.query(
+        'SELECT status FROM noura.sessions WHERE id = $1 FOR UPDATE',
+        [sessionId],
+      );
+      if (session.rowCount !== 1 || session.rows[0]?.status !== 'active') {
+        throw new Error('Session has ended and is immutable.');
+      }
+      const result = await client.query(
+        `INSERT INTO noura.events (session_id, ts, type, payload, released)
+         VALUES ($1::text, $2::bigint, $3::text, $4::jsonb, $5::boolean)
+         RETURNING id`,
+        [sessionId, Date.now(), type, JSON.stringify(payload ?? {}), released],
+      );
+      return Number(result.rows[0].id);
+    });
   }
 
   async markEventReleased(sessionId: string, eventId: number): Promise<void> {

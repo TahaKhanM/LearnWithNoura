@@ -21,11 +21,12 @@ import { BoardSubmissionSchema, DeliveredTaskSchema, submitPolicyForMode, type D
 import { ResponseSegmentAnnotator } from './segmentAnnotator.js';
 import { loadReleasedBoardContext } from './boardContext.js';
 import type { DomainRepository } from '../store/domain.js';
+import { metricContextFromIdentity } from '../session/telemetryRecorder.js';
+import { SessionTelemetryWriter } from '../session/telemetryWriter.js';
 import {
-  metricContextFromIdentity,
-  recordMetric,
-  recordProviderUsage,
-} from '../session/telemetryRecorder.js';
+  YieldingTelemetryRepository,
+  type SessionTelemetryRepository,
+} from '../session/telemetryRepository.js';
 
 /**
  * Bridges one browser lesson to one OpenAI Realtime session.
@@ -38,37 +39,11 @@ import {
 
 const REALTIME_URL = 'wss://api.openai.com/v1/realtime';
 const OUTPUT_AUDIO_SAMPLES_PER_MS = 24;
-const RECONNECT_HISTORY_PAGE_SIZE = 5_000;
+const MAX_TERMINAL_TELEMETRY_RESPONSES = 512;
+const MAX_PENDING_VOICE_BARGE_INS = 256;
 
 /** Stop auto-continuing tool chains after this many rounds per turn. */
 const MAX_TOOL_CONTINUES = 14;
-
-async function hasReleasedSessionStart(
-  repo: DomainRepository,
-  sessionId: string,
-): Promise<boolean> {
-  let throughEventId: number | null = null;
-
-  try {
-    while (true) {
-      const page = await repo.listEvents(
-        sessionId,
-        RECONNECT_HISTORY_PAGE_SIZE,
-        throughEventId,
-      );
-      if (page.some((event) => event.type === 'session_started')) return true;
-      if (page.length < RECONNECT_HISTORY_PAGE_SIZE) return false;
-
-      const oldestEventId = page[0]?.id;
-      if (oldestEventId === undefined || oldestEventId <= 1) return false;
-      const nextThroughEventId = oldestEventId - 1;
-      if (throughEventId !== null && nextThroughEventId >= throughEventId) return false;
-      throughEventId = nextThroughEventId;
-    }
-  } catch {
-    return false;
-  }
-}
 
 function isAllowedClientMetric(input: MetricInput): boolean {
   switch (input.name) {
@@ -82,6 +57,9 @@ function isAllowedClientMetric(input: MetricInput): boolean {
     case 'barge_in_gate_outcome':
       return input.dimensions.outcome === 'local_only_rejected' ||
         input.dimensions.outcome === 'provider_only_rejected';
+    case 'telemetry_gap':
+      return input.dimensions.reason === 'client_queue_overflow' &&
+        input.value <= 64;
     default:
       return false;
   }
@@ -101,6 +79,7 @@ export interface ProxyOptions {
   apiKey: string;
   model: string;
   repo: DomainRepository;
+  telemetryRepo?: SessionTelemetryRepository;
   sessionId: string;
   log?: (line: string) => void;
   createUpstream?: (url: string, apiKey: string) => NodeWebSocket;
@@ -108,6 +87,13 @@ export interface ProxyOptions {
   preflightTimeoutMs?: number;
   /** How long to wait for the browser to confirm a staged plan is visible. */
   visibilityTimeoutMs?: number;
+  onLifecycle?: (lifecycle: ProxyLifecycle) => void;
+}
+
+export interface ProxyLifecycle {
+  completion: Promise<void>;
+  close(): Promise<void>;
+  forceTerminal(): Promise<void>;
 }
 
 export async function connectRealtimeProxy(client: ClientSocket, options: ProxyOptions): Promise<void> {
@@ -127,6 +113,8 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
     return;
   }
 
+  const telemetryRepo = options.telemetryRepo ?? new YieldingTelemetryRepository(repo);
+  const telemetryWriter = new SessionTelemetryWriter(telemetryRepo, sessionId);
   const lessonGoal = session.goal;
   const baseInstructions = buildInstructions({
     childName: child.name,
@@ -141,7 +129,20 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
   });
 
   let upstreamReady = false;
-  let closed = false;
+  let teardownPromise: Promise<void> | null = null;
+  let forceTerminalPromise: Promise<void> | null = null;
+  let resolveCompletion!: () => void;
+  let rejectCompletion!: (error: unknown) => void;
+  const lifecycleCompletion = new Promise<void>((resolve, reject) => {
+    resolveCompletion = resolve;
+    rejectCompletion = reject;
+  });
+  void lifecycleCompletion.catch(() => {
+    // App lifecycle tracking observes this promise; this guard also covers
+    // direct test callers that intentionally do not install a tracker.
+  });
+  const sideEffectTasks = new Set<Promise<void>>();
+  const backgroundTelemetry = new Set<Promise<void>>();
   let toolContinues = 0;
   /** response ids we know were cancelled by barge-in. */
   const cancelledResponses = new Set<string>();
@@ -166,6 +167,7 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
   const responseTranscript = new Map<string, string>();
   const responseSegments = new Map<string, ResponseSegmentAnnotator>();
   const pendingVoiceBargeInResponses = new Set<string>();
+  const terminalTelemetryResponses = new Set<string>();
   const pendingBoardOps = new Map<number, { ops: BoardOp[]; semanticGroupId?: string; groupLabel?: string; replacesGroup?: string }>();
   let activeResponseId: string | null = null;
   let speechInProgress = false;
@@ -174,6 +176,9 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
   let lastLearnerEventId: number | null = null;
   let upstreamWork = Promise.resolve();
   let clientWork = Promise.resolve();
+  let upstreamWorkPending = 0;
+  let clientWorkPending = 0;
+  let acceptingFrames = true;
   /** The learner is composing a drawing; nothing may auto-create a response. */
   let draftOpen = false;
   /** Board submissions already answered — duplicate Done must be a no-op. */
@@ -366,7 +371,7 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
     // Captured synchronously: staging may finish after this response seals,
     // in which case cues are delivered directly at its final audio boundary.
     const planSegment = responseSegment(responseId);
-    void (async () => {
+    const stagingTask = (async () => {
       if (!input.skipPreflight && input.ops.length > 0 && groupId) {
         const preflight = await preflightWithClient({ ops: input.ops, semanticGroupId: groupId, groupLabel });
         if (!preflight.accepted) {
@@ -450,6 +455,7 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
       log(`session ${sessionId}: semantic plan staging error ${String(error).slice(0, 200)}`);
       finishTool(callId, responseId, { ok: false, accepted: false, error: String(error).slice(0, 260) });
     });
+    trackSideEffect(stagingTask);
   }
 
   /** The server, not the model, decides which section a plan builds. */
@@ -496,9 +502,27 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
     }
   }
 
-  function teardown(reason: string): void {
-    if (closed) return;
-    closed = true;
+  function trackTelemetry(task: Promise<void>): void {
+    backgroundTelemetry.add(task);
+    void task.finally(() => backgroundTelemetry.delete(task)).catch(() => {});
+  }
+
+  function trackSideEffect(task: Promise<void>): void {
+    sideEffectTasks.add(task);
+    void task.finally(() => sideEffectTasks.delete(task)).catch(() => {});
+  }
+
+  function sealAdmission(): void {
+    acceptingFrames = false;
+    upstream.onmessage = null;
+    client.off('message', handleClientMessage);
+  }
+
+  function beginTeardown(reason: string): Promise<void> {
+    if (teardownPromise) return teardownPromise;
+    sealAdmission();
+    const sealedClientWork = clientWork;
+    const sealedUpstreamWork = upstreamWork;
     log(`session ${sessionId}: closed (${reason})`);
     try {
       upstream.close();
@@ -510,7 +534,67 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
     } catch {
       /* already closed */
     }
+    teardownPromise = Promise.allSettled([
+      sealedClientWork,
+      sealedUpstreamWork,
+    ]).then(async () => {
+      while (sideEffectTasks.size > 0) {
+        await Promise.allSettled([...sideEffectTasks]);
+      }
+      while (backgroundTelemetry.size > 0) {
+        await Promise.allSettled([...backgroundTelemetry]);
+      }
+      await telemetryWriter.close();
+      resolveCompletion();
+    }).catch((error: unknown) => {
+      rejectCompletion(error);
+      throw error;
+    });
+    return teardownPromise;
   }
+
+  function forceTerminal(): Promise<void> {
+    if (forceTerminalPromise) return forceTerminalPromise;
+    sealAdmission();
+    telemetryWriter.forceTerminal();
+    backgroundTelemetry.clear();
+    try {
+      upstream.close();
+    } catch {
+      /* already closed */
+    }
+    try {
+      client.close();
+    } catch {
+      /* already closed */
+    }
+    if (
+      clientWorkPending > 0 ||
+      upstreamWorkPending > 0 ||
+      sideEffectTasks.size > 0
+    ) {
+      forceTerminalPromise = Promise.reject(
+        new Error('Proxy side-effect producer chains remain unsettled.'),
+      );
+      void forceTerminalPromise.catch(() => {});
+      return forceTerminalPromise;
+    }
+    resolveCompletion();
+    forceTerminalPromise = Promise.resolve();
+    return forceTerminalPromise;
+  }
+
+  function teardown(reason: string): void {
+    void beginTeardown(reason).catch((error: unknown) => {
+      log(`session ${sessionId}: telemetry close error ${String(error).slice(0, 160)}`);
+    });
+  }
+
+  options.onLifecycle?.({
+    completion: lifecycleCompletion,
+    close: () => beginTeardown('server shutdown'),
+    forceTerminal,
+  });
 
   upstream.onopen = () => {
     sendUpstream({
@@ -534,20 +618,27 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
     });
   };
 
-  upstream.onmessage = (raw) => {
+  function handleUpstreamMessage(raw: { data: unknown }): void {
+    if (!acceptingFrames) return;
     let event: UpstreamEvent;
     try {
       event = JSON.parse(String(raw.data));
     } catch {
       return;
     }
+    upstreamWorkPending += 1;
     upstreamWork = upstreamWork
       .then(() => handleUpstream(event))
       .catch((error) => {
         log(`session ${sessionId}: upstream processing error ${String(error).slice(0, 240)}`);
         sendClient({ type: 'error', message: 'Noura hit a snag — it will recover in a moment.' });
+      })
+      .finally(() => {
+        upstreamWorkPending -= 1;
       });
-  };
+  }
+
+  upstream.onmessage = handleUpstreamMessage;
 
   upstream.onerror = () => {
     sendClient({ type: 'error', message: 'Lost the connection to the tutor voice service.' });
@@ -781,12 +872,28 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
         const status = response?.status ?? 'unknown';
         if (status === 'cancelled' && response?.id) cancelledResponses.add(response.id);
         const responseIdentity = identityForResponse(response?.id);
-        if (response?.id && responseIdentity) {
-          const context = metricContextFromIdentity(responseIdentity, response.id);
-          await recordProviderUsage(repo, sessionId, response.usage, context);
+        const terminalTelemetryIdentity = response?.id
+          ? responseIdentities.get(response.id)
+          : undefined;
+        const recordsTerminalTelemetry = Boolean(
+          response?.id &&
+          terminalTelemetryIdentity &&
+          !terminalTelemetryResponses.has(response.id),
+        );
+        if (response?.id && terminalTelemetryIdentity && recordsTerminalTelemetry) {
+          addBounded(
+            terminalTelemetryResponses,
+            response.id,
+            MAX_TERMINAL_TELEMETRY_RESPONSES,
+          );
+          const context = metricContextFromIdentity(
+            terminalTelemetryIdentity,
+            response.id,
+          );
+          telemetryWriter.submitProviderUsage(response.usage, context);
           const outputSamples = responseSegments.get(response.id)?.totalSamples();
           if (outputSamples !== undefined && outputSamples > 0) {
-            await recordMetric(repo, sessionId, {
+            telemetryWriter.submit({
               schemaVersion: TELEMETRY_SCHEMA_VERSION,
               name: 'tutor_audio_output_duration',
               unit: 'ms',
@@ -799,7 +906,7 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
               : status === 'completed'
                 ? 'provider_completed'
                 : 'provider_failed';
-            await recordMetric(repo, sessionId, {
+            telemetryWriter.submit({
               schemaVersion: TELEMETRY_SCHEMA_VERSION,
               name: 'barge_in_cancel_outcome',
               unit: 'count',
@@ -1335,7 +1442,9 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
     sendUpstream({ type: 'response.create' });
   }
 
-  client.on('message', (raw) => {
+  function handleClientMessage(raw: unknown): void {
+    if (!acceptingFrames) return;
+    clientWorkPending += 1;
     clientWork = clientWork.then(async () => {
       let decoded: unknown;
       try { decoded = JSON.parse(String(raw)); }
@@ -1371,8 +1480,12 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
     }).catch((error) => {
       log(`session ${sessionId}: client processing error ${String(error).slice(0, 240)}`);
       sendClient({ type: 'error', message: 'Noura could not save that turn. Please try again.' });
+    }).finally(() => {
+      clientWorkPending -= 1;
     });
-  });
+  }
+
+  client.on('message', handleClientMessage);
 
   client.on('close', () => teardown('client closed'));
   client.on('error', () => teardown('client error'));
@@ -1393,7 +1506,6 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
         if (started) break;
         started = true;
         toolContinues = 0;
-        const hadPriorStart = await hasReleasedSessionStart(repo, sessionId);
         const resume = await conversationContext();
         if (resume) {
           sendUpstream({
@@ -1405,19 +1517,32 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
             },
           });
         }
-        await repo.addEvent(sessionId, 'session_started', {
+        const startEventId = await repo.addEvent(sessionId, 'session_started', {
           resumed: Boolean(resume),
           connectionEpoch: envelope.connectionEpoch,
         });
-        if (hadPriorStart) {
-          await recordMetric(repo, sessionId, {
-            schemaVersion: TELEMETRY_SCHEMA_VERSION,
-            name: 'session_reconnect',
-            unit: 'count',
-            value: 1,
-          }, metricContextFromIdentity(envelope));
-        }
         requestModelResponse('start', 'session-start');
+        const historyTask = telemetryRepo
+          .hasPriorReleasedSessionStart(sessionId, startEventId)
+          .then((hadPriorStart) => {
+            if (!hadPriorStart) return;
+            telemetryWriter.submit({
+              schemaVersion: TELEMETRY_SCHEMA_VERSION,
+              name: 'session_reconnect',
+              unit: 'count',
+              value: 1,
+            }, metricContextFromIdentity(envelope));
+          })
+          .catch(() => {
+            telemetryWriter.submit({
+              schemaVersion: TELEMETRY_SCHEMA_VERSION,
+              name: 'telemetry_gap',
+              unit: 'count',
+              value: 1,
+              dimensions: { reason: 'server_history_failure' },
+            }, metricContextFromIdentity(envelope));
+          });
+        trackTelemetry(historyTask);
         break;
       }
 
@@ -1453,14 +1578,20 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
           interruptedResponseId !== null &&
           interruptedIdentity !== null &&
           !pendingVoiceBargeInResponses.has(interruptedResponseId);
-        if (recordVoiceGate) pendingVoiceBargeInResponses.add(interruptedResponseId);
+        if (recordVoiceGate) {
+          addBounded(
+            pendingVoiceBargeInResponses,
+            interruptedResponseId,
+            MAX_PENDING_VOICE_BARGE_INS,
+          );
+        }
         childHoldsFloor = true;
         if (activeResponseId) cancelledResponses.add(activeResponseId);
         lessonState = reduceLesson(lessonState, { type: 'INTERRUPTED' });
         if (message.reason === 'voice') setEndpointingEagerness('high');
         sendUpstream({ type: 'response.cancel' });
         if (recordVoiceGate) {
-          await recordMetric(repo, sessionId, {
+          telemetryWriter.submit({
             schemaVersion: TELEMETRY_SCHEMA_VERSION,
             name: 'barge_in_gate_outcome',
             unit: 'count',
@@ -1627,11 +1758,13 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
       case 'metric': {
         const metric = MetricInputSchema.safeParse(envelope.payload);
         if (!metric.success || !isAllowedClientMetric(metric.data)) break;
-        await recordMetric(
-          repo,
-          sessionId,
+        const trustedResponseId = trustedClientResponseId(metric.data, envelope);
+        if (metric.data.name === 'board_reveal_to_narration' && !trustedResponseId) {
+          break;
+        }
+        telemetryWriter.submit(
           metric.data,
-          metricContextFromIdentity(envelope, trustedClientResponseId(metric.data, envelope)),
+          metricContextFromIdentity(envelope, trustedResponseId),
         );
         break;
       }
@@ -1679,6 +1812,13 @@ function learnerBoardOps(raw: unknown): BoardOp[] {
 function safeBoardImage(value: unknown): string | null {
   if (typeof value !== 'string' || value.length > 320_000) return null;
   return /^data:image\/(?:png|jpeg);base64,[a-z0-9+/=]+$/i.test(value) ? value : null;
+}
+
+function addBounded(set: Set<string>, value: string, limit: number): void {
+  set.add(value);
+  if (set.size <= limit) return;
+  const oldest = set.values().next().value;
+  if (oldest !== undefined) set.delete(oldest);
 }
 
 function semanticTurnDetection(eagerness: 'medium' | 'high') {

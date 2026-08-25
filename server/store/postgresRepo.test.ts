@@ -2,10 +2,26 @@ import { newDb } from 'pg-mem';
 import { describe, expect, it } from 'vitest';
 import { PostgresRepo } from './postgresRepo';
 
-function postgresRepo(): PostgresRepo {
+// Deliberate high-workload contract: tolerate machine load while still detecting hangs.
+const HEAVY_CONTRACT_TIMEOUT_MS = 15_000;
+
+function postgresRepo(transactionQueries?: string[]): PostgresRepo {
   const memory = newDb();
   const adapter = memory.adapters.createPg();
-  return new PostgresRepo(new adapter.Pool());
+  const pool = new adapter.Pool();
+  if (transactionQueries) {
+    const connect = pool.connect.bind(pool);
+    pool.connect = async () => {
+      const client = await connect();
+      const query = client.query.bind(client);
+      client.query = ((text: unknown, values?: unknown[]) => {
+        transactionQueries.push(String(text).replace(/\s+/g, ' ').trim());
+        return query(text as string, values);
+      }) as typeof client.query;
+      return client;
+    };
+  }
+  return new PostgresRepo(pool);
 }
 
 describe('PostgresRepo domain contract', () => {
@@ -41,7 +57,7 @@ describe('PostgresRepo domain contract', () => {
     const ended = await repo.endSession(session.id, null);
     expect(ended?.endedEventId).toBe(sourceEventId);
     await expect(repo.addEvent(session.id, 'learner_said', { text: 'late' })).rejects.toThrow(/ended/i);
-  });
+  }, HEAVY_CONTRACT_TIMEOUT_MS);
 
   it('keeps fallback writes staged until the matching generation completes', async () => {
     const repo = postgresRepo();
@@ -65,6 +81,22 @@ describe('PostgresRepo domain contract', () => {
     await expect(repo.finishFallbackTurn(identity, 'completed', [])).resolves.toBe(true);
     await expect(repo.listEvents(session.id)).resolves.toEqual([
       expect.objectContaining({ id: eventId, released: true }),
+    ]);
+  });
+
+  it('locks the session row before inserting an event transactionally', async () => {
+    const queries: string[] = [];
+    const repo = postgresRepo(queries);
+    await repo.initialize();
+    const child = await repo.createChild('Synthetic Learner', 10);
+    const session = await repo.createSession(child.id, 'Lock ordering');
+    await repo.addEvent(session.id, 'learner_said', { text: 'serialized' });
+
+    expect(queries).toEqual([
+      'BEGIN',
+      'SELECT status FROM noura.sessions WHERE id = $1 FOR UPDATE',
+      expect.stringContaining('INSERT INTO noura.events'),
+      'COMMIT',
     ]);
   });
 });

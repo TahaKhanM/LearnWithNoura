@@ -2,6 +2,7 @@ import express from 'express';
 import request from 'supertest';
 import { describe, expect, it, vi } from 'vitest';
 import { createApi } from './api';
+import { SESSION_TELEMETRY_LOG_EVENT_LIMIT } from './session/sessionLog';
 import { openTestDb } from './store/db';
 import { Repo } from './store/repo';
 
@@ -75,7 +76,10 @@ describe('REST object authorization', () => {
     });
     expect(response.body.timeline).toHaveLength(1);
     expect(JSON.stringify(response.body)).not.toContain('Synthetic A');
-    expect(listEvents).toHaveBeenCalledWith(sessionA.id, 5_000);
+    expect(JSON.stringify(response.body)).not.toContain('turn-a');
+    expect(JSON.stringify(response.body)).not.toContain('generation-a');
+    expect(JSON.stringify(response.body)).not.toContain('object-a');
+    expect(listEvents).toHaveBeenCalledWith(sessionA.id, SESSION_TELEMETRY_LOG_EVENT_LIMIT);
   });
 
   it('rejects missing and non-owner parents before reading session events', async () => {
@@ -105,8 +109,27 @@ describe('REST object authorization', () => {
 
     expect(unauthenticated.status).toBe(401);
     expect(nonOwner.status).toBe(404);
+    expect(unauthenticated.headers['cache-control']).toBe('no-store');
+    expect(nonOwner.headers['cache-control']).toBe('no-store');
     expect(nonOwner.body).toEqual({ error: 'not found' });
     expect(JSON.stringify(nonOwner.body)).not.toContain(sessionA.id);
     expect(listEvents).not.toHaveBeenCalled();
+  });
+
+  it('sets no-store before handled repository failures', async () => {
+    const repo = new Repo(openTestDb());
+    vi.spyOn(repo, 'getSessionForParent').mockRejectedValue(
+      new Error('repository unavailable'),
+    );
+    const app = express();
+    app.use(express.json());
+    app.use('/api', createApi(repo, null, 'gpt-5.6-terra', {
+      parentId: () => 'parent-a',
+    }));
+
+    const response = await request(app).get('/api/sessions/session-failure/log');
+
+    expect(response.status).toBe(500);
+    expect(response.headers['cache-control']).toBe('no-store');
   });
 });

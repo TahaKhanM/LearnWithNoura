@@ -2,9 +2,15 @@ import { EventEmitter } from 'node:events';
 import { Buffer } from 'node:buffer';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createRuntimeEvent, type GenerationIdentity, type RuntimeEventEnvelope } from '../../shared/runtimeProtocol';
+import type { MetricObservation } from '../../shared/sessionTelemetry';
 import { openTestDb } from '../store/db';
+import type { DomainRepository } from '../store/domain';
 import { Repo } from '../store/repo';
-import { connectRealtimeProxy } from './proxy';
+import { connectRealtimeProxy, type ProxyLifecycle } from './proxy';
+import {
+  ProxyLifecycleRegistry,
+  runQuiescentShutdown,
+} from './lifecycle';
 
 class FakeUpstream {
   static OPEN = 1;
@@ -464,6 +470,170 @@ describe('realtime proxy response annotation', () => {
     expect(repo.listEventsForInternalAudit(session.id).filter((event) => event.type === 'semantic_scene')).toEqual([]);
   });
 
+  it('takes fatal shutdown while semantic preflight staging is unresolved', async () => {
+    vi.stubGlobal('WebSocket', FakeUpstream);
+    const repo = new Repo(openTestDb());
+    const child = repo.createChild('Maya', 10);
+    const session = repo.createSession(child.id, 'fractions');
+    const client = new FakeClient();
+    const registry = new ProxyLifecycleRegistry();
+    let lifecycle: ProxyLifecycle | null = null;
+    await connectRealtimeProxy(client as never, {
+      apiKey: 'offline-fixture',
+      model: 'gpt-realtime-2.1',
+      repo,
+      sessionId: session.id,
+      createUpstream: () => new FakeUpstream() as never,
+      preflightTimeoutMs: 60_000,
+      onLifecycle: (value) => {
+        lifecycle = value;
+        registry.register(value);
+      },
+    });
+    const active = { ...identity, sessionId: session.id };
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 0, 'hello', {})));
+    const upstream = FakeUpstream.latest;
+    createBlueprint(upstream, 'shutdown-stage');
+    await flushProxy();
+    vi.useFakeTimers({ toFake: ['setTimeout'] });
+    upstream.emit({ type: 'response.created', response: { id: 'shutdown-plan-response' } });
+    upstream.emit({
+      type: 'response.function_call_arguments.done',
+      response_id: 'shutdown-plan-response',
+      call_id: 'shutdown-plan-call',
+      name: 'semantic_visual_plan',
+      arguments: JSON.stringify({
+        schemaVersion: '2.0.0',
+        planId: 'shutdown-plan',
+        intent: {
+          objective: 'Compare fractions',
+          domain: 'quantitative',
+          relevance: 'essential',
+          questionAnswered: 'Which is larger?',
+          rationale: 'One scale.',
+          action: 'establish',
+          density: 'minimal',
+        },
+        groups: [{
+          id: 'fraction-scale',
+          label: 'Fraction number line',
+          revealOrder: ['outline'],
+          template: 'fraction_comparison',
+          parameters: { values: [0.5], labels: ['1/2'] },
+        }],
+      }),
+    });
+    await flushProxy();
+    const preflight = client.sent.find((event) => event.type === 'visual_preflight');
+    expect(preflight).toBeDefined();
+    const preflightId = (preflight!.payload as { preflight_id?: unknown }).preflight_id;
+    expect(preflightId).toEqual(expect.stringMatching(/^preflight-/));
+    expect(toolOutput(upstream, 'shutdown-plan-call')).toEqual({});
+    expect(repo.listEventsForInternalAudit(session.id)
+      .filter((event) => event.type === 'semantic_scene')).toEqual([]);
+
+    const repositoryClose = vi.fn(async () => {});
+    const fatal = vi.fn();
+    const shutdown = runQuiescentShutdown({
+      stopAccepting: () => {},
+      closeClients: () => {},
+      closeProxies: () => registry.shutdown(5),
+      closeRepository: repositoryClose,
+      log: () => {},
+      fatal,
+    });
+    await vi.advanceTimersByTimeAsync(6);
+    const result = await shutdown;
+    expect(result).toBe('fatal');
+    expect(repositoryClose).not.toHaveBeenCalled();
+    expect(fatal).toHaveBeenCalledWith(expect.any(Error));
+    expect(repo.listEventsForInternalAudit(session.id)
+      .filter((event) => event.type === 'semantic_scene')).toEqual([]);
+
+    client.emit('message', JSON.stringify(createRuntimeEvent(
+      active,
+      1,
+      'visual_preflight_result',
+      {
+        preflight_id: preflightId,
+        accepted: false,
+        reasons: ['shutdown test cleanup'],
+      },
+    )));
+    await vi.advanceTimersByTimeAsync(60_000);
+    await expect(lifecycle!.completion).resolves.toBeUndefined();
+    vi.useRealTimers();
+  });
+
+  it('gracefully drains settled semantic staging', async () => {
+    vi.stubGlobal('WebSocket', FakeUpstream);
+    const repo = new Repo(openTestDb());
+    const child = repo.createChild('Maya', 10);
+    const session = repo.createSession(child.id, 'fractions');
+    const client = new FakeClient();
+    const registry = new ProxyLifecycleRegistry();
+    await connectRealtimeProxy(client as never, {
+      apiKey: 'offline-fixture',
+      model: 'gpt-realtime-2.1',
+      repo,
+      sessionId: session.id,
+      createUpstream: () => new FakeUpstream() as never,
+      preflightTimeoutMs: 100,
+      onLifecycle: (value) => registry.register(value),
+    });
+    const active = { ...identity, sessionId: session.id };
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 0, 'hello', {})));
+    const upstream = FakeUpstream.latest;
+    createBlueprint(upstream, 'graceful-stage');
+    await flushProxy();
+    upstream.emit({ type: 'response.created', response: { id: 'graceful-plan-response' } });
+    upstream.emit({
+      type: 'response.function_call_arguments.done',
+      response_id: 'graceful-plan-response',
+      call_id: 'graceful-plan-call',
+      name: 'semantic_visual_plan',
+      arguments: JSON.stringify({
+        schemaVersion: '2.0.0',
+        planId: 'graceful-plan',
+        intent: {
+          objective: 'Compare fractions',
+          domain: 'quantitative',
+          relevance: 'essential',
+          questionAnswered: 'Which is larger?',
+          rationale: 'One scale.',
+          action: 'establish',
+          density: 'minimal',
+        },
+        groups: [{
+          id: 'fraction-scale',
+          label: 'Fraction number line',
+          revealOrder: ['outline'],
+          template: 'fraction_comparison',
+          parameters: { values: [0.5], labels: ['1/2'] },
+        }],
+      }),
+    });
+    await flushProxy();
+    const preflight = client.sent.find((event) => event.type === 'visual_preflight');
+    client.emit('message', JSON.stringify(createRuntimeEvent(
+      active,
+      1,
+      'visual_preflight_result',
+      {
+        preflight_id: (preflight!.payload as { preflight_id?: string }).preflight_id,
+        accepted: false,
+        reasons: ['test rejection'],
+      },
+    )));
+    await flushProxy();
+    await flushProxy();
+    expect(toolOutput(upstream, 'graceful-plan-call')).toMatchObject({
+      ok: false,
+      accepted: false,
+    });
+    await expect(registry.shutdown(100)).resolves.toBe('graceful');
+  });
+
   it('rejects every live replace request: visible tutor work never disappears', async () => {
     vi.stubGlobal('WebSocket', FakeUpstream);
     const repo = new Repo(openTestDb());
@@ -910,25 +1080,15 @@ describe('realtime proxy telemetry', () => {
     expect(observations).toEqual([
       expect.objectContaining({
         name: 'board_reveal_to_narration',
-        generationId: 'generation-correlated',
-        providerResponseId: 'response-correlated',
-        visualCueId: 'cue-correlated',
-      }),
-      expect.not.objectContaining({ providerResponseId: expect.anything() }),
-      expect.objectContaining({
-        name: 'board_reveal_to_narration',
-        generationId: 'generation-next',
-        visualCueId: 'cue-mismatched',
+        generationId: expect.stringMatching(/^tel2_/),
+        providerResponseId: expect.stringMatching(/^tel2_/),
+        visualCueId: expect.stringMatching(/^tel2_/),
       }),
     ]);
-    expect(observations[1]).toMatchObject({
-      name: 'board_reveal_to_narration',
-      generationId: 'generation-correlated',
-      visualCueId: 'cue-unknown',
-    });
-    expect(observations.slice(1).every(
-      (observation) => !('providerResponseId' in observation),
-    )).toBe(true);
+    expect(JSON.stringify(observations)).not.toContain('response-correlated');
+    expect(JSON.stringify(observations)).not.toContain('cue-correlated');
+    expect(JSON.stringify(observations)).not.toContain('response-unknown');
+    expect(JSON.stringify(observations)).not.toContain('cue-mismatched');
   });
 
   it('omits real client-carried response correlation from other allowed metrics', async () => {
@@ -1103,7 +1263,6 @@ describe('realtime proxy telemetry', () => {
       'speech_end_to_response_started',
       'speech_end_to_first_audio',
       'ask_to_first_audio',
-      'board_reveal_to_narration',
       'barge_in_gate_outcome',
       'barge_in_gate_outcome',
       'section_navigation',
@@ -1111,9 +1270,11 @@ describe('realtime proxy telemetry', () => {
     ]);
     expect(observations).toEqual(observations.map(() => expect.objectContaining({
       connectionEpoch: 7,
-      turnId: 'turn-authoritative',
-      generationId: 'generation-authoritative',
+      turnId: expect.stringMatching(/^tel2_/),
+      generationId: expect.stringMatching(/^tel2_/),
     })));
+    expect(JSON.stringify(observations)).not.toContain('turn-authoritative');
+    expect(JSON.stringify(observations)).not.toContain('generation-authoritative');
     expect(observations.every((observation) => !('providerResponseId' in observation))).toBe(true);
   });
 
@@ -1175,6 +1336,13 @@ describe('realtime proxy telemetry', () => {
       value: 1,
       dimensions: { outcome: 'confirmed' },
     }],
+    ['oversized client_queue_overflow', {
+      schemaVersion: '1.0.0',
+      name: 'telemetry_gap',
+      unit: 'count',
+      value: Number.MAX_SAFE_INTEGER,
+      dimensions: { reason: 'client_queue_overflow' },
+    }],
     ['unknown_metric', {
       schemaVersion: '1.0.0',
       name: 'unknown_metric',
@@ -1215,8 +1383,8 @@ describe('realtime proxy telemetry', () => {
       expect.objectContaining({
         name: 'speech_end_to_first_audio',
         connectionEpoch: active.connectionEpoch,
-        turnId: active.turnId,
-        generationId: active.generationId,
+        turnId: expect.stringMatching(/^tel2_/),
+        generationId: expect.stringMatching(/^tel2_/),
       }),
     ]);
   });
@@ -1307,8 +1475,12 @@ describe('realtime proxy telemetry', () => {
     }, 0, 'start', {})));
     await flushProxy();
 
-    expect(listEventsSpy.mock.calls.slice(0, 2)).toEqual([
-      [session.id, 5_000, null],
+    const reconnectQueries = listEventsSpy.mock.calls.filter((call) => call[1] === 5_000);
+    const newestStart = listEvents(session.id, 5_010)
+      .filter((event) => event.type === 'session_started')
+      .at(-1);
+    expect(reconnectQueries).toEqual([
+      [session.id, 5_000, (newestStart?.id ?? 1) - 1],
       [session.id, 5_000, (originalStart?.id ?? 0) + 1],
     ]);
     const events = listEvents(session.id, 5_010);
@@ -1321,8 +1493,8 @@ describe('realtime proxy telemetry', () => {
         payload: expect.objectContaining({
           name: 'session_reconnect',
           connectionEpoch: 2,
-          turnId: 'turn-second',
-          generationId: 'generation-second',
+          turnId: expect.stringMatching(/^tel2_/),
+          generationId: expect.stringMatching(/^tel2_/),
         }),
       }),
     ]);
@@ -1364,6 +1536,7 @@ describe('realtime proxy telemetry', () => {
     const repo = new Repo(openTestDb());
     const child = repo.createChild('Maya', 10);
     const session = repo.createSession(child.id, 'fractions');
+    repo.addEvent(session.id, 'learner_said', { text: 'released history' });
     const client = new FakeClient();
     await connectRealtimeProxy(client as never, {
       apiKey: 'offline-fixture',
@@ -1374,13 +1547,14 @@ describe('realtime proxy telemetry', () => {
     });
     const upstream = FakeUpstream.latest;
     const listEvents = repo.listEvents.bind(repo);
-    vi.spyOn(repo, 'listEvents')
-      .mockImplementationOnce(() => {
-        throw new Error('telemetry history unavailable');
-      })
-      .mockImplementation(
-        (targetSessionId, limit, throughEventId) => listEvents(targetSessionId, limit, throughEventId),
-      );
+    vi.spyOn(repo, 'listEvents').mockImplementation(
+      (targetSessionId, limit, throughEventId) => {
+        if (throughEventId !== undefined && throughEventId !== null) {
+          throw new Error('telemetry history unavailable');
+        }
+        return listEvents(targetSessionId, limit, throughEventId);
+      },
+    );
 
     client.emit('message', JSON.stringify(createRuntimeEvent({
       sessionId: session.id,
@@ -1393,7 +1567,180 @@ describe('realtime proxy telemetry', () => {
     expect(upstream.sent.map((raw) => JSON.parse(raw) as { type: string }))
       .toContainEqual(expect.objectContaining({ type: 'response.create' }));
     expect(listEvents(session.id).filter((event) => event.type === 'session_started')).toHaveLength(1);
+    expect(listEvents(session.id).filter((event) => event.type === 'metric').map(
+      (event) => event.payload,
+    )).toEqual([
+      expect.objectContaining({
+        name: 'telemetry_gap',
+        dimensions: { reason: 'server_history_failure' },
+        value: 1,
+      }),
+    ]);
     expect(client.sent.some((event) => event.type === 'error')).toBe(false);
+  });
+
+  it('awaits unresolved history telemetry before lifecycle completion', async () => {
+    vi.stubGlobal('WebSocket', FakeUpstream);
+    const repo = new Repo(openTestDb());
+    const child = repo.createChild('Maya', 10);
+    const session = repo.createSession(child.id, 'fractions');
+    let resolveHistory!: (value: boolean) => void;
+    const history = new Promise<boolean>((resolve) => { resolveHistory = resolve; });
+    const historyStarted = deferred<void>();
+    const metrics: MetricObservation[] = [];
+    let lifecycle: ProxyLifecycle | null = null;
+    const client = new FakeClient();
+    await connectRealtimeProxy(client as never, {
+      apiKey: 'offline-fixture',
+      model: 'gpt-realtime-2.1',
+      repo,
+      telemetryRepo: {
+        async appendMetric(_sessionId, observation) {
+          metrics.push(observation);
+          return metrics.length;
+        },
+        hasPriorReleasedSessionStart: () => {
+          historyStarted.resolve();
+          return history;
+        },
+      },
+      sessionId: session.id,
+      createUpstream: () => new FakeUpstream() as never,
+      onLifecycle: (value) => { lifecycle = value; },
+    });
+    client.emit('message', JSON.stringify(createRuntimeEvent({
+      sessionId: session.id,
+      connectionEpoch: 1,
+      turnId: 'turn-first',
+      generationId: 'generation-first',
+    }, 0, 'start', {})));
+    await historyStarted.promise;
+    const closing = lifecycle!.close();
+    client.emit('message', JSON.stringify(createRuntimeEvent({
+      sessionId: session.id,
+      connectionEpoch: 1,
+      turnId: 'turn-after-close',
+      generationId: 'generation-after-close',
+    }, 1, 'user_text', {
+      text: 'must not persist',
+      idempotencyKey: 'after-close-message',
+    })));
+    FakeUpstream.latest.emit({
+      type: 'conversation.item.input_audio_transcription.completed',
+      transcript: 'must not persist upstream',
+    });
+    let settled = false;
+    void closing.then(() => { settled = true; });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    resolveHistory(true);
+    await expect(closing).resolves.toBeUndefined();
+    expect(metrics).toEqual([
+      expect.objectContaining({ name: 'session_reconnect' }),
+    ]);
+    expect(repo.listEvents(session.id).filter((event) =>
+      event.type === 'learner_said')).toEqual([]);
+  });
+
+  it('force-terminalizes unresolved history without late telemetry submission', async () => {
+    vi.stubGlobal('WebSocket', FakeUpstream);
+    const repo = new Repo(openTestDb());
+    const child = repo.createChild('Maya', 10);
+    const session = repo.createSession(child.id, 'fractions');
+    let resolveHistory!: (value: boolean) => void;
+    const history = new Promise<boolean>((resolve) => { resolveHistory = resolve; });
+    const historyForceStarted = deferred<void>();
+    const metrics: MetricObservation[] = [];
+    let lifecycle: ProxyLifecycle | null = null;
+    const client = new FakeClient();
+    await connectRealtimeProxy(client as never, {
+      apiKey: 'offline-fixture',
+      model: 'gpt-realtime-2.1',
+      repo,
+      telemetryRepo: {
+        async appendMetric(_sessionId, observation) {
+          metrics.push(observation);
+          return metrics.length;
+        },
+        hasPriorReleasedSessionStart: () => {
+          historyForceStarted.resolve();
+          return history;
+        },
+      },
+      sessionId: session.id,
+      createUpstream: () => new FakeUpstream() as never,
+      onLifecycle: (value) => { lifecycle = value; },
+    });
+    client.emit('message', JSON.stringify(createRuntimeEvent({
+      sessionId: session.id,
+      connectionEpoch: 1,
+      turnId: 'turn-first',
+      generationId: 'generation-first',
+    }, 0, 'start', {})));
+    await historyForceStarted.promise;
+    await flushProxy();
+    const closing = lifecycle!.close();
+    await lifecycle!.forceTerminal();
+    await expect(lifecycle!.completion).resolves.toBeUndefined();
+    resolveHistory(true);
+    await flushProxy();
+    expect(metrics).toEqual([]);
+    await expect(closing).resolves.toBeUndefined();
+  });
+
+  it('fails forced shutdown when a sealed client producer is still unsettled', async () => {
+    vi.stubGlobal('WebSocket', FakeUpstream);
+    const repo = new Repo(openTestDb());
+    const child = repo.createChild('Maya', 10);
+    const session = repo.createSession(child.id, 'fractions');
+    const originalListEvents = repo.listEvents.bind(repo);
+    const blockedEvents = deferred<ReturnType<typeof repo.listEvents>>();
+    const producerEntered = deferred<void>();
+    const registry = new ProxyLifecycleRegistry();
+    const client = new FakeClient();
+    let lifecycle: ProxyLifecycle | null = null;
+    await connectRealtimeProxy(client as never, {
+      apiKey: 'offline-fixture',
+      model: 'gpt-realtime-2.1',
+      repo,
+      sessionId: session.id,
+      createUpstream: () => new FakeUpstream() as never,
+      onLifecycle: (value) => {
+        lifecycle = value;
+        registry.register(value);
+      },
+    });
+    const listEvents = vi.spyOn(repo, 'listEvents').mockImplementation(
+      () => {
+        producerEntered.resolve();
+        return blockedEvents.promise as never;
+      },
+    );
+    client.emit('message', JSON.stringify(createRuntimeEvent({
+      sessionId: session.id,
+      connectionEpoch: 1,
+      turnId: 'turn-first',
+      generationId: 'generation-first',
+    }, 0, 'start', {})));
+    await producerEntered.promise;
+
+    const repositoryClose = vi.fn(async () => {});
+    const fatal = vi.fn();
+    const result = await runQuiescentShutdown({
+      stopAccepting: () => {},
+      closeClients: () => {},
+      closeProxies: () => registry.shutdown(5),
+      closeRepository: repositoryClose,
+      log: () => {},
+      fatal,
+    });
+    expect(result).toBe('fatal');
+    expect(repositoryClose).not.toHaveBeenCalled();
+    expect(fatal).toHaveBeenCalledWith(expect.any(Error));
+
+    blockedEvents.resolve(originalListEvents(session.id, 2_000));
+    await expect(lifecycle!.completion).resolves.toBeUndefined();
+    listEvents.mockRestore();
   });
 
   it('flushes response cues and sends response_done when telemetry persistence fails', async () => {
@@ -1485,7 +1832,7 @@ describe('realtime proxy telemetry', () => {
       expect.objectContaining({
         name: 'barge_in_gate_outcome',
         dimensions: { outcome: 'confirmed' },
-        providerResponseId: 'response-active',
+        providerResponseId: expect.stringMatching(/^tel2_/),
       }),
     ]);
 
@@ -1495,18 +1842,24 @@ describe('realtime proxy telemetry', () => {
 
     upstream.emit({ type: 'response.done', response: { id: 'response-active', status, output: [] } });
     await flushProxy();
-    expect(repo.listEvents(session.id).filter((event) => event.type === 'metric').map((event) => event.payload)).toEqual([
+    const terminalMetrics = repo.listEvents(session.id)
+      .filter((event) => event.type === 'metric')
+      .map((event) => event.payload as Record<string, unknown>);
+    expect(terminalMetrics).toEqual([
       expect.objectContaining({
         name: 'barge_in_gate_outcome',
         dimensions: { outcome: 'confirmed' },
-        providerResponseId: 'response-active',
+        providerResponseId: expect.stringMatching(/^tel2_/),
       }),
       expect.objectContaining({
         name: 'barge_in_cancel_outcome',
         dimensions: { outcome },
-        providerResponseId: 'response-active',
+        providerResponseId: expect.stringMatching(/^tel2_/),
       }),
     ]);
+    expect(terminalMetrics[0]?.providerResponseId)
+      .toBe(terminalMetrics[1]?.providerResponseId);
+    expect(JSON.stringify(terminalMetrics)).not.toContain('response-active');
   });
 
   it('does not record a voice gate outcome for a non-voice interruption', async () => {
@@ -1547,8 +1900,8 @@ describe('realtime proxy telemetry', () => {
         name: 'speech_end_to_response_started',
         value: 50,
         connectionEpoch: active.connectionEpoch,
-        turnId: active.turnId,
-        generationId: active.generationId,
+        turnId: expect.stringMatching(/^tel2_/),
+        generationId: expect.stringMatching(/^tel2_/),
       }),
     ]);
   });
@@ -1606,7 +1959,7 @@ describe('realtime proxy telemetry', () => {
       expect.objectContaining({
         name: 'provider_usage',
         value: 253,
-        providerResponseId: 'response-usage',
+        providerResponseId: expect.stringMatching(/^tel2_/),
         dimensions: {
           totalTokens: 253,
           inputTextTokens: 119,
@@ -1623,9 +1976,14 @@ describe('realtime proxy telemetry', () => {
         name: 'tutor_audio_output_duration',
         unit: 'ms',
         value: 500,
-        providerResponseId: 'response-usage',
+        providerResponseId: expect.stringMatching(/^tel2_/),
       }),
     ]);
+    const providerIds = metrics.map(
+      (event) => (event.payload as { providerResponseId?: string }).providerResponseId,
+    );
+    expect(providerIds[0]).toBe(providerIds[1]);
+    expect(JSON.stringify(metrics)).not.toContain('response-usage');
     expect(JSON.stringify(metrics)).not.toContain('secret provider response text');
     expect(JSON.stringify(metrics)).not.toContain('secret-provider-audio-bytes');
   });
@@ -1675,12 +2033,279 @@ describe('realtime proxy telemetry', () => {
     expect(metrics.map((event) => (event.payload as { name?: unknown }).name)).toEqual([
       'tutor_audio_output_duration',
     ]);
-    expect(metrics[0]?.payload).toMatchObject({ value: 5, providerResponseId: 'response-partial-usage' });
+    expect(metrics[0]?.payload).toMatchObject({
+      value: 5,
+      providerResponseId: expect.stringMatching(/^tel2_/),
+    });
+    expect(JSON.stringify(metrics)).not.toContain('response-partial-usage');
+  });
+
+  it('does not emit terminal telemetry for an unknown response.done identity', async () => {
+    vi.stubGlobal('WebSocket', FakeUpstream);
+    const repo = new Repo(openTestDb());
+    const child = repo.createChild('Maya', 10);
+    const session = repo.createSession(child.id, 'fractions');
+    const client = new FakeClient();
+    await connectRealtimeProxy(client as never, {
+      apiKey: 'offline-fixture',
+      model: 'gpt-realtime-2.1',
+      repo,
+      sessionId: session.id,
+      createUpstream: () => new FakeUpstream() as never,
+    });
+    const active = { ...identity, sessionId: session.id };
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 0, 'hello', {})));
+    const upstream = FakeUpstream.latest;
+    upstream.emit({
+      type: 'response.output_audio.delta',
+      response_id: 'unknown-response',
+      item_id: 'unknown-item',
+      delta: Buffer.alloc(2_400 * 2).toString('base64'),
+    });
+    upstream.emit({
+      type: 'response.done',
+      response: {
+        id: 'unknown-response',
+        status: 'cancelled',
+        output: [],
+        usage: {
+          total_tokens: 2,
+          input_token_details: {
+            text_tokens: 1,
+            audio_tokens: 0,
+            image_tokens: 0,
+            cached_tokens_details: {
+              text_tokens: 0,
+              audio_tokens: 0,
+              image_tokens: 0,
+            },
+          },
+          output_token_details: { text_tokens: 1, audio_tokens: 0 },
+        },
+      },
+    });
+    await flushProxy();
+
+    expect(repo.listEvents(session.id).filter((event) => event.type === 'metric')).toEqual([]);
+    expect(client.sent).toContainEqual(expect.objectContaining({
+      type: 'response_done',
+      payload: expect.objectContaining({
+        response_id: 'unknown-response',
+        status: 'cancelled',
+      }),
+    }));
+  });
+
+  it('requests the initial response and processes later client input before prior-start lookup resolves', async () => {
+    vi.stubGlobal('WebSocket', FakeUpstream);
+    const baseRepo = new Repo(openTestDb());
+    const child = baseRepo.createChild('Maya', 10);
+    const session = baseRepo.createSession(child.id, 'fractions');
+    baseRepo.addEvent(session.id, 'session_started', { connectionEpoch: 1 });
+    const history = deferred<ReturnType<Repo['listEvents']>>();
+    const boundedQueries: number[] = [];
+    const repo = Object.create(baseRepo) as DomainRepository;
+    repo.listEvents = (targetSessionId, limit, throughEventId) => {
+      if (throughEventId !== undefined && throughEventId !== null) {
+        boundedQueries.push(throughEventId);
+        return history.promise;
+      }
+      return baseRepo.listEvents(targetSessionId, limit, throughEventId);
+    };
+    const client = new FakeClient();
+    await connectRealtimeProxy(client as never, {
+      apiKey: 'offline-fixture',
+      model: 'gpt-realtime-2.1',
+      repo,
+      sessionId: session.id,
+      createUpstream: () => new FakeUpstream() as never,
+    });
+    const active = {
+      sessionId: session.id,
+      connectionEpoch: 2,
+      turnId: 'turn-reconnect-private',
+      generationId: 'generation-reconnect-private',
+    };
+    const upstream = FakeUpstream.latest;
+
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 0, 'start', {})));
+    await flushProxy();
+    expect(upstream.sent.map((raw) => JSON.parse(raw) as { type: string }))
+      .toContainEqual(expect.objectContaining({ type: 'response.create' }));
+    const currentStart = baseRepo.listEvents(session.id).at(-1);
+    expect(currentStart?.type).toBe('session_started');
+    expect(boundedQueries).toEqual([(currentStart?.id ?? 0) - 1]);
+
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 1, 'input_audio', {
+      audio: Buffer.from('later-client-input').toString('base64'),
+    })));
+    await flushProxy();
+    expect(upstream.sent.map((raw) => JSON.parse(raw) as { type: string }))
+      .toContainEqual(expect.objectContaining({ type: 'input_audio_buffer.append' }));
+
+    history.resolve(baseRepo.listEvents(session.id, 5_000, (currentStart?.id ?? 1) - 1));
+    await flushProxy();
+    await flushProxy();
+    expect(baseRepo.listEvents(session.id).some(
+      (event) => event.type === 'metric'
+        && (event.payload as { name?: unknown }).name === 'session_reconnect',
+    )).toBe(true);
+  });
+
+  it('sends cancel and processes later client messages before telemetry persistence resolves', async () => {
+    vi.stubGlobal('WebSocket', FakeUpstream);
+    const baseRepo = new Repo(openTestDb());
+    const child = baseRepo.createChild('Maya', 10);
+    const session = baseRepo.createSession(child.id, 'fractions');
+    const metricWrite = deferred<number>();
+    const repo = Object.create(baseRepo) as DomainRepository;
+    repo.addEvent = (targetSessionId, type, payload, released) => type === 'metric'
+      ? metricWrite.promise
+      : baseRepo.addEvent(targetSessionId, type, payload, released);
+    const client = new FakeClient();
+    await connectRealtimeProxy(client as never, {
+      apiKey: 'offline-fixture',
+      model: 'gpt-realtime-2.1',
+      repo,
+      sessionId: session.id,
+      createUpstream: () => new FakeUpstream() as never,
+    });
+    const active = { ...identity, sessionId: session.id };
+    const upstream = FakeUpstream.latest;
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 0, 'hello', {})));
+    upstream.emit({ type: 'response.created', response: { id: 'response-delayed-cancel' } });
+    await flushProxy();
+
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 1, 'interrupt', { reason: 'voice' })));
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 2, 'input_audio', {
+      audio: Buffer.from('later-after-cancel').toString('base64'),
+    })));
+    await flushProxy();
+
+    const sent = upstream.sent.map((raw) => JSON.parse(raw) as { type: string });
+    expect(sent).toContainEqual(expect.objectContaining({ type: 'response.cancel' }));
+    expect(sent).toContainEqual(expect.objectContaining({ type: 'input_audio_buffer.append' }));
+    metricWrite.resolve(1);
+  });
+
+  it('flushes cues and response_done before delayed terminal telemetry writes resolve', async () => {
+    vi.stubGlobal('WebSocket', FakeUpstream);
+    const baseRepo = new Repo(openTestDb());
+    const child = baseRepo.createChild('Maya', 10);
+    const session = baseRepo.createSession(child.id, 'fractions');
+    const metricWrite = deferred<number>();
+    const repo = Object.create(baseRepo) as DomainRepository;
+    repo.addEvent = (targetSessionId, type, payload, released) => type === 'metric'
+      ? metricWrite.promise
+      : baseRepo.addEvent(targetSessionId, type, payload, released);
+    const client = new FakeClient();
+    await connectRealtimeProxy(client as never, {
+      apiKey: 'offline-fixture',
+      model: 'gpt-realtime-2.1',
+      repo,
+      sessionId: session.id,
+      createUpstream: () => new FakeUpstream() as never,
+    });
+    const active = { ...identity, sessionId: session.id };
+    const upstream = FakeUpstream.latest;
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 0, 'hello', {})));
+    upstream.emit({ type: 'response.created', response: { id: 'response-delayed-done' } });
+    upstream.emit({
+      type: 'response.function_call_arguments.done',
+      response_id: 'response-delayed-done',
+      call_id: 'move-delayed-done',
+      name: 'propose_teaching_move',
+      arguments: JSON.stringify({
+        rationale: 'fixture',
+        microObjective: 'fraction comparison',
+        strategy: 'shared scale',
+        childFacingText: 'Compare the marks.',
+        proposedAction: 'explain',
+      }),
+    });
+    upstream.emit({
+      type: 'response.output_audio.delta',
+      response_id: 'response-delayed-done',
+      item_id: 'item-delayed-done',
+      delta: Buffer.alloc(2_400 * 2).toString('base64'),
+    });
+    await flushProxy();
+
+    upstream.emit({
+      type: 'response.done',
+      response: {
+        id: 'response-delayed-done',
+        status: 'completed',
+        output: [{ type: 'function_call' }],
+        usage: completeProviderUsage(9),
+      },
+    });
+    await flushProxy();
+
+    expect(client.sent).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'lesson_state' }),
+      expect.objectContaining({
+        type: 'response_done',
+        payload: expect.objectContaining({ response_id: 'response-delayed-done' }),
+      }),
+    ]));
+    metricWrite.resolve(1);
+  });
+
+  it('records terminal provider telemetry once for duplicate response.done', async () => {
+    vi.stubGlobal('WebSocket', FakeUpstream);
+    const repo = new Repo(openTestDb());
+    const child = repo.createChild('Maya', 10);
+    const session = repo.createSession(child.id, 'fractions');
+    const client = new FakeClient();
+    await connectRealtimeProxy(client as never, {
+      apiKey: 'offline-fixture',
+      model: 'gpt-realtime-2.1',
+      repo,
+      sessionId: session.id,
+      createUpstream: () => new FakeUpstream() as never,
+    });
+    const active = { ...identity, sessionId: session.id };
+    const upstream = FakeUpstream.latest;
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 0, 'hello', {})));
+    upstream.emit({ type: 'response.created', response: { id: 'response-duplicate-done' } });
+    upstream.emit({
+      type: 'response.output_audio.delta',
+      response_id: 'response-duplicate-done',
+      item_id: 'item-duplicate-done',
+      delta: Buffer.alloc(2_400 * 2).toString('base64'),
+    });
+    await flushProxy();
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 1, 'interrupt', { reason: 'voice' })));
+    await flushProxy();
+
+    const done = {
+      type: 'response.done',
+      response: {
+        id: 'response-duplicate-done',
+        status: 'cancelled',
+        output: [],
+        usage: completeProviderUsage(9),
+      },
+    };
+    upstream.emit(done);
+    upstream.emit(done);
+    await flushProxy();
+    await flushProxy();
+
+    const names = repo.listEvents(session.id)
+      .filter((event) => event.type === 'metric')
+      .map((event) => (event.payload as { name?: unknown }).name);
+    expect(names.filter((name) => name === 'provider_usage')).toHaveLength(1);
+    expect(names.filter((name) => name === 'tutor_audio_output_duration')).toHaveLength(1);
+    expect(names.filter((name) => name === 'barge_in_cancel_outcome')).toHaveLength(1);
   });
 });
 
-function flushProxy(): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, 0));
+async function flushProxy(): Promise<void> {
+  for (let index = 0; index < 20; index += 1) {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
 }
 
 function failMetricWrites(repo: Repo): void {
@@ -1689,4 +2314,27 @@ function failMetricWrites(repo: Repo): void {
     if (type === 'metric') throw new Error('telemetry store unavailable');
     return addEvent(sessionId, type, payload, released);
   });
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: Error) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, reject, resolve };
+}
+
+function completeProviderUsage(totalTokens: number) {
+  return {
+    total_tokens: totalTokens,
+    input_token_details: {
+      text_tokens: Math.max(0, totalTokens - 2),
+      audio_tokens: 0,
+      image_tokens: 0,
+      cached_tokens_details: { text_tokens: 0, audio_tokens: 0, image_tokens: 0 },
+    },
+    output_token_details: { text_tokens: 1, audio_tokens: 1 },
+  };
 }

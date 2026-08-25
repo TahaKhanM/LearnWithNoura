@@ -404,3 +404,103 @@ Phase 0 is complete only when:
 At that point the phase stops and requests explicit authorization for the
 deployment and synthetic live smoke. Phase 1 does not start until Phase 0's
 acceptance criteria are met.
+
+## Final hardening amendment
+
+The approved hardening decision in
+`2026-08-25-phase-0-telemetry-hardening-decision.md` is part of this design.
+It supersedes the earlier direct-write and reconnect-path wording where they
+conflict.
+
+- Server observations are synchronously prepared, pseudonymized, and submitted
+  to a bounded per-connection `SessionTelemetryWriter`. Its single FIFO drain
+  is never awaited by lesson-critical message handling. Tests and connection
+  close have an explicit `flush()` boundary.
+- The server appends `session_started`, requests the initial model response,
+  then asynchronously pages released history below that new row's exclusive
+  event-ID bound to determine whether to enqueue `session_reconnect`.
+- `telemetry_gap` records positive aggregated loss counts for
+  `server_queue_overflow`, `server_persistence_failure`, and
+  `client_queue_overflow`. Pending server gaps precede later successful
+  observations; client pre-ready eviction is reported after the next `ready`.
+- Raw turn, generation, provider-response, visual-cue, semantic-object,
+  section, and object identifiers are transformed into deterministic
+  field-specific session-scoped opaque tokens only after proxy trust checks.
+  Projection applies the same defense to historical/direct typed rows and does
+  not double-hash versioned opaque tokens.
+- `board_reveal_to_narration` requires exact accepted provider-response
+  correlation. Provider terminal telemetry and pending voice-cancel
+  correlation use bounded per-connection sets and are idempotent by provider
+  response ID.
+- Barge-in summary counts are per observed gate transition, not per semantic
+  speech episode.
+- The session-log repository input is ascending event/server chronology. One
+  exported 5,000-row limit is used by both the endpoint query and truncation
+  projection.
+- The smoke reporter accepts an HTTP(S) origin only and constructs reports from
+  exact endpoint allowlists. It verifies origin, session, schema, safe-integer
+  durations, internally consistent positive provider usage, timeline/summary
+  equality, and absence of telemetry gaps.
+
+Gap rows make known loss visible but cannot prove completeness after a browser
+connection that never reaches another accepted `ready`. Final observations can
+also be lost in an unrecovered fallback or failed transport phase. Such runs
+must remain incomplete and cannot support a live telemetry-completeness claim.
+
+## Second-review hardening amendment
+
+This amendment supersedes any earlier wording that treats a deferred
+in-process callback as a sufficient asynchronous repository boundary:
+
+- production SQLite metric append and prior-start lookup execute in a worker
+  thread; Postgres keeps its native asynchronous query boundary, while
+  test/in-memory repositories use a yielding adapter;
+- the writer is one ordered stream of observations and gap barriers. Overflow
+  gaps follow older accepted observations, failed observations become
+  persistence-failure barriers in place, and failed gaps retain their original
+  reason/value while blocking later entries;
+- preparation always encodes raw inputs. Projection preserves an identifier
+  only when server-owned encoding metadata is valid and its token prefix
+  belongs to the current session; copied cross-session tokens and forged
+  metadata are re-encoded;
+- smoke validation reconstructs every aggregate and lifecycle count from
+  strictly ascending timeline rows and compares the full summary exactly with
+  checked safe-integer arithmetic;
+- an unknown `response.done` identity emits no provider usage, tutor-output
+  duration, or cancel-outcome telemetry. Existing cue flush and client
+  finalization behavior remains unchanged.
+
+## Lifecycle accounting amendment
+
+- Accepted normal observations are FIFO. Gap observations are fixed-size,
+  exact per-reason completeness counters and do not claim chronology under
+  saturation.
+- Pending loss accounting blocks acceptance of later normal telemetry until a
+  gap attempt succeeds; internal counter overflow creates an explicit
+  smoke-failing incomplete state.
+- SQLite session ending serializes the cutoff and status transition against the
+  worker writer; Postgres retains its transactional row-lock equivalent.
+- Reconnect-history failures record completeness loss.
+- Repository shutdown stops telemetry acceptance, waits a documented finite
+  bound for registered writers, then closes the worker with handled errors.
+- Writer flush rejects with typed incompleteness unless every normal row and
+  gap counter is empty; failed close remains registered for shutdown retry.
+- Proxy lifecycle completion includes client/upstream chains and prior-start
+  callbacks before writer close. Server shutdown closes active WebSockets and
+  awaits these handles before repository shutdown.
+- PostgreSQL append locks the session row transactionally before active-state
+  validation and insert, serializing across instances with the end cutoff lock.
+- Teardown seals both frame handlers before snapshotting producer chains.
+  Upgrade authorization is rechecked immediately before WebSocket acceptance,
+  and connection setup plus late lifecycle registration drain repeatedly to
+  empty under the one shutdown deadline.
+- Deadline expiry force-terminalizes every remaining proxy and writer before
+  repository close and returns a `forced` disposition. Failed terminalization
+  returns `fatal` and skips graceful repository closure.
+- Force success additionally requires the admission-sealed client/upstream
+  side-effect chains to be settled. Unsettled chains invoke the injectable
+  fatal process path; only history-only telemetry continuations may be
+  terminalized by disabling their writer authority.
+- Detached semantic staging is registered in one side-effect task set.
+  Graceful close drains it repeatedly before telemetry; force requires it to be
+  empty, so unresolved preflight/staging fails fatal without repository close.

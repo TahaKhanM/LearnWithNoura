@@ -2,6 +2,7 @@
 // Normal execution can reach the configured provider and requires authorization.
 // --help and --report-fixture are offline-only and make no live evidence claim.
 import { mkdir, readFile, stat } from 'node:fs/promises';
+import { projectObservation } from './e2e-live-schema.mjs';
 
 const MAX_RETAINED_COUNT = 10_000;
 const MAX_RETAINED_MILESTONES = 32;
@@ -20,7 +21,6 @@ const MILESTONE_LABELS = new Set([
   'parent_dashboard_loaded',
   'telemetry_log_retrieved',
 ]);
-
 const HELP = `Prepared Noura synthetic live smoke reporter
 
 Usage:
@@ -79,8 +79,6 @@ async function main(argv) {
       process.env.NOURA_PROVIDER_REPORTED_COST_USD,
     );
     context.providerReportedCostUsd = providerReportedCostUsd;
-    validateConfiguration(baseUrl);
-
     if (!options.reportFixturePath && !options.authorizedLiveRun) {
       throw new SmokeReportError(
         'authorization_required',
@@ -165,7 +163,18 @@ function parseArguments(argv) {
 
 function parseBaseUrl(value) {
   try {
-    return new URL(value ?? 'http://localhost:5173');
+    const url = new URL(value ?? 'http://localhost:5173');
+    if (
+      !['http:', 'https:'].includes(url.protocol)
+      || url.username
+      || url.password
+      || url.pathname !== '/'
+      || url.search
+      || url.hash
+    ) {
+      throw new Error();
+    }
+    return new URL(url.origin);
   } catch {
     throw new SmokeReportError(
       'invalid_base_url',
@@ -184,15 +193,6 @@ function parseProviderReportedCost(value) {
     );
   }
   return costUsd;
-}
-
-function validateConfiguration(url) {
-  if (!['http:', 'https:'].includes(url.protocol)) {
-    throw new SmokeReportError(
-      'invalid_base_url',
-      'NOURA_BASE_URL must be a valid absolute HTTP or HTTPS URL.',
-    );
-  }
 }
 
 async function loadReportFixture(path) {
@@ -391,28 +391,33 @@ function buildReport({
   observation,
   offlineFixture,
 }) {
-  const version = requireRecord(observation.version, 'version');
-  const log = requireRecord(observation.log, 'log');
-  const summary = requireRecord(log.summary, 'log.summary');
-  const durations = requireRecord(summary.durations, 'log.summary.durations');
-  const timeline = Array.isArray(log.timeline) ? log.timeline.filter(isRecord) : [];
-  const providerUsageRows = timeline.filter((entry) => entry.name === 'provider_usage');
-  const audioRows = timeline.filter(
-    (entry) => entry.name === 'tutor_audio_output_duration'
-      && typeof entry.value === 'number'
-      && Number.isFinite(entry.value),
+  const projected = projectObservation(observation);
+  if (projected.navigatedOrigin !== url.origin) {
+    throw new Error('The browser reached an unexpected origin.');
+  }
+  const { log, version } = projected;
+  if (log.sessionId !== projected.sessionId) {
+    throw new Error('The session log does not match the created session.');
+  }
+  const providerUsageRows = log.timeline.filter((entry) => entry.name === 'provider_usage');
+  const audioRows = log.timeline.filter(
+    (entry) => entry.name === 'tutor_audio_output_duration',
   );
-  const hasProviderUsage = providerUsageRows.length > 0;
-  const providerTokenUsage = hasProviderUsage && isRecord(summary.providerUsage)
-    ? summary.providerUsage
+  const hasProviderUsage = providerUsageRows.length > 0
+    && log.summary.providerUsage.totalTokens > 0;
+  const providerTokenUsage = hasProviderUsage
+    ? { ...log.summary.providerUsage }
     : null;
   const requiredDurationNames = requiredDurationNamesForScenario(scenario);
   const missingDurationNames = requiredDurationNames.filter(
-    (name) => !hasDurationAggregate(durations[name]),
+    (name) => !log.summary.durations[name],
   );
+  const hasTelemetryGaps = Object.values(log.summary.telemetryGaps)
+    .some((value) => value > 0);
   const missingObservationIds = [
     ...missingDurationNames.map((name) => `missing_${name}`),
     ...(!hasProviderUsage ? ['missing_provider_usage'] : []),
+    ...(hasTelemetryGaps ? ['telemetry_gaps_present'] : []),
   ];
   const requiresAuthorizedLiveVerification = [
     verificationEntry(
@@ -433,7 +438,13 @@ function buildReport({
       id,
       `The selected ${scenario} scenario did not produce this required observation.`,
     )),
-    ...(log.truncated === true
+    ...(hasTelemetryGaps
+      ? [verificationEntry(
+          'complete_telemetry',
+          'The session log contains explicit telemetry transport or persistence gaps.',
+        )]
+      : []),
+    ...(log.truncated
       ? [verificationEntry(
           'complete_session_log',
           'The parent-scoped session log reached its bound and may be incomplete.',
@@ -452,13 +463,17 @@ function buildReport({
       ? 'provider_token_usage_from_response_done_only'
       : null,
     liveLatencyClaim: null,
-    configuredBaseUrl: url.href,
-    navigatedOrigin: normalizedOrigin(observation.navigatedOrigin),
-    gitSha: typeof version.gitSha === 'string' ? version.gitSha : null,
-    runtimeModelIds: isRecord(version.runtimeModels) ? version.runtimeModels : null,
+    configuredBaseUrl: url.origin,
+    navigatedOrigin: projected.navigatedOrigin,
+    gitSha: version.gitSha,
+    runtimeModelIds: {
+      realtime: version.runtimeModels.realtime,
+      transcription: version.runtimeModels.transcription,
+      text: version.runtimeModels.text,
+    },
     scenario,
-    sessionId: observation.sessionId,
-    elapsedSmokeDurationMs: observation.elapsedSmokeDurationMs,
+    sessionId: projected.sessionId,
+    elapsedSmokeDurationMs: projected.elapsedSmokeDurationMs,
     totalTutorAudioOutputDurationMs: audioRows.length > 0
       ? audioRows.reduce((total, entry) => total + entry.value, 0)
       : null,
@@ -472,15 +487,16 @@ function buildReport({
     providerReportedCostSource: costUsd === null
       ? null
       : 'optional_user_supplied_provider_billing_surface',
-    phase0Aggregates: summary,
-    telemetryLogTruncated: log.truncated === true,
+    phase0Aggregates: log.summary,
+    telemetryGaps: { ...log.summary.telemetryGaps },
+    telemetryLogTruncated: log.truncated,
     smokeGate: {
-      passed: missingObservationIds.length === 0 && log.truncated !== true,
+      passed: missingObservationIds.length === 0 && !log.truncated,
       requiredDurationNames,
       missingObservationIds,
     },
     requiresAuthorizedLiveVerification,
-    journey: buildJourneyReport(observation),
+    journey: buildJourneyReport(projected),
   };
 }
 
@@ -512,7 +528,7 @@ function buildFailureReport({
     liveProviderEvidenceVerified: false,
     liveProviderEvidenceScope: null,
     liveLatencyClaim: null,
-    configuredBaseUrl: url instanceof URL ? url.href : null,
+    configuredBaseUrl: url instanceof URL ? url.origin : null,
     navigatedOrigin: null,
     scenario,
     providerReportedCostUsd: costUsd,
@@ -612,19 +628,12 @@ function boundedCount(value) {
   return Math.min(Math.round(value), MAX_RETAINED_COUNT);
 }
 
-function normalizedOrigin(value) {
-  if (typeof value !== 'string') return null;
-  try {
-    const url = new URL(value);
-    return ['http:', 'https:'].includes(url.protocol) ? url.origin : null;
-  } catch {
-    return null;
-  }
-}
-
 function normalizeReportError(error, offlineFixture) {
   if (error instanceof SmokeReportError) {
     return error;
+  }
+  if (offlineFixture && error instanceof Error) {
+    return new SmokeReportError('fixture_load_failed', error.message);
   }
   return new SmokeReportError(
     offlineFixture ? 'fixture_load_failed' : 'live_journey_failed',
@@ -634,20 +643,8 @@ function normalizeReportError(error, offlineFixture) {
   );
 }
 
-function hasDurationAggregate(value) {
-  return isRecord(value)
-    && typeof value.count === 'number'
-    && Number.isInteger(value.count)
-    && value.count > 0;
-}
-
 function verificationEntry(id, reason) {
   return { id, status: 'unverified', reason };
-}
-
-function requireRecord(value, label) {
-  if (!isRecord(value)) throw new Error(`${label} must be an object.`);
-  return value;
 }
 
 function isRecord(value) {

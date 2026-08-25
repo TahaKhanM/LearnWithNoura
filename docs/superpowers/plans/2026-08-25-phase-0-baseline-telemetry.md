@@ -4,7 +4,15 @@
 
 **Goal:** Add privacy-safe, event-sourced session telemetry and a parent-scoped structured session log without changing Noura's lesson, audio, turn, or board behavior.
 
-**Architecture:** Define one typed telemetry contract in `shared/`, persist validated observations as existing released `metric` events, and project those events into a structured log. Browser and provider lifecycle code supply facts to small pure observers; the realtime proxy remains the persistence boundary and never trusts client-supplied identity. Existing event storage, generation envelopes, board state, and transport behavior remain unchanged.
+**Architecture:** Define one typed telemetry contract in `shared/`, prepare and
+pseudonymize accepted observations synchronously, submit them to one bounded
+ordered non-blocking writer per connection, persist them as existing released
+`metric` events, and project those events into a structured log. Browser and
+provider lifecycle code supply facts to small pure observers; the realtime
+proxy remains the trust boundary and never trusts client-supplied identity.
+Known queue/persistence loss is represented by typed gap observations. Existing
+event storage, generation envelopes, board state, and transport behavior remain
+unchanged.
 
 **Tech Stack:** TypeScript 6, Zod 4, React 19, Express 5, SQLite/Postgres repository contract, Vitest, Playwright.
 
@@ -19,6 +27,78 @@
 - Leave the three pre-existing untracked architecture prompt/review documents untouched.
 - Do not update visual snapshots.
 - Do not deploy, push, create paid resources, or run live-provider calls.
+- No metric repository query or write may be awaited before initial response
+  creation, cancellation, cue/response completion, or later message handling.
+- Raw telemetry correlation IDs must be converted to deterministic
+  field-specific session-scoped opaque tokens after proxy trust checks and
+  before persistence; projection repeats this defense for historical/direct
+  typed rows.
+- The smoke gate fails closed on malformed endpoint data, origin/session/schema
+  mismatch, inconsistent provider usage, truncation, or any telemetry gap.
+
+## Final review hardening wave
+
+The implementation tasks below describe the original milestone sequence. The
+final review wave additionally follows
+`docs/architecture/2026-08-25-phase-0-telemetry-hardening-decision.md` and uses
+strict RED/GREEN coverage for:
+
+1. a typed bounded `SessionTelemetryWriter` with one FIFO drain, swallowed
+   persistence failures, ordered pending-gap writes, and explicit `flush()`;
+2. asynchronous exact prior-start paging below the newly appended
+   `session_started` event ID, after initial `response.create`;
+3. `telemetry_gap` summary totals for server queue overflow, server persistence
+   failure, and client pre-ready overflow;
+4. server preparation and session-log defense-in-depth pseudonymization of all
+   turn/generation/provider/visual/semantic/section/object identifiers;
+5. exact rejection of untrusted board/narration response correlation plus
+   bounded provider-terminal and pending-barge-in idempotency sets;
+6. origin-only smoke configuration and exact hand-written endpoint/report
+   projection with safe-integer duration and provider-usage reconciliation;
+7. session-log `no-store` before authorization/ownership checks and one shared
+   5,000-row endpoint/projection limit.
+
+Projection consumes released repository rows in ascending event/server
+chronology and does not reorder or infer missing rows. Barge-in counts are per
+gate transition. An unrecovered browser/fallback/failed transport can still
+lose final observations before a gap is delivered, so such a run cannot prove
+telemetry completeness.
+
+### Second consolidated review wave
+
+Before final evidence is reconciled, strict RED/GREEN coverage additionally
+requires:
+
+1. a production SQLite worker-thread adapter for metric append and exact
+   prior-start lookup, native async Postgres delegation, and a yielding
+   test/in-memory adapter;
+2. one ordered writer queue containing normal observations and gap barriers,
+   with bounded gap reserve, adjacency-only merging, in-place failure
+   replacement, and original gap reason/value recovery;
+3. server-owned encoding metadata plus a session-derived token prefix;
+   preparation always transforms input, while projection preserves only
+   metadata-valid tokens belonging to the projected session;
+4. exact reconstruction of all duration and lifecycle summary fields from
+   strictly ascending timeline rows, including checked integer addition and
+   required-duration presence in the timeline;
+5. exact-map-only terminal telemetry identity, so unknown `response.done`
+   events remain behaviorally finalized but emit no terminal metrics.
+
+### Lifecycle accounting follow-up
+
+Strict RED/GREEN coverage additionally requires fixed enum-keyed exact gap
+counters, bounded client gap values, explicit accounting-overflow
+incompleteness, transactional SQLite end cutoffs under concurrent worker
+append, reconnect-history failure gaps, and a shared writer registry that
+flushes before bounded repository shutdown. Gap counters are completeness
+evidence, not chronological event evidence; only accepted normal observations
+retain FIFO ordering.
+
+The final distributed follow-up additionally requires truthful typed flush
+failure, close-without-unregister on incomplete persistence, global gap-empty
+draining, proxy lifecycle tracking through prior-start settlement, ordered
+WebSocket/proxy/repository/worker shutdown, and a transactional PostgreSQL
+session-row lock before every event insert.
 
 ## File Structure
 
