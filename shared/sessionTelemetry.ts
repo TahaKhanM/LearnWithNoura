@@ -158,8 +158,10 @@ const legacyObservationSchema = z.object({
   legacy: z.literal(true),
 });
 
+const newMetricObservationSchema = MetricInputSchema.and(z.object(metricContextFields));
+
 export const MetricObservationSchema = z.union([
-  MetricInputSchema.and(z.object(metricContextFields)),
+  newMetricObservationSchema,
   legacyObservationSchema,
 ]);
 
@@ -184,7 +186,7 @@ export function attachMetricContext(
 }
 
 export function normalizeStoredMetric(payload: unknown): NormalizedMetric | null {
-  const observation = MetricObservationSchema.safeParse(payload);
+  const observation = newMetricObservationSchema.safeParse(payload);
   if (observation.success) {
     return observation.data;
   }
@@ -253,7 +255,7 @@ export type SessionTelemetryLog = {
   sessionId: string;
   truncated: boolean;
   summary: {
-    durations: Partial<Record<MetricInput['name'], DurationAggregate>>;
+    durations: Partial<Record<DurationMetricName, DurationAggregate>>;
     bargeIn: BargeInOutcomeCounts;
     sectionSwitchCount: number;
     reconnectCount: number;

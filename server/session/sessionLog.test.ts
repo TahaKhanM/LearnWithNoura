@@ -166,6 +166,23 @@ describe('buildSessionTelemetryLog', () => {
     ]);
   });
 
+  it('rounds duration means from the exact total without cumulative drift', () => {
+    const events = [0, 1, 0].map((value, index) => metricEvent(index + 1, {
+      schemaVersion: '1.0.0',
+      name: 'speech_end_to_first_audio',
+      unit: 'ms',
+      value,
+    }));
+
+    expect(buildSessionTelemetryLog('session-1', events, 5_000).summary.durations.speech_end_to_first_audio).toEqual({
+      count: 3,
+      min: 0,
+      max: 1,
+      mean: 0,
+      latest: 0,
+    });
+  });
+
   it('does not increment section switches for initial_anchor', () => {
     const events = [
       metricEvent(1, {
@@ -219,6 +236,20 @@ describe('buildSessionTelemetryLog', () => {
     });
   });
 
+  it('counts confirmed barge-ins without a providerResponseId as unresolved', () => {
+    const events = [
+      metricEvent(1, {
+        schemaVersion: '1.0.0',
+        name: 'barge_in_gate_outcome',
+        unit: 'count',
+        value: 1,
+        dimensions: { outcome: 'confirmed' },
+      }),
+    ];
+
+    expect(buildSessionTelemetryLog('session-1', events, 5_000).summary.bargeIn.unresolved).toBe(1);
+  });
+
   it('excludes malformed metrics', () => {
     const events = [
       { id: 1, sessionId: 'session-1', ts: 1_000, type: 'metric', released: true, payload: { name: 'child_text', unit: 'count', value: 1 } },
@@ -250,6 +281,57 @@ describe('buildSessionTelemetryLog', () => {
     ];
 
     expect(buildSessionTelemetryLog('session-1', events, 5_000).summary.reconnectCount).toBe(1);
+  });
+
+  it('sums every provider usage category across observations', () => {
+    const events = [
+      metricEvent(1, {
+        schemaVersion: '1.0.0',
+        name: 'provider_usage',
+        unit: 'count',
+        value: 100,
+        dimensions: {
+          totalTokens: 100,
+          inputTextTokens: 40,
+          inputAudioTokens: 10,
+          inputImageTokens: 0,
+          cachedTextTokens: 5,
+          cachedAudioTokens: 2,
+          cachedImageTokens: 0,
+          outputTextTokens: 30,
+          outputAudioTokens: 20,
+        },
+      }),
+      metricEvent(2, {
+        schemaVersion: '1.0.0',
+        name: 'provider_usage',
+        unit: 'count',
+        value: 50,
+        dimensions: {
+          totalTokens: 50,
+          inputTextTokens: 20,
+          inputAudioTokens: 5,
+          inputImageTokens: 5,
+          cachedTextTokens: 3,
+          cachedAudioTokens: 1,
+          cachedImageTokens: 2,
+          outputTextTokens: 10,
+          outputAudioTokens: 10,
+        },
+      }),
+    ];
+
+    expect(buildSessionTelemetryLog('session-1', events, 5_000).summary.providerUsage).toEqual({
+      totalTokens: 150,
+      inputTextTokens: 60,
+      inputAudioTokens: 15,
+      inputImageTokens: 5,
+      cachedTextTokens: 8,
+      cachedAudioTokens: 3,
+      cachedImageTokens: 2,
+      outputTextTokens: 40,
+      outputAudioTokens: 30,
+    });
   });
 
   it('marks truncated when the input reaches the requested limit', () => {

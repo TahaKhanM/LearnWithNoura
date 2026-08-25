@@ -5,7 +5,7 @@ import {
   normalizeStoredMetric,
   type BargeInOutcomeCounts,
   type DurationAggregate,
-  type MetricInput,
+  type DurationMetricName,
   type ProviderUsageTotals,
   type SessionMetricEntry,
   type SessionTelemetryLog,
@@ -38,10 +38,13 @@ function roundMean(total: number, count: number): number {
 }
 
 function updateDurationAggregate(
-  aggregates: Partial<Record<MetricInput['name'], DurationAggregate>>,
-  name: MetricInput['name'],
+  aggregates: Partial<Record<DurationMetricName, DurationAggregate>>,
+  totals: Partial<Record<DurationMetricName, number>>,
+  name: DurationMetricName,
   value: number,
 ): void {
+  const total = (totals[name] ?? 0) + value;
+  totals[name] = total;
   const current = aggregates[name];
   if (!current) {
     aggregates[name] = {
@@ -58,7 +61,7 @@ function updateDurationAggregate(
   current.min = Math.min(current.min, value);
   current.max = Math.max(current.max, value);
   current.latest = value;
-  current.mean = roundMean(current.mean * (current.count - 1) + value, current.count);
+  current.mean = roundMean(total, current.count);
 }
 
 function toTimelineDimensions(
@@ -111,11 +114,13 @@ export function buildSessionTelemetryLog(
   events: EventRow[],
   limit: number,
 ): SessionTelemetryLog {
-  const durations: Partial<Record<MetricInput['name'], DurationAggregate>> = {};
+  const durations: Partial<Record<DurationMetricName, DurationAggregate>> = {};
+  const durationTotals: Partial<Record<DurationMetricName, number>> = {};
   const bargeIn = emptyBargeInCounts();
   const providerUsage = emptyProviderUsage();
   const confirmedByResponseId = new Map<string, number>();
   const resolvedByResponseId = new Map<string, number>();
+  let uncorrelatedConfirmedCount = 0;
   let sectionSwitchCount = 0;
   let reconnectCount = 0;
   let tutorObjectDisappearanceCount = 0;
@@ -130,7 +135,7 @@ export function buildSessionTelemetryLog(
     timeline.push(toTimelineEntry(event, metric));
 
     if (isDurationMetricName(metric.name)) {
-      updateDurationAggregate(durations, metric.name, metric.value);
+      updateDurationAggregate(durations, durationTotals, metric.name, metric.value);
     }
 
     if (metric.name === 'barge_in_gate_outcome' && 'dimensions' in metric) {
@@ -146,6 +151,8 @@ export function buildSessionTelemetryLog(
           const responseId = 'providerResponseId' in metric ? metric.providerResponseId : undefined;
           if (responseId) {
             confirmedByResponseId.set(responseId, (confirmedByResponseId.get(responseId) ?? 0) + 1);
+          } else {
+            uncorrelatedConfirmedCount += 1;
           }
           break;
         }
@@ -198,7 +205,7 @@ export function buildSessionTelemetryLog(
     }
   }
 
-  let unresolved = 0;
+  let unresolved = uncorrelatedConfirmedCount;
   for (const [responseId, confirmedCount] of confirmedByResponseId) {
     const resolvedCount = resolvedByResponseId.get(responseId) ?? 0;
     unresolved += Math.max(0, confirmedCount - resolvedCount);

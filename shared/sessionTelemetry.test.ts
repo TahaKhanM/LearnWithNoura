@@ -1,8 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, expectTypeOf, it } from 'vitest';
 import {
   MetricInputSchema,
   attachMetricContext,
   normalizeStoredMetric,
+  type DurationAggregate,
+  type DurationMetricName,
+  type SessionTelemetryLog,
 } from './sessionTelemetry';
 
 const context = {
@@ -53,5 +56,19 @@ describe('session telemetry contract', () => {
       value: 420,
       legacy: true,
     });
+  });
+
+  it('rejects normalized legacy output as a stored metric payload', () => {
+    expect(normalizeStoredMetric({
+      name: 'speech_end_to_first_audio',
+      unit: 'ms',
+      value: 420,
+      legacy: true,
+    })).toBeNull();
+  });
+
+  it('types duration summaries with duration metric names only', () => {
+    expectTypeOf<SessionTelemetryLog['summary']['durations']>()
+      .toEqualTypeOf<Partial<Record<DurationMetricName, DurationAggregate>>>();
   });
 });
