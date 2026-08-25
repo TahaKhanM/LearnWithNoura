@@ -1050,7 +1050,45 @@ describe('realtime proxy telemetry', () => {
     ]);
   });
 
-  it('records one reconnect after prior history exceeds the old scan bound', async () => {
+  it('does not record a reconnect when a released client metric precedes the first start', async () => {
+    vi.stubGlobal('WebSocket', FakeUpstream);
+    const repo = new Repo(openTestDb());
+    const child = repo.createChild('Maya', 10);
+    const session = repo.createSession(child.id, 'fractions');
+    const client = new FakeClient();
+    await connectRealtimeProxy(client as never, {
+      apiKey: 'offline-fixture',
+      model: 'gpt-realtime-2.1',
+      repo,
+      sessionId: session.id,
+      createUpstream: () => new FakeUpstream() as never,
+    });
+    const active = { ...identity, sessionId: session.id };
+
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 0, 'metric', {
+      schemaVersion: '1.0.0',
+      name: 'speech_end_to_first_audio',
+      unit: 'ms',
+      value: 240,
+    })));
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 1, 'start', {})));
+    await flushProxy();
+
+    const events = repo.listEvents(session.id);
+    expect(events.filter((event) => event.type === 'session_started')).toHaveLength(1);
+    expect(events.filter(
+      (event) => event.type === 'metric' &&
+        (event.payload as { name?: unknown }).name === 'speech_end_to_first_audio',
+    )).toEqual([
+      expect.objectContaining({ released: true }),
+    ]);
+    expect(events.filter(
+      (event) => event.type === 'metric' &&
+        (event.payload as { name?: unknown }).name === 'session_reconnect',
+    )).toEqual([]);
+  });
+
+  it('pages released history to find a prior start beyond 5,000 later events', async () => {
     vi.stubGlobal('WebSocket', FakeUpstream);
     const repo = new Repo(openTestDb());
     const child = repo.createChild('Maya', 10);
@@ -1071,8 +1109,10 @@ describe('realtime proxy telemetry', () => {
     }, 0, 'start', {})));
     await flushProxy();
 
+    const originalStart = repo.listEvents(session.id).find((event) => event.type === 'session_started');
+    expect(originalStart).toBeDefined();
     expect(repo.listEvents(session.id).filter((event) => event.type === 'metric')).toEqual([]);
-    for (let index = 0; index < 2_001; index += 1) {
+    for (let index = 0; index < 5_001; index += 1) {
       repo.addEvent(session.id, 'history_filler', { index });
     }
 
@@ -1084,6 +1124,10 @@ describe('realtime proxy telemetry', () => {
       sessionId: session.id,
       createUpstream: () => new FakeUpstream() as never,
     });
+    const listEvents = repo.listEvents.bind(repo);
+    const listEventsSpy = vi.spyOn(repo, 'listEvents').mockImplementation(
+      (targetSessionId, limit, throughEventId) => listEvents(targetSessionId, limit, throughEventId),
+    );
     secondClient.emit('message', JSON.stringify(createRuntimeEvent({
       sessionId: session.id,
       connectionEpoch: 2,
@@ -1092,7 +1136,11 @@ describe('realtime proxy telemetry', () => {
     }, 0, 'start', {})));
     await flushProxy();
 
-    const events = repo.listEvents(session.id, 2_010);
+    expect(listEventsSpy.mock.calls.slice(0, 2)).toEqual([
+      [session.id, 5_000, null],
+      [session.id, 5_000, (originalStart?.id ?? 0) + 1],
+    ]);
+    const events = listEvents(session.id, 5_010);
     expect(events.filter((event) => event.type === 'session_started').map((event) => event.payload)).toEqual([
       expect.objectContaining({ connectionEpoch: 1 }),
       expect.objectContaining({ connectionEpoch: 2 }),
@@ -1137,6 +1185,43 @@ describe('realtime proxy telemetry', () => {
     expect(upstream.sent.map((raw) => JSON.parse(raw) as { type: string }))
       .toContainEqual(expect.objectContaining({ type: 'response.create' }));
     expect(repo.listEvents(session.id).filter((event) => event.type === 'session_started')).toHaveLength(2);
+    expect(client.sent.some((event) => event.type === 'error')).toBe(false);
+  });
+
+  it('requests the initial response when reconnect history lookup fails', async () => {
+    vi.stubGlobal('WebSocket', FakeUpstream);
+    const repo = new Repo(openTestDb());
+    const child = repo.createChild('Maya', 10);
+    const session = repo.createSession(child.id, 'fractions');
+    const client = new FakeClient();
+    await connectRealtimeProxy(client as never, {
+      apiKey: 'offline-fixture',
+      model: 'gpt-realtime-2.1',
+      repo,
+      sessionId: session.id,
+      createUpstream: () => new FakeUpstream() as never,
+    });
+    const upstream = FakeUpstream.latest;
+    const listEvents = repo.listEvents.bind(repo);
+    vi.spyOn(repo, 'listEvents')
+      .mockImplementationOnce(() => {
+        throw new Error('telemetry history unavailable');
+      })
+      .mockImplementation(
+        (targetSessionId, limit, throughEventId) => listEvents(targetSessionId, limit, throughEventId),
+      );
+
+    client.emit('message', JSON.stringify(createRuntimeEvent({
+      sessionId: session.id,
+      connectionEpoch: 1,
+      turnId: 'turn-first',
+      generationId: 'generation-first',
+    }, 0, 'start', {})));
+    await flushProxy();
+
+    expect(upstream.sent.map((raw) => JSON.parse(raw) as { type: string }))
+      .toContainEqual(expect.objectContaining({ type: 'response.create' }));
+    expect(listEvents(session.id).filter((event) => event.type === 'session_started')).toHaveLength(1);
     expect(client.sent.some((event) => event.type === 'error')).toBe(false);
   });
 

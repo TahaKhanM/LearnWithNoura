@@ -38,9 +38,37 @@ import {
 
 const REALTIME_URL = 'wss://api.openai.com/v1/realtime';
 const OUTPUT_AUDIO_SAMPLES_PER_MS = 24;
+const RECONNECT_HISTORY_PAGE_SIZE = 5_000;
 
 /** Stop auto-continuing tool chains after this many rounds per turn. */
 const MAX_TOOL_CONTINUES = 14;
+
+async function hasReleasedSessionStart(
+  repo: DomainRepository,
+  sessionId: string,
+): Promise<boolean> {
+  let throughEventId: number | null = null;
+
+  try {
+    while (true) {
+      const page = await repo.listEvents(
+        sessionId,
+        RECONNECT_HISTORY_PAGE_SIZE,
+        throughEventId,
+      );
+      if (page.some((event) => event.type === 'session_started')) return true;
+      if (page.length < RECONNECT_HISTORY_PAGE_SIZE) return false;
+
+      const oldestEventId = page[0]?.id;
+      if (oldestEventId === undefined || oldestEventId <= 1) return false;
+      const nextThroughEventId = oldestEventId - 1;
+      if (throughEventId !== null && nextThroughEventId >= throughEventId) return false;
+      throughEventId = nextThroughEventId;
+    }
+  } catch {
+    return false;
+  }
+}
 
 function isAllowedClientMetric(input: MetricInput): boolean {
   switch (input.name) {
@@ -1348,7 +1376,7 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
         if (started) break;
         started = true;
         toolContinues = 0;
-        const hadPriorStart = (await repo.listEvents(sessionId, 1)).length > 0;
+        const hadPriorStart = await hasReleasedSessionStart(repo, sessionId);
         const resume = await conversationContext();
         if (resume) {
           sendUpstream({
