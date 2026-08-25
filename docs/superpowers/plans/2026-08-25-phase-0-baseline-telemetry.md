@@ -216,7 +216,9 @@ expect(log.summary.bargeIn).toEqual({
 expect(log.summary.sectionSwitchCount).toBe(1);
 expect(log.summary.reconnectCount).toBe(2);
 expect(log.summary.tutorObjectDisappearanceCount).toBe(1);
-expect(log.timeline.map((entry) => entry.eventId)).toEqual([11, 12, 13, 14, 15]);
+expect(log.timeline.map((entry) => entry.eventId)).toEqual([
+  11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
+]);
 ```
 
 Also assert that:
