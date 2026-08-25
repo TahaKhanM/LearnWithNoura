@@ -2,12 +2,13 @@
 
 ## Second-review status
 
-The timeout terminalization follow-up is complete at code head `bc79203`.
+The producer-authority follow-up is complete at code head `ddc2ad1`.
 Browser/visual/accessibility evidence remains intentionally pending controller
 rerun; no live/provider/hardware claim is added.
 
 ## Proven offline
 
+- Producer-authority code head: `ddc2ad1` against reviewer head `2706aca`.
 - Timeout terminalization code head: `bc79203` against reviewer head `9f31e96`.
 - Shutdown admission code head: `011861e` against reviewer head `2b089c2`.
 - Distributed lifecycle code head: `a3c72a1` against reviewer head `887d21a`.
@@ -49,9 +50,9 @@ rerun; no live/provider/hardware claim is added.
   failed seven new reconciliation assertions. Final GREEN evidence:
   - focused shared/session-log/recorder/writer/proxy/RealtimeSession/API suite:
     8 files, 104 tests passed;
-  - `npm test`: 50 files, 348 tests passed;
+  - `npm test`: 50 files, 349 tests passed;
   - `npm run test:smoke-report`: 45 tests passed;
-  - `npm run test:integration`: 50 files, 348 tests passed;
+  - `npm run test:integration`: 50 files, 349 tests passed;
   - `npm run test:security`: 3 files, 16 tests passed;
   - `npm run test:storage`: 3 files, 6 tests passed;
   - `npm run build`: 147 modules transformed;
@@ -61,10 +62,10 @@ rerun; no live/provider/hardware claim is added.
 - Per instruction, browser/visual/accessibility suites were not run in this fix
   wave. Their earlier pre-hardening results are historical only; the controller
   must rerun every browser gate against the reviewed head.
-- Final timeout-path focused lifecycle/proxy/writer/repository suite: 4 files,
-  73 tests passed. Deadline expiry now reports forced only after successful
-  producer terminalization; failed force reports fatal and skips repository
-  close.
+- Final producer-authority lifecycle/proxy/writer focus: 3 files, 69 tests.
+  Deadline expiry reports forced only when sealed side-effect chains are
+  settled; otherwise the injected fatal process hook runs and repository close
+  is skipped.
 - No visual snapshot, runtime model/provider identifier, `response.create` or
   VAD ownership, learner draft/Done behavior, tutor permanence behavior, broad
   parent-route cache policy, dependency, migration, table, or service changed.

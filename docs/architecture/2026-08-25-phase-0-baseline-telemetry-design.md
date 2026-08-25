@@ -497,3 +497,7 @@ in-process callback as a sufficient asynchronous repository boundary:
 - Deadline expiry force-terminalizes every remaining proxy and writer before
   repository close and returns a `forced` disposition. Failed terminalization
   returns `fatal` and skips graceful repository closure.
+- Force success additionally requires the admission-sealed client/upstream
+  side-effect chains to be settled. Unsettled chains invoke the injectable
+  fatal process path; only history-only telemetry continuations may be
+  terminalized by disabling their writer authority.

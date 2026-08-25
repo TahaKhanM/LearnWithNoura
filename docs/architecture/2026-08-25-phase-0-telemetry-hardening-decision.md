@@ -217,3 +217,13 @@ If any producer cannot be force-terminalized, shutdown reports explicit
 `fatal`, logs the failure, and skips graceful repository closure. This avoids
 both a false graceful claim and closing storage while a producer remains
 capable of submission.
+
+Force-terminal success is limited to proxies whose sealed client and upstream
+side-effect chains are already settled. Admission is sealed before checking
+the tracked pending counts, so the check cannot race a later chain extension.
+An unsettled domain-write/state/socket continuation makes force-terminal fail;
+the registry reports `fatal`, leaves repository/worker graceful close unused,
+and invokes the production fatal process-exit hook. Tests inject that hook so
+the process path is verified without exiting the test runner. History-only
+telemetry work may still force successfully because writer terminalization
+makes its eventual callback unable to submit.
