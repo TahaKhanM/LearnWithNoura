@@ -173,6 +173,7 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
   let lastLearnerEventId: number | null = null;
   let upstreamWork = Promise.resolve();
   let clientWork = Promise.resolve();
+  let acceptingFrames = true;
   /** The learner is composing a drawing; nothing may auto-create a response. */
   let draftOpen = false;
   /** Board submissions already answered — duplicate Done must be a no-op. */
@@ -502,6 +503,11 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
 
   function beginTeardown(reason: string): Promise<void> {
     if (teardownPromise) return teardownPromise;
+    acceptingFrames = false;
+    upstream.onmessage = null;
+    client.off('message', handleClientMessage);
+    const sealedClientWork = clientWork;
+    const sealedUpstreamWork = upstreamWork;
     log(`session ${sessionId}: closed (${reason})`);
     try {
       upstream.close();
@@ -514,8 +520,8 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
       /* already closed */
     }
     teardownPromise = Promise.allSettled([
-      clientWork,
-      upstreamWork,
+      sealedClientWork,
+      sealedUpstreamWork,
     ]).then(async () => {
       while (backgroundTelemetry.size > 0) {
         await Promise.allSettled([...backgroundTelemetry]);
@@ -562,7 +568,8 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
     });
   };
 
-  upstream.onmessage = (raw) => {
+  function handleUpstreamMessage(raw: { data: unknown }): void {
+    if (!acceptingFrames) return;
     let event: UpstreamEvent;
     try {
       event = JSON.parse(String(raw.data));
@@ -575,7 +582,9 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
         log(`session ${sessionId}: upstream processing error ${String(error).slice(0, 240)}`);
         sendClient({ type: 'error', message: 'Noura hit a snag — it will recover in a moment.' });
       });
-  };
+  }
+
+  upstream.onmessage = handleUpstreamMessage;
 
   upstream.onerror = () => {
     sendClient({ type: 'error', message: 'Lost the connection to the tutor voice service.' });
@@ -1379,7 +1388,8 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
     sendUpstream({ type: 'response.create' });
   }
 
-  client.on('message', (raw) => {
+  function handleClientMessage(raw: unknown): void {
+    if (!acceptingFrames) return;
     clientWork = clientWork.then(async () => {
       let decoded: unknown;
       try { decoded = JSON.parse(String(raw)); }
@@ -1416,7 +1426,9 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
       log(`session ${sessionId}: client processing error ${String(error).slice(0, 240)}`);
       sendClient({ type: 'error', message: 'Noura could not save that turn. Please try again.' });
     });
-  });
+  }
+
+  client.on('message', handleClientMessage);
 
   client.on('close', () => teardown('client closed'));
   client.on('error', () => teardown('client error'));

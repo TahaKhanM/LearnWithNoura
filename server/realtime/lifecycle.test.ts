@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
-import { ProxyLifecycleRegistry, runQuiescentShutdown } from './lifecycle.js';
+import {
+  ProxyLifecycleRegistry,
+  ShutdownGate,
+  runQuiescentShutdown,
+} from './lifecycle.js';
 
 function deferred() {
   let resolve!: () => void;
@@ -38,6 +42,66 @@ describe('ProxyLifecycleRegistry', () => {
       completion: Promise.reject(failure),
     });
     await expect(registry.shutdown(1_000)).rejects.toThrow('proxy close failed');
+  });
+
+  it('repeatedly drains connections and lifecycles registered while closing', async () => {
+    const first = deferred();
+    const late = deferred();
+    const releaseConnection = deferred();
+    const lateCloseStarted = deferred();
+    const lateClose = vi.fn(async () => { lateCloseStarted.resolve(); });
+    const registry = new ProxyLifecycleRegistry();
+    registry.register({ close: async () => {}, completion: first.promise });
+    const connection = releaseConnection.promise.then(() => {
+      registry.register({ close: lateClose, completion: late.promise });
+    });
+    registry.trackConnection(connection);
+
+    const shutdown = registry.shutdown(1_000);
+    releaseConnection.resolve();
+    first.resolve();
+    await lateCloseStarted.promise;
+    expect(lateClose).toHaveBeenCalled();
+    let settled = false;
+    void shutdown.then(() => { settled = true; });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    late.resolve();
+    await expect(shutdown).resolves.toBeUndefined();
+  });
+
+  it('rejects an authorized upgrade resumed after shutdown starts', async () => {
+    const authorization = deferred();
+    const active = deferred();
+    const gate = new ShutdownGate();
+    const registry = new ProxyLifecycleRegistry();
+    registry.register({ close: async () => {}, completion: active.promise });
+    const order: string[] = [];
+    let accepted = false;
+    let destroyed = false;
+    const upgrade = authorization.promise.then(() => {
+      if (!gate.allowsUpgrade()) {
+        destroyed = true;
+        return;
+      }
+      accepted = true;
+    });
+    const shutdown = runQuiescentShutdown({
+      stopAccepting: () => {
+        gate.begin();
+        order.push('stop');
+      },
+      closeClients: () => { order.push('clients'); },
+      closeProxies: () => registry.shutdown(1_000),
+      closeRepository: async () => { order.push('repository'); },
+      log: () => {},
+    });
+    authorization.resolve();
+    await upgrade;
+    expect({ accepted, destroyed }).toEqual({ accepted: false, destroyed: true });
+    active.resolve();
+    await shutdown;
+    expect(order).toEqual(['stop', 'clients', 'repository']);
   });
 
   it('logs repository close rejection without escaping shutdown', async () => {

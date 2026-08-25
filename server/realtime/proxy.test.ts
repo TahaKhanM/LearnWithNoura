@@ -1443,6 +1443,19 @@ describe('realtime proxy telemetry', () => {
       generationId: 'generation-first',
     }, 0, 'start', {})));
     const closing = lifecycle!.close();
+    client.emit('message', JSON.stringify(createRuntimeEvent({
+      sessionId: session.id,
+      connectionEpoch: 1,
+      turnId: 'turn-after-close',
+      generationId: 'generation-after-close',
+    }, 1, 'user_text', {
+      text: 'must not persist',
+      idempotencyKey: 'after-close-message',
+    })));
+    FakeUpstream.latest.emit({
+      type: 'conversation.item.input_audio_transcription.completed',
+      transcript: 'must not persist upstream',
+    });
     let settled = false;
     void closing.then(() => { settled = true; });
     await Promise.resolve();
@@ -1452,6 +1465,8 @@ describe('realtime proxy telemetry', () => {
     expect(metrics).toEqual([
       expect.objectContaining({ name: 'session_reconnect' }),
     ]);
+    expect(repo.listEvents(session.id).filter((event) =>
+      event.type === 'learner_said')).toEqual([]);
   });
 
   it('flushes response cues and sends response_done when telemetry persistence fails', async () => {

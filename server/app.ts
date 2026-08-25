@@ -8,6 +8,7 @@ import { fallbackTurns } from './fallbackTutor.js';
 import { connectRealtimeProxy } from './realtime/proxy.js';
 import {
   ProxyLifecycleRegistry,
+  ShutdownGate,
   runQuiescentShutdown,
 } from './realtime/lifecycle.js';
 import { assertRealtimePromptReadable } from './realtime/instructions.js';
@@ -264,10 +265,10 @@ const wss = new WebSocketServer({
   handleProtocols: (protocols) => protocols.has('noura.v1') ? 'noura.v1' : false,
 });
 const proxyLifecycles = new ProxyLifecycleRegistry();
-let shuttingDown = false;
+const shutdownGate = new ShutdownGate();
 
 server.on('upgrade', async (request, socket, head) => {
-  if (shuttingDown) {
+  if (!shutdownGate.allowsUpgrade()) {
     socket.destroy();
     return;
   }
@@ -294,13 +295,17 @@ server.on('upgrade', async (request, socket, head) => {
     socket.destroy();
     return;
   }
+  if (!shutdownGate.allowsUpgrade()) {
+    socket.destroy();
+    return;
+  }
   wss.handleUpgrade(request, socket, head, (client) => {
     if (!process.env.OPENAI_API_KEY || !sessionId) {
       client.send(JSON.stringify({ type: 'error', message: process.env.OPENAI_API_KEY ? 'Missing session id.' : 'Noura is not configured on this server.' }));
       client.close(4400);
       return;
     }
-    void connectRealtimeProxy(client, {
+    const connection = connectRealtimeProxy(client, {
       apiKey: process.env.OPENAI_API_KEY,
       model: runtimeConfig.realtimeModel,
       repo,
@@ -311,6 +316,7 @@ server.on('upgrade', async (request, socket, head) => {
     }).catch(() => {
       try { client.close(1011, 'lesson service unavailable'); } catch { /* already closed */ }
     });
+    proxyLifecycles.trackConnection(connection);
   });
 });
 
@@ -325,7 +331,7 @@ export function closeRepository(): Promise<void> {
 export function shutdownServer(): Promise<void> {
   serverShutdown ??= runQuiescentShutdown({
     stopAccepting: () => {
-      shuttingDown = true;
+      shutdownGate.begin();
       server.close();
     },
     closeClients: () => {
