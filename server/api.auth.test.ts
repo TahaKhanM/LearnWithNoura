@@ -64,6 +64,7 @@ describe('REST object authorization', () => {
       .set('x-test-parent', 'parent-a');
 
     expect(response.status).toBe(200);
+    expect(response.headers['cache-control']).toBe('no-store');
     expect(response.body).toMatchObject({
       schemaVersion: '1.0.0',
       sessionId: sessionA.id,

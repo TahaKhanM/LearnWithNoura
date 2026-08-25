@@ -129,6 +129,7 @@ export function createApi(
     }
     const limit = 5_000;
     const events = await repo.listEvents(session.id, limit);
+    res.set('Cache-Control', 'no-store');
     res.json(buildSessionTelemetryLog(session.id, events, limit));
   });
 
