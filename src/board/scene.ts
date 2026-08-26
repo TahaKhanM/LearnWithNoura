@@ -4,6 +4,7 @@ import {
   type ShapeSpec,
 } from '../../shared/boardOps';
 import { isCenterArc } from '../../shared/authoredSpecs';
+import { isManipulativeSpec, manipulativeLearnerProps, applyManipulativeProps } from '../../shared/manipulativeSpecs';
 
 export type Owner = 'tutor' | 'learner';
 
@@ -35,7 +36,13 @@ export interface AppliedOps {
 }
 
 /** Applies validated ops to the scene. Pure, so React state stays simple. */
-export function applyOps(scene: SceneState, ops: BoardOp[], owner: Owner, semanticGroupId?: string): AppliedOps {
+export function applyOps(
+  scene: SceneState,
+  ops: BoardOp[],
+  owner: Owner,
+  semanticGroupId?: string,
+  options?: { manipulativeDraft?: boolean },
+): AppliedOps {
   let items = scene.items;
   let epoch = scene.epoch;
   const added: string[] = [];
@@ -69,15 +76,22 @@ export function applyOps(scene: SceneState, ops: BoardOp[], owner: Owner, semant
         break;
       }
       case 'update': {
-        items = items.map((existing) =>
-          existing.id === op.id && existing.owner === owner
-            ? {
-                ...existing,
-                spec: applyUpdate(existing.spec, op.props, { tier: 'authored' }),
-                revision: existing.revision + 1,
-              }
-            : existing,
-        );
+        items = items.map((existing) => {
+          if (existing.id !== op.id) return existing;
+          if (options?.manipulativeDraft && isManipulativeSpec(existing.spec) && manipulativeLearnerProps(op.props)) {
+            return {
+              ...existing,
+              spec: applyManipulativeProps(existing.spec, op.props),
+              revision: existing.revision + 1,
+            };
+          }
+          if (existing.owner !== owner) return existing;
+          return {
+            ...existing,
+            spec: applyUpdate(existing.spec, op.props, { tier: 'authored' }),
+            revision: existing.revision + 1,
+          };
+        });
         break;
       }
       case 'highlight':
@@ -101,7 +115,6 @@ export function applyOps(scene: SceneState, ops: BoardOp[], owner: Owner, semant
   return { scene: { items, epoch }, added, highlighted };
 }
 
-/** Labels, plots and connectors die with the object they point at. */
 function dependsOn(spec: ShapeSpec, id: string): boolean {
   if (spec.kind === 'label') return spec.target === id;
   if (spec.kind === 'plot') return spec.axes === id;
@@ -162,6 +175,12 @@ export function describeScene(scene: SceneState): string {
         return `${item.id}${group}: curve, ${s.points.length} points${who}`;
       case 'asset':
         return `${item.id}${group}: icon ${s.assetId}${s.label ? ` "${s.label}"` : ''} at (${s.at})${who}`;
+      case 'draggable':
+        return `${item.id}${group}: draggable ${s.handle} at (${s.at})${s.label ? ` "${s.label}"` : ''}${who}`;
+      case 'snapZone':
+        return `${item.id}${group}: snap zone ${s.shape} at (${s.at})${who}`;
+      case 'tappable':
+        return `${item.id}${group}: tap target at (${s.at})${s.selected ? ' [selected]' : ''}${s.label ? ` "${s.label}"` : ''}${who}`;
     }
   });
   return `Objects on the board now:\n${lines.join('\n')}`;

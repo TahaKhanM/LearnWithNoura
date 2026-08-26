@@ -25,6 +25,9 @@ The board is 1000 wide and 600 tall; origin top-left. Every op is {"op":"add","i
 - {"kind":"curve","points":[[x,y],[cp1],[cp2],[end],...]} — cubic Bézier, 4+3k points
 - {"kind":"text","at":[x,y],"text":"few words","style":"handwritten"} — short margin notes only; equations stay KaTeX
 - {"kind":"asset","assetId":"sun|cloud|raindrop|leaf|tree|root|atom|cell|magnet|battery|bulb|thermometer|heart|lungs|globe|mountain|river|volcano|gear|scale|beaker|cycle|person|book|…","at":[x,y],"size":72,"label":"optional"} — curated local icons. Prefer an asset when a simple silhouette teaches faster than constructed geometry (weather, organisms, lab tools). Prefer exact geometry for measured maths.
+- {"kind":"draggable","handle":"point|token|piece","at":[x,y],"size":44,"label":"marker"} — learner-movable tokens checked by a stage manipulativeCheck (never emit without a matching check spec)
+- {"kind":"snapZone","shape":"box|interval|point","at":[x,y],...} — invisible or dashed drop targets paired with draggable checks
+- {"kind":"tappable","shape":"circle|box","at":[x,y],"label":"acute angle"} — tap-to-choose targets for selected-predicate checks
 
 Hard rules:
 - Add operations only. Nothing visible may be erased, cleared, replaced, or updated.

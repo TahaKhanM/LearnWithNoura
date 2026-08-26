@@ -116,6 +116,15 @@ export class LearnerDraftController {
     this.notify();
   }
 
+  /** A learner move of a draggable or tap target during a manipulate task. */
+  addManipulativeUpdate(op: BoardOp, inverse: BoardOp | null, note: string): void {
+    if (!this.isOpen || op.op !== 'update') return;
+    this.entries.push({ op, inverse, note });
+    this.redoStack = [];
+    this.recover();
+    this.notify();
+  }
+
   /** Returns the op that reverts the latest edit, to apply to the scene. */
   undo(): BoardOp | null {
     if (!this.isOpen || this.entries.length === 0) return null;
@@ -155,8 +164,9 @@ export class LearnerDraftController {
   }
 
   /** Freezes the draft for one idempotent submission. */
-  beginSubmit(): { submissionId: string; draftId: string; ops: BoardOp[]; notes: string[] } | null {
-    if ((this.status !== 'open' && this.status !== 'error') || this.entries.length === 0 || !this.draftId) return null;
+  beginSubmit(options?: { allowEmpty?: boolean }): { submissionId: string; draftId: string; ops: BoardOp[]; notes: string[] } | null {
+    if ((this.status !== 'open' && this.status !== 'error') || !this.draftId) return null;
+    if (this.entries.length === 0 && !options?.allowEmpty) return null;
     // Retrying a failed submission reuses the same id so the server can
     // deduplicate; new edits after a failure produce a new id.
     this.pendingSubmissionId ??= `submission-${crypto.randomUUID()}`;

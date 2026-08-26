@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { LearnerBoardAnalysisSchema } from './learnerBoard.js';
+import { ManipulativeCheckResultSchema, ManipulativeCheckSchema } from './manipulativeCheck.js';
 
 /**
  * The shared logical-turn contract between the browser, the proxy, and
@@ -12,7 +13,7 @@ import { LearnerBoardAnalysisSchema } from './learnerBoard.js';
  * `response.create`.
  */
 
-export const ResponseModeSchema = z.enum(['voice', 'text', 'draw', 'choice', 'mixed']);
+export const ResponseModeSchema = z.enum(['voice', 'text', 'draw', 'choice', 'mixed', 'manipulate']);
 export type ResponseMode = z.infer<typeof ResponseModeSchema>;
 
 export const SubmitPolicySchema = z.enum(['vad', 'explicit']);
@@ -26,14 +27,16 @@ export const DeliveredTaskSchema = z.object({
   submitPolicy: SubmitPolicySchema,
   semanticGroupId: z.string().min(1).max(160).optional(),
   targetObjectIds: z.array(z.string().min(1).max(160)).max(12).default([]),
+  /** Local machine-check spec for manipulate tasks. */
+  manipulativeCheck: ManipulativeCheckSchema.optional(),
   boardRevision: z.number().int().nonnegative().default(0),
   allowVoiceWhileDrawing: z.boolean().default(true),
 });
 export type DeliveredTask = z.infer<typeof DeliveredTaskSchema>;
 
-/** Drawing tasks require an explicit Done; spoken/typed tasks may use VAD. */
+/** Drawing and manipulative tasks require an explicit Done; spoken/typed tasks may use VAD. */
 export function submitPolicyForMode(mode: ResponseMode): SubmitPolicy {
-  return mode === 'draw' || mode === 'mixed' ? 'explicit' : 'vad';
+  return mode === 'draw' || mode === 'mixed' || mode === 'manipulate' ? 'explicit' : 'vad';
 }
 
 /** One frozen learner board answer. Idempotent by submissionId. */
@@ -48,6 +51,8 @@ export const BoardSubmissionSchema = z.object({
   description: z.string().max(4_000).default(''),
   ops: z.array(z.unknown()).max(80).default([]),
   analysis: LearnerBoardAnalysisSchema.optional(),
+  manipulativeCheck: ManipulativeCheckSchema.optional(),
+  manipulativeResult: ManipulativeCheckResultSchema.optional(),
   imageDataUrl: z.string().max(320_000).optional(),
 });
 export type BoardSubmission = z.infer<typeof BoardSubmissionSchema>;

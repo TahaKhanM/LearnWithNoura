@@ -20,6 +20,7 @@ describe('lesson turn state machine', () => {
   it('derives explicit submission for drawing and mixed tasks', () => {
     expect(submitPolicyForMode('draw')).toBe('explicit');
     expect(submitPolicyForMode('mixed')).toBe('explicit');
+    expect(submitPolicyForMode('manipulate')).toBe('explicit');
     expect(submitPolicyForMode('voice')).toBe('vad');
     expect(submitPolicyForMode('text')).toBe('vad');
   });
