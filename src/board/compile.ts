@@ -9,6 +9,7 @@ import { BOARD_W, BOARD_H, PALETTE, type Vec, type ShapeSpec, type AxesSpec } fr
 import { compileExpression } from '../../shared/expr';
 import { compileArc, compileCurve } from './compileCurves';
 import { compileAsset } from './compileAssets';
+import { compileDraggable, compileSnapZone, compileTappable } from './compileManipulatives';
 import { measureText, wrapText, TEXT_SIZES } from './measure';
 import type { SceneItem } from './scene';
 
@@ -999,6 +1000,18 @@ function compileSpec(
     case 'asset':
       nodes.push(...compileAsset(spec, color));
       break;
+
+    case 'draggable':
+      nodes.push(...compileDraggable(spec, color).nodes);
+      break;
+
+    case 'snapZone':
+      nodes.push(...compileSnapZone(spec));
+      break;
+
+    case 'tappable':
+      nodes.push(...compileTappable(spec, color).nodes);
+      break;
   }
 
   return nodes;
@@ -1030,6 +1043,11 @@ function defaultColor(spec: ShapeSpec): string {
       return INK_SOFT;
     case 'asset':
       return PALETTE.blue;
+    case 'draggable':
+    case 'tappable':
+      return PALETTE.amber;
+    case 'snapZone':
+      return PALETTE.violet;
     default:
       return INK;
   }

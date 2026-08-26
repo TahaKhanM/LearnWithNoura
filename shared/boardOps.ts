@@ -16,10 +16,14 @@ import {
   type ArcSpec,
   type AssetSpec,
   type CurveSpec,
+  type DraggableSpec,
+  type SnapZoneSpec,
+  type TappableSpec,
 } from './authoredSpecs';
 
-export type { ArcSpec, AssetSpec, CurveSpec } from './authoredSpecs';
+export type { ArcSpec, AssetSpec, CurveSpec, DraggableSpec, SnapZoneSpec, TappableSpec } from './authoredSpecs';
 export { AUTHORED_ONLY_KINDS } from './authoredSpecs';
+export { MIN_MANIPULATIVE_HIT_PX } from './manipulativeSpecs';
 
 export const BOARD_W = 1000;
 export const BOARD_H = 600;
@@ -208,7 +212,10 @@ export type ShapeSpec =
   | PathSpec
   | ArcSpec
   | CurveSpec
-  | AssetSpec;
+  | AssetSpec
+  | DraggableSpec
+  | SnapZoneSpec
+  | TappableSpec;
 
 export type SpecKind = ShapeSpec['kind'];
 

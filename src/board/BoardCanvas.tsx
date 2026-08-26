@@ -9,6 +9,8 @@ import { contains, deriveSemanticViewport } from './semanticViewport';
 import { cameraViewBox, layoutRegions } from './regionLayout';
 import { useAnimatedCamera } from './camera';
 import { FONT_HAND } from './measure';
+import { ManipulativeLayer, type ManipulativeFeedback } from './ManipulativeLayer';
+import type { UpdateOp } from '../../shared/boardOps';
 import './Board.css';
 
 export type BoardTool = 'pointer' | 'draw' | 'erase';
@@ -45,6 +47,11 @@ interface BoardCanvasProps {
   overview?: boolean;
   /** Active spatial region; the camera pans here. Defaults to the focus group. */
   cameraRegionId?: string;
+  manipulativeEnabled?: boolean;
+  manipulativeFeedback?: ManipulativeFeedback;
+  manipulativeCheckTargetId?: string;
+  onManipulativeMove?: (op: UpdateOp, inverse: UpdateOp, note: string) => void;
+  onManipulativeTap?: (op: UpdateOp, inverse: UpdateOp, note: string) => void;
 }
 
 function KatexBlock({ node }: { node: Extract<RenderNode, { type: 'katex' }> }) {
@@ -181,6 +188,11 @@ export function BoardCanvas({
   focusIndex = 0,
   overview = false,
   cameraRegionId,
+  manipulativeEnabled = false,
+  manipulativeFeedback = 'idle',
+  manipulativeCheckTargetId,
+  onManipulativeMove,
+  onManipulativeTap,
 }: BoardCanvasProps) {
   const activeRegionId = cameraRegionId ?? focusSemanticObjectId;
   const svgRef = useRef<SVGSVGElement>(null);
@@ -504,6 +516,20 @@ export function BoardCanvas({
 
       <Pen pos={pen} />
       </g>
+
+      {manipulativeEnabled && onManipulativeMove && onManipulativeTap && (
+        <ManipulativeLayer
+          scene={scene}
+          enabled={interactive && manipulativeEnabled}
+          pointFromClient={boardPoint}
+          regionOffset={(groupId) => regionLayout.offset(groupId)}
+          activeRegionId={activeRegionId}
+          onMove={onManipulativeMove}
+          onTap={onManipulativeTap}
+          feedback={manipulativeFeedback}
+          checkTargetId={manipulativeCheckTargetId}
+        />
+      )}
     </svg>
       <p id="noura-board-description" className="board__long-description">
         {longDescription ?? 'The shared teaching board is empty.'}

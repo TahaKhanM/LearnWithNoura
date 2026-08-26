@@ -65,8 +65,8 @@ export const REALTIME_TOOLS = [
         taskId: { type: 'string', minLength: 1, maxLength: 160 },
         responseMode: {
           type: 'string',
-          enum: ['voice', 'text', 'draw', 'choice', 'mixed'],
-          description: 'How the learner should answer questionOrTask. Use "draw" (or "mixed" for draw-and-explain) for board tasks: the learner then composes freely and presses Done; you will receive exactly one complete submitted drawing.',
+          enum: ['voice', 'text', 'draw', 'choice', 'mixed', 'manipulate'],
+          description: 'How the learner should answer questionOrTask. Use "draw" (or "mixed" for draw-and-explain) for drawing tasks, or "manipulate" when the learner moves or taps board widgets: they press Done once; the board checks locally before you react.',
         },
         proposedAction: { type: 'string', enum: ['explain', 'visual', 'question', 'wait', 'feedback', 'practice', 'reteach', 'advance', 'complete'] },
         blueprintId: { type: 'string', minLength: 1, maxLength: 120 },

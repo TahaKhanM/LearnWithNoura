@@ -54,8 +54,11 @@ export async function handleToolCall(ctx: CoordinatorContext, name: string, rawA
       const stageBefore = currentStage(state.lessonState);
       if (state.lessonState.blueprint?.mode === 'board_led' && stageBefore &&
           ['guided_check', 'independent_check'].includes(stageBefore.kind) && parsed.data.questionOrTask) {
+        const responseMode = parsed.data.responseMode ?? 'voice';
         const visibleTargets = (parsed.data.targetObjectIds ?? []).filter((id) => state.boardContext.hasObject(id));
-        if (visibleTargets.length === 0) {
+        const manipTarget = stageBefore.checks?.find((check) => check.id === parsed.data.taskId)?.manipulativeCheck?.targetId;
+        const hasManipulativeTarget = manipTarget ? state.boardContext.hasObject(manipTarget) : false;
+        if (visibleTargets.length === 0 && !hasManipulativeTarget && responseMode !== 'manipulate') {
           finishTool(ctx, callId, responseId, {
             ok: false,
             error: `A ${stageBefore.kind} question in a board-led lesson must name visible board objects it asks about (targetObjectIds). Inspect the board and reference real ids.`,
@@ -66,7 +69,7 @@ export async function handleToolCall(ctx: CoordinatorContext, name: string, rawA
       }
       try {
         state.lessonState = reduceLesson(state.lessonState, { type: 'MOVE_PROPOSED', move: parsed.data });
-        const task = taskFromMove(parsed.data, responseId);
+        const task = taskFromMove(parsed.data, responseId, stageBefore);
         if (task) state.pendingDeliveredTask = task;
         const lessonStatePayload = {
           activeConcept: state.lessonState.microObjective,
@@ -247,14 +250,21 @@ function taxonomyFromLegacyVerdict(value: unknown): ResponseTaxonomy {
 }
 
 /** Builds the explicit learner-task contract from a structured teaching move. */
-function taskFromMove(move: TeachingMove, responseId: string): DeliveredTask | null {
+function taskFromMove(
+  move: TeachingMove,
+  responseId: string,
+  stage: ReturnType<typeof currentStage> = null,
+): DeliveredTask | null {
   if (!move.questionOrTask?.trim()) return null;
   const responseMode = move.responseMode ?? 'voice';
+  const stageCheck = stage?.checks?.find((check) => check.id === move.taskId);
   const parsed = DeliveredTaskSchema.safeParse({
     taskId: (move.taskId?.trim() || `task-${responseId}`).slice(0, 160),
     prompt: move.questionOrTask.trim().slice(0, 500),
     responseMode,
     submitPolicy: submitPolicyForMode(responseMode),
+    targetObjectIds: move.targetObjectIds ?? stageCheck?.targetObjectIds ?? [],
+    manipulativeCheck: stageCheck?.manipulativeCheck,
     ...(move.semanticObjectId ? { semanticGroupId: move.semanticObjectId } : {}),
   });
   return parsed.success ? parsed.data : null;

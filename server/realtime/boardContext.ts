@@ -1,5 +1,6 @@
 import { applyUpdate, normalizeColor, validateOps, validateSpec, type BoardOp, type ShapeSpec } from '../../shared/boardOps.js';
 import { isCenterArc } from '../../shared/authoredSpecs.js';
+import { applyManipulativeProps, isManipulativeSpec, manipulativeLearnerProps } from '../../shared/manipulativeSpecs.js';
 import { LearnerBoardAnalysisSchema, type LearnerBoardAnalysis } from '../../shared/learnerBoard.js';
 import type { DomainRepository } from '../store/domain.js';
 
@@ -45,9 +46,14 @@ export class BoardContextTracker {
         if (index < 0) this.items.push(next);
         else if (this.items[index].owner === owner) this.items[index] = next;
       } else if (op.op === 'update') {
-        this.items = this.items.map((item) => item.id === op.id && item.owner === owner
-          ? { ...item, spec: applyUpdate(item.spec, op.props, { tier: 'authored' }) }
-          : item);
+        this.items = this.items.map((item) => {
+          if (item.id !== op.id) return item;
+          if (owner === 'learner' && isManipulativeSpec(item.spec) && manipulativeLearnerProps(op.props)) {
+            return { ...item, spec: applyManipulativeProps(item.spec, op.props) };
+          }
+          if (item.owner !== owner) return item;
+          return { ...item, spec: applyUpdate(item.spec, op.props, { tier: 'authored' }) };
+        });
       } else if (op.op === 'erase') {
         this.items = this.items.filter((item) => item.owner !== owner || (item.id !== op.id && !dependsOn(item.spec, op.id)));
       } else if (op.op === 'clear') {
@@ -287,5 +293,8 @@ function describeSpec(spec: ShapeSpec): string {
       : `arc through (${spec.from}) (${spec.through}) (${spec.to})`;
     case 'curve': return `curve with ${spec.points.length} points`;
     case 'asset': return `icon ${spec.assetId}${spec.label ? ` labelled “${spec.label}”` : ''}`;
+    case 'draggable': return `draggable ${spec.handle} at (${spec.at})${spec.label ? ` labelled “${spec.label}”` : ''}`;
+    case 'snapZone': return `snap zone ${spec.shape} at (${spec.at})`;
+    case 'tappable': return `tap target at (${spec.at})${spec.selected ? ' [selected]' : ''}${spec.label ? ` labelled “${spec.label}”` : ''}`;
   }
 }

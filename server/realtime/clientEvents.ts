@@ -190,7 +190,9 @@ export async function handleClientEvent(
       const ops = learnerBoardOps(submission.ops);
       const imageDataUrl = safeBoardImage(submission.imageDataUrl);
       const analysis = submission.analysis ?? null;
-      if (!description && ops.length === 0) {
+      const manipulativeResult = submission.manipulativeResult ?? null;
+      const manipulativeCheck = submission.manipulativeCheck ?? null;
+      if (!description && ops.length === 0 && !manipulativeResult) {
         ctx.sendClient({ type: 'board_submission_ack', submissionId: submission.submissionId, empty: true });
         break;
       }
@@ -208,6 +210,8 @@ export async function handleClientEvent(
         ...(submission.semanticGroupId ? { semanticObjectId: submission.semanticGroupId } : {}),
         ...(submission.semanticGroupLabel ? { groupLabel: submission.semanticGroupLabel } : {}),
         ...(analysis ? { analysis } : {}),
+        ...(manipulativeCheck ? { manipulativeCheck } : {}),
+        ...(manipulativeResult ? { manipulativeResult, localCheckPassed: manipulativeResult.passed } : {}),
       });
       // Evidence recorded for this answer cites the board event itself.
       state.lastLearnerEventId = eventId;
@@ -222,6 +226,9 @@ export async function handleClientEvent(
           '[The learner finished a drawing on the shared board and pressed Done. This is their complete submitted answer, not a partial stroke.]',
           submission.taskId ? `It answers task ${submission.taskId}.` : '',
           description,
+          manipulativeResult
+            ? `Local manipulative check (${manipulativeResult.predicate} on ${manipulativeResult.targetId}): ${manipulativeResult.passed ? 'passed' : 'not yet correct'}. ${manipulativeResult.summary}`
+            : '',
           analysis ? `Deterministic vector analysis (spatial hints, not meaning): ${analysis.summary}` : '',
           imageDataUrl
             ? 'Use the attached full-board/detail image to interpret the drawing. If its meaning is ambiguous, ask the learner rather than guessing.'

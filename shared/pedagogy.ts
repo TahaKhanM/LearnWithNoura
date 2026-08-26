@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { ResponseModeSchema } from './lessonTurn.js';
+import { ManipulativeCheckSchema } from './manipulativeCheck.js';
 
 export const ResponseTaxonomySchema = z.enum([
   'correct',
@@ -40,6 +41,7 @@ export const StageCheckSchema = z.object({
   questionOrTask: z.string().min(1).max(500),
   responseMode: ResponseModeSchema,
   targetObjectIds: z.array(z.string().min(1).max(160)).max(12).optional(),
+  manipulativeCheck: ManipulativeCheckSchema.optional(),
   misconceptions: z.array(MisconceptionBranchSchema).max(4).optional(),
 });
 export type StageCheck = z.infer<typeof StageCheckSchema>;

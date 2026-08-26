@@ -5,14 +5,18 @@
  */
 
 import { isBoardAssetId } from './boardAssets';
+import { validateManipulativeKind } from './manipulativeSpecs';
+import type { DraggableSpec, SnapZoneSpec, TappableSpec } from './manipulativeSpecs';
 
 /** Local copies so this module does not import boardOps (cycle: boardOps → here). */
 const BOARD_W = 1000;
 const BOARD_H = 600;
 type Vec = [number, number];
 
-export const AUTHORED_ONLY_KINDS = ['arc', 'curve', 'asset'] as const;
+export const AUTHORED_ONLY_KINDS = ['arc', 'curve', 'asset', 'draggable', 'snapZone', 'tappable'] as const;
 export type AuthoredOnlyKind = (typeof AUTHORED_ONLY_KINDS)[number];
+
+export type { DraggableSpec, SnapZoneSpec, TappableSpec } from './manipulativeSpecs';
 
 export interface CenterArcSpec {
   kind: 'arc';
@@ -134,7 +138,11 @@ export function validateAssetSpec(raw: Record<string, unknown>): AssetSpec | nul
   };
 }
 
-export function validateAuthoredKind(raw: Record<string, unknown>): ArcSpec | CurveSpec | AssetSpec | null {
+export function validateAuthoredKind(
+  raw: Record<string, unknown>,
+): ArcSpec | CurveSpec | AssetSpec | DraggableSpec | SnapZoneSpec | TappableSpec | null {
+  const manipulative = validateManipulativeKind(raw);
+  if (manipulative) return manipulative;
   switch (raw.kind) {
     case 'arc':
       return validateArcSpec(raw);
