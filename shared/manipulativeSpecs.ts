@@ -168,6 +168,23 @@ export function manipulativeLearnerProps(props: Record<string, unknown>): boolea
   return keys.every((key) => key === 'at' || key === 'selected');
 }
 
+/** Validates and clamps learner update props; rejects NaN, Infinity, and out-of-board coordinates. */
+export function sanitizeLearnerManipulativeProps(props: Record<string, unknown>): Record<string, unknown> | null {
+  if (!manipulativeLearnerProps(props)) return null;
+  const out: Record<string, unknown> = {};
+  if ('selected' in props) {
+    if (typeof props.selected !== 'boolean') return null;
+    out.selected = props.selected;
+  }
+  if ('at' in props) {
+    const at = vec(props.at);
+    if (!at) return null;
+    out.at = at;
+  }
+  if (Object.keys(out).length === 0) return null;
+  return out;
+}
+
 export function manipulativeRejectionReason(kind: unknown, raw: Record<string, unknown>): string {
   if (kind === 'draggable' && !raw.handle) return 'draggable requires handle "point", "token", or "piece"';
   if (kind === 'snapZone' && raw.shape === 'interval' && raw.from === undefined) return 'interval snapZone requires from and to';
@@ -180,14 +197,13 @@ export function applyManipulativeProps(
   spec: ManipulativeSpec,
   props: Record<string, unknown>,
 ): ManipulativeSpec {
-  if (!manipulativeLearnerProps(props)) return spec;
-  if (spec.kind === 'tappable' && typeof props.selected === 'boolean') {
-    return { ...spec, selected: props.selected };
+  const sanitized = sanitizeLearnerManipulativeProps(props);
+  if (!sanitized) return spec;
+  if (spec.kind === 'tappable' && typeof sanitized.selected === 'boolean') {
+    return { ...spec, selected: sanitized.selected };
   }
-  if (spec.kind === 'draggable' && Array.isArray(props.at) && props.at.length >= 2) {
-    const x = typeof props.at[0] === 'number' ? props.at[0] : spec.at[0];
-    const y = typeof props.at[1] === 'number' ? props.at[1] : spec.at[1];
-    return { ...spec, at: [x, y] as Vec };
+  if (spec.kind === 'draggable' && Array.isArray(sanitized.at)) {
+    return { ...spec, at: sanitized.at as Vec };
   }
   return spec;
 }

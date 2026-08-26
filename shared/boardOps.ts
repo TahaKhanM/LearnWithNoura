@@ -9,6 +9,7 @@
  */
 
 import {
+  AUTHORED_ONLY_KINDS,
   authoredRejectionReason,
   isAuthoredOnlySpec,
   updatePropsYieldAuthored,
@@ -696,7 +697,9 @@ export function validateOps(rawOps: unknown, options?: { tier?: OpsValidationTie
           out.rejected.push({
             reason: props.style === 'handwritten'
               ? 'handwritten style is director/compiler-only'
-              : `${String(props.kind)} is director/compiler-only`,
+              : typeof props.kind === 'string' && (AUTHORED_ONLY_KINDS as readonly string[]).includes(props.kind)
+                ? `${String(props.kind)} is director/compiler-only`
+                : 'manipulative or authored update props are director/compiler-only',
             raw,
           });
           break;
@@ -742,9 +745,10 @@ export function applyUpdate(
   props: Record<string, unknown>,
   options?: { tier?: OpsValidationTier },
 ): ShapeSpec {
+  const tier = options?.tier ?? 'fast';
+  if (tier === 'fast' && isAuthoredOnlySpec(spec)) return spec;
   const merged = { ...(spec as unknown as Record<string, unknown>), ...props, kind: spec.kind };
   const next = validateSpec(merged as RawOp) ?? spec;
-  const tier = options?.tier ?? 'fast';
   if (tier === 'fast' && isAuthoredOnlySpec(next) && !isAuthoredOnlySpec(spec)) return spec;
   return next;
 }

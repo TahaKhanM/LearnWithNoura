@@ -1,6 +1,7 @@
 import type { RuntimeEventEnvelope } from '../../shared/runtimeProtocol.js';
 import { MetricInputSchema, TELEMETRY_SCHEMA_VERSION } from '../../shared/sessionTelemetry.js';
 import { BoardSubmissionSchema } from '../../shared/lessonTurn.js';
+import { evaluateManipulativeCheck } from '../../shared/manipulativeCheck.js';
 import { reduceLesson } from '../lesson/orchestrator.js';
 import { metricContextFromIdentity } from '../session/telemetryRecorder.js';
 import { loadReleasedBoardContext } from './boardContext.js';
@@ -187,11 +188,19 @@ export async function handleClientEvent(
         break;
       }
       const description = submission.description.trim().slice(0, 4000);
-      const ops = learnerBoardOps(submission.ops);
+      const ops = learnerBoardOps(submission.ops, {
+        manipulativeTargetIds: state.boardContext.learnerUpdatableManipulativeIds(),
+      });
       const imageDataUrl = safeBoardImage(submission.imageDataUrl);
       const analysis = submission.analysis ?? null;
-      const manipulativeResult = submission.manipulativeResult ?? null;
       const manipulativeCheck = submission.manipulativeCheck ?? null;
+      state.boardContext.apply(ops, 'learner', submission.semanticGroupId, submission.semanticGroupLabel);
+      const manipulativeResult = manipulativeCheck
+        ? evaluateManipulativeCheck({
+          check: manipulativeCheck,
+          items: state.boardContext.manipulativeSceneItems(),
+        })
+        : null;
       if (!description && ops.length === 0 && !manipulativeResult) {
         ctx.sendClient({ type: 'board_submission_ack', submissionId: submission.submissionId, empty: true });
         break;
@@ -215,7 +224,6 @@ export async function handleClientEvent(
       });
       // Evidence recorded for this answer cites the board event itself.
       state.lastLearnerEventId = eventId;
-      state.boardContext.apply(ops, 'learner', submission.semanticGroupId, submission.semanticGroupLabel);
       if (analysis) state.boardContext.observeLearnerAnalysis(analysis);
       refreshBoardInstructions(ctx);
       try { state.lessonState = reduceLesson(state.lessonState, { type: 'LEARNER_RESPONSE_RECEIVED' }); }

@@ -1,6 +1,8 @@
-import { applyUpdate, normalizeColor, validateOps, validateSpec, type BoardOp, type ShapeSpec } from '../../shared/boardOps.js';
+import { applyUpdate, validateOps, type BoardOp, type ShapeSpec } from '../../shared/boardOps.js';
 import { isCenterArc } from '../../shared/authoredSpecs.js';
 import { applyManipulativeProps, isManipulativeSpec, manipulativeLearnerProps } from '../../shared/manipulativeSpecs.js';
+import type { ManipulativeSceneItem } from '../../shared/manipulativeCheck.js';
+import { learnerBoardOps } from '../../shared/learnerSubmissionOps.js';
 import { LearnerBoardAnalysisSchema, type LearnerBoardAnalysis } from '../../shared/learnerBoard.js';
 import type { DomainRepository } from '../store/domain.js';
 
@@ -132,6 +134,20 @@ export class BoardContextTracker {
     return this.items.some((item) => item.id === id);
   }
 
+  /** Draggable/tappable ids the learner may update on Done. */
+  learnerUpdatableManipulativeIds(): Set<string> {
+    return new Set(
+      this.items
+        .filter((item) => isManipulativeSpec(item.spec) && (item.spec.kind === 'draggable' || item.spec.kind === 'tappable'))
+        .map((item) => item.id),
+    );
+  }
+
+  /** Scene items for server-side manipulative check evaluation. */
+  manipulativeSceneItems(): ManipulativeSceneItem[] {
+    return this.items.map((item) => ({ id: item.id, spec: item.spec }));
+  }
+
   groupOfObject(id: string): string | null {
     return this.items.find((item) => item.id === id)?.semanticGroupId ?? null;
   }
@@ -217,7 +233,9 @@ export async function loadReleasedBoardContext(repo: DomainRepository, sessionId
     const owner = event.type === 'learner_board' ? 'learner' : 'tutor';
     const payload = event.payload as { ops?: unknown; semanticObjectId?: unknown; groupLabel?: unknown; replacesGroup?: unknown; plan?: { groups?: Array<{ id?: unknown; label?: unknown }> } };
     const raw = payload.ops;
-    const ops = owner === 'learner' ? releasedLearnerOps(raw) : validateOps(raw, { tier: 'authored' }).ops;
+    const ops = owner === 'learner'
+      ? learnerBoardOps(raw, { trustPersistedManipulativeUpdates: true })
+      : validateOps(raw, { tier: 'authored' }).ops;
     const semanticGroupId = typeof payload.semanticObjectId === 'string'
       ? payload.semanticObjectId
       : typeof payload.plan?.groups?.[0]?.id === 'string'
@@ -235,27 +253,6 @@ export async function loadReleasedBoardContext(repo: DomainRepository, sessionId
     }
   }
   return tracker;
-}
-
-function releasedLearnerOps(raw: unknown): BoardOp[] {
-  if (!Array.isArray(raw)) return [];
-  const ops: BoardOp[] = [];
-  for (const entry of raw.slice(0, 80)) {
-    if (typeof entry !== 'object' || entry === null) continue;
-    const candidate = entry as { op?: unknown; id?: unknown; spec?: unknown; color?: unknown };
-    const id = typeof candidate.id === 'string' && /^sketch-[\w-]{1,80}$/.test(candidate.id) ? candidate.id : null;
-    if (!id) continue;
-    if (candidate.op === 'erase') {
-      ops.push({ op: 'erase', id });
-      continue;
-    }
-    if (candidate.op !== 'add' || typeof candidate.spec !== 'object' || candidate.spec === null) continue;
-    const spec = validateSpec(candidate.spec as never);
-    if (spec?.kind !== 'path') continue;
-    const color = normalizeColor(candidate.color);
-    ops.push({ op: 'add', id, spec, ...(color ? { color } : {}) });
-  }
-  return ops;
 }
 
 function itemSignature(spec: ShapeSpec, color?: string): string {

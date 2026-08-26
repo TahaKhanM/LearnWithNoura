@@ -51,7 +51,13 @@ function itemById(items: ManipulativeSceneItem[], id: string): ManipulativeScene
 
 function numberlineX(spec: NumberlineSpec, value: number): number {
   const { at, w, min, max } = spec;
+  if (max === min) return at[0];
   return at[0] + ((value - min) / (max - min)) * w;
+}
+
+/** Maps a number-line domain value to board x; shared by checks and renderers. */
+export function numberlineXFromSpec(spec: NumberlineSpec, value: number): number {
+  return numberlineX(spec, value);
 }
 
 function resolveIntervalBounds(
@@ -64,6 +70,7 @@ function resolveIntervalBounds(
   if (from === undefined || to === undefined) return null;
   const line = zone.numberlineId ? itemById(items, zone.numberlineId) : undefined;
   if (line?.spec.kind === 'numberline') {
+    if (line.spec.min === line.spec.max) return null;
     const y = line.spec.at[1];
     return {
       x0: numberlineX(line.spec, from),
@@ -72,6 +79,7 @@ function resolveIntervalBounds(
       tolerance: zone.tolerance ?? 18,
     };
   }
+  if (zone.numberlineId) return null;
   const x0 = zone.at[0];
   const x1 = zone.at[0] + (zone.w ?? Math.abs(to - from) * 100);
   return { x0, x1, y: zone.at[1], tolerance: zone.tolerance ?? 18 };

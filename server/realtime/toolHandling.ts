@@ -56,8 +56,17 @@ export async function handleToolCall(ctx: CoordinatorContext, name: string, rawA
           ['guided_check', 'independent_check'].includes(stageBefore.kind) && parsed.data.questionOrTask) {
         const responseMode = parsed.data.responseMode ?? 'voice';
         const visibleTargets = (parsed.data.targetObjectIds ?? []).filter((id) => state.boardContext.hasObject(id));
-        const manipTarget = stageBefore.checks?.find((check) => check.id === parsed.data.taskId)?.manipulativeCheck?.targetId;
+        const stageCheck = stageBefore.checks?.find((check) => check.id === parsed.data.taskId);
+        const manipTarget = stageCheck?.manipulativeCheck?.targetId;
         const hasManipulativeTarget = manipTarget ? state.boardContext.hasObject(manipTarget) : false;
+        if (responseMode === 'manipulate' && !stageCheck?.manipulativeCheck) {
+          finishTool(ctx, callId, responseId, {
+            ok: false,
+            error: 'A manipulate teaching move requires a compiled manipulativeCheck on the stage check. Use the stage check taskId.',
+            board: state.boardContext.toolSnapshot(),
+          });
+          break;
+        }
         if (visibleTargets.length === 0 && !hasManipulativeTarget && responseMode !== 'manipulate') {
           finishTool(ctx, callId, responseId, {
             ok: false,

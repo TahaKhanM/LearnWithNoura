@@ -43,6 +43,14 @@ export const StageCheckSchema = z.object({
   targetObjectIds: z.array(z.string().min(1).max(160)).max(12).optional(),
   manipulativeCheck: ManipulativeCheckSchema.optional(),
   misconceptions: z.array(MisconceptionBranchSchema).max(4).optional(),
+}).superRefine((check, context) => {
+  if (check.responseMode === 'manipulate' && !check.manipulativeCheck) {
+    context.addIssue({
+      code: 'custom',
+      path: ['manipulativeCheck'],
+      message: 'manipulate checks require a manipulativeCheck spec.',
+    });
+  }
 });
 export type StageCheck = z.infer<typeof StageCheckSchema>;
 
