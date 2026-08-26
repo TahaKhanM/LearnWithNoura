@@ -3,7 +3,7 @@ import type { DeliveredTask } from '../../shared/lessonTurn';
 import type { GenerationIdentity } from '../../shared/runtimeProtocol';
 
 export type ResponseCue =
-  | { kind: 'visual'; cueId: string; responseId: string; sequence: number; identity: GenerationIdentity; ops: BoardOp[]; eventId: number | null; visualCueId?: string; semanticObjectId?: string; groupLabel?: string; checkpoint?: string; replacesGroup?: string; idempotencyKey?: string }
+  | { kind: 'visual'; cueId: string; responseId: string; sequence: number; identity: GenerationIdentity; ops: BoardOp[]; eventId: number | null; visualCueId?: string; semanticObjectId?: string; groupLabel?: string; checkpoint?: string; replacesGroup?: string; idempotencyKey?: string; awaitNarration?: boolean }
   | { kind: 'semantic'; cueId: string; responseId: string; sequence: number; identity: GenerationIdentity; state: Record<string, unknown>; semanticObjectId?: string }
   | { kind: 'task'; cueId: string; responseId: string; sequence: number; identity: GenerationIdentity; task: DeliveredTask }
   | { kind: 'final'; cueId: string; responseId: string; sequence: number; identity: GenerationIdentity; text: string };

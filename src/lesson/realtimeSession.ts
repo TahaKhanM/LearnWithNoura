@@ -66,7 +66,7 @@ export interface SessionSnapshot {
 }
 
 interface QueuedAsk { text: string; idempotencyKey: string; identity: GenerationIdentity }
-export interface VisualCueMetadata { responseId?: string; visualCueId?: string; semanticObjectId?: string; groupLabel?: string; checkpoint?: string; replacesGroup?: string }
+export interface VisualCueMetadata { responseId?: string; visualCueId?: string; semanticObjectId?: string; groupLabel?: string; checkpoint?: string; replacesGroup?: string; awaitNarration?: boolean }
 
 export type VoiceTransportFactory = (input: {
   sessionId: string;
@@ -146,7 +146,17 @@ export class RealtimeSession {
   getIdentity = (): GenerationIdentity => this.scope.identity;
 
   noteBoardReveal(identity: GenerationIdentity, cue: VisualCueMetadata): void {
-    if (!this.isCurrent(identity) || !cue.responseId) return;
+    if (!this.isCurrent(identity)) return;
+    if (cue.awaitNarration) {
+      // A storyboard step: the narration that describes it is the NEXT
+      // playback start, not this cue's own (already finished) response.
+      this.responseTiming.noteAwaitedReveal(performance.now(), {
+        visualCueId: cue.visualCueId,
+        semanticObjectId: cue.semanticObjectId,
+      });
+      return;
+    }
+    if (!cue.responseId) return;
     const metric = this.responseTiming.noteBoardReveal(
       cue.responseId,
       performance.now(),
@@ -536,7 +546,8 @@ export class RealtimeSession {
     }
     if (boundary === 'started' && responseId && !this.deadResponses.has(responseId)) {
       this.currentResponseId = responseId;
-      this.responseTiming.noteNarrationScheduled(responseId, performance.now());
+      const awaitedRevealMetric = this.responseTiming.noteNarrationScheduled(responseId, performance.now());
+      if (awaitedRevealMetric) this.emitMetric(awaitedRevealMetric, this.scope.identity, responseId);
       if (this.speechStoppedAt > 0) {
         const speechEndToFirstAudioMs = Math.max(0, Math.round(performance.now() - this.speechStoppedAt));
         this.emitMetric({
@@ -675,6 +686,7 @@ export class RealtimeSession {
           checkpoint: typeof message.checkpoint === 'string' ? message.checkpoint : undefined,
           replacesGroup: typeof message.replacesGroup === 'string' ? message.replacesGroup : undefined,
           idempotencyKey: envelope.idempotencyKey,
+          awaitNarration: message.await_narration === true,
         });
         this.releasePending();
         break;
@@ -836,6 +848,7 @@ export class RealtimeSession {
       groupLabel: item.groupLabel,
       checkpoint: item.checkpoint,
       replacesGroup: item.replacesGroup,
+      awaitNarration: item.awaitNarration,
     })).then((completed) => {
       if (completed === false && item.eventId !== null) {
         this.send('ops_rejected', {
