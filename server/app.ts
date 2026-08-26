@@ -14,6 +14,11 @@ import {
   type ShutdownDisposition,
 } from './realtime/lifecycle.js';
 import { assertRealtimePromptReadable } from './realtime/instructions.js';
+import {
+  createFixtureCompilationService,
+  createLiveCompilationService,
+  type LessonCompilationService,
+} from './lesson/compilationService.js';
 import { readRuntimeConfig, productionReadinessErrors, EVENT_SCHEMA_VERSION } from './runtimeConfig.js';
 import { createRepositoryRuntime } from './store/createRepository.js';
 import { capabilityFromProtocols, SecurityBoundary } from './security.js';
@@ -34,6 +39,22 @@ const security = new SecurityBoundary(runtimeConfig);
 const openai = runtimeConfig.providerConfigured
   ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
   : null;
+
+// Production readiness (above) refuses to start without a configured
+// provider, so the deterministic fixture compiler only ever serves
+// offline development and automated tests.
+const compilation: LessonCompilationService = openai
+  ? createLiveCompilationService({
+      repo,
+      client: openai,
+      model: runtimeConfig.compilerModel,
+      reasoningEffort: runtimeConfig.compilerReasoningEffort,
+      harnessUrl: process.env.NOURA_BOARD_HARNESS_URL
+        ?? (runtimeConfig.production ? null : 'http://127.0.0.1:5173/dev/board'),
+      onCompileError: (sessionId, reasons) =>
+        console.error(`[compiler] session ${sessionId} failed: ${reasons.join('; ').slice(0, 300)}`),
+    })
+  : createFixtureCompilationService(repo);
 
 export const app = express();
 app.disable('x-powered-by');
@@ -68,7 +89,7 @@ app.get(['/version', '/api/version'], (_req, res) => {
   });
 });
 
-app.use('/api', createApi(repo, openai, runtimeConfig.textModel, security.apiSecurity(), runtimeConfig));
+app.use('/api', createApi(repo, openai, runtimeConfig.textModel, security.apiSecurity(), runtimeConfig, compilation));
 
 const sidebandRegistry = new SidebandRegistry();
 
@@ -372,7 +393,7 @@ let repositoryClose: Promise<void> | null = null;
 let serverShutdown: Promise<ShutdownDisposition> | null = null;
 
 export function closeRepository(): Promise<void> {
-  repositoryClose ??= repository.close();
+  repositoryClose ??= Promise.all([repository.close(), compilation.close()]).then(() => undefined);
   return repositoryClose;
 }
 

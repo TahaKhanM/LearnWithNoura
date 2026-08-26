@@ -15,6 +15,8 @@ export interface RuntimeConfig {
   privacyConfigured: boolean;
   realtimeModel: string;
   textModel: string;
+  compilerModel: string;
+  compilerReasoningEffort: 'low' | 'medium' | 'high';
   buildSha: string;
   environment: string;
 }
@@ -48,6 +50,10 @@ export function readRuntimeConfig(env: NodeJS.ProcessEnv = process.env): Runtime
     privacyConfigured: Boolean(env.NOURA_PRIVACY_POLICY_VERSION && env.NOURA_SAFETY_MODE),
     realtimeModel: env.OPENAI_REALTIME_MODEL || 'gpt-realtime-2.1',
     textModel: env.OPENAI_MODEL || 'gpt-5.6-terra',
+    compilerModel: env.NOURA_COMPILER_MODEL || env.OPENAI_MODEL || 'gpt-5.6-terra',
+    compilerReasoningEffort: env.NOURA_COMPILER_REASONING_EFFORT === 'low' || env.NOURA_COMPILER_REASONING_EFFORT === 'high'
+      ? env.NOURA_COMPILER_REASONING_EFFORT
+      : 'medium',
     buildSha: env.NOURA_BUILD_SHA || env.VERCEL_GIT_COMMIT_SHA || 'local-uncommitted',
     environment: env.VERCEL_ENV || deploymentMode,
   };
