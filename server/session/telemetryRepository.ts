@@ -246,7 +246,7 @@ implements ManagedSessionTelemetryRepository {
     const pending = this.pending.get(message.id);
     if (!pending) return;
     this.pending.delete(message.id);
-    if (message.ok) pending.resolve(message.value);
+    if (message.ok === true) pending.resolve(message.value);
     else pending.reject(new Error(message.error));
   }
 
