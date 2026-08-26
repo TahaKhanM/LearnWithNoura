@@ -305,6 +305,13 @@ describe('the Board Director pipeline', () => {
         alt: 'A pond habitat',
       },
       objectId: 'illust-pond',
+      record: {
+        id: 'img-a1b2c3d4e5f67890',
+        cacheKey: 'e'.repeat(64),
+        mime: 'image/png' as const,
+        bytes: Uint8Array.from([137, 80, 78, 71]),
+        createdAt: 1,
+      },
       cacheHit: false,
       latencyMs: 12,
       imageCount: 1,
