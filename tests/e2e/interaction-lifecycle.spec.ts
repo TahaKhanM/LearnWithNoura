@@ -404,9 +404,23 @@ test('a new tutor section never hides the current board: it is announced and rea
   });
   await expect(picker).toHaveValue('group-one');
   await expect(page.locator('[data-item^="sketch-"]')).toHaveCount(1);
+  await expect(picker).toBeDisabled();
 
-  // Learner marks stay in the region they were drawn in; panning away
-  // does not erase them — they remain in the scene for the pan back.
+  // Camera stays locked until the learner finishes the draft. After Done,
+  // marks inherit the region they were drawn in; panning away does not
+  // erase them — they remain in the scene for the pan back.
+  await page.getByTestId('draft-done').click();
+  const submissionId = await page.evaluate(() => {
+    const socket = (window as typeof window & { __nouraFakeSocket: { sent: Array<{ type: string; payload?: Record<string, unknown> }> } }).__nouraFakeSocket;
+    return String(socket.sent.find((event) => event.type === 'board_submission')?.payload?.submissionId ?? '');
+  });
+  await page.evaluate((id) => {
+    const socket = (window as typeof window & { __nouraFakeSocket: { emit(type: string, payload: Record<string, unknown>): void } }).__nouraFakeSocket;
+    socket.emit('board_submission_ack', { submissionId: id });
+  }, submissionId);
+  await expect(page.getByTestId('draft-done')).toHaveCount(0);
+  await expect(picker).toBeEnabled();
+
   await picker.selectOption('group-two');
   await expect(page.locator('[data-item^="sketch-"]')).toHaveCount(1);
   await picker.selectOption('group-one');

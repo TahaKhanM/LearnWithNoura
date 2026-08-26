@@ -1,21 +1,26 @@
-import { useEffect, useRef, useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import { CAMERA_PAN_MS, interpolateCamera, type CameraBox } from './regionLayout';
 
 function prefersReducedMotion(): boolean {
   return window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
 }
 
-/** Smoothly pans the camera box. Reduced motion and the first frame jump. */
+/**
+ * Smoothly pans the camera box. Reduced motion, an explicit instant flag,
+ * and the first committed target all jump — compact focus crops must match
+ * the derived viewport on the same render as the scene (no stale viewBox).
+ */
 export function useAnimatedCamera(target: CameraBox, instant: boolean): CameraBox {
-  const [current, setCurrent] = useState(target);
+  const skipAnim = instant || prefersReducedMotion();
   const fromRef = useRef(target);
   const startRef = useRef<number | null>(null);
   const targetRef = useRef(target);
   targetRef.current = target;
+  const [current, setCurrent] = useState(target);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const nextTarget = targetRef.current;
-    if (instant || prefersReducedMotion()) {
+    if (skipAnim) {
       fromRef.current = nextTarget;
       setCurrent(nextTarget);
       return;
@@ -37,8 +42,9 @@ export function useAnimatedCamera(target: CameraBox, instant: boolean): CameraBo
     };
     frame = requestAnimationFrame(step);
     return () => cancelAnimationFrame(frame);
-  }, [target.x, target.y, target.w, target.h, instant]);
+  }, [target.x, target.y, target.w, target.h, skipAnim]);
 
+  if (skipAnim) return target;
   return current;
 }
 

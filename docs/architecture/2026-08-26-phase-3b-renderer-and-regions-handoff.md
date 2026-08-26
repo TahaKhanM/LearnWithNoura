@@ -56,7 +56,10 @@ preflight, and quality. The live canvas renders every region.
   viewBox is exactly `0 0 1000 600`. With two or more regions the camera
   includes a `REGION_PEEK = 200` sliver of the previous tile (gutter plus a
   hint of the neighbouring drawing). Pans animate
-  420 ms (cubic ease); `prefers-reduced-motion` jumps. The camera moves only
+  420 ms (cubic ease); `prefers-reduced-motion` (and the first committed
+  target) apply the settled box on the same render so compact mobile-focus
+  crops stay identical to the derived viewport — a stale animated viewBox
+  was clipping edge labels. The camera moves only
   on announced navigation: learner tabs/arrows/`Part X of Y`, the section
   notice's "Open it", task-driven focus (`task.semanticGroupId`), or
   `tutor_announce`. It never moves during an open learner draft.
@@ -73,7 +76,9 @@ preflight, and quality. The live canvas renders every region.
 - **Permanence**: the v3.1-era announced-section E2E was adapted
   deliberately — off-camera objects stay in the DOM (`toHaveCount(1)`), and
   `permanenceRegions.test.ts` proves a camera pan never drops a tutor object
-  from the scene.
+  from the scene. The same E2E now also asserts the draft lock: the
+  section picker stays disabled while a drawing draft is open; after Done
+  the learner can pan back and the mark is still in the scene.
 
 ## Asset set and licensing
 
@@ -101,10 +106,10 @@ network fetch at lesson time. No raster images. No new runtime dependency.
 | `src/board/compileCurves.ts` | 202 | Arc + cubic Bézier compilation and occupancy samples |
 | `src/board/compileAssets.ts` | 69 | Local icon compile (transform + optional label) |
 | `src/board/regionLayout.ts` | 90 | SectionId → region offset; settled camera box |
-| `src/board/camera.ts` | 48 | Animated camera interpolation; reduced-motion jump |
+| `src/board/camera.ts` | 54 | Animated camera interpolation; reduced-motion / first-target jump |
 | `shared/boardOps.ts` | 724 | Fast vs authored `validateOps`; ShapeSpec union. Already over 400: it is the single shared contract; new kinds delegate to `authoredSpecs.ts`. |
 | `src/board/compile.ts` | 1160 | Composes new renderers; grew only ~22 lines. Already over 400: deterministic compiler; new specs extracted. |
-| `src/board/BoardCanvas.tsx` | 512 | Region transforms + composed camera/focus viewBox. Already over 400: one mount-lifetime unit (animator refs, pointer capture, viewBox). |
+| `src/board/BoardCanvas.tsx` | 521 | Region transforms + composed camera/focus viewBox. Already over 400: one mount-lifetime unit (animator refs, pointer capture, viewBox). |
 
 ## Visual baselines
 
@@ -118,8 +123,9 @@ baselines only:
 | `scene-arc-curve.png` | New: tutor arc + cubic curve |
 | `scene-two-regions-gutter.png` | New: camera on region 2 with previous-region gutter peek |
 
-If an existing canonical baseline changes, it is a regression — inspect it;
-do not accept a bulk refresh.
+Existing canonical / home / lesson baselines were not regenerated. The
+52-test visual suite passed against the pre-3b snapshots plus the four
+new ones above.
 
 ## Proven offline
 
@@ -133,7 +139,8 @@ do not accept a bulk refresh.
 - Region layout: first section → offset 0; later sections adjacent; single
   section camera identical to today; region-1 camera includes gutter peek.
 - Permanence: camera pan leaves every tutor object in the scene; tracker
-  reports no disappearance.
+  reports no disappearance. The announced-section E2E keeps the picker
+  disabled while a draft is open, then pans after Done.
 - Prompt consistency: voice model is not taught authored geometry
   vocabulary.
 - Restore / board context / compiled-lesson schema accept authored ops.
