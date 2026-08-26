@@ -22,7 +22,7 @@ if (command === 'import') {
 } else {
   const snapshot = JSON.parse(await readFile(file, 'utf8')) as StorageSnapshot;
   const actual = await store.counts();
-  const expected = { children: snapshot.children.length, sessions: snapshot.sessions.length, events: snapshot.events.length, evidence: snapshot.evidence.length };
+  const expected = { children: snapshot.children.length, sessions: snapshot.sessions.length, events: snapshot.events.length, evidence: snapshot.evidence.length, compiledLessons: snapshot.compiledLessons?.length ?? 0 };
   if (JSON.stringify(actual) !== JSON.stringify(expected)) throw new Error(`Storage counts differ: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
   console.log(JSON.stringify({ ok: true, counts: actual }));
 }

@@ -123,3 +123,10 @@ export interface CompiledLessonRecord {
   createdAt: number;
   updatedAt: number;
 }
+
+/** One compilation progress write: pending, ready (with lesson), or failed. */
+export interface CompiledLessonUpdate {
+  status: CompiledLessonStatus;
+  lesson?: CompiledLesson | null;
+  failureReason?: string | null;
+}

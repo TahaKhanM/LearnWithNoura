@@ -1,5 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import type { Pool, PoolClient, QueryResultRow } from 'pg';
+import {
+  CompiledLessonSchema,
+  type CompiledLessonRecord,
+  type CompiledLessonStatus,
+  type CompiledLessonUpdate,
+} from '../../shared/compiledLesson.js';
 import type { ResponseTaxonomy } from '../../shared/pedagogy.js';
 import type { DomainRepository, ManagedDomainRepository } from './domain.js';
 import type {
@@ -147,6 +153,33 @@ export class PostgresRepo implements DomainRepository, ManagedDomainRepository {
       if (!session || session.status !== 'ended') throw new Error('Only an ended session can continue.');
       return this.createSessionWith(client, session.childId, session.goal, session.id);
     });
+  }
+
+  async upsertCompiledLesson(sessionId: string, update: CompiledLessonUpdate): Promise<CompiledLessonRecord> {
+    await this.initialize();
+    if (update.status === 'ready' && !update.lesson) throw new Error('A ready compiled lesson requires the lesson payload.');
+    const lesson = update.lesson ? CompiledLessonSchema.parse(update.lesson) : null;
+    return this.transaction(async (client) => {
+      const session = await this.getSessionWith(client, sessionId);
+      if (!session) throw new Error('Unknown session.');
+      const now = Date.now();
+      await client.query(
+        `INSERT INTO noura.compiled_lessons (session_id, status, lesson_json, failure_reason, created_at, updated_at)
+         VALUES ($1, $2, $3::jsonb, $4, $5, $5)
+         ON CONFLICT (session_id) DO UPDATE SET
+           status = EXCLUDED.status, lesson_json = EXCLUDED.lesson_json,
+           failure_reason = EXCLUDED.failure_reason, updated_at = EXCLUDED.updated_at`,
+        [sessionId, update.status, lesson ? JSON.stringify(lesson) : null, update.failureReason ?? null, now],
+      );
+      const stored = await this.getCompiledLessonWith(client, sessionId);
+      if (!stored) throw new Error('Compiled lesson write failed.');
+      return stored;
+    });
+  }
+
+  async getCompiledLesson(sessionId: string): Promise<CompiledLessonRecord | null> {
+    await this.initialize();
+    return this.getCompiledLessonWith(this.pool, sessionId);
   }
 
   async claimFallbackTurn(identity: FallbackTurnIdentity): Promise<FallbackTurnClaim> {
@@ -455,16 +488,26 @@ export class PostgresRepo implements DomainRepository, ManagedDomainRepository {
       );
       CREATE INDEX IF NOT EXISTS idx_noura_evidence_session ON noura.evidence(session_id, id);
       CREATE INDEX IF NOT EXISTS idx_noura_evidence_child ON noura.evidence(child_id, id DESC);
+      CREATE TABLE IF NOT EXISTS noura.compiled_lessons (
+        session_id TEXT PRIMARY KEY REFERENCES noura.sessions(id),
+        status TEXT NOT NULL,
+        lesson_json JSONB,
+        failure_reason TEXT,
+        created_at BIGINT NOT NULL,
+        updated_at BIGINT NOT NULL
+      );
       INSERT INTO noura.schema_migrations (version, applied_at) VALUES (1, ${Date.now()})
+      ON CONFLICT (version) DO NOTHING;
+      INSERT INTO noura.schema_migrations (version, applied_at) VALUES (2, ${Date.now()})
       ON CONFLICT (version) DO NOTHING;
     `);
   }
 
   private async verifySchema(): Promise<void> {
     const result = await this.pool.query(
-      'SELECT version FROM noura.schema_migrations WHERE version = 1',
+      'SELECT version FROM noura.schema_migrations WHERE version IN (1, 2)',
     );
-    if (result.rowCount !== 1) throw new Error('Noura Postgres schema migration 1 is not applied.');
+    if (result.rowCount !== 2) throw new Error('Noura Postgres schema migrations 1 and 2 are not both applied.');
   }
 
   private async getChildWith(queryable: Queryable, id: string): Promise<Child | null> {
@@ -478,6 +521,23 @@ export class PostgresRepo implements DomainRepository, ManagedDomainRepository {
   private async getSessionWith(queryable: Queryable, id: string): Promise<Session | null> {
     const result = await queryable.query('SELECT * FROM noura.sessions WHERE id = $1', [id]);
     return result.rows[0] ? mapSession(result.rows[0]) : null;
+  }
+
+  private async getCompiledLessonWith(queryable: Queryable, sessionId: string): Promise<CompiledLessonRecord | null> {
+    const result = await queryable.query(
+      'SELECT session_id, status, lesson_json, failure_reason, created_at, updated_at FROM noura.compiled_lessons WHERE session_id = $1',
+      [sessionId],
+    );
+    const row = result.rows[0];
+    if (!row) return null;
+    return {
+      sessionId: String(row.session_id),
+      status: String(row.status) as CompiledLessonStatus,
+      lesson: row.lesson_json ? CompiledLessonSchema.parse(jsonValue(row.lesson_json)) : null,
+      failureReason: nullableString(row.failure_reason),
+      createdAt: Number(row.created_at),
+      updatedAt: Number(row.updated_at),
+    };
   }
 
   private async createSessionWith(queryable: Queryable, childId: string, goal: string, parentSessionId: string | null): Promise<Session> {
