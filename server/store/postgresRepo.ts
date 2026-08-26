@@ -40,7 +40,8 @@ export class PostgresRepo implements DomainRepository, ManagedDomainRepository {
       await this.initialize();
       const result = await this.pool.query('SELECT 1 AS ok');
       return Number(result.rows[0]?.ok) === 1;
-    } catch {
+    } catch (error) {
+      console.error(`[storage] health failed: ${String(error instanceof Error ? error.message : error).slice(0, 240)}`);
       return false;
     }
   }
@@ -443,21 +444,22 @@ export class PostgresRepo implements DomainRepository, ManagedDomainRepository {
   }
 
   private async initializeSchema(): Promise<void> {
-    await this.pool.query(`
-      CREATE SCHEMA IF NOT EXISTS noura;
-      CREATE TABLE IF NOT EXISTS noura.schema_migrations (
+    const appliedAt = Date.now();
+    const statements = [
+      'CREATE SCHEMA IF NOT EXISTS noura',
+      `CREATE TABLE IF NOT EXISTS noura.schema_migrations (
         version INTEGER PRIMARY KEY,
         applied_at BIGINT NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS noura.children (
+      )`,
+      `CREATE TABLE IF NOT EXISTS noura.children (
         id TEXT PRIMARY KEY,
         parent_id TEXT NOT NULL,
         name TEXT NOT NULL,
         age INTEGER,
         created_at BIGINT NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS idx_noura_children_parent ON noura.children(parent_id, created_at);
-      CREATE TABLE IF NOT EXISTS noura.sessions (
+      )`,
+      'CREATE INDEX IF NOT EXISTS idx_noura_children_parent ON noura.children(parent_id, created_at)',
+      `CREATE TABLE IF NOT EXISTS noura.sessions (
         id TEXT PRIMARY KEY,
         child_id TEXT NOT NULL REFERENCES noura.children(id),
         goal TEXT NOT NULL,
@@ -469,10 +471,10 @@ export class PostgresRepo implements DomainRepository, ManagedDomainRepository {
         ended_event_id BIGINT,
         summary_version INTEGER,
         summary_through_event_id BIGINT
-      );
-      CREATE INDEX IF NOT EXISTS idx_noura_sessions_child ON noura.sessions(child_id, started_at DESC);
-      CREATE INDEX IF NOT EXISTS idx_noura_sessions_parent ON noura.sessions(parent_session_id);
-      CREATE TABLE IF NOT EXISTS noura.events (
+      )`,
+      'CREATE INDEX IF NOT EXISTS idx_noura_sessions_child ON noura.sessions(child_id, started_at DESC)',
+      'CREATE INDEX IF NOT EXISTS idx_noura_sessions_parent ON noura.sessions(parent_session_id)',
+      `CREATE TABLE IF NOT EXISTS noura.events (
         id BIGSERIAL PRIMARY KEY,
         session_id TEXT NOT NULL REFERENCES noura.sessions(id),
         ts BIGINT NOT NULL,
@@ -480,9 +482,9 @@ export class PostgresRepo implements DomainRepository, ManagedDomainRepository {
         payload JSONB NOT NULL,
         released BOOLEAN NOT NULL DEFAULT TRUE,
         release_requested BOOLEAN NOT NULL DEFAULT FALSE
-      );
-      CREATE INDEX IF NOT EXISTS idx_noura_events_session ON noura.events(session_id, id);
-      CREATE TABLE IF NOT EXISTS noura.fallback_turns (
+      )`,
+      'CREATE INDEX IF NOT EXISTS idx_noura_events_session ON noura.events(session_id, id)',
+      `CREATE TABLE IF NOT EXISTS noura.fallback_turns (
         session_id TEXT NOT NULL REFERENCES noura.sessions(id),
         idempotency_key TEXT NOT NULL,
         connection_epoch INTEGER NOT NULL,
@@ -493,10 +495,10 @@ export class PostgresRepo implements DomainRepository, ManagedDomainRepository {
         created_at BIGINT NOT NULL,
         updated_at BIGINT NOT NULL,
         PRIMARY KEY (session_id, idempotency_key)
-      );
-      CREATE UNIQUE INDEX IF NOT EXISTS idx_noura_fallback_one_active_session
-        ON noura.fallback_turns(session_id) WHERE status = 'active';
-      CREATE TABLE IF NOT EXISTS noura.evidence (
+      )`,
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_noura_fallback_one_active_session
+        ON noura.fallback_turns(session_id) WHERE status = 'active'`,
+      `CREATE TABLE IF NOT EXISTS noura.evidence (
         id BIGSERIAL PRIMARY KEY,
         session_id TEXT NOT NULL REFERENCES noura.sessions(id),
         ts BIGINT NOT NULL,
@@ -524,22 +526,20 @@ export class PostgresRepo implements DomainRepository, ManagedDomainRepository {
         retrieval_of TEXT,
         released BOOLEAN NOT NULL DEFAULT TRUE,
         idempotency_key TEXT
-      );
-      CREATE INDEX IF NOT EXISTS idx_noura_evidence_session ON noura.evidence(session_id, id);
-      CREATE INDEX IF NOT EXISTS idx_noura_evidence_child ON noura.evidence(child_id, id DESC);
-      CREATE TABLE IF NOT EXISTS noura.compiled_lessons (
+      )`,
+      'CREATE INDEX IF NOT EXISTS idx_noura_evidence_session ON noura.evidence(session_id, id)',
+      'CREATE INDEX IF NOT EXISTS idx_noura_evidence_child ON noura.evidence(child_id, id DESC)',
+      `CREATE TABLE IF NOT EXISTS noura.compiled_lessons (
         session_id TEXT PRIMARY KEY REFERENCES noura.sessions(id),
         status TEXT NOT NULL,
         lesson_json JSONB,
         failure_reason TEXT,
         created_at BIGINT NOT NULL,
         updated_at BIGINT NOT NULL
-      );
-      INSERT INTO noura.schema_migrations (version, applied_at) VALUES (1, ${Date.now()})
-      ON CONFLICT (version) DO NOTHING;
-      INSERT INTO noura.schema_migrations (version, applied_at) VALUES (2, ${Date.now()})
-      ON CONFLICT (version) DO NOTHING;
-      CREATE TABLE IF NOT EXISTS noura.board_assets (
+      )`,
+      `INSERT INTO noura.schema_migrations (version, applied_at) VALUES (1, ${appliedAt}) ON CONFLICT (version) DO NOTHING`,
+      `INSERT INTO noura.schema_migrations (version, applied_at) VALUES (2, ${appliedAt}) ON CONFLICT (version) DO NOTHING`,
+      `CREATE TABLE IF NOT EXISTS noura.board_assets (
         id TEXT PRIMARY KEY,
         cache_key TEXT NOT NULL UNIQUE,
         mime TEXT NOT NULL,
@@ -547,15 +547,16 @@ export class PostgresRepo implements DomainRepository, ManagedDomainRepository {
         created_at BIGINT NOT NULL,
         parent_id TEXT,
         session_id TEXT
-      );
-      CREATE INDEX IF NOT EXISTS idx_noura_board_assets_cache ON noura.board_assets(cache_key);
-      INSERT INTO noura.schema_migrations (version, applied_at) VALUES (3, ${Date.now()})
-      ON CONFLICT (version) DO NOTHING;
-      ALTER TABLE noura.board_assets ADD COLUMN IF NOT EXISTS parent_id TEXT;
-      ALTER TABLE noura.board_assets ADD COLUMN IF NOT EXISTS session_id TEXT;
-      INSERT INTO noura.schema_migrations (version, applied_at) VALUES (4, ${Date.now()})
-      ON CONFLICT (version) DO NOTHING;
-    `);
+      )`,
+      'CREATE INDEX IF NOT EXISTS idx_noura_board_assets_cache ON noura.board_assets(cache_key)',
+      `INSERT INTO noura.schema_migrations (version, applied_at) VALUES (3, ${appliedAt}) ON CONFLICT (version) DO NOTHING`,
+      'ALTER TABLE noura.board_assets ADD COLUMN IF NOT EXISTS parent_id TEXT',
+      'ALTER TABLE noura.board_assets ADD COLUMN IF NOT EXISTS session_id TEXT',
+      `INSERT INTO noura.schema_migrations (version, applied_at) VALUES (4, ${appliedAt}) ON CONFLICT (version) DO NOTHING`,
+    ];
+    for (const sql of statements) {
+      await this.pool.query(sql);
+    }
   }
 
   private async verifySchema(): Promise<void> {
