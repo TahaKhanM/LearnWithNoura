@@ -1,0 +1,16 @@
+{
+  "schemaVersion": "1.0.0",
+  "label": "dual-gate isolation — pinned provider_failed",
+  "expectPass": true,
+  "expectedConfirmedThenCancelled": 0,
+  "expectedUnlabelledCancellations": 0,
+  "expectedProviderCompletedAfterConfirmed": 0,
+  "expectedProviderFailed": 1,
+  "traces": [
+    {
+      "gateOutcome": "confirmed",
+      "providerResponseId": "resp-fail-1",
+      "cancelOutcome": "provider_failed"
+    }
+  ]
+}

@@ -69,7 +69,7 @@ function validateStoryboardRunnerBinding(fixture: RevealNarrationFixture): strin
 /**
  * Scores reveal–narration ordering from a scripted storyboard timeline.
  * Narration must cover each reveal before the next; referenced object ids are
- * derived from the storyboard step's objectIds. When anchorScene is present,
+ * derived from the storyboard step's objectIds. anchorScene is required so
  * reveal ops are bound to production storyboardRunSteps.
  */
 export function scoreRevealNarrationCoherence(fixture: RevealNarrationFixture): RevealNarrationCoherenceResult {

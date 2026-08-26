@@ -30,7 +30,7 @@ export type BlueprintDimensionScore = {
   weight: number;
   score: number;
   rationale: string;
-  source: 'structural' | 'scripted_judge';
+  source: 'structural';
   applicable: boolean;
 };
 
@@ -226,26 +226,12 @@ const structuralScorers: Record<string, (blueprint: LessonBlueprint) => Blueprin
   no_assessment_in_images: scoreNoAssessmentInImages,
 };
 
-/** Default offline path: structural scorer plus optional scripted judge overrides. */
+/** Default offline path: structural scorer only. Scripted overrides cannot rescue a weak blueprint. */
 export function scoreBlueprintQuality(fixture: BlueprintQualityFixture): BlueprintQualityResult {
   const rubric = loadBlueprintQualityRubric();
-  const scripted = new Map((fixture.scriptedJudgments ?? []).map((entry) => [entry.dimensionId, entry]));
   const dimensions: BlueprintDimensionScore[] = [];
 
   for (const dimension of rubric.dimensions) {
-    const override = scripted.get(dimension.id);
-    if (override) {
-      dimensions.push({
-        dimensionId: dimension.id,
-        label: dimension.label,
-        weight: dimension.weight,
-        score: override.score,
-        rationale: override.rationale,
-        source: 'scripted_judge',
-        applicable: true,
-      });
-      continue;
-    }
     const scorer = structuralScorers[dimension.id];
     if (!scorer) {
       dimensions.push({

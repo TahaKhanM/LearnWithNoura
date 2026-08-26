@@ -70,6 +70,13 @@ export function runOfflineLessonEval(): LessonEvalReport {
 
   pushGate(
     gates,
+    'revealNarrationCoherence',
+    readFixture('reveal-narration-unbound.json', RevealNarrationFixtureSchema),
+    scoreRevealNarrationCoherence(readFixture('reveal-narration-unbound.json', RevealNarrationFixtureSchema)),
+  );
+
+  pushGate(
+    gates,
     'objectPermanence',
     readFixture('object-permanence-pass.json', ObjectPermanenceFixtureSchema),
     scoreObjectPermanence(readFixture('object-permanence-pass.json', ObjectPermanenceFixtureSchema)),
@@ -87,6 +94,13 @@ export function runOfflineLessonEval(): LessonEvalReport {
     'objectPermanence',
     readFixture('object-permanence-fail-overwrite.json', ObjectPermanenceFixtureSchema),
     scoreObjectPermanence(readFixture('object-permanence-fail-overwrite.json', ObjectPermanenceFixtureSchema)),
+  );
+
+  pushGate(
+    gates,
+    'objectPermanence',
+    readFixture('object-permanence-fail-clear.json', ObjectPermanenceFixtureSchema),
+    scoreObjectPermanence(readFixture('object-permanence-fail-clear.json', ObjectPermanenceFixtureSchema)),
   );
 
   pushGate(
@@ -115,6 +129,13 @@ export function runOfflineLessonEval(): LessonEvalReport {
     'falseBargeIns',
     readFixture('barge-in-negative-control.json', FalseBargeInFixtureSchema),
     scoreFalseBargeIns(readFixture('barge-in-negative-control.json', FalseBargeInFixtureSchema)),
+  );
+
+  pushGate(
+    gates,
+    'falseBargeIns',
+    readFixture('barge-in-provider-failed.json', FalseBargeInFixtureSchema),
+    scoreFalseBargeIns(readFixture('barge-in-provider-failed.json', FalseBargeInFixtureSchema)),
   );
 
   pushGate(

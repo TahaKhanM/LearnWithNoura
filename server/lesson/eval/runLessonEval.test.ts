@@ -12,6 +12,7 @@ import { scoreRevealNarrationCoherence } from './revealNarrationCoherence.js';
 import { listLessonEvalFixtures, runOfflineLessonEval } from './runLessonEval.js';
 import { scoreTurnLatencyPercentiles } from './turnLatencyPercentiles.js';
 import {
+  BoardOpBatchSchema,
   BlueprintQualityFixtureSchema,
   FalseBargeInFixtureSchema,
   ObjectPermanenceFixtureSchema,
@@ -65,12 +66,36 @@ describe('reveal–narration coherence', () => {
     expect(score.pass).toBe(false);
     expect(score.violations.some((violation) => violation.includes('before narration'))).toBe(true);
   });
+
+  it('fails when timeline objectIds are unbound from storyboardRunSteps', () => {
+    const fixture = loadFixture('reveal-narration-unbound.json', RevealNarrationFixtureSchema);
+    const score = scoreRevealNarrationCoherence(fixture);
+    expect(score.pass).toBe(false);
+    expect(score.violations.some((violation) => violation.includes('storyboardRunSteps'))).toBe(true);
+  });
 });
 
 describe('object permanence', () => {
+  it('rejects a {op:remove} batch at parse time through production validateOps', () => {
+    expect(() => BoardOpBatchSchema.parse({
+      owner: 'tutor',
+      ts: 1,
+      ops: [{ op: 'remove' }],
+    })).toThrow(/unknown op/i);
+  });
+
   it('passes when tutor objects only accumulate via production applyOps', () => {
     const fixture = loadFixture('object-permanence-pass.json', ObjectPermanenceFixtureSchema);
     expect(scoreObjectPermanence(fixture).pass).toBe(true);
+  });
+
+  it('excuses a same-id overwrite whose ts matches a sectionNavigation', () => {
+    const fixture = loadFixture('object-permanence-pass.json', ObjectPermanenceFixtureSchema);
+    expect(fixture.boardOpBatches.some((batch) => batch.ts === 2000 && batch.ops.some((op) => op.op === 'add'))).toBe(true);
+    expect(fixture.sectionNavigations.some((entry) => entry.ts === 2000)).toBe(true);
+    const withoutNav = scoreObjectPermanence({ ...fixture, sectionNavigations: [] });
+    expect(withoutNav.pass).toBe(false);
+    expect(withoutNav.unexplainedDisappearances.some((entry) => entry.cause.includes('overwrite'))).toBe(true);
   });
 
   it('fails on tutor erase outside navigation', () => {
@@ -85,6 +110,22 @@ describe('object permanence', () => {
     const score = scoreObjectPermanence(fixture);
     expect(score.pass).toBe(false);
     expect(score.unexplainedDisappearances.some((entry) => entry.cause.includes('overwrite'))).toBe(true);
+  });
+
+  it('fails on tutor clear; erase and clear always fail even if a navigation were present', () => {
+    const fixture = loadFixture('object-permanence-fail-clear.json', ObjectPermanenceFixtureSchema);
+    const score = scoreObjectPermanence(fixture);
+    expect(score.pass).toBe(false);
+    expect(score.unexplainedDisappearances.length).toBeGreaterThan(0);
+    const withNav = scoreObjectPermanence({
+      ...fixture,
+      sectionNavigations: [{
+        ts: 900,
+        previousSemanticGroupId: 'lesson-anchor',
+        nextSemanticGroupId: 'side-compare',
+      }],
+    });
+    expect(withNav.pass).toBe(false);
   });
 });
 
@@ -147,6 +188,14 @@ describe('false barge-ins', () => {
     const fixture = loadFixture('barge-in-negative-control.json', FalseBargeInFixtureSchema);
     expect(scoreFalseBargeIns(fixture).pass).toBe(true);
   });
+
+  it('pins provider_failed isolation at expectedProviderFailed: 1', () => {
+    const fixture = loadFixture('barge-in-provider-failed.json', FalseBargeInFixtureSchema);
+    const score = scoreFalseBargeIns(fixture);
+    expect(score.providerFailed).toBe(1);
+    expect(fixture.expectedProviderFailed).toBe(1);
+    expect(score.pass).toBe(true);
+  });
 });
 
 describe('blueprint quality rubric', () => {
@@ -169,7 +218,7 @@ describe('blueprint quality rubric', () => {
 
 describe('offline lesson eval runner', () => {
   it('lists checked-in fixtures', () => {
-    expect(listLessonEvalFixtures().length).toBeGreaterThanOrEqual(12);
+    expect(listLessonEvalFixtures().length).toBeGreaterThanOrEqual(15);
   });
 
   it('passes every dimension gate including negative controls', () => {

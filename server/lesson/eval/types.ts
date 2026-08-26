@@ -1,8 +1,21 @@
 import { z } from 'zod';
 import { LessonBlueprintSchema } from '../../../shared/pedagogy.js';
-import type { BoardOp } from '../../../shared/boardOps.js';
+import { validateOps, type BoardOp } from '../../../shared/boardOps.js';
 
 export const LESSON_EVAL_SCHEMA_VERSION = '1.0.0' as const;
+
+/** Fixture BoardOps must survive production validateOps; rejected entries fail parse. */
+export const ProductionBoardOpsSchema = z.unknown().transform((raw, ctx): BoardOp[] => {
+  const result = validateOps(raw, { tier: 'authored' });
+  if (!Array.isArray(raw) || result.rejected.length > 0) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: result.rejected.map((entry) => entry.reason).join('; ') || 'ops must be an array of production BoardOps',
+    });
+    return z.NEVER;
+  }
+  return result.ops;
+});
 
 export const StoryboardStepFixtureSchema = z.object({
   id: z.string().min(1),
@@ -12,7 +25,7 @@ export const StoryboardStepFixtureSchema = z.object({
 });
 
 export const AnchorSceneFixtureSchema = z.object({
-  ops: z.array(z.custom<BoardOp>((value) => typeof value === 'object' && value !== null)),
+  ops: ProductionBoardOpsSchema,
   storyboard: z.array(StoryboardStepFixtureSchema),
 });
 
@@ -35,13 +48,13 @@ export const RevealNarrationFixtureSchema = z.object({
   expectPass: z.boolean(),
   storyboard: z.array(StoryboardStepFixtureSchema).min(1),
   timeline: z.array(RevealNarrationTimelineEventSchema).min(1),
-  /** When set, reveal steps are cross-checked against production storyboardRunSteps. */
-  anchorScene: AnchorSceneFixtureSchema.optional(),
+  /** Required so reveal objectIds are bound to production storyboardRunSteps. */
+  anchorScene: AnchorSceneFixtureSchema,
 });
 
 export const BoardOpBatchSchema = z.object({
   owner: z.enum(['tutor', 'learner']),
-  ops: z.array(z.custom<BoardOp>((value) => typeof value === 'object' && value !== null)),
+  ops: ProductionBoardOpsSchema,
   semanticGroupId: z.string().min(1).optional(),
   ts: z.number().finite().nonnegative(),
 });
@@ -95,11 +108,6 @@ export const BlueprintQualityFixtureSchema = z.object({
   label: z.string().min(1),
   expectPass: z.boolean(),
   blueprint: LessonBlueprintSchema,
-  scriptedJudgments: z.array(z.object({
-    dimensionId: z.string().min(1),
-    score: z.number().min(0).max(1),
-    rationale: z.string().min(1),
-  })).optional(),
 });
 
 export type RevealNarrationFixture = z.infer<typeof RevealNarrationFixtureSchema>;

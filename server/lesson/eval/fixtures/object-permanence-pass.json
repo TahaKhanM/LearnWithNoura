@@ -22,6 +22,12 @@
       "owner": "learner",
       "ts": 1200,
       "ops": [{ "op": "add", "id": "learner-mark-1", "spec": { "kind": "point", "at": [400, 200] } }]
+    },
+    {
+      "owner": "tutor",
+      "ts": 2000,
+      "semanticGroupId": "side-compare",
+      "ops": [{ "op": "add", "id": "lesson-anchor-triangle", "spec": { "kind": "point", "at": [150, 250] } }]
     }
   ],
   "sectionNavigations": [
