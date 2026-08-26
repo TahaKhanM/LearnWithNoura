@@ -156,7 +156,8 @@ function geometryObstacles(items: SceneItem[], compiled: Map<string, CompiledIte
       case 'arc':
         segments.push(...sampleArcSegments(spec));
         break;
-      case 'asset': {
+      case 'asset':
+      case 'image': {
         const box = compiled.get(item.id)?.bbox;
         if (box) solids.push(box);
         break;

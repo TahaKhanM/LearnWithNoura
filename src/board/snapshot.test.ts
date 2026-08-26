@@ -58,6 +58,20 @@ describe('canonical board snapshot', () => {
     expect(svg).toContain('viewBox="0 0 2080 600"');
   });
 
+  it('serializes an illustration as an SVG image keyed by assetId, never a data-URL', () => {
+    const pictured = applyOps(emptyScene, [
+      { op: 'add', id: 'pond', spec: { kind: 'image', assetId: 'img-a1b2c3d4e5f67890', at: [80, 60], w: 840, h: 420, alt: 'A pond habitat' } },
+      { op: 'add', id: 'frog', spec: { kind: 'text', at: [200, 520], text: 'frog' } },
+    ], 'tutor', 'habitat').scene;
+    const svg = sceneToCanonicalSvg(pictured);
+    expect(svg).toContain('data-item="pond"');
+    expect(svg).toContain('href="/api/board-assets/img-a1b2c3d4e5f67890"');
+    expect(svg).toContain('preserveAspectRatio="xMidYMid meet"');
+    expect(svg).toContain('aria-label="A pond habitat"');
+    expect(svg).toContain('frog');
+    expect(svg).not.toContain('data:image');
+  });
+
   it('translates common LaTeX into deterministic readable text', () => {
     expect(latexToPlainText('c^2=a^2+b^2')).toBe('c^2=a^2+b^2');
     expect(latexToPlainText('A+B+C=180^\\circ')).toBe('A+B+C=180°');

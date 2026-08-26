@@ -130,6 +130,33 @@ describe('compileScene', () => {
     expect(items[1].nodes[0]).toMatchObject({ type: 'text', style: 'handwritten', text: 'watch this' });
   });
 
+  it('compiles a generated illustration as a contained image node with overlay space reserved', () => {
+    const [picture] = compile([
+      {
+        op: 'add',
+        id: 'pond',
+        spec: {
+          kind: 'image',
+          assetId: 'img-a1b2c3d4e5f67890',
+          at: [80, 60],
+          w: 840,
+          h: 420,
+          alt: 'A pond habitat',
+        },
+      },
+    ]);
+    expect(picture.nodes[0]).toMatchObject({
+      type: 'image',
+      href: '/api/board-assets/img-a1b2c3d4e5f67890',
+      x: 80,
+      y: 60,
+      w: 840,
+      h: 420,
+      alt: 'A pond habitat',
+    });
+    expect(picture.bbox).toMatchObject({ x: 80, y: 60, w: 840, h: 420 });
+  });
+
   it('renders equations as KaTeX nodes with estimated bounds', () => {
     const [eq] = compile([
       { op: 'add', id: 'e', spec: { kind: 'equation', at: [100, 100], latex: '\\frac{a}{b}' } },

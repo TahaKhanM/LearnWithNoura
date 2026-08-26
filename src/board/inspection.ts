@@ -113,6 +113,7 @@ function translateSpec(spec: ShapeSpec, dx: number, dy: number): ShapeSpec {
         ? { ...spec, center: move(spec.center) }
         : { ...spec, from: move(spec.from), through: move(spec.through), to: move(spec.to) };
     case 'asset': return { ...spec, at: move(spec.at) };
+    case 'image': return { ...spec, at: move(spec.at), ...(spec.crop ? { crop: { ...spec.crop, x: spec.crop.x + dx, y: spec.crop.y + dy } } : {}) };
     case 'draggable': case 'snapZone': case 'tappable': return { ...spec, at: move(spec.at) };
     case 'label': case 'plot': return spec;
   }

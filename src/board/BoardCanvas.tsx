@@ -136,6 +136,38 @@ const NodeView = memo(function NodeView({
       </text>
     );
   }
+  if (node.type === 'image') {
+    const crop = node.crop;
+    const clipId = crop ? `img-clip-${Math.round(node.x)}-${Math.round(node.y)}` : undefined;
+    return (
+      <g
+        ref={refCallback as (el: SVGGElement | null) => void}
+        visibility={hiddenInFocus ? 'hidden' : 'visible'}
+        data-required-text={node.alt}
+        data-required-text-key={textKey}
+        data-focus-contained={hiddenInFocus ? 'false' : 'true'}
+        style={animationPending ? { opacity: 0 } : undefined}
+      >
+        {crop && clipId ? (
+          <clipPath id={clipId}>
+            <rect x={crop.x} y={crop.y} width={crop.w} height={crop.h} />
+          </clipPath>
+        ) : null}
+        <image
+          href={node.href}
+          x={node.x}
+          y={node.y}
+          width={node.w}
+          height={node.h}
+          preserveAspectRatio="xMidYMid meet"
+          clipPath={clipId ? `url(#${clipId})` : undefined}
+          aria-label={node.alt}
+        >
+          <title>{node.alt}</title>
+        </image>
+      </g>
+    );
+  }
   return (
     <g
       ref={refCallback as (el: SVGGElement | null) => void}

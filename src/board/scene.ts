@@ -175,6 +175,8 @@ export function describeScene(scene: SceneState): string {
         return `${item.id}${group}: curve, ${s.points.length} points${who}`;
       case 'asset':
         return `${item.id}${group}: icon ${s.assetId}${s.label ? ` "${s.label}"` : ''} at (${s.at})${who}`;
+      case 'image':
+        return `${item.id}${group}: illustration ${s.assetId} “${s.alt}” at (${s.at}) ${s.w}x${s.h}${who}`;
       case 'draggable':
         return `${item.id}${group}: draggable ${s.handle} at (${s.at})${s.label ? ` "${s.label}"` : ''}${who}`;
       case 'snapZone':
