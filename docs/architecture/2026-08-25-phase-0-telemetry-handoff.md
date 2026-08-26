@@ -2,9 +2,9 @@
 
 ## Proven offline
 
-- Latest local code head: `e75084a`. A fresh sequential full-gate run at this
+- Latest local code head: `bb04aea`. A fresh sequential full-gate run at this
   head passed build, server typecheck, lint, 351/351 Vitest rows,
-  69/69 deterministic smoke-report rows, audit with zero production
+  70/70 deterministic smoke-report rows, audit with zero production
   vulnerabilities, 351/351 integration rows, 16/16 security rows, 6/6 storage
   rows, brand and all 8 runtime-model assertions, 12/12 browser E2E rows,
   48/48 unchanged visual baselines, 3/3 accessibility rows, and
@@ -21,6 +21,13 @@
   selectors), plus `5b3bee5` (nested Vercel session-log adapter). The bypass
   implementation received a high-capability implementation pass and an
   independent security review with no remaining High or Medium blocker.
+- Final follow-up review found that the `e75084a` existing-learner recovery
+  branch was still unreachable from a fresh browser context. `e06a628` fixed
+  the readiness anchor with a failing-first regression and capped Vitest
+  concurrency without weakening the 5-second per-test timeout; `bb04aea`
+  tied that anchor to the learner button already covered by browser E2E and
+  made the worker cap proportional. Independent re-review found no remaining
+  High or Medium blocker.
 - Complete Phase 0 commit ledger through the reviewed head:
   - contract, plan, and initial implementation:
     `e899e5b`, `d850246`, `0f9b03b`, `fce1a6f`, `ee146d3`, `b4bd342`,
@@ -130,7 +137,9 @@
   was fixed and directly verified, but no later provider-backed session
   completed the full report. Other attempts stopped before `POST /api/sessions`
   and made no provider call. The final fixed head therefore remains unverified
-  as a single uninterrupted live end-to-end run.
+  as a single uninterrupted live end-to-end run. The later existing-learner
+  readiness defect now has offline regression coverage but has not been
+  provider-backed live re-run.
 - No live latency percentile, acoustic onset/silence, billed currency,
   target-device, real microphone/speaker, room-noise, autoplay/permission, or
   genuine zoom claim is made. The observed 3,998 ms text-ask boundary is one

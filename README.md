@@ -110,8 +110,8 @@ revoked after the run.
 The August 26 authorized exercise proved one provider-backed lesson and its
 complete, gap-free parent-scoped telemetry log, but did not produce one
 uninterrupted passing reporter run because the deployed nested log adapter was
-missing during that lesson. The adapter is now present and offline gates are
-green. Exact evidence and remaining limits are recorded in the
+missing during that lesson. The adapter is now present in the codebase and
+offline gates are green. Exact evidence and remaining limits are recorded in the
 [Phase 0 telemetry handoff](docs/architecture/2026-08-25-phase-0-telemetry-handoff.md).
 
 Gap accounting makes known loss visible but is not an end-to-end delivery
