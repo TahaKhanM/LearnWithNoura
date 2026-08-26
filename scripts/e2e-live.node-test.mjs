@@ -225,6 +225,19 @@ test('package scripts keep deterministic reporting separate from live authorizat
   assert.doesNotMatch(packageJson.scripts['e2e:live'], /authorized-live-run/);
 });
 
+test('live journey readiness accepts an existing learner with no selection', () => {
+  const script = readFileSync(scriptPath, 'utf8');
+  const readySelector = script.match(
+    /await page\.waitForSelector\(\s*'([^']+)'/,
+  )?.[1];
+
+  assert.ok(readySelector, 'expected a home readiness selector');
+  assert.ok(
+    readySelector.split(',').map((selector) => selector.trim()).includes('.home__children'),
+    'expected the always-visible learner list to mark the home as ready',
+  );
+});
+
 test('non-fixture execution fails closed without explicit authorization', () => {
   const result = runScript(['--text-only'], {
     NOURA_BASE_URL: 'http://127.0.0.1:1',

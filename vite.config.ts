@@ -17,5 +17,7 @@ export default defineConfig({
     environment: 'jsdom',
     globals: true,
     exclude: ['tests/**', 'node_modules/**', 'dist/**'],
+    // Avoid starving individual 5 s test budgets when CPU-heavy suites run together.
+    maxWorkers: 4,
   },
 })
