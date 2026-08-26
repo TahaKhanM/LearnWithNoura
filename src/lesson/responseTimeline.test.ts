@@ -5,7 +5,7 @@ import { ResponseCueTimeline, type ResponseCue } from './responseTimeline';
 const identity: GenerationIdentity = { sessionId: 'session', connectionEpoch: 1, turnId: 'turn-1', generationId: 'generation-1' };
 const nextIdentity: GenerationIdentity = { ...identity, connectionEpoch: 2, turnId: 'turn-2', generationId: 'generation-2' };
 
-function visual(id: string, sequence: number, responseId = 'response', active = identity): ResponseCue {
+function visual(id: string, sequence: number, responseId = 'response', active = identity): Extract<ResponseCue, { kind: 'visual' }> {
   return { kind: 'visual', cueId: id, responseId, sequence, identity: active, ops: [], eventId: 1, semanticObjectId: 'fraction-scale', visualCueId: id };
 }
 
