@@ -157,6 +157,7 @@ npm run build
 npm run typecheck:server
 npm run lint
 npm run test:smoke-report
+npm run test:lesson-eval
 npm test
 npm audit --omit=dev
 npm run test:integration

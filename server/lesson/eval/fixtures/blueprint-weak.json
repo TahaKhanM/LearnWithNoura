@@ -1,0 +1,49 @@
+{
+  "schemaVersion": "1.0.0",
+  "label": "weak blueprint — duplicate stage purpose and missing guided checks",
+  "expectPass": false,
+  "minimumTotalScore": 0.72,
+  "blueprint": {
+    "blueprintId": "blueprint-weak-eval-fixture",
+    "goal": "Compare fractions quickly",
+    "mode": "board_led",
+    "successCriteria": ["Learner compares two marks"],
+    "anchor": {
+      "semanticGroupId": "lesson-anchor",
+      "template": "fraction_comparison",
+      "instructionalQuestion": "Which mark is farther right?",
+      "invariantObjectIds": []
+    },
+    "stages": [
+      {
+        "id": "orient",
+        "kind": "orient",
+        "objective": "Meet the number line",
+        "boardPurpose": "establish_anchor",
+        "allowedBoardMutation": "establish",
+        "learnerOpportunity": "Look at the line",
+        "evidenceExpected": "recall"
+      },
+      {
+        "id": "model",
+        "kind": "model",
+        "objective": "Meet the number line",
+        "boardPurpose": "reveal_relation",
+        "allowedBoardMutation": "extend",
+        "learnerOpportunity": "Look at the line again",
+        "evidenceExpected": "recall"
+      },
+      {
+        "id": "guided",
+        "kind": "guided_check",
+        "objective": "Compare the marks",
+        "boardPurpose": "elicit_learner_work",
+        "allowedBoardMutation": "emphasize",
+        "learnerOpportunity": "Answer without a delivered task",
+        "evidenceExpected": "application"
+      }
+    ],
+    "currentStageIndex": 0,
+    "detourStack": []
+  }
+}

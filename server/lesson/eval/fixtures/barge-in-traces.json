@@ -1,0 +1,23 @@
+{
+  "schemaVersion": "1.0.0",
+  "label": "dual-gate traces — labelled confirmed-then-cancelled vs true interrupt",
+  "expectPass": true,
+  "traces": [
+    { "gateOutcome": "local_only_rejected" },
+    { "gateOutcome": "provider_only_rejected" },
+    {
+      "gateOutcome": "confirmed",
+      "providerResponseId": "resp-noise-1",
+      "cancelOutcome": "provider_cancelled"
+    },
+    {
+      "gateOutcome": "confirmed",
+      "providerResponseId": "resp-speech-1",
+      "cancelOutcome": "provider_completed"
+    },
+    {
+      "gateOutcome": "confirmed",
+      "providerResponseId": "resp-unlabelled-1"
+    }
+  ]
+}

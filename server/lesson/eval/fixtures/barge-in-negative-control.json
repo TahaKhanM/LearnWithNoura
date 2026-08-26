@@ -1,0 +1,23 @@
+{
+  "schemaVersion": "1.0.0",
+  "label": "dual-gate isolation — confirmed-then-cancelled count must match",
+  "expectPass": true,
+  "expectedConfirmedThenCancelled": 2,
+  "traces": [
+    {
+      "gateOutcome": "confirmed",
+      "providerResponseId": "resp-a",
+      "cancelOutcome": "provider_cancelled"
+    },
+    {
+      "gateOutcome": "confirmed",
+      "providerResponseId": "resp-b",
+      "cancelOutcome": "provider_cancelled"
+    },
+    {
+      "gateOutcome": "confirmed",
+      "providerResponseId": "resp-c",
+      "cancelOutcome": "provider_completed"
+    }
+  ]
+}

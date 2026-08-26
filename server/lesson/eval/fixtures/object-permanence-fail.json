@@ -1,0 +1,14 @@
+{
+  "schemaVersion": "1.0.0",
+  "label": "triangle anchor — tutor object disappears outside navigation",
+  "expectPass": false,
+  "releasedEvents": [
+    { "kind": "add", "objectId": "lesson-anchor-triangle", "owner": "tutor", "ts": 100 },
+    { "kind": "add", "objectId": "lesson-anchor-angle-a", "owner": "tutor", "ts": 420 },
+    { "kind": "remove", "objectId": "lesson-anchor-angle-a", "owner": "tutor", "ts": 900 }
+  ],
+  "sectionNavigations": [],
+  "disappearanceMetrics": [
+    { "objectId": "lesson-anchor-angle-a", "cause": "scene_mutation", "ts": 901 }
+  ]
+}

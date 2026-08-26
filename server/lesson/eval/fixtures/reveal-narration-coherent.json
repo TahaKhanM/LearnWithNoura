@@ -1,0 +1,49 @@
+{
+  "schemaVersion": "1.0.0",
+  "label": "numberline anchor — coherent reveal-narration order",
+  "expectPass": true,
+  "storyboard": [
+    {
+      "id": "reveal-line",
+      "objectIds": ["lesson-anchor-line"],
+      "narration": "Here is one number line from zero to one."
+    },
+    {
+      "id": "reveal-marks",
+      "objectIds": ["lesson-anchor-prompt"],
+      "narration": "One-half and three-quarters are marked for you."
+    },
+    {
+      "id": "reveal-marker",
+      "objectIds": ["lesson-anchor-zone-three-quarters", "lesson-anchor-marker"],
+      "narration": "This marker is yours to move."
+    }
+  ],
+  "timeline": [
+    { "kind": "reveal", "stepId": "reveal-line", "objectIds": ["lesson-anchor-line"] },
+    {
+      "kind": "narration",
+      "stepId": "reveal-line",
+      "referencedObjectIds": ["lesson-anchor-line"],
+      "narrationText": "Here is one number line from zero to one."
+    },
+    { "kind": "reveal", "stepId": "reveal-marks", "objectIds": ["lesson-anchor-prompt"] },
+    {
+      "kind": "narration",
+      "stepId": "reveal-marks",
+      "referencedObjectIds": ["lesson-anchor-prompt"],
+      "narrationText": "One-half and three-quarters are marked for you."
+    },
+    {
+      "kind": "reveal",
+      "stepId": "reveal-marker",
+      "objectIds": ["lesson-anchor-zone-three-quarters", "lesson-anchor-marker"]
+    },
+    {
+      "kind": "narration",
+      "stepId": "reveal-marker",
+      "referencedObjectIds": ["lesson-anchor-marker"],
+      "narrationText": "This marker is yours to move."
+    }
+  ]
+}

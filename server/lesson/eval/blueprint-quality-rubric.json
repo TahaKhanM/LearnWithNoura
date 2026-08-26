@@ -1,0 +1,38 @@
+{
+  "schemaVersion": "1.0.0",
+  "title": "Noura compiled-lesson blueprint quality rubric",
+  "description": "Fixed offline rubric for Phase 5 blueprint quality scoring. Live strong-model judging uses the same dimensions behind --authorized-live-run.",
+  "dimensions": [
+    {
+      "id": "stage_purpose",
+      "label": "Stage purpose",
+      "weight": 0.2,
+      "criteria": "Each stage has a distinct objective aligned with its boardPurpose and learnerOpportunity; stages progress orient → model → check without duplicate purpose."
+    },
+    {
+      "id": "check_task_pairing",
+      "label": "Check/task pairing",
+      "weight": 0.2,
+      "criteria": "Guided and independent check stages include at least one check with child-facing questionOrTask wording; voice checks avoid manipulate-only tasks on non-manipulate stages."
+    },
+    {
+      "id": "visual_intent_vs_geometry",
+      "label": "Visual intent vs geometry authorship",
+      "weight": 0.2,
+      "criteria": "Board-led lessons declare an anchor with template or raw ops intent; establish stage uses allowedBoardMutation establish; geometry remains compiler/director authored, not realtime-invented."
+    },
+    {
+      "id": "manipulate_check_pairing",
+      "label": "Manipulate-check pairing",
+      "weight": 0.2,
+      "criteria": "Every responseMode manipulate check includes a manipulativeCheck spec; non-manipulate checks must not claim machine-checked drag/tap without the spec."
+    },
+    {
+      "id": "no_assessment_in_images",
+      "label": "No assessment targets in generated images",
+      "weight": 0.2,
+      "criteria": "Illustration or image intents must not encode answer targets, measured scales, or equations that belong in exact BoardOp overlays."
+    }
+  ],
+  "passThreshold": 0.7
+}

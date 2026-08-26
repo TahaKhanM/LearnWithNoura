@@ -1,0 +1,10 @@
+{
+  "schemaVersion": "1.0.0",
+  "label": "Phase 0 duration metrics — insufficient_n honesty control",
+  "expectPass": false,
+  "minSamplesForPercentile": 5,
+  "metrics": [
+    { "name": "speech_end_to_response_started", "valueMs": 180 },
+    { "name": "speech_end_to_first_audio", "valueMs": 320 }
+  ]
+}
