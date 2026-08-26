@@ -105,6 +105,66 @@ describe('lesson orchestrator', () => {
     expect(currentStage(state)?.id).toBe('model');
   });
 
+  it('upgrades a recorded detour with a compiled mini-plan, travels it, and returns to the recorded stage', () => {
+    let state = createLessonState('fractions', 'generation-1');
+    state = reduceLesson(state, { type: 'BLUEPRINT_CREATED', blueprint: { ...blueprint, currentStageIndex: 1 } });
+    state = reduceLesson(state, { type: 'QUESTION_DELIVERED', taskId: 'task-1', text: 'Where does two thirds go?' });
+    state = reduceLesson(state, { type: 'LEARNER_RESPONSE_RECEIVED' });
+    state = reduceLesson(state, { type: 'ASSESSED', classification: 'missing_prerequisite', evidenceId: 'evidence-1' });
+    expect(state.blueprint?.detourStack).toHaveLength(1);
+
+    // The compiler's mini-plan upgrades the already-recorded simple detour
+    // in place; the stack does not grow and the main route is untouched.
+    state = reduceLesson(state, {
+      type: 'DETOUR_PLANNED',
+      reason: 'missing prerequisite',
+      stages: [
+        { id: 'detour-parts', kind: 'orient', objective: 'What the denominator counts', boardPurpose: 'none', allowedBoardMutation: 'none', learnerOpportunity: 'Say what the bottom number means', evidenceExpected: 'recall' },
+        { id: 'detour-thirds', kind: 'guided_check', objective: 'Split a whole into thirds', boardPurpose: 'none', allowedBoardMutation: 'none', learnerOpportunity: 'Mark one third', evidenceExpected: 'application' },
+      ],
+    });
+    expect(state.blueprint?.detourStack).toHaveLength(1);
+    expect(currentStage(state)?.id).toBe('detour-parts');
+    expect(state.microObjective).toBe('What the denominator counts');
+
+    // Correct evidence advances through the detour plan, one stage at a time.
+    state = reduceLesson(state, { type: 'QUESTION_DELIVERED', taskId: 'task-2', text: 'What does the bottom number count?' });
+    state = reduceLesson(state, { type: 'LEARNER_RESPONSE_RECEIVED' });
+    state = reduceLesson(state, { type: 'ASSESSED', classification: 'correct', evidenceId: 'evidence-2' });
+    expect(state.blueprint?.detourStack).toHaveLength(1);
+    expect(currentStage(state)?.id).toBe('detour-thirds');
+
+    // Finishing the last detour stage pops the detour and returns to the
+    // recorded main stage, exactly like a simple detour resolution.
+    state = reduceLesson(state, { type: 'QUESTION_DELIVERED', taskId: 'task-3', text: 'Mark one third.' });
+    state = reduceLesson(state, { type: 'LEARNER_RESPONSE_RECEIVED' });
+    state = reduceLesson(state, { type: 'ASSESSED', classification: 'correct', evidenceId: 'evidence-3' });
+    expect(state.blueprint?.detourStack).toHaveLength(0);
+    expect(currentStage(state)?.id).toBe('model');
+  });
+
+  it('rejects detour plans without a blueprint and enforces the one-to-two stage bound', () => {
+    const bare = createLessonState('fractions', 'generation-1');
+    const stage = { id: 'detour', kind: 'orient' as const, objective: 'Prerequisite', boardPurpose: 'none' as const, allowedBoardMutation: 'none' as const, learnerOpportunity: 'Try', evidenceExpected: 'recall' };
+    expect(() => reduceLesson(bare, { type: 'DETOUR_PLANNED', reason: 'gap', stages: [stage] })).toThrow(/blueprint/i);
+    let state = reduceLesson(createLessonState('fractions', 'generation-1'), { type: 'BLUEPRINT_CREATED', blueprint });
+    expect(() => reduceLesson(state, {
+      type: 'DETOUR_PLANNED',
+      reason: 'gap',
+      stages: [stage, { ...stage, id: 'detour-2' }, { ...stage, id: 'detour-3' }],
+    })).toThrow();
+    // Without a prior simple detour the plan opens its own bounded entry.
+    state = reduceLesson(state, { type: 'DETOUR_PLANNED', reason: 'gap', stages: [stage] });
+    expect(state.blueprint?.detourStack).toHaveLength(1);
+    expect(currentStage(state)?.id).toBe('detour');
+    // While a planned detour is open, a move naming the main stage is an
+    // illegal jump; the detour stage is the current stage.
+    expect(() => reduceLesson(state, {
+      type: 'MOVE_PROPOSED',
+      move: { rationale: 'jump', microObjective: 'skip ahead', strategy: 'jump', childFacingText: 'Back to the scale.', proposedAction: 'explain', stageId: 'orient' },
+    })).toThrow(/illegal stage jump/i);
+  });
+
   it('refuses completion before the blueprint route and evidence exist', () => {
     let state = createLessonState('fractions', 'generation-1');
     state = reduceLesson(state, { type: 'BLUEPRINT_CREATED', blueprint });
