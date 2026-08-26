@@ -15,10 +15,12 @@ import {
   YieldingTelemetryRepository,
   type SessionTelemetryRepository,
 } from '../session/telemetryRepository.js';
+import type { BoardDirector } from '../board/director.js';
 import type { ClientCueOptional, CoordinatorContext, CoordinatorState } from './coordinatorContext.js';
 import type { GenerationIdentity } from '../../shared/runtimeProtocol.js';
 import { latestVoiceCallId, type SidebandRegistry } from './callBootstrap.js';
 import { handleClientEvent } from './clientEvents.js';
+import { noteStoryboardClientIdentityChanged } from './storyboardRunner.js';
 import { handleUpstreamEvent, type UpstreamEvent } from './upstreamEvents.js';
 import { initialSessionUpdate, realtimeCallUrl, REALTIME_URL } from './sessionConfig.js';
 
@@ -57,6 +59,11 @@ export interface ProxyOptions {
   planDetour?: (input: { objective: string; reason: string; returnStageObjective: string }) => Promise<LessonStage[]>;
   /** How long detour planning may run before the simple detour stands. */
   detourPlanTimeoutMs?: number;
+  /** Board Director for slow-tier scene requests; absent means new-scene
+   * requests fail closed with a clean rejection. */
+  directVisual?: BoardDirector;
+  /** How long one storyboard step may await visibility confirmation. */
+  stepRevealTimeoutMs?: number;
   onLifecycle?: (lifecycle: ProxyLifecycle) => void;
 }
 
@@ -107,6 +114,10 @@ function createCoordinatorState(goal: string): CoordinatorState {
     pendingVisibility: new Map(),
     comparisonSectionCounter: 0,
     boardContext: new BoardContextTracker(),
+    pendingResponseCreates: 0,
+    lastCompletedResponseId: null,
+    beatResponses: new Set(),
+    storyboardRun: null,
   };
 }
 
@@ -200,6 +211,8 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
     visibilityTimeoutMs: options.visibilityTimeoutMs ?? 15_000,
     planDetour: options.planDetour ?? null,
     detourPlanTimeoutMs: options.detourPlanTimeoutMs ?? DETOUR_PLAN_TIMEOUT_MS,
+    directVisual: options.directVisual ?? null,
+    stepRevealTimeoutMs: options.stepRevealTimeoutMs ?? 45_000,
     state,
     sendClient(
       payload: Record<string, unknown>,
@@ -399,6 +412,7 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
         state.clientSequence = 0;
         state.lastClientSequence = -1;
         flushPendingClientPayloads();
+        noteStoryboardClientIdentityChanged(ctx);
       }
       if (envelope.sequence <= state.lastClientSequence) return;
       state.lastClientSequence = envelope.sequence;

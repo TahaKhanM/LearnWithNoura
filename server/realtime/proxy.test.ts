@@ -158,7 +158,7 @@ describe('realtime proxy response annotation', () => {
     expect(parsed.board?.visibleObjectIds).toContain('existing-line');
   });
 
-  it('returns board sections from inspect_board and enforces semantic density budgets', async () => {
+  it('returns board sections from inspect_board and fails new-scene requests closed without a Director', async () => {
     vi.stubGlobal('WebSocket', FakeUpstream);
     const repo = new Repo(openTestDb());
     const child = repo.createChild('Maya', 10);
@@ -177,17 +177,21 @@ describe('realtime proxy response annotation', () => {
       .find((event) => event.type === 'conversation.item.create' && event.item?.call_id === 'inspect-call');
     expect(JSON.parse(inspectOutput?.item?.output ?? '{}')).toMatchObject({ board: { visibleGroups: [{ id: 'existing-proof', objectCount: 1 }] } });
 
-    upstream.emit({ type: 'response.created', response: { id: 'dense-response' } });
+    // The voice model supplies intent only; without a wired Director the
+    // slow tier fails closed instead of inventing geometry. (Density
+    // budgets on Director scenes are enforced and tested in
+    // server/board/director.test.ts.)
+    upstream.emit({ type: 'response.created', response: { id: 'scene-response' } });
     upstream.emit({
-      type: 'response.function_call_arguments.done', response_id: 'dense-response', call_id: 'dense-call', name: 'semantic_visual_plan',
+      type: 'response.function_call_arguments.done', response_id: 'scene-response', call_id: 'scene-call', name: 'request_visual',
       arguments: JSON.stringify({
-        schemaVersion: '2.0.0', planId: 'dense-proof',
-        intent: { objective: 'Pythagorean proof', domain: 'geometry', relevance: 'essential', questionAnswered: 'Why does the theorem work?', rationale: 'The rearrangement is spatial.', action: 'establish', density: 'minimal' },
-        groups: [{ id: 'dense-proof', label: 'Pythagorean proof', revealOrder: ['outline', 'label', 'connector'], template: 'pythagorean_area_proof', parameters: {} }],
+        schemaVersion: '3.0.0', requestId: 'proof-request', action: 'establish',
+        purpose: 'The stage needs the proof laid out spatially', idea: 'The rearrangement proof of the Pythagorean theorem', density: 'minimal',
       }),
     });
     await flushProxy();
-    expect(toolOutput(upstream, 'dense-call')).toMatchObject({ ok: false, accepted: false, reason: expect.stringContaining('density budget') });
+    expect(toolOutput(upstream, 'scene-call')).toMatchObject({ ok: false, accepted: false, reason: expect.stringContaining('No scene service') });
+    expect(repo.listEventsForInternalAudit(session.id).filter((event) => event.type === 'semantic_scene')).toEqual([]);
   });
 
   it('answers an extend request with guidance and routes the adaptation into the visible section', async () => {
@@ -208,11 +212,11 @@ describe('realtime proxy response annotation', () => {
     });
     await flushProxy();
     upstream.emit({
-      type: 'response.function_call_arguments.done', response_id: 'adapt-response', call_id: 'extend-call', name: 'semantic_visual_plan',
+      type: 'response.function_call_arguments.done', response_id: 'adapt-response', call_id: 'extend-call', name: 'request_visual',
       arguments: JSON.stringify({
-        schemaVersion: '2.0.0', planId: 'extend-fraction-model',
-        intent: { objective: 'Answer on the existing line', domain: 'quantitative', relevance: 'essential', questionAnswered: 'Where is three quarters?', rationale: 'The visible line already supplies the scale.', action: 'extend', targetGroupId: 'fraction-model', density: 'minimal' },
-        groups: [],
+        schemaVersion: '3.0.0', requestId: 'extend-fraction-model', action: 'extend',
+        purpose: 'Answer on the existing line', idea: 'Mark where three quarters sits on the visible scale',
+        targetGroupId: 'fraction-model', density: 'minimal',
       }),
     });
     upstream.emit({
@@ -453,12 +457,12 @@ describe('realtime proxy response annotation', () => {
     expect(JSON.stringify(staged?.payload)).not.toContain('"clear"');
   });
 
-  it('fails a plan closed when the browser rejects or never confirms the preflight', async () => {
+  it('fails the anchor build closed when the browser rejects or never confirms the preflight', async () => {
     vi.stubGlobal('WebSocket', FakeUpstream);
     const repo = new Repo(openTestDb());
     const child = repo.createChild('Maya', 10);
     const session = repo.createSession(child.id, 'fractions');
-    seedCompiledLesson(repo, session.id);
+    seedCompiledLesson(repo, session.id, 'board_led');
     const client = new FakeClient();
     await connectRealtimeProxy(client as never, {
       apiKey: 'offline-fixture', model: 'gpt-realtime-2.1', repo, sessionId: session.id,
@@ -469,17 +473,16 @@ describe('realtime proxy response annotation', () => {
     const upstream = FakeUpstream.latest;
     upstream.emit({ type: 'response.created', response: { id: 'plan-response' } });
     upstream.emit({
-      type: 'response.function_call_arguments.done', response_id: 'plan-response', call_id: 'plan-call', name: 'semantic_visual_plan',
+      type: 'response.function_call_arguments.done', response_id: 'plan-response', call_id: 'plan-call', name: 'request_visual',
       arguments: JSON.stringify({
-        schemaVersion: '2.0.0', planId: 'fractions-preflight',
-        intent: { objective: 'Compare fractions', domain: 'quantitative', relevance: 'essential', questionAnswered: 'Which is larger?', rationale: 'One scale.', action: 'establish', density: 'minimal' },
-        groups: [{ id: 'fraction-scale', label: 'Fraction number line', revealOrder: ['outline', 'label'], template: 'fraction_comparison', parameters: { values: [0.5, 0.75], labels: ['1/2', '3/4'] } }],
+        schemaVersion: '3.0.0', requestId: 'anchor-preflight', action: 'establish',
+        purpose: 'Anchor the comparison', idea: 'Both fractions on one shared number line', density: 'minimal',
       }),
     });
     await flushProxy();
 
-    // The browser is asked to compile the complete candidate offscreen; the
-    // server assigned the blueprint anchor section, not the model's name.
+    // The browser is asked to compile the complete compiled-anchor scene
+    // offscreen, in the server-assigned anchor section.
     const preflight = client.sent.find((event) => event.type === 'visual_preflight');
     expect(preflight?.payload).toMatchObject({ semanticObjectId: 'lesson-anchor' });
     // The browser rejects it; the model must be told nothing was drawn.
@@ -497,11 +500,10 @@ describe('realtime proxy response annotation', () => {
     // (allowed once after a failure) times out closed and stages nothing.
     upstream.emit({ type: 'response.created', response: { id: 'plan-response-2' } });
     upstream.emit({
-      type: 'response.function_call_arguments.done', response_id: 'plan-response-2', call_id: 'plan-call-2', name: 'semantic_visual_plan',
+      type: 'response.function_call_arguments.done', response_id: 'plan-response-2', call_id: 'plan-call-2', name: 'request_visual',
       arguments: JSON.stringify({
-        schemaVersion: '2.0.0', planId: 'fractions-preflight-retry',
-        intent: { objective: 'Compare fractions', domain: 'quantitative', relevance: 'essential', questionAnswered: 'Which is larger?', rationale: 'One scale.', action: 'establish', density: 'minimal' },
-        groups: [{ id: 'fraction-scale', label: 'Fraction number line', revealOrder: ['outline'], template: 'fraction_comparison', parameters: { values: [0.5], labels: ['1/2'] } }],
+        schemaVersion: '3.0.0', requestId: 'anchor-preflight-retry', action: 'establish',
+        purpose: 'Anchor the comparison', idea: 'Both fractions on one shared number line', density: 'minimal',
       }),
     });
     await new Promise((resolve) => setTimeout(resolve, 220));
@@ -514,7 +516,7 @@ describe('realtime proxy response annotation', () => {
     const repo = new Repo(openTestDb());
     const child = repo.createChild('Maya', 10);
     const session = repo.createSession(child.id, 'fractions');
-    seedCompiledLesson(repo, session.id);
+    seedCompiledLesson(repo, session.id, 'board_led');
     const client = new FakeClient();
     const registry = new ProxyLifecycleRegistry();
     let lifecycle: ProxyLifecycle | null = null;
@@ -539,26 +541,14 @@ describe('realtime proxy response annotation', () => {
       type: 'response.function_call_arguments.done',
       response_id: 'shutdown-plan-response',
       call_id: 'shutdown-plan-call',
-      name: 'semantic_visual_plan',
+      name: 'request_visual',
       arguments: JSON.stringify({
-        schemaVersion: '2.0.0',
-        planId: 'shutdown-plan',
-        intent: {
-          objective: 'Compare fractions',
-          domain: 'quantitative',
-          relevance: 'essential',
-          questionAnswered: 'Which is larger?',
-          rationale: 'One scale.',
-          action: 'establish',
-          density: 'minimal',
-        },
-        groups: [{
-          id: 'fraction-scale',
-          label: 'Fraction number line',
-          revealOrder: ['outline'],
-          template: 'fraction_comparison',
-          parameters: { values: [0.5], labels: ['1/2'] },
-        }],
+        schemaVersion: '3.0.0',
+        requestId: 'shutdown-plan',
+        action: 'establish',
+        purpose: 'Anchor the comparison',
+        idea: 'Both fractions on one shared number line',
+        density: 'minimal',
       }),
     });
     await flushProxy();
@@ -608,7 +598,7 @@ describe('realtime proxy response annotation', () => {
     const repo = new Repo(openTestDb());
     const child = repo.createChild('Maya', 10);
     const session = repo.createSession(child.id, 'fractions');
-    seedCompiledLesson(repo, session.id);
+    seedCompiledLesson(repo, session.id, 'board_led');
     const client = new FakeClient();
     const registry = new ProxyLifecycleRegistry();
     await connectRealtimeProxy(client as never, {
@@ -628,26 +618,14 @@ describe('realtime proxy response annotation', () => {
       type: 'response.function_call_arguments.done',
       response_id: 'graceful-plan-response',
       call_id: 'graceful-plan-call',
-      name: 'semantic_visual_plan',
+      name: 'request_visual',
       arguments: JSON.stringify({
-        schemaVersion: '2.0.0',
-        planId: 'graceful-plan',
-        intent: {
-          objective: 'Compare fractions',
-          domain: 'quantitative',
-          relevance: 'essential',
-          questionAnswered: 'Which is larger?',
-          rationale: 'One scale.',
-          action: 'establish',
-          density: 'minimal',
-        },
-        groups: [{
-          id: 'fraction-scale',
-          label: 'Fraction number line',
-          revealOrder: ['outline'],
-          template: 'fraction_comparison',
-          parameters: { values: [0.5], labels: ['1/2'] },
-        }],
+        schemaVersion: '3.0.0',
+        requestId: 'graceful-plan',
+        action: 'establish',
+        purpose: 'Anchor the comparison',
+        idea: 'Both fractions on one shared number line',
+        density: 'minimal',
       }),
     });
     await flushProxy();
@@ -687,17 +665,18 @@ describe('realtime proxy response annotation', () => {
     const upstream = FakeUpstream.latest;
     upstream.onopen?.();
     upstream.emit({ type: 'response.created', response: { id: 'replace-response' } });
+    // Replace is no longer even representable: the intent-only request
+    // schema has no such action, so the request fails validation closed.
     upstream.emit({
-      type: 'response.function_call_arguments.done', response_id: 'replace-response', call_id: 'replace-call', name: 'semantic_visual_plan',
+      type: 'response.function_call_arguments.done', response_id: 'replace-response', call_id: 'replace-call', name: 'request_visual',
       arguments: JSON.stringify({
-        schemaVersion: '2.0.0', planId: 'replace-model',
-        intent: { objective: 'Correct the model', domain: 'process', relevance: 'essential', questionAnswered: 'What is the right order?', rationale: 'The old order misleads.', action: 'replace', targetGroupId: 'working-model', density: 'minimal' },
-        groups: [{ id: 'working-model', label: 'Corrected model', revealOrder: ['outline'], template: 'worked_steps', parameters: { steps: ['First', 'Second'] } }],
+        schemaVersion: '3.0.0', requestId: 'replace-model', action: 'replace',
+        purpose: 'Correct the model', idea: 'A corrected two-step model', targetGroupId: 'working-model', density: 'minimal',
       }),
     });
     await flushProxy();
     await new Promise((resolve) => setTimeout(resolve, 40));
-    expect(toolOutput(upstream, 'replace-call')).toMatchObject({ ok: false, accepted: false, reason: expect.stringContaining('never disappears') });
+    expect(toolOutput(upstream, 'replace-call')).toMatchObject({ ok: false, accepted: false, error: expect.stringContaining('schema validation') });
     // No clear is staged and no visible object is removed.
     expect(repo.listEventsForInternalAudit(session.id).filter((event) => event.type === 'semantic_scene')).toEqual([]);
     const instructions = upstream.sent.map((raw) => JSON.parse(raw) as { type: string; session?: { instructions?: string } })
@@ -705,101 +684,84 @@ describe('realtime proxy response annotation', () => {
     expect(instructions).toContain('model-box');
   });
 
-  it('accepts one plan per tutor turn, waits for on-screen confirmation, then reports the visible board', async () => {
+  it('accepts one structural request per tutor turn and covers Director latency with a preparing result', async () => {
     vi.stubGlobal('WebSocket', FakeUpstream);
     const repo = new Repo(openTestDb());
     const child = repo.createChild('Maya', 10);
     const session = repo.createSession(child.id, 'fractions');
     seedCompiledLesson(repo, session.id);
     const client = new FakeClient();
+    const directorRequests: string[] = [];
     await connectRealtimeProxy(client as never, {
       apiKey: 'offline-fixture', model: 'gpt-realtime-2.1', repo, sessionId: session.id,
-      createUpstream: () => new FakeUpstream() as never, preflightTimeoutMs: 400, visibilityTimeoutMs: 800,
+      createUpstream: () => new FakeUpstream() as never,
+      // A Director that never resolves: the voice model must stay unblocked
+      // regardless — the tool result returns immediately as "preparing".
+      directVisual: (request) => {
+        directorRequests.push(request.sectionId);
+        return new Promise(() => {});
+      },
     });
     const active = { ...identity, sessionId: session.id };
     client.emit('message', JSON.stringify(createRuntimeEvent(active, 0, 'hello', {})));
     const upstream = FakeUpstream.latest;
-    upstream.emit({ type: 'response.created', response: { id: 'anchor-response' } });
+    upstream.emit({ type: 'response.created', response: { id: 'compare-response' } });
     upstream.emit({
-      type: 'response.function_call_arguments.done', response_id: 'anchor-response', call_id: 'anchor-call', name: 'semantic_visual_plan',
+      type: 'response.function_call_arguments.done', response_id: 'compare-response', call_id: 'compare-call', name: 'request_visual',
       arguments: JSON.stringify({
-        schemaVersion: '2.0.0', planId: 'anchor-plan',
-        intent: { objective: 'Compare fractions', domain: 'quantitative', relevance: 'essential', questionAnswered: 'Which is larger?', rationale: 'One scale.', action: 'establish', density: 'minimal' },
-        groups: [{ id: 'anything', label: 'Fraction number line', revealOrder: ['outline', 'label'], template: 'fraction_comparison', parameters: { values: [0.5, 0.75], labels: ['1/2', '3/4'] } }],
+        schemaVersion: '3.0.0', requestId: 'compare-plan', action: 'compare',
+        purpose: 'Contrast with equal fractions', idea: 'A side case where both fractions are equal', density: 'minimal',
       }),
     });
     await flushProxy();
-    const preflight = client.sent.find((event) => event.type === 'visual_preflight');
-    client.emit('message', JSON.stringify(createRuntimeEvent(active, 1, 'visual_preflight_result', {
-      preflight_id: (preflight!.payload as { preflight_id?: string }).preflight_id,
+    // The voice model is never blocked silently: the result arrives at once
+    // and tells it to keep teaching with what is visible.
+    expect(toolOutput(upstream, 'compare-call')).toMatchObject({
+      ok: true,
       accepted: true,
-      reasons: [],
-    })));
-    // Seal the response so the staged cues reach the browser.
-    upstream.emit({ type: 'response.done', response: { id: 'anchor-response', status: 'completed', output: [{ type: 'function_call' }] } });
-    await flushProxy();
-    await flushProxy();
+      status: 'preparing',
+      semanticGroupId: 'lesson-anchor-alt1',
+      guidance: expect.stringContaining('Keep teaching'),
+    });
+    expect(directorRequests).toEqual(['lesson-anchor-alt1']);
+    // The tool continuation lets the model keep narrating while it waits.
+    expect(upstream.sent.map((raw) => JSON.parse(raw) as { type: string })
+      .filter((event) => event.type === 'response.create').length).toBeGreaterThan(0);
 
-    // Visibility barrier: the tool result is withheld until the browser
-    // confirms the plan is actually on screen.
-    expect(toolOutput(upstream, 'anchor-call')).toEqual({});
-    const staged = client.sent.filter((event) => event.type === 'board_ops');
-    expect(staged.length).toBeGreaterThan(0);
-    let sequence = 2;
-    for (const cue of staged) {
-      client.emit('message', JSON.stringify(createRuntimeEvent(active, sequence++, 'ops_shown', { event_id: (cue.payload as { event_id?: number }).event_id })));
-    }
-    await flushProxy();
-    await flushProxy();
-    const output = toolOutput(upstream, 'anchor-call') as { ok?: boolean; visible?: boolean; semanticGroupId?: string; board?: { visibleObjectIds?: string[] } };
-    expect(output.ok).toBe(true);
-    expect(output.visible).toBe(true);
-    // The result contains the now-authoritative visible board, in the
-    // server-assigned anchor section.
-    expect(output.semanticGroupId).toBe('lesson-anchor');
-    expect(output.board?.visibleObjectIds).toContain('lesson-anchor-scale');
-
-    // A second structural plan in the same tutor turn is rejected with the
-    // current anchor.
-    upstream.emit({ type: 'response.created', response: { id: 'second-plan-response' } });
+    // A second structural request in the same tutor turn is rejected.
     upstream.emit({
-      type: 'response.function_call_arguments.done', response_id: 'second-plan-response', call_id: 'second-plan-call', name: 'semantic_visual_plan',
+      type: 'response.function_call_arguments.done', response_id: 'compare-response', call_id: 'second-call', name: 'request_visual',
       arguments: JSON.stringify({
-        schemaVersion: '2.0.0', planId: 'second-plan',
-        intent: { objective: 'Another idea', domain: 'process', relevance: 'essential', questionAnswered: 'What next?', rationale: 'More structure.', action: 'establish', density: 'minimal' },
-        groups: [{ id: 'second-section', label: 'Second idea', revealOrder: ['outline'], template: 'worked_steps', parameters: { steps: ['One', 'Two'] } }],
+        schemaVersion: '3.0.0', requestId: 'second-plan', action: 'establish',
+        purpose: 'Another idea', idea: 'A second structure', density: 'minimal',
       }),
     });
     await flushProxy();
-    expect(toolOutput(upstream, 'second-plan-call')).toMatchObject({
+    expect(toolOutput(upstream, 'second-call')).toMatchObject({
       ok: false,
       accepted: false,
       reason: expect.stringContaining('One visual plan per teaching turn'),
-      // The compiled test lesson is conversation-led, so no blueprint
-      // anchor exists; the fallback anchor section still hosted the plan.
       anchorGroupId: null,
     });
 
-    // A learner turn resets the budget; the anchor itself can never be
-    // re-established, so the next legal structural action is a comparison.
-    client.emit('message', JSON.stringify(createRuntimeEvent(active, sequence++, 'user_text', { text: 'I think three quarters is bigger.', idempotencyKey: 'turn-reset-key-1' })));
+    // A learner turn resets the budget; the next comparison gets the next
+    // announced side section.
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 1, 'user_text', { text: 'I think three quarters is bigger.', idempotencyKey: 'turn-reset-key-1' })));
     await flushProxy();
-    upstream.emit({ type: 'response.created', response: { id: 'compare-response' } });
+    upstream.emit({ type: 'response.created', response: { id: 'compare-response-2' } });
     upstream.emit({
-      type: 'response.function_call_arguments.done', response_id: 'compare-response', call_id: 'compare-call', name: 'semantic_visual_plan',
+      type: 'response.function_call_arguments.done', response_id: 'compare-response-2', call_id: 'compare-call-2', name: 'request_visual',
       arguments: JSON.stringify({
-        schemaVersion: '2.0.0', planId: 'compare-plan',
-        intent: { objective: 'Contrast with equal fractions', domain: 'quantitative', relevance: 'essential', questionAnswered: 'What if they were equal?', rationale: 'A contrast case.', action: 'compare', density: 'minimal' },
-        groups: [{ id: 'anything-else', label: 'Equal fractions case', revealOrder: ['outline'], template: 'fraction_comparison', parameters: { values: [0.5, 0.5], labels: ['1/2', '2/4'] } }],
+        schemaVersion: '3.0.0', requestId: 'compare-plan-2', action: 'compare',
+        purpose: 'Contrast with equal fractions', idea: 'A side case where both fractions are equal', density: 'minimal',
       }),
     });
     await flushProxy();
-    const comparePreflight = [...client.sent].reverse().find((event) => event.type === 'visual_preflight');
-    // The comparison is additive, beside the anchor, in an announced section.
-    expect(comparePreflight?.payload).toMatchObject({ semanticObjectId: 'lesson-anchor-alt1' });
+    expect(toolOutput(upstream, 'compare-call-2')).toMatchObject({ status: 'preparing', semanticGroupId: 'lesson-anchor-alt2' });
+    expect(directorRequests).toEqual(['lesson-anchor-alt1', 'lesson-anchor-alt2']);
   });
 
-  it('resolves establish to the precompiled anchor scene and echoes its storyboard', async () => {
+  it('resolves establish to the precompiled anchor and hands the reveal to the storyboard runner', async () => {
     vi.stubGlobal('WebSocket', FakeUpstream);
     const repo = new Repo(openTestDb());
     const child = repo.createChild('Maya', 10);
@@ -814,20 +776,21 @@ describe('realtime proxy response annotation', () => {
     client.emit('message', JSON.stringify(createRuntimeEvent(active, 0, 'hello', {})));
     const upstream = FakeUpstream.latest;
     upstream.onopen?.();
-    // The injected stage context carries the storyboard narration beats.
+    // The injected stage context announces the step-by-step build without
+    // inlining the narrations: beats are prompted per reveal by the runner,
+    // so the model cannot pre-narrate the scene.
     const initial = JSON.parse(upstream.sent[0]) as { session: { instructions: string } };
-    expect(initial.session.instructions).toContain('Anchor reveal storyboard');
-    expect(initial.session.instructions).toContain('Here is one number line from zero to one.');
+    expect(initial.session.instructions).toContain('Anchor scene for section lesson-anchor');
+    expect(initial.session.instructions).not.toContain('Here is one number line from zero to one.');
 
-    // The voice model triggers establish; whatever geometry it proposes is
-    // ignored in favour of the pre-validated compiled anchor scene.
+    // The voice model requests establish with intent only; the compiled,
+    // pre-validated anchor geometry is what actually builds.
     upstream.emit({ type: 'response.created', response: { id: 'compiled-anchor-response' } });
     upstream.emit({
-      type: 'response.function_call_arguments.done', response_id: 'compiled-anchor-response', call_id: 'compiled-anchor-call', name: 'semantic_visual_plan',
+      type: 'response.function_call_arguments.done', response_id: 'compiled-anchor-response', call_id: 'compiled-anchor-call', name: 'request_visual',
       arguments: JSON.stringify({
-        schemaVersion: '2.0.0', planId: 'model-invented-plan',
-        intent: { objective: 'Compare fractions', domain: 'quantitative', relevance: 'essential', questionAnswered: 'Which is larger?', rationale: 'One scale.', action: 'establish', density: 'minimal' },
-        groups: [{ id: 'anything', label: 'Model invention', revealOrder: ['outline'], template: 'worked_steps', parameters: { steps: ['Wrong', 'Geometry'] } }],
+        schemaVersion: '3.0.0', requestId: 'model-request', action: 'establish',
+        purpose: 'Anchor the comparison', idea: 'Both fractions on one shared number line', density: 'minimal',
       }),
     });
     await flushProxy();
@@ -840,28 +803,36 @@ describe('realtime proxy response annotation', () => {
       accepted: true,
       reasons: [],
     })));
-    upstream.emit({ type: 'response.done', response: { id: 'compiled-anchor-response', status: 'completed', output: [{ type: 'function_call' }] } });
     await flushProxy();
     await flushProxy();
 
-    const staged = client.sent.filter((event) => event.type === 'board_ops');
-    expect(staged.map((cue) => (cue.payload as { checkpoint?: string }).checkpoint)).toEqual(['outline', 'label']);
-    let sequence = 2;
-    for (const cue of staged) {
-      client.emit('message', JSON.stringify(createRuntimeEvent(active, sequence++, 'ops_shown', { event_id: (cue.payload as { event_id?: number }).event_id })));
-    }
-    await flushProxy();
-    await flushProxy();
+    // The tool result arrives BEFORE anything is visible and says so: the
+    // runner owns the reveal, and no free continuation may narrate an
+    // invisible scene (the beats are the continuation).
     const output = toolOutput(upstream, 'compiled-anchor-call') as {
-      ok?: boolean; visible?: boolean; semanticGroupId?: string;
-      storyboard?: Array<{ reveal?: string; narration?: string }>;
-      board?: { visibleObjectIds?: string[] };
+      ok?: boolean; accepted?: boolean; status?: string; semanticGroupId?: string;
+      storyboard?: Array<{ reveal?: string }>; guidance?: string;
     };
     expect(output.ok).toBe(true);
-    expect(output.visible).toBe(true);
+    expect(output.accepted).toBe(true);
+    expect(output.status).toBe('building');
     expect(output.semanticGroupId).toBe('lesson-anchor');
     expect(output.storyboard?.map((step) => step.reveal)).toEqual(['outline', 'label']);
-    expect(output.board?.visibleObjectIds).toEqual(expect.arrayContaining(['anchor-scale', 'anchor-label']));
+    expect(upstream.sent.map((raw) => JSON.parse(raw) as { type: string })
+      .filter((event) => event.type === 'response.create')).toEqual([]);
+
+    // Only the FIRST step is staged, tagged to the establishing response's
+    // playback boundary and marked for reveal→narrate telemetry. Step two
+    // must not exist yet — that is the retirement of "reveal everything at
+    // segment end".
+    const staged = client.sent.filter((event) => event.type === 'board_ops');
+    expect(staged).toHaveLength(1);
+    expect(staged[0].payload).toMatchObject({
+      checkpoint: 'outline',
+      response_id: 'compiled-anchor-response',
+      await_narration: true,
+    });
+    expect((staged[0].payload as { ops?: Array<{ id?: string }> }).ops?.map((op) => op.id)).toEqual(['anchor-scale']);
   });
 
   it('upgrades a prerequisite gap to a compiled detour mini-plan and returns to the recorded stage', async () => {

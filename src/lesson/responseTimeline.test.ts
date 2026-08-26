@@ -5,7 +5,7 @@ import { ResponseCueTimeline, type ResponseCue } from './responseTimeline';
 const identity: GenerationIdentity = { sessionId: 'session', connectionEpoch: 1, turnId: 'turn-1', generationId: 'generation-1' };
 const nextIdentity: GenerationIdentity = { ...identity, connectionEpoch: 2, turnId: 'turn-2', generationId: 'generation-2' };
 
-function visual(id: string, sequence: number, responseId = 'response', active = identity): ResponseCue {
+function visual(id: string, sequence: number, responseId = 'response', active = identity): Extract<ResponseCue, { kind: 'visual' }> {
   return { kind: 'visual', cueId: id, responseId, sequence, identity: active, ops: [], eventId: 1, semanticObjectId: 'fraction-scale', visualCueId: id };
 }
 
@@ -24,9 +24,9 @@ describe('response cue timeline (playback-bound)', () => {
     timeline.enqueue(semantic('semantic-1', 1));
     timeline.enqueue(visual('visual-1', 3));
     timeline.enqueue(final('final-1', 5));
-    expect(timeline.drain((responseId) => responseId === 'response')).toEqual([]);
+    expect(timeline.drain((responseId) => responseId === 'response' ? 'playing' : 'finished')).toEqual([]);
     expect(timeline.pendingCount()).toBe(4);
-    expect(timeline.drain(() => false).map((cue) => cue.cueId))
+    expect(timeline.drain(() => 'finished').map((cue) => cue.cueId))
       .toEqual(['semantic-1', 'visual-1', 'visual-2', 'final-1']);
     expect(timeline.pendingCount()).toBe(0);
   });
@@ -35,7 +35,7 @@ describe('response cue timeline (playback-bound)', () => {
     const timeline = new ResponseCueTimeline();
     timeline.enqueue(visual('tool-first-plan', 1, 'tool-first'));
     timeline.enqueue(visual('spoken-plan', 2, 'spoken'));
-    const released = timeline.drain((responseId) => responseId === 'spoken');
+    const released = timeline.drain((responseId) => responseId === 'spoken' ? 'playing' : 'pending');
     expect(released.map((cue) => cue.cueId)).toEqual(['tool-first-plan']);
     expect(timeline.pendingCount('visual')).toBe(1);
   });
@@ -64,7 +64,17 @@ describe('response cue timeline (playback-bound)', () => {
     timeline.cancel(identity);
     expect(timeline.enqueue(visual('old-late', 2))).toBe(false);
     expect(timeline.enqueue(visual('new', 1, 'response', nextIdentity))).toBe(true);
-    expect(timeline.drain(() => false).map((cue) => cue.cueId)).toEqual(['new']);
+    expect(timeline.drain(() => 'finished').map((cue) => cue.cueId)).toEqual(['new']);
+  });
+
+  it('holds a storyboard reveal until its tagged response has finished playing', () => {
+    const timeline = new ResponseCueTimeline();
+    timeline.enqueue({ ...visual('step-2', 1, 'beat-1'), awaitNarration: true });
+    // Pending playback (the beat has not started speaking yet) still holds
+    // the reveal — an ordinary cue would already have been released.
+    expect(timeline.drain(() => 'pending')).toEqual([]);
+    expect(timeline.drain(() => 'playing')).toEqual([]);
+    expect(timeline.drain(() => 'finished').map((cue) => cue.cueId)).toEqual(['step-2']);
   });
 
   it('navigation cleanup removes every pending cue', () => {

@@ -96,6 +96,21 @@ export class BoardContextTracker {
     this.learnerObservations = this.learnerObservations.slice(-8);
   }
 
+  /** The visible board as replayable add operations (both owners), used to
+   * raster the Director's screenshot of what the learner sees right now. */
+  visibleOps(): BoardOp[] {
+    return this.items.map((item) => ({
+      op: 'add' as const,
+      id: item.id,
+      spec: item.spec,
+      ...(item.color ? { color: item.color } : {}),
+    }));
+  }
+
+  visibleObjectIdList(): string[] {
+    return this.items.map((item) => item.id);
+  }
+
   hasGroup(id: string): boolean {
     return this.items.some((item) => item.semanticGroupId === id);
   }

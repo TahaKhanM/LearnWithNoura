@@ -1,0 +1,452 @@
+import type { BoardOp } from '../../shared/boardOps.js';
+import { TELEMETRY_SCHEMA_VERSION } from '../../shared/sessionTelemetry.js';
+import { metricContextFromIdentity } from '../session/telemetryRecorder.js';
+import type { CoordinatorContext } from './coordinatorContext.js';
+import { addBounded } from './responseRegistry.js';
+import { sendResponseCreate, tutorFloorIsFree } from './turnFloor.js';
+
+/**
+ * The interleaved reveal-narrate engine. One runner plays ANY storyboard —
+ * the compiled anchor scene or a Director-authored scene — as: reveal step k
+ * at a playback boundary → narrate it with a beat response (`response.create`
+ * with per-response instructions and a token cap) → reveal step k+1 when that
+ * narration has audibly finished.
+ *
+ * The server never tracks playback itself: each step cue is tagged with the
+ * response whose playback boundary should release it, and the client's cue
+ * timeline (the Phase 1 machinery) holds it until that response stops
+ * playing. Forward progress is driven purely by `ops_shown` confirmations,
+ * so the fail-closed visibility barrier and the released-events ledger keep
+ * working unchanged. Beats are tutor-floor continuations: they never flip
+ * floor or handoff state. After the last beat, one ordinary (unmarked)
+ * handoff response delivers the stage's check/task through the existing
+ * delivered-task contract.
+ */
+
+const MAX_TRACKED_BEATS = 64;
+/** Narration beats are one or two sentences; cap runaway generations while
+ * leaving room for audio tokens. The closing handoff response is uncapped
+ * because it must finish a tool call plus the spoken task. */
+const BEAT_MAX_OUTPUT_TOKENS = 1_200;
+
+export type StoryboardSource = 'anchor' | 'director';
+
+export interface StoryboardRunStep {
+  id: string;
+  reveal: string;
+  narration: string;
+  objectIds: string[];
+  ops: BoardOp[];
+}
+
+export interface StoryboardRunState {
+  runId: string;
+  source: StoryboardSource;
+  groupId: string;
+  groupLabel: string;
+  steps: StoryboardRunStep[];
+  /** Steps confirmed visible on the learner's screen (ops_shown). */
+  revealedSteps: number;
+  /** Steps whose narration beat has been created. */
+  narratedSteps: number;
+  /** A beat/handoff response.create is in flight, awaiting response.created. */
+  beatCreateInFlight: boolean;
+  /** The step the in-flight beat narrates; null means the closing handoff. */
+  pendingBeatStepIndex: number | null;
+  /** The learner took the floor after the beat create was sent. */
+  cancelPendingBeat: boolean;
+  /** The persisted event id of the step cue awaiting ops_shown. */
+  pendingStepEventId: number | null;
+  /** The pending cue may have been dropped by an interruption. */
+  needsResend: boolean;
+  stepTimer: ReturnType<typeof setTimeout> | null;
+  /** Framing lines prepended to the next beat (resume, announcements). */
+  nextBeatFraming: string[];
+  /** Instruction lines for the final beat's handoff duty. */
+  handoff: string;
+}
+
+export interface StoryboardRunInput {
+  runId: string;
+  source: StoryboardSource;
+  groupId: string;
+  groupLabel: string;
+  steps: StoryboardRunStep[];
+  /** The response whose playback boundary releases the first reveal; null
+   * defers the first reveal until the floor is free. */
+  revealAfterResponseId: string | null;
+  firstBeatFraming?: string[];
+  handoff: string;
+  /** Steps already confirmed visible (reconnect restoration). */
+  alreadyRevealedSteps?: number;
+  /** Hold the run until the next response resolves (reconnect: the resume
+   * greeting speaks first; the build continues at its playback boundary). */
+  startPaused?: boolean;
+}
+
+/** Derives runnable steps from any anchor-shaped scene (compiled anchor or
+ * Director output): each step carries the add operations it reveals. */
+export function storyboardRunSteps(scene: { ops: BoardOp[]; storyboard: ReadonlyArray<{ id: string; reveal: string; narration: string; objectIds: string[] }> }): StoryboardRunStep[] {
+  const addOps = scene.ops.filter((op) => op.op === 'add');
+  return scene.storyboard.map((step) => ({
+    id: step.id,
+    reveal: step.reveal,
+    narration: step.narration,
+    objectIds: step.objectIds,
+    ops: addOps.filter((op) => step.objectIds.includes(op.id)),
+  }));
+}
+
+export function startStoryboardRun(ctx: CoordinatorContext, input: StoryboardRunInput): void {
+  const revealed = Math.min(input.alreadyRevealedSteps ?? 0, input.steps.length);
+  const run: StoryboardRunState = {
+    runId: input.runId,
+    source: input.source,
+    groupId: input.groupId,
+    groupLabel: input.groupLabel,
+    steps: input.steps,
+    revealedSteps: revealed,
+    narratedSteps: revealed,
+    beatCreateInFlight: false,
+    pendingBeatStepIndex: null,
+    cancelPendingBeat: false,
+    pendingStepEventId: null,
+    needsResend: false,
+    stepTimer: null,
+    nextBeatFraming: [...(input.firstBeatFraming ?? [])],
+    handoff: input.handoff,
+  };
+  ctx.state.storyboardRun = run;
+  persistProgress(ctx, run, 'active');
+  if (run.revealedSteps >= run.steps.length) {
+    completeStoryboardRun(ctx, 'completed');
+    return;
+  }
+  if (input.startPaused) return;
+  if (input.revealAfterResponseId !== null) {
+    ctx.trackSideEffect(sendStepCue(ctx, input.revealAfterResponseId));
+    return;
+  }
+  // No boundary to bind to yet: the first reveal waits for a free floor.
+  advanceStoryboardRun(ctx);
+}
+
+/** The learner took the floor (confirmed interrupt or speech start): stop
+ * scheduling, remember that a pending cue may have been dropped, and cancel
+ * a beat whose creation is still in flight. Revealed objects stay visible —
+ * permanence — and progress resumes after the learner's turn resolves. */
+export function pauseStoryboardRun(ctx: CoordinatorContext): void {
+  const run = ctx.state.storyboardRun;
+  if (!run) return;
+  clearStepTimer(run);
+  if (run.pendingStepEventId !== null) run.needsResend = true;
+  if (run.beatCreateInFlight) run.cancelPendingBeat = true;
+  if (run.nextBeatFraming.length === 0) {
+    run.nextBeatFraming.push(
+      'You were interrupted while the picture was building and have just finished responding to the learner. Briefly reconnect to the build (for example “Back to our picture —”) before this beat.',
+    );
+  }
+}
+
+/**
+ * Single scheduler evaluation. Called whenever the world may have changed
+ * (a response finished, a step was confirmed, a draft closed). It creates
+ * at most one beat or one reveal cue, and only while the tutor genuinely
+ * holds a quiet floor.
+ */
+export function advanceStoryboardRun(ctx: CoordinatorContext): void {
+  const run = ctx.state.storyboardRun;
+  if (!run || run.beatCreateInFlight) return;
+  if (!tutorFloorIsFree(ctx)) return;
+  if (run.narratedSteps < run.revealedSteps) {
+    createBeat(ctx, run.revealedSteps - 1);
+    return;
+  }
+  if (run.revealedSteps >= run.steps.length) {
+    // Everything is revealed and narrated: one ordinary handoff response
+    // (never marked as a beat) delivers the stage's check/task through the
+    // existing delivered-task contract.
+    createHandoff(ctx);
+    return;
+  }
+  if (run.pendingStepEventId !== null) {
+    if (run.needsResend) {
+      run.needsResend = false;
+      resendPendingStepCue(ctx);
+    }
+    return;
+  }
+  ctx.trackSideEffect(sendStepCue(ctx, ctx.state.lastCompletedResponseId));
+}
+
+/** Matches a provider response to the beat/handoff creation in flight. */
+export function noteStoryboardResponseCreated(ctx: CoordinatorContext, responseId: string): void {
+  const { state } = ctx;
+  const run = state.storyboardRun;
+  if (!run || !run.beatCreateInFlight) return;
+  run.beatCreateInFlight = false;
+  const stepIndex = run.pendingBeatStepIndex;
+  run.pendingBeatStepIndex = null;
+  if (run.cancelPendingBeat || state.childHoldsFloor || state.speechInProgress) {
+    // The learner took the floor while this beat was being created: it
+    // must not speak over them. It is recreated on resume.
+    run.cancelPendingBeat = false;
+    state.cancelledResponses.add(responseId);
+    ctx.sendUpstream({ type: 'response.cancel' });
+    return;
+  }
+  if (stepIndex === null) {
+    // The closing handoff response exists; the run's job is done and the
+    // ordinary machinery owns the task delivery from here.
+    completeStoryboardRun(ctx, 'completed');
+    return;
+  }
+  addBounded(state.beatResponses, responseId, MAX_TRACKED_BEATS);
+  run.narratedSteps = stepIndex + 1;
+  // Pipelined reveal-at-playback-boundary: the next step's cue rides now,
+  // tagged with this beat, and the client applies it exactly when this
+  // beat's audio stops.
+  if (run.revealedSteps < run.steps.length && run.pendingStepEventId === null) {
+    ctx.trackSideEffect(sendStepCue(ctx, responseId));
+  }
+}
+
+export function noteStoryboardResponseDone(ctx: CoordinatorContext): void {
+  if (!ctx.state.storyboardRun) return;
+  advanceStoryboardRun(ctx);
+}
+
+/** A beat's response.create failed (conversation already active): let the
+ * next quiet floor recreate it instead of leaving the run stuck. */
+export function noteStoryboardCreateRejected(ctx: CoordinatorContext): void {
+  const run = ctx.state.storyboardRun;
+  if (!run || !run.beatCreateInFlight) return;
+  run.beatCreateInFlight = false;
+  run.pendingBeatStepIndex = null;
+  run.cancelPendingBeat = false;
+}
+
+/**
+ * A confirmed barge-in advances the client's generation identity, so a step
+ * cue re-sent before the first new-identity envelope arrived was rejected by
+ * the client's gate. The identity change is that first envelope: re-send the
+ * pending step under the fresh identity (applying the same board event twice
+ * is idempotent on every layer).
+ */
+export function noteStoryboardClientIdentityChanged(ctx: CoordinatorContext): void {
+  const run = ctx.state.storyboardRun;
+  if (!run) return;
+  if (run.pendingStepEventId !== null) run.needsResend = true;
+  advanceStoryboardRun(ctx);
+}
+
+async function sendStepCue(ctx: CoordinatorContext, tagResponseId: string | null): Promise<void> {
+  const { state } = ctx;
+  const run = state.storyboardRun;
+  if (!run || run.pendingStepEventId !== null || run.revealedSteps >= run.steps.length) return;
+  const step = run.steps[run.revealedSteps];
+  const eventId = await ctx.repo.addEvent(ctx.sessionId, 'semantic_scene', {
+    ops: step.ops,
+    checkpointId: step.id,
+    reveal: step.reveal,
+    semanticObjectId: run.groupId,
+    groupLabel: run.groupLabel,
+    runId: run.runId,
+  }, false);
+  if (state.storyboardRun !== run) return;
+  run.pendingStepEventId = eventId;
+  state.pendingBoardOps.set(eventId, { ops: step.ops, semanticGroupId: run.groupId, groupLabel: run.groupLabel });
+  state.pendingVisibility.set(eventId, (shown) => {
+    state.pendingVisibility.delete(eventId);
+    onStepVisibility(ctx, run, eventId, shown);
+  });
+  for (const op of step.ops) if (op.op === 'add') state.objectsCreatedThisTurn.add(op.id);
+  armStepTimer(ctx, run);
+  const safeTag = tagResponseId && !state.cancelledResponses.has(tagResponseId) ? tagResponseId : null;
+  sendCueEnvelope(ctx, run, step, eventId, safeTag);
+}
+
+/** Re-sends the persisted pending step cue after an interruption dropped
+ * it client-side. Applying the same event twice is idempotent. */
+function resendPendingStepCue(ctx: CoordinatorContext): void {
+  const { state } = ctx;
+  const run = state.storyboardRun;
+  if (!run || run.pendingStepEventId === null) return;
+  const step = run.steps[run.revealedSteps];
+  const tag = state.lastCompletedResponseId && !state.cancelledResponses.has(state.lastCompletedResponseId)
+    ? state.lastCompletedResponseId
+    : null;
+  armStepTimer(ctx, run);
+  sendCueEnvelope(ctx, run, step, run.pendingStepEventId, tag);
+}
+
+function sendCueEnvelope(
+  ctx: CoordinatorContext,
+  run: StoryboardRunState,
+  step: StoryboardRunStep,
+  eventId: number,
+  tagResponseId: string | null,
+): void {
+  // Runner cues always ride the CURRENT client identity: after an
+  // interruption the client's generation moved on, and an old response's
+  // identity would be rejected by the client gate. The response tag only
+  // decides which playback boundary releases the reveal.
+  ctx.sendClient({
+    type: 'board_ops',
+    ops: step.ops,
+    ...(tagResponseId ? { response_id: tagResponseId } : {}),
+    event_id: eventId,
+    groupLabel: run.groupLabel,
+    checkpoint: step.reveal,
+    await_narration: true,
+  }, ctx.state.clientIdentity, {
+    visualCueId: step.id,
+    semanticObjectId: run.groupId,
+  });
+}
+
+function onStepVisibility(ctx: CoordinatorContext, run: StoryboardRunState, eventId: number, shown: boolean): void {
+  if (ctx.state.storyboardRun !== run || run.pendingStepEventId !== eventId) return;
+  clearStepTimer(run);
+  run.pendingStepEventId = null;
+  run.needsResend = false;
+  if (!shown) {
+    // The client already recorded the rejection and injected the honest
+    // system note (ops_rejected); the runner just stops cleanly.
+    abandonStoryboardRun(ctx, { injectNote: false });
+    return;
+  }
+  run.revealedSteps += 1;
+  persistProgress(ctx, run, 'active');
+  advanceStoryboardRun(ctx);
+}
+
+function createBeat(ctx: CoordinatorContext, stepIndex: number): void {
+  const run = ctx.state.storyboardRun;
+  if (!run) return;
+  const step = run.steps[stepIndex];
+  const framing = run.nextBeatFraming.splice(0);
+  run.beatCreateInFlight = true;
+  run.pendingBeatStepIndex = stepIndex;
+  run.cancelPendingBeat = false;
+  sendResponseCreate(ctx, 'beat', {
+    instructions: beatInstructions(run, step, framing),
+    max_output_tokens: BEAT_MAX_OUTPUT_TOKENS,
+  });
+}
+
+function createHandoff(ctx: CoordinatorContext): void {
+  const run = ctx.state.storyboardRun;
+  if (!run) return;
+  const framing = run.nextBeatFraming.splice(0);
+  run.beatCreateInFlight = true;
+  run.pendingBeatStepIndex = null;
+  run.cancelPendingBeat = false;
+  sendResponseCreate(ctx, 'beat', {
+    instructions: [
+      PERSONA_LINE,
+      ...framing,
+      'The picture you were building is now complete on the board.',
+      run.handoff,
+    ].join('\n'),
+  });
+}
+
+const PERSONA_LINE = 'You are Noura, a warm, plain-spoken voice tutor teaching one child at a shared whiteboard. You are continuing your own explanation; the learner has not spoken.';
+
+function beatInstructions(run: StoryboardRunState, step: StoryboardRunStep, framing: string[]): string {
+  return [
+    PERSONA_LINE,
+    ...framing,
+    `The board just revealed, in the section called “${run.groupLabel}”: ${step.objectIds.join(', ')}.`,
+    `Say one or two short sentences conveying exactly this beat, in your own warm spoken voice: “${step.narration}”`,
+    'Refer to what appeared by what it is. Never say object ids, coordinates, or markup, and never mention drawing, waiting, or tools.',
+    'Do not greet, do not recap earlier steps, do not ask a question, and do not call tools. Stop after this beat.',
+  ].join('\n');
+}
+
+function armStepTimer(ctx: CoordinatorContext, run: StoryboardRunState): void {
+  clearStepTimer(run);
+  const timer = setTimeout(() => {
+    if (ctx.state.storyboardRun !== run) return;
+    abandonStoryboardRun(ctx, { injectNote: true });
+  }, ctx.stepRevealTimeoutMs);
+  timer.unref?.();
+  run.stepTimer = timer;
+}
+
+function clearStepTimer(run: StoryboardRunState): void {
+  if (run.stepTimer !== null) clearTimeout(run.stepTimer);
+  run.stepTimer = null;
+}
+
+function completeStoryboardRun(ctx: CoordinatorContext, outcome: 'completed'): void {
+  const run = ctx.state.storyboardRun;
+  if (!run) return;
+  clearStepTimer(run);
+  ctx.state.storyboardRun = null;
+  persistProgress(ctx, run, outcome);
+  submitOutcome(ctx, run, outcome);
+}
+
+/** Fail-closed stop: the tutor continues with what is visible. Revealed
+ * steps stay on the board (permanence); unrevealed steps never appear. */
+export function abandonStoryboardRun(ctx: CoordinatorContext, options: { injectNote: boolean }): void {
+  const { state } = ctx;
+  const run = state.storyboardRun;
+  if (!run) return;
+  clearStepTimer(run);
+  if (run.pendingStepEventId !== null) {
+    state.pendingVisibility.delete(run.pendingStepEventId);
+    state.pendingBoardOps.delete(run.pendingStepEventId);
+  }
+  state.storyboardRun = null;
+  state.visualPlanState = 'failed';
+  persistProgress(ctx, run, 'abandoned');
+  submitOutcome(ctx, run, 'abandoned');
+  if (!options.injectNote) return;
+  ctx.sendUpstream({
+    type: 'conversation.item.create',
+    item: {
+      type: 'message',
+      role: 'system',
+      content: [{
+        type: 'input_text',
+        text: '[The board build stopped early; the remaining parts will not appear.] Continue teaching with what is visible now. Do not refer to parts that never appeared.',
+      }],
+    },
+  });
+  if (tutorFloorIsFree(ctx)) sendResponseCreate(ctx, 'tool');
+}
+
+function persistProgress(
+  ctx: CoordinatorContext,
+  run: StoryboardRunState,
+  status: 'active' | 'completed' | 'abandoned',
+): void {
+  ctx.trackSideEffect(Promise.resolve(ctx.repo.addEvent(ctx.sessionId, 'storyboard_progress', {
+    runId: run.runId,
+    source: run.source,
+    groupId: run.groupId,
+    revealedSteps: run.revealedSteps,
+    totalSteps: run.steps.length,
+    status,
+  })).then(() => undefined));
+}
+
+function submitOutcome(ctx: CoordinatorContext, run: StoryboardRunState, outcome: 'completed' | 'abandoned'): void {
+  const identity = ctx.state.clientIdentity;
+  if (!identity) return;
+  ctx.telemetryWriter.submit({
+    schemaVersion: TELEMETRY_SCHEMA_VERSION,
+    name: 'storyboard_outcome',
+    unit: 'count',
+    value: 1,
+    dimensions: {
+      outcome,
+      source: run.source,
+      revealedSteps: run.revealedSteps,
+      totalSteps: run.steps.length,
+    },
+  }, metricContextFromIdentity(identity));
+}

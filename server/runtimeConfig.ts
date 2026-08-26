@@ -17,6 +17,8 @@ export interface RuntimeConfig {
   textModel: string;
   compilerModel: string;
   compilerReasoningEffort: 'low' | 'medium' | 'high';
+  directorModel: string;
+  directorReasoningEffort: 'low' | 'medium' | 'high';
   buildSha: string;
   environment: string;
 }
@@ -53,6 +55,10 @@ export function readRuntimeConfig(env: NodeJS.ProcessEnv = process.env): Runtime
     compilerModel: env.NOURA_COMPILER_MODEL || env.OPENAI_MODEL || 'gpt-5.6-terra',
     compilerReasoningEffort: env.NOURA_COMPILER_REASONING_EFFORT === 'low' || env.NOURA_COMPILER_REASONING_EFFORT === 'high'
       ? env.NOURA_COMPILER_REASONING_EFFORT
+      : 'medium',
+    directorModel: env.NOURA_DIRECTOR_MODEL || env.OPENAI_MODEL || 'gpt-5.6-terra',
+    directorReasoningEffort: env.NOURA_DIRECTOR_REASONING_EFFORT === 'low' || env.NOURA_DIRECTOR_REASONING_EFFORT === 'high'
+      ? env.NOURA_DIRECTOR_REASONING_EFFORT
       : 'medium',
     buildSha: env.NOURA_BUILD_SHA || env.VERCEL_GIT_COMMIT_SHA || 'local-uncommitted',
     environment: env.VERCEL_ENV || deploymentMode,

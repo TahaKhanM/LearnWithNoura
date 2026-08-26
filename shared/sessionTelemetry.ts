@@ -127,6 +127,16 @@ export const MetricInputSchema = z.discriminatedUnion('name', [
     }),
   }),
   z.object({
+    ...countMetricBase,
+    name: z.literal('storyboard_outcome'),
+    dimensions: z.object({
+      outcome: z.enum(['completed', 'abandoned']),
+      source: z.enum(['anchor', 'director']),
+      revealedSteps: nonNegativeInt,
+      totalSteps: nonNegativeInt,
+    }),
+  }),
+  z.object({
     schemaVersion,
     name: z.literal('telemetry_gap'),
     unit: z.literal('count'),

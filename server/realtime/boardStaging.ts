@@ -1,5 +1,5 @@
 import type { BoardOp } from '../../shared/boardOps.js';
-import type { SemanticCheckpoint, SemanticScenePlan } from '../../shared/semanticScene.js';
+import type { SemanticCheckpoint } from '../../shared/semanticScene.js';
 import type { CoordinatorContext } from './coordinatorContext.js';
 import { identityForResponse } from './responseRegistry.js';
 import { refreshBoardInstructions } from './sessionConfig.js';
@@ -8,7 +8,9 @@ import { finishTool } from './turnFloor.js';
 /**
  * Board plan staging: preflight, checkpoint persistence, and the visibility
  * barrier that keeps continuation speech honest about what the learner can
- * actually see.
+ * actually see. Storyboard-bearing scenes are sequenced step by step by
+ * `storyboardRunner.ts`; this module serves fast-tier confirmations (such
+ * as emphasize) that reveal in one committed batch.
  */
 
 export function anchorGroupId(ctx: CoordinatorContext): string | null {
@@ -46,7 +48,7 @@ function waitForCheckpointVisibility(ctx: CoordinatorContext, eventIds: number[]
  * model may continue without a visual or retry a simpler plan, but missing
  * evidence is never turned into acceptance.
  */
-function preflightWithClient(
+export function preflightWithClient(
   ctx: CoordinatorContext,
   input: { ops: BoardOp[]; semanticGroupId: string; groupLabel?: string; replacesGroup?: string },
 ): Promise<{ accepted: boolean; reasons: string[] }> {
@@ -74,36 +76,25 @@ function preflightWithClient(
 }
 
 /**
- * The visibility barrier for board-led moves: validate → preflight (fail
- * closed) → stage exactly one plan → wait until the browser confirms it is
- * actually on screen (`ops_shown`) → only then return the successful tool
- * result (with the now-authoritative visible board) so continuation speech
- * can refer to what the learner can really see.
+ * The visibility barrier for fast-tier board confirmations: validate →
+ * preflight (fail closed) → stage exactly one plan → wait until the browser
+ * confirms it is actually on screen (`ops_shown`) → only then return the
+ * successful tool result (with the now-authoritative visible board) so
+ * continuation speech can refer to what the learner can really see.
  */
 export function stageAndConfirmPlan(ctx: CoordinatorContext, callId: string, responseId: string, input: {
   ops: BoardOp[];
   checkpoints: SemanticCheckpoint[];
   action: string;
-  plan?: SemanticScenePlan;
-  announcement?: string;
   skipPreflight?: boolean;
-  /** Pre-compiled reveal narration beats echoed back to the voice model. */
-  storyboard?: Array<{ id: string; reveal: string; narration: string }>;
 }): void {
   const { state } = ctx;
   const groupId = input.checkpoints[0]?.semanticObjectId ?? '';
   const groupLabel = input.checkpoints[0]?.groupLabel;
-  const structural = ['establish', 'compare'].includes(input.action);
-  if (structural) {
-    state.planStagedThisTurn = true;
-    state.planAttemptsThisTurn += 1;
-    state.visualPlanState = 'preparing';
-  }
   const stagingTask = (async () => {
     if (!input.skipPreflight && input.ops.length > 0 && groupId) {
       const preflight = await preflightWithClient(ctx, { ops: input.ops, semanticGroupId: groupId, groupLabel });
       if (!preflight.accepted) {
-        if (structural) state.visualPlanState = 'failed';
         state.boardContext.observeBoardRejection(preflight.reasons.join('; ').slice(0, 300) || 'Complete-plan preflight failed.');
         refreshBoardInstructions(ctx);
         finishTool(ctx, callId, responseId, {
@@ -115,11 +106,9 @@ export function stageAndConfirmPlan(ctx: CoordinatorContext, callId: string, res
         return;
       }
     }
-    if (structural) state.visualPlanState = 'rendering';
     const eventIds: number[] = [];
     for (const checkpoint of input.checkpoints) {
       const eventId = await ctx.repo.addEvent(ctx.sessionId, 'semantic_scene', {
-        ...(input.plan ? { plan: input.plan } : {}),
         ops: checkpoint.ops,
         checkpointId: checkpoint.id,
         reveal: checkpoint.reveal,
@@ -152,7 +141,6 @@ export function stageAndConfirmPlan(ctx: CoordinatorContext, callId: string, res
     for (const op of input.ops) if (op.op === 'add') state.objectsCreatedThisTurn.add(op.id);
     const visible = await waitForCheckpointVisibility(ctx, eventIds);
     if (!visible) {
-      if (structural) state.visualPlanState = 'failed';
       for (const eventId of eventIds) state.pendingBoardOps.delete(eventId);
       finishTool(ctx, callId, responseId, {
         ok: false,
@@ -162,7 +150,6 @@ export function stageAndConfirmPlan(ctx: CoordinatorContext, callId: string, res
       });
       return;
     }
-    if (structural) state.visualPlanState = 'visible';
     // The board context was advanced by the acknowledgements, so this
     // snapshot is the authoritative, actually-visible board.
     finishTool(ctx, callId, responseId, {
@@ -174,21 +161,11 @@ export function stageAndConfirmPlan(ctx: CoordinatorContext, callId: string, res
       action: input.action,
       visibleObjectIds: input.ops.filter((op) => op.op === 'add').map((op) => op.id),
       ...(groupId ? { semanticGroupId: groupId } : {}),
-      ...(input.announcement ? { announcement: input.announcement } : {}),
-      ...(input.storyboard ? { storyboard: input.storyboard } : {}),
       board: state.boardContext.toolSnapshot(),
     });
   })().catch((error) => {
-    if (structural) state.visualPlanState = 'failed';
     ctx.log(`session ${ctx.sessionId}: semantic plan staging error ${String(error).slice(0, 200)}`);
     finishTool(ctx, callId, responseId, { ok: false, accepted: false, error: String(error).slice(0, 260) });
   });
   ctx.trackSideEffect(stagingTask);
-}
-
-/** The server, not the model, decides which section a plan builds. */
-export function assignSectionToPlan(rawArgs: Record<string, unknown>, groupId: string): Record<string, unknown> {
-  const source = rawArgs as { groups?: Array<Record<string, unknown>> };
-  const groups = (source.groups ?? []).map((group, index) => index === 0 ? { ...group, id: groupId } : group);
-  return { ...rawArgs, groups };
 }

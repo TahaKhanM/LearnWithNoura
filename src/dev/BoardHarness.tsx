@@ -6,6 +6,8 @@ import { registerKatexMeasurer } from '../board/compile';
 import { measureKatexInDom } from '../board/domKatexMeasurer';
 import { deriveSemanticViewports } from '../board/semanticViewport';
 import { BoardSceneCoordinator } from '../board/sceneCoordinator';
+import { sceneForGroup } from '../board/sceneGroups';
+import { renderSceneImage } from '../board/snapshot';
 import type { BoardAnimator } from '../board/animator';
 import { describeScene, applyOps, emptyScene, type SceneState } from '../board/scene';
 import './BoardHarness.css';
@@ -18,6 +20,10 @@ declare global {
      * pipeline (compile, inspection, annotation layout, quality budget)
      * with DOM-measured KaTeX bounds, against an empty board. */
     nouraPreflightScene?: (ops: BoardOp[], semanticGroupId?: string) => Promise<ScenePreflightVerdict>;
+    /** Headless raster entry point: compiles the given ops through the
+     * real render pipeline and returns the canonical board JPEG data URL
+     * (the Board Director's eyes), or null when rendering fails. */
+    nouraRenderScene?: (ops: BoardOp[], semanticGroupId?: string) => Promise<string | null>;
   }
 }
 
@@ -26,6 +32,17 @@ async function preflightScene(ops: BoardOp[], semanticGroupId?: string): Promise
   registerKatexMeasurer(measureKatexInDom);
   try {
     return new BoardSceneCoordinator().preflightTutorOps(ops, semanticGroupId);
+  } finally {
+    registerKatexMeasurer(null);
+  }
+}
+
+async function renderSceneToImage(ops: BoardOp[], semanticGroupId?: string): Promise<string | null> {
+  await document.fonts.ready;
+  registerKatexMeasurer(measureKatexInDom);
+  try {
+    const applied = applyOps(emptyScene, ops, 'tutor', semanticGroupId);
+    return await renderSceneImage(sceneForGroup(applied.scene, semanticGroupId));
   } finally {
     registerKatexMeasurer(null);
   }
@@ -117,7 +134,11 @@ export function BoardHarness() {
 
   useEffect(() => {
     window.nouraPreflightScene = preflightScene;
-    return () => { delete window.nouraPreflightScene; };
+    window.nouraRenderScene = renderSceneToImage;
+    return () => {
+      delete window.nouraPreflightScene;
+      delete window.nouraRenderScene;
+    };
   }, []);
 
   const highlight = useCallback(() => {

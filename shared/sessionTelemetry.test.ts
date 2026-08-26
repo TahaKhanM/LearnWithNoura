@@ -32,6 +32,30 @@ describe('session telemetry contract', () => {
     });
   });
 
+  it('accepts storyboard outcomes with bounded dimensions and rejects free-form ones', () => {
+    expect(MetricInputSchema.safeParse({
+      schemaVersion: '1.0.0',
+      name: 'storyboard_outcome',
+      unit: 'count',
+      value: 1,
+      dimensions: { outcome: 'completed', source: 'anchor', revealedSteps: 4, totalSteps: 4 },
+    }).success).toBe(true);
+    expect(MetricInputSchema.safeParse({
+      schemaVersion: '1.0.0',
+      name: 'storyboard_outcome',
+      unit: 'count',
+      value: 1,
+      dimensions: { outcome: 'abandoned', source: 'director', revealedSteps: 1, totalSteps: 5 },
+    }).success).toBe(true);
+    expect(MetricInputSchema.safeParse({
+      schemaVersion: '1.0.0',
+      name: 'storyboard_outcome',
+      unit: 'count',
+      value: 1,
+      dimensions: { outcome: 'gave up', source: 'anchor', revealedSteps: 0, totalSteps: 4 },
+    }).success).toBe(false);
+  });
+
   it('rejects unknown names, free-form outcomes, and non-finite values', () => {
     expect(MetricInputSchema.safeParse({ schemaVersion: '1.0.0', name: 'child_text', unit: 'count', value: 1 }).success).toBe(false);
     expect(MetricInputSchema.safeParse({

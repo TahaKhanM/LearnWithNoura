@@ -10,14 +10,48 @@ export interface BoardRevealCorrelation {
   semanticObjectId?: string;
 }
 
+interface AwaitedReveal {
+  revealMs: number;
+  correlation: BoardRevealCorrelation;
+}
+
 export class ResponseTimingTracker {
   private narrationBoundaries = new Map<string, number>();
   private seenVisualCueIds = new Set<string>();
+  /** A storyboard step reveal waiting for the beat narration that follows. */
+  private awaitedReveal: AwaitedReveal | null = null;
 
-  noteNarrationScheduled(responseId: string, boundaryMs: number): void {
-    if (!responseId || !isUsableBoundary(boundaryMs) || this.narrationBoundaries.has(responseId)) return;
+  /**
+   * A storyboard step just became visible; the NEXT narration start narrates
+   * it. Only the latest awaited reveal is held, and a cue already counted
+   * (for example a re-sent step cue after an interruption) is never counted
+   * again.
+   */
+  noteAwaitedReveal(revealMs: number, correlation: BoardRevealCorrelation): void {
+    if (!isUsableBoundary(revealMs)) return;
+    if (correlation.visualCueId && this.seenVisualCueIds.has(correlation.visualCueId)) return;
+    this.awaitedReveal = { revealMs, correlation };
+  }
+
+  noteNarrationScheduled(responseId: string, boundaryMs: number): MetricInput | null {
+    if (!responseId || !isUsableBoundary(boundaryMs) || this.narrationBoundaries.has(responseId)) return null;
     this.narrationBoundaries.set(responseId, boundaryMs);
     trimOldest(this.narrationBoundaries);
+    if (!this.awaitedReveal) return null;
+    const { revealMs, correlation } = this.awaitedReveal;
+    this.awaitedReveal = null;
+    if (correlation.visualCueId) {
+      this.seenVisualCueIds.add(correlation.visualCueId);
+      trimOldest(this.seenVisualCueIds);
+    }
+    return {
+      schemaVersion: TELEMETRY_SCHEMA_VERSION,
+      name: 'board_reveal_to_narration',
+      unit: 'ms',
+      value: Math.round(boundaryMs - revealMs),
+      ...(correlation.visualCueId ? { visualCueId: correlation.visualCueId } : {}),
+      ...(correlation.semanticObjectId ? { semanticObjectId: correlation.semanticObjectId } : {}),
+    };
   }
 
   noteBoardReveal(
@@ -46,6 +80,7 @@ export class ResponseTimingTracker {
   resetGeneration(): void {
     this.narrationBoundaries.clear();
     this.seenVisualCueIds.clear();
+    this.awaitedReveal = null;
   }
 }
 

@@ -4,7 +4,9 @@ import express from 'express';
 import OpenAI from 'openai';
 import { WebSocketServer } from 'ws';
 import { createApi } from './api.js';
+import { createLiveBoardDirector } from './board/directorService.js';
 import { fallbackTurns } from './fallbackTutor.js';
+import { createHeadlessSceneValidator, type HeadlessSceneValidatorHandle } from './lesson/headlessSceneValidator.js';
 import { connectRealtimeProxy } from './realtime/proxy.js';
 import { bootstrapVoiceCall, SidebandRegistry } from './realtime/callBootstrap.js';
 import {
@@ -46,18 +48,36 @@ const openai = runtimeConfig.providerConfigured
 // automated tests — hermetic test runs set the flag explicitly so a locally
 // configured key never triggers live compilation calls.
 const fixtureCompilerForced = process.env.NOURA_LESSON_COMPILER === 'fixture';
+const boardHarnessUrl = process.env.NOURA_BOARD_HARNESS_URL
+  ?? (runtimeConfig.production ? null : 'http://127.0.0.1:5173/dev/board');
 const compilation: LessonCompilationService = openai && !fixtureCompilerForced
   ? createLiveCompilationService({
       repo,
       client: openai,
       model: runtimeConfig.compilerModel,
       reasoningEffort: runtimeConfig.compilerReasoningEffort,
-      harnessUrl: process.env.NOURA_BOARD_HARNESS_URL
-        ?? (runtimeConfig.production ? null : 'http://127.0.0.1:5173/dev/board'),
+      harnessUrl: boardHarnessUrl,
       onCompileError: (sessionId, reasons) =>
         console.error(`[compiler] session ${sessionId} failed: ${reasons.join('; ').slice(0, 300)}`),
     })
   : createFixtureCompilationService(repo);
+
+// The Board Director: slow-tier scene requests during live lessons. It
+// needs both a configured provider and a reachable board harness; without
+// either, new-scene requests fail closed with a clean rejection instead of
+// unvalidated geometry. Live lessons themselves already require the
+// provider, so no fixture Director exists.
+const directorHarness: HeadlessSceneValidatorHandle | null = openai && !fixtureCompilerForced && boardHarnessUrl
+  ? createHeadlessSceneValidator({ harnessUrl: boardHarnessUrl })
+  : null;
+const boardDirector = openai && directorHarness
+  ? createLiveBoardDirector({
+      client: openai,
+      model: runtimeConfig.directorModel,
+      reasoningEffort: runtimeConfig.directorReasoningEffort,
+      harness: directorHarness,
+    })
+  : null;
 
 export const app = express();
 app.disable('x-powered-by');
@@ -384,6 +404,7 @@ server.on('upgrade', async (request, socket, head) => {
       sessionId,
       sidebandRegistry,
       planDetour: (input) => compilation.planDetour(input),
+      ...(boardDirector ? { directVisual: boardDirector } : {}),
       log: (line) => console.log(`[realtime] ${line}`),
       onLifecycle: (lifecycle) => proxyLifecycles.register(lifecycle),
     }).catch(() => {
@@ -397,7 +418,11 @@ let repositoryClose: Promise<void> | null = null;
 let serverShutdown: Promise<ShutdownDisposition> | null = null;
 
 export function closeRepository(): Promise<void> {
-  repositoryClose ??= Promise.all([repository.close(), compilation.close()]).then(() => undefined);
+  repositoryClose ??= Promise.all([
+    repository.close(),
+    compilation.close(),
+    directorHarness?.close() ?? Promise.resolve(),
+  ]).then(() => undefined);
   return repositoryClose;
 }
 
