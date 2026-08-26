@@ -21,7 +21,7 @@ The application runtime baseline remains unchanged:
 
 - `gpt-realtime-2.1` for speech-to-speech, carried on a direct browser ↔ provider WebRTC call whose control lives on a server-owned sideband WebSocket to the same call;
 - `gpt-4o-mini-transcribe` for input transcription;
-- `gpt-5.6-terra` through the existing Chat Completions path for captions-only fallback and parent summaries.
+- `gpt-5.6-terra` through the existing Chat Completions path for captions-only fallback, parent summaries and the session-creation lesson compiler (`NOURA_COMPILER_MODEL`, reasoning effort `NOURA_COMPILER_REASONING_EFFORT`, default `medium`).
 
 GPT-5.6 Sol was the Codex implementation agent used for this repository work. It is not an application dependency and did not trigger a model, endpoint, reasoning-effort, provider or topology migration.
 
@@ -29,10 +29,10 @@ GPT-5.6 Sol was the Codex implementation agent used for this repository work. It
 
 The active path is:
 
-1. Parent setup creates or explicitly selects a learner and a goal.
+1. Parent setup creates or explicitly selects a learner and a goal. Session creation normalizes the goal (a vague goal returns 2–3 candidate objectives for the parent to pick) and compiles the complete lesson ahead of the call: a strong reasoning model authors the blueprint: stages, success criteria, exact check questions, misconception branches: plus, for board-led lessons, an anchor scene and storyboard pre-validated through the real board pipeline in headless Chromium. The lesson page shows an honest preparing state until the compiled lesson is ready; a lesson never starts on an uncompiled goal.
 2. The child taps **Begin**, which owns microphone permission and bootstraps the voice call: the browser posts its WebRTC SDP offer to the server, which creates the provider call with the API key, attaches its control sideband, applies the full session configuration and returns only the SDP answer. Tutor audio arrives as a remote media track; no PCM transits the server.
 3. A versioned event envelope (browser ↔ server WebSocket, control only: never audio) carries session, connection epoch, turn, generation, sequence, provider, visual and idempotency identity.
-4. A deterministic lesson reducer owns legal transitions and forbids waiting without a delivered question or task.
+4. A deterministic lesson reducer owns legal transitions and forbids waiting without a delivered question or task. The realtime model executes the pre-compiled blueprint stage by stage: it never authors the lesson live: and the `establish` visual action reveals the pre-validated anchor scene with its storyboard narration beats.
 5. One `GenerationScope` owns playback binding, provisional captions, transient visuals, character tasks, timers, reconnect work and fallback cancellation.
 6. Captions release on transcript arrival with phrase smoothing; board reveals, semantic state, task delivery and truncation bind to the provider's real playback boundaries (`output_audio_buffer.started/stopped/cleared` on the WebRTC data channel).
 7. Visual Plan 2.0 decides whether a visual is essential/supportive/unnecessary and whether to create, reuse, replace or skip a named board section.
@@ -169,7 +169,7 @@ npm run test:brand
 
 `npx vercel@latest build` is the deployment build gate. The installed global CLI predates Vercel’s native WebSocket public beta, so deployment work uses the current CLI without changing the global installation.
 
-The browser suites use synthetic learner fixtures. Paid live-provider runs are not part of the default test commands.
+The browser suites use synthetic learner fixtures. Paid live-provider runs are not part of the default test commands. The Playwright servers set `NOURA_LESSON_COMPILER=fixture`, so a locally configured provider key never triggers live lesson-compilation calls from a test run; production startup refuses that flag.
 
 ## Interaction and privacy notes
 
