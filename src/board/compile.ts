@@ -222,6 +222,24 @@ function estimateKatex(latex: string, fontSize: number): { w: number; h: number 
   };
 }
 
+/**
+ * Optional real-DOM KaTeX measurement. Headless compiler validation
+ * registers a measurer so equation bounds come from an actual KaTeX render
+ * rather than the character estimate; live rendering keeps the estimate so
+ * accepted geometry never shifts between environments.
+ */
+export type KatexMeasurer = (latex: string, fontSize: number) => { w: number; h: number } | null;
+
+let activeKatexMeasurer: KatexMeasurer | null = null;
+
+export function registerKatexMeasurer(measurer: KatexMeasurer | null): void {
+  activeKatexMeasurer = measurer;
+}
+
+function measureKatex(latex: string, fontSize: number): { w: number; h: number } {
+  return activeKatexMeasurer?.(latex, fontSize) ?? estimateKatex(latex, fontSize);
+}
+
 // ---------------------------------------------------------------------------
 // Axes mapping shared between axes and plot items
 // ---------------------------------------------------------------------------
@@ -423,7 +441,7 @@ function compileSpec(
 
     case 'equation': {
       const fontSize = spec.size === 'small' ? 16 : spec.size === 'big' ? 26 : 20;
-      const { w, h } = estimateKatex(spec.latex, fontSize);
+      const { w, h } = measureKatex(spec.latex, fontSize);
       nodes.push({
         type: 'katex',
         x: spec.at[0],

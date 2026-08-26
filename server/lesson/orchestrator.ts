@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { LessonBlueprintSchema, TeachingMoveSchema, type LessonBlueprint, type ResponseTaxonomy, type TeachingMove } from '../../shared/pedagogy.js';
+import { DetourPlanSchema, LessonBlueprintSchema, TeachingMoveSchema, type LessonBlueprint, type LessonStage, type ResponseTaxonomy, type TeachingMove } from '../../shared/pedagogy.js';
 import { submitPolicyForMode, type ResponseMode, type SubmitPolicy } from '../../shared/lessonTurn.js';
 
 export type LessonPhase = 'ORIENT' | 'EXPLAIN' | 'VISUALIZE' | 'ASK' | 'AWAIT_LEARNER' | 'ASSESS' | 'FEEDBACK' | 'PRACTICE' | 'RETEACH' | 'ADVANCE' | 'COMPLETE' | 'STRETCH';
@@ -39,13 +39,20 @@ export type OrchestratorEvent =
   | { type: 'QUESTION_DELIVERED'; taskId: string; text: string; responseMode?: ResponseMode }
   | { type: 'LEARNER_RESPONSE_RECEIVED' }
   | { type: 'ASSESSED'; classification: ResponseTaxonomy; evidenceId?: string }
+  | { type: 'DETOUR_PLANNED'; reason: string; stages: LessonStage[] }
   | { type: 'INTERRUPTED' }
   | { type: 'RECOVERED'; generationId: string }
   | { type: 'COMPLETE' }
   | { type: 'STRETCH' };
 
-export function currentStage(state: LessonOrchestrationState): LessonBlueprint['stages'][number] | null {
+/** The stage the tutor executes right now. While a compiled detour plan is
+ * open, that is the active detour stage, not the recorded main stage. */
+export function currentStage(state: LessonOrchestrationState): LessonStage | null {
   if (!state.blueprint) return null;
+  const detour = state.blueprint.detourStack[state.blueprint.detourStack.length - 1];
+  if (detour?.plan) {
+    return detour.plan.stages[Math.min(detour.plan.activeIndex, detour.plan.stages.length - 1)] ?? null;
+  }
   return state.blueprint.stages[Math.min(state.blueprint.currentStageIndex, state.blueprint.stages.length - 1)] ?? null;
 }
 
@@ -156,10 +163,20 @@ export function reduceLesson(state: LessonOrchestrationState, event: Orchestrato
       let blueprint = state.blueprint;
       if (blueprint) {
         if (event.classification === 'correct' || event.classification === 'self_corrected') {
-          if (blueprint.detourStack.length > 0) {
+          const detour = blueprint.detourStack[blueprint.detourStack.length - 1];
+          if (detour?.plan && detour.plan.activeIndex < detour.plan.stages.length - 1) {
+            // A multi-stage detour plan advances through its own stages
+            // before the lesson returns to the recorded main stage.
+            blueprint = {
+              ...blueprint,
+              detourStack: [
+                ...blueprint.detourStack.slice(0, -1),
+                { ...detour, plan: { ...detour.plan, activeIndex: detour.plan.activeIndex + 1 } },
+              ],
+            };
+          } else if (detour) {
             // A resolved detour returns to the recorded stage; the lesson
             // goal itself was never replaced.
-            const detour = blueprint.detourStack[blueprint.detourStack.length - 1];
             blueprint = {
               ...blueprint,
               detourStack: blueprint.detourStack.slice(0, -1),
@@ -181,6 +198,23 @@ export function reduceLesson(state: LessonOrchestrationState, event: Orchestrato
         // never the blueprint.
       }
       return { ...state, blueprint, phase: nextPhase, owedAction: nextPhase === 'RETEACH' ? 'reteach' : 'feedback', turnOwner: 'tutor', lastClassification: event.classification, conceptEvidenceIds: event.evidenceId ? [...state.conceptEvidenceIds, event.evidenceId] : state.conceptEvidenceIds, prerequisiteState: event.classification === 'missing_prerequisite' ? 'gap' : state.prerequisiteState };
+    }
+    case 'DETOUR_PLANNED': {
+      // A deterministic server decision delivered a compiled detour
+      // mini-plan. It upgrades the simple detour that evidence already
+      // recorded (or opens one) and never touches the main blueprint route.
+      const blueprint = state.blueprint;
+      if (!blueprint) throw new Error('A detour plan requires an active blueprint.');
+      const plan = DetourPlanSchema.parse({ stages: event.stages, activeIndex: 0 });
+      const top = blueprint.detourStack[blueprint.detourStack.length - 1];
+      const detourStack = top && !top.plan
+        ? [...blueprint.detourStack.slice(0, -1), { ...top, plan }]
+        : [...blueprint.detourStack, { reason: event.reason.slice(0, 240), returnStageIndex: blueprint.currentStageIndex, plan }].slice(-4);
+      return {
+        ...state,
+        blueprint: { ...blueprint, detourStack },
+        microObjective: plan.stages[0].objective,
+      };
     }
     case 'INTERRUPTED':
       return { ...state, interruptionState: 'interrupted', turnOwner: 'learner', characterAttentionTarget: 'learner' };

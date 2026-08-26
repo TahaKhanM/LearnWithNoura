@@ -8,8 +8,12 @@ test('Noura parent setup, explicit learner handoff, and selection persistence', 
   await expect(page.locator('link[rel="canonical"]')).toHaveAttribute('href', 'https://learnwithnoura.com/');
 
   const suffix = Date.now().toString(36);
+  // Wait out the loading state first: a one-shot visibility check during
+  // "Loading parent setup…" mistook a first-use database for returning use.
   const createHeading = page.getByRole('heading', { name: 'Create a learner' });
-  if (!(await createHeading.isVisible().catch(() => false))) await page.getByText('Add another learner').click();
+  const addMore = page.getByText('Add another learner');
+  await expect(createHeading.or(addMore)).toBeVisible();
+  if (!(await createHeading.isVisible())) await addMore.click();
   await page.getByLabel('Name').fill(`Synthetic ${suffix}`);
   await page.getByLabel('Age').fill('10');
   await page.getByRole('button', { name: 'Create learner' }).click();

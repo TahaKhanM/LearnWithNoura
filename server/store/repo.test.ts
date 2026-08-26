@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { conversationCompiledLesson } from './compiledLessonFixture';
 import { openTestDb } from './db';
 import { Repo } from './repo';
 
@@ -129,6 +130,35 @@ describe('Repo', () => {
       'turn-7',
       'turn-8',
     ]);
+  });
+
+  it('tracks the compiled lesson lifecycle from pending to ready', () => {
+    const r = repo();
+    const child = r.createChild('Iman', 9);
+    const session = r.createSession(child.id, 'water cycle');
+    expect(r.getCompiledLesson(session.id)).toBeNull();
+
+    const pending = r.upsertCompiledLesson(session.id, { status: 'pending' });
+    expect(pending).toMatchObject({ sessionId: session.id, status: 'pending', lesson: null, failureReason: null });
+
+    const lesson = conversationCompiledLesson();
+    const ready = r.upsertCompiledLesson(session.id, { status: 'ready', lesson });
+    expect(ready.status).toBe('ready');
+    expect(ready.lesson?.blueprint.blueprintId).toBe(lesson.blueprint.blueprintId);
+    expect(ready.createdAt).toBe(pending.createdAt);
+
+    const reloaded = r.getCompiledLesson(session.id);
+    expect(reloaded?.lesson?.objective).toBe(lesson.objective);
+  });
+
+  it('records compilation failures and refuses a ready record without a lesson', () => {
+    const r = repo();
+    const child = r.createChild('Iman', 9);
+    const session = r.createSession(child.id, 'water cycle');
+    const failed = r.upsertCompiledLesson(session.id, { status: 'failed', failureReason: 'validation exhausted retries' });
+    expect(failed).toMatchObject({ status: 'failed', failureReason: 'validation exhausted retries', lesson: null });
+    expect(() => r.upsertCompiledLesson(session.id, { status: 'ready' })).toThrow(/lesson payload/i);
+    expect(() => r.upsertCompiledLesson('missing-session', { status: 'pending' })).toThrow(/unknown session/i);
   });
 
   it('rejects event and evidence writes after a session ends', () => {

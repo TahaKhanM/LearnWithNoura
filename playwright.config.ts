@@ -26,6 +26,9 @@ export default defineConfig({
         NOURA_DATA_DIR: testDataDir,
         NOURA_DEPLOYMENT_MODE: 'local-synthetic',
         NOURA_SYNTHETIC_ONLY: 'true',
+        // Hermetic runs: never let a locally configured provider key trigger
+        // live lesson-compilation calls from the test server.
+        NOURA_LESSON_COMPILER: 'fixture',
         NOURA_ALLOWED_ORIGINS: 'http://localhost:5180,http://localhost:8790',
       },
     },

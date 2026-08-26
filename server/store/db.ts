@@ -217,6 +217,20 @@ function migrate(database: DatabaseSync): void {
   addColumn(database, 'evidence', 'released INTEGER NOT NULL DEFAULT 1');
   addColumn(database, 'evidence', 'idempotency_key TEXT');
   database.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_evidence_evidence_id ON evidence(evidence_id) WHERE evidence_id IS NOT NULL');
+
+  // Phase 2: lessons are compiled before the realtime session starts.
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS compiled_lessons (
+      session_id TEXT PRIMARY KEY REFERENCES sessions(id),
+      status TEXT NOT NULL,
+      lesson_json TEXT,
+      failure_reason TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+
+    INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (2, unixepoch() * 1000);
+  `);
 }
 
 function addColumn(database: DatabaseSync, table: string, definition: string): void {

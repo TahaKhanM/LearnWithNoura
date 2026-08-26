@@ -1,0 +1,77 @@
+{
+  "compiledLessonId": "compiled-fixture-being-brave",
+  "schemaVersion": "1.0.0",
+  "goal": "Talk about being brave when things feel new",
+  "objective": "Describe what bravery means and recall one time they acted bravely",
+  "blueprint": {
+    "blueprintId": "blueprint-fixture-being-brave",
+    "goal": "Describe what bravery means and recall one time they acted bravely",
+    "mode": "conversation_led",
+    "successCriteria": [
+      "Learner gives their own definition of bravery",
+      "Learner connects bravery to a real moment from their life"
+    ],
+    "anchor": null,
+    "stages": [
+      {
+        "id": "orient",
+        "kind": "orient",
+        "objective": "Warm up with what bravery feels like",
+        "boardPurpose": "none",
+        "allowedBoardMutation": "none",
+        "learnerOpportunity": "Name something that feels scary but exciting",
+        "evidenceExpected": "recall",
+        "checks": [
+          {
+            "id": "orient-feels",
+            "questionOrTask": "What is something that feels a little scary and a little exciting at the same time?",
+            "responseMode": "voice",
+            "misconceptions": [
+              {
+                "anticipatedAnswer": "Brave people are never scared",
+                "tactic": "Share that bravery only exists when something feels scary first, then ask again."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "model",
+        "kind": "model",
+        "objective": "Build a working definition of bravery",
+        "boardPurpose": "none",
+        "allowedBoardMutation": "none",
+        "learnerOpportunity": "Improve a too-simple definition the tutor offers",
+        "evidenceExpected": "reasoning",
+        "checks": [
+          {
+            "id": "model-define",
+            "questionOrTask": "If a friend asked you what brave means, what would you tell them?",
+            "responseMode": "voice"
+          }
+        ]
+      },
+      {
+        "id": "apply",
+        "kind": "guided_check",
+        "objective": "Connect bravery to their own life",
+        "boardPurpose": "none",
+        "allowedBoardMutation": "none",
+        "learnerOpportunity": "Tell one true story where they were brave",
+        "evidenceExpected": "application",
+        "checks": [
+          {
+            "id": "apply-story",
+            "questionOrTask": "Tell me about one time you did something even though it felt scary. What happened?",
+            "responseMode": "voice"
+          }
+        ]
+      }
+    ],
+    "currentStageIndex": 0,
+    "detourStack": []
+  },
+  "anchorScene": null,
+  "compiledAt": 0,
+  "compilerModel": "fixture-compiler"
+}

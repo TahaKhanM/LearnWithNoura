@@ -1,3 +1,5 @@
+import { currentStage } from '../lesson/orchestrator.js';
+import { lessonExecutionContext } from './instructions.js';
 import { REALTIME_TOOLS } from './tools.js';
 import { semanticTurnDetection } from './turnFloor.js';
 import type { CoordinatorContext } from './coordinatorContext.js';
@@ -12,7 +14,14 @@ export function realtimeCallUrl(callId: string): string {
 }
 
 function currentInstructions(ctx: CoordinatorContext): string {
-  return `${ctx.baseInstructions}\n\n${ctx.state.boardContext.prompt()}`;
+  const stageContext = lessonExecutionContext(
+    ctx.state.lessonState.blueprint,
+    currentStage(ctx.state.lessonState),
+    ctx.compiledLesson?.anchorScene ?? null,
+  );
+  return [ctx.baseInstructions, stageContext, ctx.state.boardContext.prompt()]
+    .filter(Boolean)
+    .join('\n\n');
 }
 
 export function refreshBoardInstructions(ctx: CoordinatorContext): void {
