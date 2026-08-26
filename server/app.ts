@@ -380,6 +380,7 @@ server.on('upgrade', async (request, socket, head) => {
       telemetryRepo: repository.telemetry,
       sessionId,
       sidebandRegistry,
+      planDetour: (input) => compilation.planDetour(input),
       log: (line) => console.log(`[realtime] ${line}`),
       onLifecycle: (lifecycle) => proxyLifecycles.register(lifecycle),
     }).catch(() => {

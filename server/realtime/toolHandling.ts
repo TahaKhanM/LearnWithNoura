@@ -6,6 +6,7 @@ import type { Confidence, Verdict } from '../store/repo.js';
 import { currentStage, reduceLesson } from '../lesson/orchestrator.js';
 import type { CoordinatorContext } from './coordinatorContext.js';
 import { anchorGroupId, assignSectionToPlan, stageAndConfirmPlan } from './boardStaging.js';
+import { schedulePlannedDetour } from './detourPlanning.js';
 import { identityForResponse } from './responseRegistry.js';
 import { refreshBoardInstructions } from './sessionConfig.js';
 import { finishTool } from './turnFloor.js';
@@ -371,6 +372,12 @@ export async function handleToolCall(ctx: CoordinatorContext, name: string, rawA
             // The stage changed, so the injected per-stage execution
             // context (objective, checks, storyboard) must change with it.
             refreshBoardInstructions(ctx);
+          }
+          if (classification === 'missing_prerequisite') {
+            // Deterministic trigger: the evidence just recorded a
+            // prerequisite gap, so a compiled detour mini-plan is authored
+            // asynchronously while the tutor bridges verbally.
+            schedulePlannedDetour(ctx);
           }
           const stage = currentStage(state.lessonState);
           finishTool(ctx, callId, responseId, {

@@ -2,6 +2,7 @@ import { EventEmitter } from 'node:events';
 import { Buffer } from 'node:buffer';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CompiledLessonSchema, COMPILED_LESSON_SCHEMA_VERSION } from '../../shared/compiledLesson';
+import type { LessonStage } from '../../shared/pedagogy';
 import { createRuntimeEvent, type GenerationIdentity, type RuntimeEventEnvelope } from '../../shared/runtimeProtocol';
 import type { MetricObservation } from '../../shared/sessionTelemetry';
 import { openTestDb } from '../store/db';
@@ -861,6 +862,115 @@ describe('realtime proxy response annotation', () => {
     expect(output.semanticGroupId).toBe('lesson-anchor');
     expect(output.storyboard?.map((step) => step.reveal)).toEqual(['outline', 'label']);
     expect(output.board?.visibleObjectIds).toEqual(expect.arrayContaining(['anchor-scale', 'anchor-label']));
+  });
+
+  it('upgrades a prerequisite gap to a compiled detour mini-plan and returns to the recorded stage', async () => {
+    vi.stubGlobal('WebSocket', FakeUpstream);
+    const repo = new Repo(openTestDb());
+    const child = repo.createChild('Maya', 10);
+    const session = repo.createSession(child.id, 'fractions');
+    seedCompiledLesson(repo, session.id);
+    const detourStage: LessonStage = {
+      id: 'detour-prereq', kind: 'model', objective: 'Rebuild fraction meaning with one shaded strip',
+      boardPurpose: 'none', allowedBoardMutation: 'none',
+      learnerOpportunity: 'Shade one half of a strip and say what it shows', evidenceExpected: 'recall of fraction meaning',
+      checks: [{ id: 'detour-check', questionOrTask: 'What does the shaded part show?', responseMode: 'voice' }],
+    };
+    const client = new FakeClient();
+    await connectRealtimeProxy(client as never, {
+      apiKey: 'offline-fixture', model: 'gpt-realtime-2.1', repo, sessionId: session.id,
+      createUpstream: () => new FakeUpstream() as never,
+      planDetour: async () => [detourStage],
+    });
+    const active = { ...identity, sessionId: session.id };
+    const upstream = FakeUpstream.latest;
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 0, 'hello', {})));
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 1, 'user_text', { text: 'What is a fraction again?', idempotencyKey: 'detour-turn-0001' })));
+    await flushProxy();
+
+    upstream.emit({ type: 'response.created', response: { id: 'gap-response' } });
+    upstream.emit({
+      type: 'response.function_call_arguments.done', response_id: 'gap-response', call_id: 'gap-evidence-call', name: 'record_evidence',
+      arguments: JSON.stringify({
+        concept: 'fraction meaning', observation: 'Cannot say what the denominator counts.', verdict: 'struggling',
+        classification: 'missing_prerequisite', confidence: 'medium', confidence_basis: 'Direct question, no answer.',
+        task_id: 'orient-check', opportunity_kind: 'recall',
+      }),
+    });
+    await flushProxy();
+    await flushProxy();
+    expect(toolOutput(upstream, 'gap-evidence-call')).toMatchObject({ ok: true, detourDepth: 1 });
+
+    // The asynchronous compiled mini-plan upgraded the simple detour entry
+    // durably, and the injected stage context now teaches the detour stage.
+    const progress = repo.listEventsForInternalAudit(session.id).filter((event) => event.type === 'blueprint_progress');
+    const lastStack = (progress.at(-1)?.payload as { detourStack?: Array<{ plan?: { stages: Array<{ id: string }> } }> } | undefined)?.detourStack ?? [];
+    expect(lastStack[0]?.plan?.stages.map((stage) => stage.id)).toEqual(['detour-prereq']);
+    const instructions = upstream.sent.map((raw) => JSON.parse(raw) as { type: string; session?: { instructions?: string } })
+      .filter((event) => event.type === 'session.update').at(-1)?.session?.instructions ?? '';
+    expect(instructions).toContain('Rebuild fraction meaning with one shaded strip');
+    expect(instructions).toContain('prerequisite detour');
+
+    // A correct answer on the final detour stage pops it and returns to the
+    // recorded main stage.
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 2, 'user_text', { text: 'It shows one of two equal parts.', idempotencyKey: 'detour-turn-0002' })));
+    await flushProxy();
+    upstream.emit({ type: 'response.created', response: { id: 'resolve-response' } });
+    upstream.emit({
+      type: 'response.function_call_arguments.done', response_id: 'resolve-response', call_id: 'resolve-evidence-call', name: 'record_evidence',
+      arguments: JSON.stringify({
+        concept: 'fraction meaning', observation: 'Explained the shaded strip correctly.', verdict: 'progressing',
+        classification: 'correct', confidence: 'medium', confidence_basis: 'Clear explanation in own words.',
+        task_id: 'detour-check', opportunity_kind: 'explanation',
+      }),
+    });
+    await flushProxy();
+    await flushProxy();
+    expect(toolOutput(upstream, 'resolve-evidence-call')).toMatchObject({
+      ok: true,
+      detourDepth: 0,
+      currentStage: { id: 'orient' },
+    });
+  });
+
+  it('falls back to the simple detour when detour planning times out', async () => {
+    vi.stubGlobal('WebSocket', FakeUpstream);
+    const repo = new Repo(openTestDb());
+    const child = repo.createChild('Maya', 10);
+    const session = repo.createSession(child.id, 'fractions');
+    seedCompiledLesson(repo, session.id);
+    const client = new FakeClient();
+    await connectRealtimeProxy(client as never, {
+      apiKey: 'offline-fixture', model: 'gpt-realtime-2.1', repo, sessionId: session.id,
+      createUpstream: () => new FakeUpstream() as never,
+      planDetour: () => new Promise(() => {}),
+      detourPlanTimeoutMs: 30,
+    });
+    const active = { ...identity, sessionId: session.id };
+    const upstream = FakeUpstream.latest;
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 0, 'hello', {})));
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 1, 'user_text', { text: 'I do not know.', idempotencyKey: 'timeout-turn-0001' })));
+    await flushProxy();
+    upstream.emit({ type: 'response.created', response: { id: 'timeout-response' } });
+    upstream.emit({
+      type: 'response.function_call_arguments.done', response_id: 'timeout-response', call_id: 'timeout-evidence-call', name: 'record_evidence',
+      arguments: JSON.stringify({
+        concept: 'fraction meaning', observation: 'No usable definition offered.', verdict: 'struggling',
+        classification: 'missing_prerequisite', confidence: 'medium', confidence_basis: 'Direct question, no answer.',
+        task_id: 'orient-check', opportunity_kind: 'recall',
+      }),
+    });
+    await flushProxy();
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    await flushProxy();
+
+    // The simple detour recorded by the evidence classification stands; no
+    // compiled plan ever landed.
+    expect(toolOutput(upstream, 'timeout-evidence-call')).toMatchObject({ ok: true, detourDepth: 1 });
+    const progress = repo.listEventsForInternalAudit(session.id).filter((event) => event.type === 'blueprint_progress');
+    const stacks = progress.map((event) => (event.payload as { detourStack?: Array<{ plan?: unknown }> }).detourStack ?? []);
+    expect(stacks.length).toBeGreaterThan(0);
+    expect(stacks.every((stack) => stack.every((entry) => entry.plan === undefined))).toBe(true);
   });
 
   it('refuses to attach a session whose lesson compilation is not ready', async () => {

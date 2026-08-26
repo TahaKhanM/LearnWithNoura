@@ -6,6 +6,8 @@ import {
 } from '../../shared/runtimeProtocol.js';
 import { buildInstructions } from './instructions.js';
 import { createLessonState, reduceLesson } from '../lesson/orchestrator.js';
+import type { LessonStage } from '../../shared/pedagogy.js';
+import { DETOUR_PLAN_TIMEOUT_MS } from './detourPlanning.js';
 import { BoardContextTracker, loadReleasedBoardContext } from './boardContext.js';
 import type { DomainRepository } from '../store/domain.js';
 import { SessionTelemetryWriter } from '../session/telemetryWriter.js';
@@ -51,6 +53,10 @@ export interface ProxyOptions {
   preflightTimeoutMs?: number;
   /** How long to wait for the browser to confirm a staged plan is visible. */
   visibilityTimeoutMs?: number;
+  /** Compiler entry point for bounded mid-lesson detour mini-plans. */
+  planDetour?: (input: { objective: string; reason: string; returnStageObjective: string }) => Promise<LessonStage[]>;
+  /** How long detour planning may run before the simple detour stands. */
+  detourPlanTimeoutMs?: number;
   onLifecycle?: (lifecycle: ProxyLifecycle) => void;
 }
 
@@ -192,6 +198,8 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
     telemetryRepo,
     preflightTimeoutMs: options.preflightTimeoutMs ?? 1_200,
     visibilityTimeoutMs: options.visibilityTimeoutMs ?? 15_000,
+    planDetour: options.planDetour ?? null,
+    detourPlanTimeoutMs: options.detourPlanTimeoutMs ?? DETOUR_PLAN_TIMEOUT_MS,
     state,
     sendClient(
       payload: Record<string, unknown>,
