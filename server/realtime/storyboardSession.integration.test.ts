@@ -54,6 +54,8 @@ interface SessionInternals {
   handleMicEnergy(rms: number): void;
   connectVoice(): Promise<void>;
   send(type: string, payload: Record<string, unknown>): void;
+  releasePending(): void;
+  timeline: { pendingCount(kind?: string): number };
 }
 
 function seedBoardLedLesson(repo: Repo, sessionId: string): void {
@@ -271,6 +273,85 @@ describe('interleaved anchor build through the real session', () => {
 
     // Permanence: every applied operation ever sent to the board is an add.
     expect(harness.applied.every((reveal) => reveal.ops.every((op) => op.op === 'add'))).toBe(true);
+    harness.session.end();
+  });
+
+  it('holds the next step when a beat finishes generating before its audio starts', async () => {
+    const harness = await createHarness();
+    await harness.establishAnchor();
+    harness.voice.emitBoundary('stopped', 'anchor-response', 1_500);
+    await harness.pump();
+    expect(harness.applied.map((reveal) => reveal.ids)).toEqual([['anchor-scale']]);
+    // Beat 0 is created; step 1's cue rides tagged to its playback.
+    harness.upstream.emit({ type: 'response.created', response: { id: 'beat-0' } });
+    await harness.pump();
+    // Realistic provider ordering: the sideband's response.done arrives
+    // BEFORE the data channel's output_audio_buffer.started. The next step
+    // must stay hidden — the reveal binds to playback, not generation.
+    harness.upstream.emit({ type: 'response.done', response: { id: 'beat-0', status: 'completed', output: [] } });
+    await harness.pump();
+    expect(harness.applied.map((reveal) => reveal.ids)).toEqual([['anchor-scale']]);
+    // Audio begins late and plays out; the reveal lands only at its end.
+    harness.voice.emitBoundary('started', 'beat-0');
+    await harness.pump();
+    expect(harness.applied.map((reveal) => reveal.ids)).toEqual([['anchor-scale']]);
+    harness.voice.emitBoundary('stopped', 'beat-0', 900);
+    await harness.pump();
+    expect(harness.applied.map((reveal) => reveal.ids)).toEqual([['anchor-scale'], ['anchor-mark']]);
+    harness.session.end();
+  });
+
+  it('releases a held step once the grace window confirms a beat is genuinely silent', async () => {
+    const harness = await createHarness();
+    await harness.establishAnchor();
+    harness.voice.emitBoundary('stopped', 'anchor-response', 1_500);
+    await harness.pump();
+    harness.upstream.emit({ type: 'response.created', response: { id: 'beat-0' } });
+    await harness.pump();
+    harness.upstream.emit({ type: 'response.done', response: { id: 'beat-0', status: 'completed', output: [] } });
+    await harness.pump();
+    // No audio ever arrives for this beat. Within the grace window the
+    // step stays hidden…
+    expect(harness.applied.map((reveal) => reveal.ids)).toEqual([['anchor-scale']]);
+    // …and once the window has expired the build must not deadlock.
+    const base = performance.now();
+    const nowSpy = vi.spyOn(performance, 'now').mockImplementation(() => base + 10_000);
+    (harness.session as unknown as SessionInternals).releasePending();
+    await harness.pump();
+    nowSpy.mockRestore();
+    expect(harness.applied.map((reveal) => reveal.ids)).toEqual([['anchor-scale'], ['anchor-mark']]);
+    harness.session.end();
+  });
+
+  it('applies a re-sent step cue exactly once under its stable board-event identity', async () => {
+    const harness = await createHarness();
+    await harness.establishAnchor();
+    harness.voice.emitBoundary('stopped', 'anchor-response', 1_500);
+    await harness.pump();
+    harness.upstream.emit({ type: 'response.created', response: { id: 'beat-0' } });
+    await harness.pump();
+    harness.voice.emitBoundary('started', 'beat-0');
+    await harness.pump();
+    expect(harness.applied.map((reveal) => reveal.ids)).toEqual([['anchor-scale']]);
+
+    // An unconfirmed speech blip while beat 0 speaks: the server pauses the
+    // run and marks the pending step cue for re-send; the client never
+    // confirms an interruption, so the original cue is still pending.
+    harness.upstream.emit({ type: 'input_audio_buffer.speech_started' });
+    await harness.pump();
+    harness.upstream.emit({ type: 'input_audio_buffer.speech_stopped' });
+    await harness.pump();
+    harness.upstream.emit({ type: 'response.created', response: { id: 'blip-response' } });
+    await harness.pump();
+    harness.upstream.emit({ type: 'response.done', response: { id: 'blip-response', status: 'completed', output: [] } });
+    await harness.pump();
+
+    // Beat 0's audio finishes: the step reveals exactly once, and the
+    // duplicate re-send left nothing behind in the timeline.
+    harness.voice.emitBoundary('stopped', 'beat-0', 900);
+    await harness.pump();
+    expect(harness.applied.map((reveal) => reveal.ids)).toEqual([['anchor-scale'], ['anchor-mark']]);
+    expect((harness.session as unknown as SessionInternals).timeline.pendingCount('visual')).toBe(0);
     harness.session.end();
   });
 });

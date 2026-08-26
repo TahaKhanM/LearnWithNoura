@@ -77,6 +77,27 @@ describe('response cue timeline (playback-bound)', () => {
     expect(timeline.drain(() => 'finished').map((cue) => cue.cueId)).toEqual(['step-2']);
   });
 
+  it('deduplicates a re-sent board event by stable cue id across separate envelopes', () => {
+    const timeline = new ResponseCueTimeline();
+    expect(timeline.enqueue({ ...visual('board-event-503', 1, 'beat-0'), awaitNarration: true })).toBe(true);
+    // The server re-sent the same board event under a fresh envelope while
+    // the original cue is still pending: it must not enqueue twice.
+    expect(timeline.enqueue({ ...visual('board-event-503', 2, 'blip-response'), awaitNarration: true })).toBe(false);
+    expect(timeline.pendingCount()).toBe(1);
+  });
+
+  it('allows a cancelled board event to re-enqueue under a fresh generation identity', () => {
+    const timeline = new ResponseCueTimeline();
+    timeline.enqueue(visual('board-event-503', 1));
+    timeline.cancel(identity);
+    // The stale identity stays rejected…
+    expect(timeline.enqueue(visual('board-event-503', 2))).toBe(false);
+    // …but the legitimate post-interruption re-send of the SAME board event
+    // arrives under the new generation and must apply.
+    expect(timeline.enqueue(visual('board-event-503', 2, 'resume-response', nextIdentity))).toBe(true);
+    expect(timeline.drain(() => 'finished').map((cue) => cue.cueId)).toEqual(['board-event-503']);
+  });
+
   it('navigation cleanup removes every pending cue', () => {
     const timeline = new ResponseCueTimeline();
     timeline.enqueue(semantic('state', 1));

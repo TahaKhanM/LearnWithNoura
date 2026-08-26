@@ -102,7 +102,9 @@ interface SystemNote extends Record<string, unknown> {
   item?: { type?: string; role?: string; content?: Array<{ text?: string }> };
 }
 
-async function connectBoardLed(options: Partial<ProxyOptions> = {}) {
+async function connectBoardLed(
+  options: Partial<ProxyOptions> & { wrapRepo?: (repo: Repo) => ProxyOptions['repo'] } = {},
+) {
   vi.stubGlobal('WebSocket', FakeUpstream);
   const repo = new Repo(openTestDb());
   const child = repo.createChild('Maya', 10);
@@ -110,15 +112,16 @@ async function connectBoardLed(options: Partial<ProxyOptions> = {}) {
   seedBoardLedLesson(repo, session.id);
   const metrics: MetricObservation[] = [];
   const client = new FakeClient();
+  const { wrapRepo, ...proxyOptions } = options;
   await connectRealtimeProxy(client as never, {
-    apiKey: 'offline-fixture', model: 'gpt-realtime-2.1', repo, sessionId: session.id,
+    apiKey: 'offline-fixture', model: 'gpt-realtime-2.1', repo: wrapRepo ? wrapRepo(repo) : repo, sessionId: session.id,
     createUpstream: () => new FakeUpstream() as never,
     preflightTimeoutMs: 400,
     telemetryRepo: {
       appendMetric: async (_sessionId, observation) => { metrics.push(observation); return metrics.length; },
       hasPriorReleasedSessionStart: async () => false,
     },
-    ...options,
+    ...proxyOptions,
   });
   const active = { ...identity, sessionId: session.id };
   client.emit('message', JSON.stringify(createRuntimeEvent(active, 0, 'hello', {})));
@@ -262,17 +265,15 @@ describe('the storyboard runner', () => {
     await flushProxy();
 
     // After the last beat, ONE unmarked handoff response carries the
-    // stage's exact check wording and no token cap; the run is complete.
+    // stage's exact check wording and no token cap.
     const handoff = harness.scopedCreates()[3];
     expect(handoff.response?.instructions).toContain('Which mark is farther right?');
     expect(handoff.response?.instructions).toContain('propose_teaching_move');
     expect(handoff.response?.max_output_tokens).toBeUndefined();
     harness.upstream.emit({ type: 'response.created', response: { id: 'handoff-response' } });
     await flushProxy();
-    expect(harness.progressEvents().at(-1)).toMatchObject({ status: 'completed', revealedSteps: 3, totalSteps: 3, source: 'anchor' });
-    expect(harness.metrics.filter((metric) => metric.name === 'storyboard_outcome')).toEqual([
-      expect.objectContaining({ dimensions: { outcome: 'completed', source: 'anchor', revealedSteps: 3, totalSteps: 3 } }),
-    ]);
+    // The run stays open until the handoff response actually finishes.
+    expect(harness.progressEvents().every((event) => event.status !== 'completed')).toBe(true);
 
     // The handoff response delivers the task through the EXISTING contract:
     // propose_teaching_move, then the spoken question, then delivery.
@@ -287,6 +288,10 @@ describe('the storyboard runner', () => {
     await flushProxy();
     harness.upstream.emit({ type: 'response.done', response: { id: 'handoff-response', status: 'completed', output: [{ type: 'function_call' }] } });
     await flushProxy();
+    expect(harness.progressEvents().at(-1)).toMatchObject({ status: 'completed', revealedSteps: 3, totalSteps: 3, source: 'anchor' });
+    expect(harness.metrics.filter((metric) => metric.name === 'storyboard_outcome')).toEqual([
+      expect.objectContaining({ dimensions: { outcome: 'completed', source: 'anchor', revealedSteps: 3, totalSteps: 3 } }),
+    ]);
     harness.upstream.emit({ type: 'response.created', response: { id: 'ask-response' } });
     harness.upstream.emit({ type: 'response.output_audio_transcript.done', response_id: 'ask-response', transcript: 'Which mark is farther right?' });
     harness.upstream.emit({ type: 'response.done', response: { id: 'ask-response', status: 'completed', output: [] } });
@@ -467,6 +472,7 @@ describe('the storyboard runner', () => {
     const handoff = harness.scopedCreates().at(-1);
     expect(handoff?.response?.instructions).toContain('propose_teaching_move');
     harness.upstream.emit({ type: 'response.created', response: { id: 'director-handoff' } });
+    harness.upstream.emit({ type: 'response.done', response: { id: 'director-handoff', status: 'completed', output: [] } });
     await flushProxy();
     expect(harness.progressEvents().at(-1)).toMatchObject({ status: 'completed', source: 'director', revealedSteps: 2, totalSteps: 2 });
   });
@@ -569,5 +575,333 @@ describe('the storyboard runner', () => {
     });
     await flushProxy();
     expect(harness.toolOutput('retry-call')).toMatchObject({ status: 'preparing', semanticGroupId: 'lesson-anchor-alt2' });
+  });
+
+  it('completes only when the closing handoff response finishes, retrying a transient create rejection', async () => {
+    const harness = await connectBoardLed();
+    await harness.establish();
+    harness.upstream.emit({ type: 'response.done', response: { id: 'anchor-response', status: 'completed', output: [{ type: 'function_call' }] } });
+    // Play through all three steps and their beats.
+    for (let step = 0; step < 3; step += 1) {
+      harness.showStep(step);
+      await flushProxy();
+      harness.upstream.emit({ type: 'response.created', response: { id: `beat-${step}` } });
+      await flushProxy();
+      harness.upstream.emit({ type: 'response.done', response: { id: `beat-${step}`, status: 'completed', output: [] } });
+      await flushProxy();
+    }
+    // The closing handoff create was sent…
+    expect(harness.scopedCreates()).toHaveLength(4);
+    // …but the provider rejects it: another response was already active.
+    harness.upstream.emit({ type: 'error', error: { code: 'conversation_already_has_active_response', message: 'Conversation already has an active response' } });
+    await flushProxy();
+    // The run must NOT be completed yet: the stage check has not been handed off.
+    expect(harness.progressEvents().every((event) => event.status !== 'completed')).toBe(true);
+
+    // The blocking response resolves; the runner retries the handoff.
+    harness.upstream.emit({ type: 'response.created', response: { id: 'blocking-response' } });
+    harness.upstream.emit({ type: 'response.done', response: { id: 'blocking-response', status: 'completed', output: [] } });
+    await flushProxy();
+    const handoffs = harness.scopedCreates().filter((event) => event.response?.instructions?.includes('Which mark is farther right?'));
+    expect(handoffs).toHaveLength(2);
+
+    // The retried handoff is created — the run is still open until it finishes.
+    harness.upstream.emit({ type: 'response.created', response: { id: 'handoff-response' } });
+    await flushProxy();
+    expect(harness.progressEvents().every((event) => event.status !== 'completed')).toBe(true);
+    harness.upstream.emit({ type: 'response.done', response: { id: 'handoff-response', status: 'completed', output: [{ type: 'function_call' }] } });
+    await flushProxy();
+    expect(harness.progressEvents().at(-1)).toMatchObject({ status: 'completed', revealedSteps: 3, totalSteps: 3 });
+    expect(harness.metrics.filter((metric) => metric.name === 'storyboard_outcome')).toEqual([
+      expect.objectContaining({ dimensions: expect.objectContaining({ outcome: 'completed' }) }),
+    ]);
+  });
+
+  it('recreates a handoff that was cancelled by a barge-in instead of losing the stage check', async () => {
+    const harness = await connectBoardLed();
+    await harness.establish();
+    harness.upstream.emit({ type: 'response.done', response: { id: 'anchor-response', status: 'completed', output: [{ type: 'function_call' }] } });
+    for (let step = 0; step < 3; step += 1) {
+      harness.showStep(step);
+      await flushProxy();
+      harness.upstream.emit({ type: 'response.created', response: { id: `beat-${step}` } });
+      await flushProxy();
+      harness.upstream.emit({ type: 'response.done', response: { id: `beat-${step}`, status: 'completed', output: [] } });
+      await flushProxy();
+    }
+    harness.upstream.emit({ type: 'response.created', response: { id: 'handoff-1' } });
+    await flushProxy();
+    // The learner barges in while the handoff is speaking.
+    harness.upstream.emit({ type: 'input_audio_buffer.speech_started' });
+    harness.upstream.emit({ type: 'response.done', response: { id: 'handoff-1', status: 'cancelled', output: [] } });
+    harness.upstream.emit({ type: 'input_audio_buffer.speech_stopped' });
+    await flushProxy();
+    expect(harness.progressEvents().every((event) => event.status !== 'completed')).toBe(true);
+    // Their turn resolves; the handoff is recreated so the check is not lost.
+    harness.upstream.emit({ type: 'response.created', response: { id: 'answer-response' } });
+    harness.upstream.emit({ type: 'response.done', response: { id: 'answer-response', status: 'completed', output: [] } });
+    await flushProxy();
+    const handoffs = harness.scopedCreates().filter((event) => event.response?.instructions?.includes('Which mark is farther right?'));
+    expect(handoffs).toHaveLength(2);
+    harness.upstream.emit({ type: 'response.created', response: { id: 'handoff-2' } });
+    harness.upstream.emit({ type: 'response.done', response: { id: 'handoff-2', status: 'completed', output: [{ type: 'function_call' }] } });
+    await flushProxy();
+    expect(harness.progressEvents().at(-1)).toMatchObject({ status: 'completed' });
+  });
+
+  it('advances past a confirmed step only after its progress write is durable', async () => {
+    let releaseWrite!: () => void;
+    const writeGate = new Promise<void>((resolve) => { releaseWrite = resolve; });
+    let gateArmed = false;
+    const harness = await connectBoardLed({
+      wrapRepo: (repo) => {
+        const wrapped = Object.create(repo) as ProxyOptions['repo'];
+        wrapped.addEvent = async (sessionId, type, payload, released) => {
+          if (type === 'storyboard_progress' && gateArmed) { gateArmed = false; await writeGate; }
+          return repo.addEvent(sessionId, type, payload, released);
+        };
+        return wrapped;
+      },
+    });
+    await harness.establish();
+    harness.upstream.emit({ type: 'response.done', response: { id: 'anchor-response', status: 'completed', output: [{ type: 'function_call' }] } });
+    await flushProxy();
+    gateArmed = true;
+    harness.showStep(0);
+    await flushProxy();
+    // The step is confirmed on screen, but the progress write has not landed
+    // yet: the run must not narrate past a boundary that is not durable.
+    expect(harness.scopedCreates()).toHaveLength(0);
+    releaseWrite();
+    await flushProxy();
+    expect(harness.scopedCreates()).toHaveLength(1);
+    expect(harness.progressEvents().at(-1)).toMatchObject({ status: 'active', revealedSteps: 1 });
+  });
+
+  it('a reconnect during the progress write resumes at the durable step, never skipping ahead', async () => {
+    let releaseWrite!: () => void;
+    const writeGate = new Promise<void>((resolve) => { releaseWrite = resolve; });
+    let gateArmed = false;
+    const harness = await connectBoardLed({
+      wrapRepo: (repo) => {
+        const wrapped = Object.create(repo) as ProxyOptions['repo'];
+        wrapped.addEvent = async (sessionId, type, payload, released) => {
+          if (type === 'storyboard_progress' && gateArmed) { gateArmed = false; await writeGate; }
+          return repo.addEvent(sessionId, type, payload, released);
+        };
+        return wrapped;
+      },
+    });
+    await harness.establish();
+    harness.upstream.emit({ type: 'response.done', response: { id: 'anchor-response', status: 'completed', output: [{ type: 'function_call' }] } });
+    await flushProxy();
+    gateArmed = true;
+    harness.showStep(0);
+    await flushProxy();
+
+    // The sideband reconnects while the revealedSteps=1 write is in flight.
+    const client2 = new FakeClient();
+    await connectRealtimeProxy(client2 as never, {
+      apiKey: 'offline-fixture', model: 'gpt-realtime-2.1', repo: harness.repo, sessionId: harness.session.id,
+      createUpstream: () => new FakeUpstream() as never,
+      telemetryRepo: { appendMetric: async () => 0, hasPriorReleasedSessionStart: async () => true },
+    });
+    const upstream2 = FakeUpstream.latest;
+    const active2: GenerationIdentity = { sessionId: harness.session.id, connectionEpoch: 2, turnId: 'turn-1', generationId: 'generation-1' };
+    let sequence2 = 0;
+    const emit2 = (type: string, payload: Record<string, unknown>) =>
+      client2.emit('message', JSON.stringify(createRuntimeEvent(active2, sequence2++, type, payload)));
+    emit2('hello', {});
+    upstream2.emit({ type: 'session.updated' });
+    await flushProxy();
+    emit2('start', {});
+    await flushProxy();
+    upstream2.emit({ type: 'response.created', response: { id: 'resume-response' } });
+    upstream2.emit({ type: 'response.done', response: { id: 'resume-response', status: 'completed', output: [] } });
+    await flushProxy();
+    // Durable truth says no step is confirmed yet, so the restore re-sends
+    // step 0 (idempotent re-apply) — it may not skip to step 1.
+    const cues = client2.sent.filter((event) => event.type === 'board_ops');
+    expect(cues).toHaveLength(1);
+    expect(cues[0].payload).toMatchObject({ checkpoint: 'outline' });
+    releaseWrite();
+    await flushProxy();
+  });
+});
+
+describe('visual request scoping across turns', () => {
+  it('abandons a slow anchor preflight that completes after a learner turn, with an honest tool failure', async () => {
+    const harness = await connectBoardLed({ preflightTimeoutMs: 5_000 });
+    harness.upstream.emit({ type: 'response.created', response: { id: 'anchor-response' } });
+    harness.upstream.emit({
+      type: 'response.function_call_arguments.done', response_id: 'anchor-response', call_id: 'anchor-call', name: 'request_visual',
+      arguments: JSON.stringify({
+        schemaVersion: '3.0.0', requestId: 'anchor-request', action: 'establish',
+        purpose: 'Anchor the comparison', idea: 'Both fractions on one shared number line', density: 'minimal',
+      }),
+    });
+    await flushProxy();
+    const preflight = [...harness.client.sent].reverse().find((event) => event.type === 'visual_preflight');
+    expect(preflight).toBeDefined();
+
+    // The learner completes a turn while the preflight is still in flight.
+    harness.upstream.emit({ type: 'input_audio_buffer.speech_started' });
+    harness.upstream.emit({ type: 'input_audio_buffer.speech_stopped' });
+    await flushProxy();
+
+    // The stale acceptance arrives now: nothing may build mid-learner-turn.
+    harness.emitClient('visual_preflight_result', {
+      preflight_id: (preflight!.payload as { preflight_id?: string }).preflight_id,
+      accepted: true,
+      reasons: [],
+    });
+    await flushProxy();
+    await flushProxy();
+    expect(harness.boardCues()).toEqual([]);
+    expect(harness.toolOutput('anchor-call')).toMatchObject({
+      ok: false, accepted: false, reason: expect.stringContaining('moved on'),
+    });
+    expect(harness.metrics.filter((metric) => metric.name === 'storyboard_outcome')).toEqual([
+      expect.objectContaining({ dimensions: expect.objectContaining({ outcome: 'abandoned', source: 'anchor', revealedSteps: 0 }) }),
+    ]);
+  });
+
+  it('abandons a superseded Director completion explicitly and builds only the newest request', async () => {
+    const gates = new Map<string, () => void>();
+    const directVisual: BoardDirector = async (request) => {
+      await new Promise<void>((resolve) => { gates.set(request.sectionId, resolve); });
+      return {
+        ok: true,
+        scene: {
+          groupId: request.sectionId,
+          groupLabel: `Case ${request.sectionId}`,
+          template: null,
+          ops: [{ op: 'add', id: `${request.sectionId}-box`, spec: { kind: 'box', at: [500, 200], w: 320, h: 120, text: 'case' } }],
+          storyboard: [{ id: `${request.sectionId}-outline`, reveal: 'outline', narration: 'Look at this case.', objectIds: [`${request.sectionId}-box`] }],
+        },
+      };
+    };
+    const harness = await connectBoardLed({ directVisual });
+    harness.upstream.emit({ type: 'response.created', response: { id: 'turn1-response' } });
+    harness.upstream.emit({
+      type: 'response.function_call_arguments.done', response_id: 'turn1-response', call_id: 'alt1-call', name: 'request_visual',
+      arguments: JSON.stringify({
+        schemaVersion: '3.0.0', requestId: 'alt1-case', action: 'compare',
+        purpose: 'Contrast with an equal case', idea: 'A case where the two fractions are equal', density: 'minimal',
+      }),
+    });
+    await flushProxy();
+    expect(harness.toolOutput('alt1-call')).toMatchObject({ status: 'preparing', semanticGroupId: 'lesson-anchor-alt1' });
+    harness.upstream.emit({ type: 'response.done', response: { id: 'turn1-response', status: 'completed', output: [{ type: 'function_call' }] } });
+
+    // A learner turn starts the next teaching turn; the tutor asks for a
+    // DIFFERENT comparison before the first one ever finished.
+    harness.upstream.emit({ type: 'input_audio_buffer.speech_started' });
+    harness.upstream.emit({ type: 'input_audio_buffer.speech_stopped' });
+    await flushProxy();
+    harness.upstream.emit({ type: 'response.created', response: { id: 'turn2-response' } });
+    harness.upstream.emit({
+      type: 'response.function_call_arguments.done', response_id: 'turn2-response', call_id: 'alt2-call', name: 'request_visual',
+      arguments: JSON.stringify({
+        schemaVersion: '3.0.0', requestId: 'alt2-case', action: 'compare',
+        purpose: 'Contrast with an unequal case', idea: 'A case where one fraction is clearly larger', density: 'minimal',
+      }),
+    });
+    await flushProxy();
+    expect(harness.toolOutput('alt2-call')).toMatchObject({ status: 'preparing', semanticGroupId: 'lesson-anchor-alt2' });
+
+    // The stale alt1 completion arrives: it is abandoned explicitly (honest
+    // note, telemetry), builds nothing, and interrupts nothing.
+    const createsBefore = harness.responseCreates().length;
+    gates.get('lesson-anchor-alt1')!();
+    await flushProxy();
+    expect(harness.systemNotes().filter((note) => note.includes('lesson has moved on'))).toHaveLength(1);
+    expect(harness.boardCues()).toEqual([]);
+    expect(harness.responseCreates().length).toBe(createsBefore);
+    expect(harness.repo.listEventsForInternalAudit(harness.session.id).filter((event) => event.type === 'directed_scene')).toEqual([]);
+    expect(harness.metrics.filter((metric) => metric.name === 'storyboard_outcome')).toEqual([
+      expect.objectContaining({ dimensions: expect.objectContaining({ outcome: 'abandoned', source: 'director' }) }),
+    ]);
+
+    // The newest request is the one that builds.
+    harness.upstream.emit({ type: 'response.done', response: { id: 'turn2-response', status: 'completed', output: [{ type: 'function_call' }] } });
+    gates.get('lesson-anchor-alt2')!();
+    await flushProxy();
+    const preflight = [...harness.client.sent].reverse().find((event) => event.type === 'visual_preflight');
+    expect(preflight?.payload).toMatchObject({ semanticObjectId: 'lesson-anchor-alt2' });
+    harness.emitClient('visual_preflight_result', {
+      preflight_id: (preflight!.payload as { preflight_id?: string }).preflight_id,
+      accepted: true,
+      reasons: [],
+    });
+    await flushProxy();
+    await flushProxy();
+    expect(harness.repo.listEvents(harness.session.id).some((event) => event.type === 'directed_scene')).toBe(true);
+    expect(harness.boardCues()).toHaveLength(1);
+    expect(JSON.stringify(harness.boardCues()[0].payload)).toContain('lesson-anchor-alt2');
+  });
+
+  it('abandons a Director completion that lands while another build is active, leaving that run untouched', async () => {
+    let releaseDirector!: () => void;
+    const directVisual: BoardDirector = async (request) => {
+      await new Promise<void>((resolve) => { releaseDirector = resolve; });
+      return {
+        ok: true,
+        scene: {
+          groupId: request.sectionId,
+          groupLabel: 'Slow case',
+          template: null,
+          ops: [
+            { op: 'add', id: 'slow-box', spec: { kind: 'box', at: [500, 200], w: 320, h: 120, text: 'slow' } },
+            { op: 'add', id: 'slow-label', spec: { kind: 'label', target: 'slow-box', side: 'below', text: 'late' } },
+          ],
+          storyboard: [
+            { id: 'slow-outline', reveal: 'outline', narration: 'One.', objectIds: ['slow-box'] },
+            { id: 'slow-label-step', reveal: 'label', narration: 'Two.', objectIds: ['slow-label'] },
+          ],
+        },
+      };
+    };
+    const harness = await connectBoardLed({ directVisual });
+    harness.upstream.emit({ type: 'response.created', response: { id: 'turn1-response' } });
+    harness.upstream.emit({
+      type: 'response.function_call_arguments.done', response_id: 'turn1-response', call_id: 'slow-call', name: 'request_visual',
+      arguments: JSON.stringify({
+        schemaVersion: '3.0.0', requestId: 'slow-case', action: 'compare',
+        purpose: 'Contrast with an equal case', idea: 'A case where the two fractions are equal', density: 'minimal',
+      }),
+    });
+    await flushProxy();
+    expect(harness.toolOutput('slow-call')).toMatchObject({ status: 'preparing' });
+    // The covering continuation resolves like any tutor response.
+    harness.upstream.emit({ type: 'response.created', response: { id: 'cover-2' } });
+    harness.upstream.emit({ type: 'response.done', response: { id: 'cover-2', status: 'completed', output: [] } });
+    harness.upstream.emit({ type: 'response.done', response: { id: 'turn1-response', status: 'completed', output: [{ type: 'function_call' }] } });
+
+    // A learner turn, then the tutor establishes the compiled anchor: a
+    // storyboard run is now active when the slow Director result lands.
+    harness.upstream.emit({ type: 'input_audio_buffer.speech_started' });
+    harness.upstream.emit({ type: 'input_audio_buffer.speech_stopped' });
+    await flushProxy();
+    await harness.establish('turn2-response', 'anchor-call');
+    expect(harness.toolOutput('anchor-call')).toMatchObject({ status: 'building' });
+    expect(harness.boardCues()).toHaveLength(1);
+
+    releaseDirector();
+    await flushProxy();
+    // The stale completion is abandoned honestly, exactly once, and the
+    // active anchor run is untouched: no failure state, no interruption.
+    expect(harness.systemNotes().filter((note) => note.includes('lesson has moved on'))).toHaveLength(1);
+    expect(harness.metrics.filter((metric) => metric.name === 'storyboard_outcome')).toEqual([
+      expect.objectContaining({ dimensions: { outcome: 'abandoned', source: 'director', revealedSteps: 0, totalSteps: 2 } }),
+    ]);
+    expect(harness.progressEvents().every((event) => event.status === 'active')).toBe(true);
+
+    // The anchor build continues normally.
+    harness.upstream.emit({ type: 'response.done', response: { id: 'turn2-response', status: 'completed', output: [{ type: 'function_call' }] } });
+    harness.showStep(0);
+    await flushProxy();
+    expect(harness.scopedCreates()).toHaveLength(1);
+    expect(harness.scopedCreates()[0].response?.instructions).toContain('Here is one number line from zero to one.');
   });
 });

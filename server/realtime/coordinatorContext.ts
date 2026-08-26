@@ -84,6 +84,16 @@ export interface CoordinatorState {
    * turn (voice, text, or board submission) starts the next teaching turn.
    */
   visualPlanState: 'none' | 'preparing' | 'rendering' | 'visible' | 'failed';
+  /**
+   * Monotonic scope for asynchronous visual work (anchor preflights and
+   * Director scenes). Captured when a request is accepted and re-checked
+   * after every await: a genuine learner turn advances the epoch, so stale
+   * completions are abandoned explicitly instead of building mid-turn.
+   */
+  visualRequestEpoch: number;
+  /** Request ids whose stale completion was already abandoned — the honest
+   * "will not appear" note must fire at most once per request. */
+  abandonedVisualRequests: Set<string>;
   planStagedThisTurn: boolean;
   /** A failed plan may retry once with a simpler plan; never more. */
   planAttemptsThisTurn: number;

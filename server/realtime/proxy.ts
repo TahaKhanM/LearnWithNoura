@@ -108,6 +108,8 @@ function createCoordinatorState(goal: string): CoordinatorState {
     preflightCounter: 0,
     pendingPreflights: new Map(),
     visualPlanState: 'none',
+    visualRequestEpoch: 0,
+    abandonedVisualRequests: new Set(),
     planStagedThisTurn: false,
     planAttemptsThisTurn: 0,
     objectsCreatedThisTurn: new Set(),
