@@ -5,7 +5,7 @@ import {
   type RuntimeEventEnvelope,
 } from '../../shared/runtimeProtocol.js';
 import { buildInstructions } from './instructions.js';
-import { createLessonState } from '../lesson/orchestrator.js';
+import { createLessonState, reduceLesson } from '../lesson/orchestrator.js';
 import { BoardContextTracker, loadReleasedBoardContext } from './boardContext.js';
 import type { DomainRepository } from '../store/domain.js';
 import { SessionTelemetryWriter } from '../session/telemetryWriter.js';
@@ -120,9 +120,20 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
     throw new Error(`Session ${sessionId} has ended and is read-only.`);
   }
 
+  // A lesson never starts on an uncompiled goal. Sessions created before
+  // the compiler existed have no record and replay their stored blueprint.
+  const compiledRecord = await repo.getCompiledLesson(sessionId);
+  if (compiledRecord && compiledRecord.status !== 'ready') {
+    throw new Error(`Session ${sessionId} lesson is not compiled yet (${compiledRecord.status}).`);
+  }
+  const compiledLesson = compiledRecord?.lesson ?? null;
+
   const telemetryRepo = options.telemetryRepo ?? new YieldingTelemetryRepository(repo);
   const telemetryWriter = new SessionTelemetryWriter(telemetryRepo, sessionId);
   const state = createCoordinatorState(session.goal);
+  if (compiledLesson) {
+    state.lessonState = reduceLesson(state.lessonState, { type: 'BLUEPRINT_CREATED', blueprint: compiledLesson.blueprint });
+  }
   state.boardContext = await loadReleasedBoardContext(repo, sessionId);
   const baseInstructions = buildInstructions({
     childName: child.name,
@@ -174,6 +185,7 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
     repo,
     sessionId,
     lessonGoal: session.goal,
+    compiledLesson,
     baseInstructions,
     log,
     telemetryWriter,

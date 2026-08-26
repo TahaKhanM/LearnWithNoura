@@ -1,5 +1,5 @@
 import { validateOps, type BoardOp } from '../../shared/boardOps.js';
-import { LessonBlueprintSchema, ResponseTaxonomySchema, TeachingMoveSchema, type ResponseTaxonomy, type TeachingMove } from '../../shared/pedagogy.js';
+import { ResponseTaxonomySchema, TeachingMoveSchema, type ResponseTaxonomy, type TeachingMove } from '../../shared/pedagogy.js';
 import { adaptSemanticScene, normalizeVisualAction, VisualActionSchema } from '../../shared/semanticScene.js';
 import { DeliveredTaskSchema, submitPolicyForMode, type DeliveredTask } from '../../shared/lessonTurn.js';
 import type { Confidence, Verdict } from '../store/repo.js';
@@ -7,6 +7,7 @@ import { currentStage, reduceLesson } from '../lesson/orchestrator.js';
 import type { CoordinatorContext } from './coordinatorContext.js';
 import { anchorGroupId, assignSectionToPlan, stageAndConfirmPlan } from './boardStaging.js';
 import { identityForResponse } from './responseRegistry.js';
+import { refreshBoardInstructions } from './sessionConfig.js';
 import { finishTool } from './turnFloor.js';
 
 /**
@@ -26,66 +27,6 @@ export async function handleToolCall(ctx: CoordinatorContext, name: string, rawA
   }
 
   switch (name) {
-    case 'create_lesson_blueprint': {
-      if (state.lessonState.blueprint) {
-        const stage = currentStage(state.lessonState);
-        finishTool(ctx, callId, responseId, {
-          ok: false,
-          error: 'A lesson blueprint already exists; execute its current stage instead of regenerating it.',
-          blueprintId: state.lessonState.blueprint.blueprintId,
-          ...(stage ? { currentStage: { id: stage.id, kind: stage.kind, objective: stage.objective } } : {}),
-        });
-        break;
-      }
-      const mode = args.mode === 'conversation_led' ? 'conversation_led' : 'board_led';
-      const candidate = {
-        blueprintId: `blueprint-${globalThis.crypto.randomUUID()}`,
-        goal: (typeof args.goal === 'string' && args.goal.trim() ? args.goal.trim() : ctx.lessonGoal).slice(0, 300),
-        mode,
-        successCriteria: Array.isArray(args.successCriteria)
-          ? args.successCriteria.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0).map((entry) => entry.slice(0, 240)).slice(0, 4)
-          : [],
-        anchor: mode === 'board_led'
-          ? {
-              // The server assigns the anchor section id; the model never
-              // invents a new group per micro-objective.
-              semanticGroupId: 'lesson-anchor',
-              template: String(args.anchorTemplate ?? 'relationship_map').slice(0, 80),
-              instructionalQuestion: String(args.anchorQuestion ?? ctx.lessonGoal).slice(0, 300),
-              invariantObjectIds: [],
-            }
-          : null,
-        stages: args.stages,
-        currentStageIndex: 0,
-        detourStack: [],
-      };
-      const parsedBlueprint = LessonBlueprintSchema.safeParse(candidate);
-      if (!parsedBlueprint.success) {
-        finishTool(ctx, callId, responseId, {
-          ok: false,
-          error: `Blueprint failed validation: ${parsedBlueprint.error.issues.slice(0, 3).map((issue) => issue.message).join('; ')}`.slice(0, 300),
-        });
-        break;
-      }
-      try {
-        state.lessonState = reduceLesson(state.lessonState, { type: 'BLUEPRINT_CREATED', blueprint: parsedBlueprint.data });
-        await ctx.repo.addEvent(ctx.sessionId, 'lesson_blueprint', { blueprint: parsedBlueprint.data });
-        const stage = currentStage(state.lessonState);
-        finishTool(ctx, callId, responseId, {
-          ok: true,
-          blueprintId: parsedBlueprint.data.blueprintId,
-          mode: parsedBlueprint.data.mode,
-          ...(parsedBlueprint.data.anchor ? { anchorGroupId: parsedBlueprint.data.anchor.semanticGroupId } : {}),
-          stages: parsedBlueprint.data.stages.map((entry) => ({ id: entry.id, kind: entry.kind })),
-          ...(stage ? { currentStage: { id: stage.id, kind: stage.kind, objective: stage.objective, boardPurpose: stage.boardPurpose } } : {}),
-          board: state.boardContext.toolSnapshot(),
-        });
-      } catch (error) {
-        finishTool(ctx, callId, responseId, { ok: false, error: String(error).slice(0, 220) });
-      }
-      break;
-    }
-
     case 'inspect_board': {
       const focus = typeof args.focus === 'string' ? args.focus.slice(0, 160) : undefined;
       finishTool(ctx, callId, responseId, {
@@ -141,7 +82,7 @@ export async function handleToolCall(ctx: CoordinatorContext, name: string, rawA
           finishTool(ctx, callId, responseId, {
             ok: false,
             accepted: false,
-            reason: 'Create the lesson blueprint first; board changes execute blueprint stages.',
+            reason: 'This lesson has no blueprint loaded; teach conversationally and use small board_ops increments only.',
             board: state.boardContext.toolSnapshot(),
           });
           break;
@@ -202,6 +143,30 @@ export async function handleToolCall(ctx: CoordinatorContext, name: string, rawA
               reason: `The anchor section ${anchor} is already on the board. Extend or emphasize it; do not rebuild it.`,
               anchorGroupId: anchor,
               board: state.boardContext.toolSnapshot(),
+            });
+            break;
+          }
+          const compiledAnchor = ctx.compiledLesson?.anchorScene;
+          if (compiledAnchor && compiledAnchor.groupId === anchor) {
+            // Establish resolves to the pre-compiled, pre-validated anchor
+            // scene: the voice model triggers the reveal but never invents
+            // the geometry. Runtime preflight still applies, fail closed.
+            const addOps = compiledAnchor.ops.filter((op) => op.op === 'add');
+            stageAndConfirmPlan(ctx, callId, responseId, {
+              ops: addOps,
+              checkpoints: compiledAnchor.storyboard.map((step) => ({
+                id: step.id,
+                semanticObjectId: compiledAnchor.groupId,
+                groupLabel: compiledAnchor.groupLabel,
+                reveal: step.reveal,
+                ops: addOps.filter((op) => step.objectIds.includes(op.id)),
+              })),
+              action: 'establish',
+              storyboard: compiledAnchor.storyboard.map((step) => ({
+                id: step.id,
+                reveal: step.reveal,
+                narration: step.narration,
+              })),
             });
             break;
           }
@@ -403,6 +368,9 @@ export async function handleToolCall(ctx: CoordinatorContext, name: string, rawA
               currentStageIndex: blueprint.currentStageIndex,
               detourStack: blueprint.detourStack,
             });
+            // The stage changed, so the injected per-stage execution
+            // context (objective, checks, storyboard) must change with it.
+            refreshBoardInstructions(ctx);
           }
           const stage = currentStage(state.lessonState);
           finishTool(ctx, callId, responseId, {

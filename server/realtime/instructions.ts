@@ -1,6 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import type { AnchorScene } from '../../shared/compiledLesson.js';
+import type { LessonBlueprint, LessonStage } from '../../shared/pedagogy.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const PROMPT_PATH = join(here, '..', 'prompts', 'realtime.md');
@@ -37,4 +39,50 @@ export function buildInstructions(profile: SessionProfile): string {
 /** Profile fields come from user input; keep them prompt-shaped. */
 function sanitize(value: string): string {
   return value.replace(/\s+/g, ' ').trim().slice(0, 200);
+}
+
+/**
+ * Per-stage execution context injected by the application. The compiled
+ * blueprint is authored before the session; this hands the stage executor
+ * the current stage's objective, its exact check questions, and — for the
+ * anchor-establishing stage — the storyboard narration beats.
+ */
+export function lessonExecutionContext(
+  blueprint: LessonBlueprint | null,
+  stage: LessonStage | null,
+  anchorScene: AnchorScene | null,
+): string {
+  if (!blueprint || !stage) return '';
+  const lines: string[] = [
+    '## Current stage (injected by the application)',
+    `Lesson goal: ${blueprint.goal}`,
+    `Success criteria: ${blueprint.successCriteria.join(' | ')}`,
+    `Stage ${stage.id} (${stage.kind}) — objective: ${stage.objective}`,
+    `Board purpose: ${stage.boardPurpose}; allowed board mutation: ${stage.allowedBoardMutation}.`,
+    `Learner opportunity to create: ${stage.learnerOpportunity}`,
+    `Evidence this stage expects: ${stage.evidenceExpected}`,
+  ];
+  if (blueprint.detourStack.length > 0) {
+    const top = blueprint.detourStack[blueprint.detourStack.length - 1];
+    lines.push(`You are on a prerequisite detour (${top.reason}); after it resolves, the lesson returns to its recorded stage automatically.`);
+  }
+  const checks = stage.checks ?? [];
+  if (checks.length > 0) {
+    lines.push('Check questions for this stage — deliver the wording verbatim as questionOrTask:');
+    for (const check of checks) {
+      const targets = check.targetObjectIds?.length ? `; target objects: ${check.targetObjectIds.join(', ')}` : '';
+      lines.push(`- [${check.id}] "${check.questionOrTask}" (answer by ${check.responseMode}${targets})`);
+      for (const branch of check.misconceptions ?? []) {
+        lines.push(`  - If the learner answers roughly "${branch.anticipatedAnswer}": ${branch.tactic}`);
+      }
+    }
+  }
+  if (anchorScene && stage.allowedBoardMutation === 'establish') {
+    lines.push(`Anchor reveal storyboard for section ${anchorScene.groupId} (${anchorScene.groupLabel}) — when your establish plan is accepted, the pre-validated scene appears checkpoint by checkpoint; speak each beat as its objects appear:`);
+    for (const step of anchorScene.storyboard) {
+      lines.push(`- ${step.reveal} (${step.objectIds.join(', ')}): ${step.narration}`);
+    }
+  }
+  lines.push('Adapt freely inside this stage — rephrase, add examples, change tactics — but do not skip to another stage, change the anchor representation, or invent new check questions when a pre-authored one fits.');
+  return lines.join('\n');
 }

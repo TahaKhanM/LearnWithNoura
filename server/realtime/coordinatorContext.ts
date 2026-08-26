@@ -1,4 +1,5 @@
 import type { BoardOp } from '../../shared/boardOps.js';
+import type { CompiledLesson } from '../../shared/compiledLesson.js';
 import type { GenerationIdentity, RuntimeEventEnvelope } from '../../shared/runtimeProtocol.js';
 import type { DeliveredTask } from '../../shared/lessonTurn.js';
 import type { LessonOrchestrationState } from '../lesson/orchestrator.js';
@@ -102,6 +103,9 @@ export interface CoordinatorContext {
   readonly repo: DomainRepository;
   readonly sessionId: string;
   readonly lessonGoal: string;
+  /** The pre-compiled, validated lesson this session executes; null only
+   * for legacy sessions recorded before the lesson compiler existed. */
+  readonly compiledLesson: CompiledLesson | null;
   readonly baseInstructions: string;
   readonly log: (line: string) => void;
   readonly telemetryWriter: SessionTelemetryWriter;

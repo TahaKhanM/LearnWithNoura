@@ -1,43 +1,11 @@
 /**
  * Tool surface exposed to the realtime tutor. Deliberately small: draw,
- * record what the learner showed, and keep the lesson plan current.
+ * record what the learner showed, and keep the lesson plan current. The
+ * lesson blueprint itself is compiled before the session ever starts; the
+ * realtime tutor executes it and never authors one.
  */
 
 export const REALTIME_TOOLS = [
-  {
-    type: 'function' as const,
-    name: 'create_lesson_blueprint',
-    description:
-      'Create the one durable lesson plan before the first substantive explanation. Choose board_led or conversation_led once. Three to five stages (orient, model, guided_check, independent_check, closure) with one anchor representation for board_led goals. The application persists it; later moves execute the current stage — the blueprint is never regenerated turn by turn.',
-    parameters: {
-      type: 'object',
-      additionalProperties: false,
-      properties: {
-        goal: { type: 'string', minLength: 1, maxLength: 300 },
-        mode: { type: 'string', enum: ['board_led', 'conversation_led'], description: 'board_led when the goal is spatial, quantitative, structural, procedural, or comparative. Chosen once.' },
-        successCriteria: { type: 'array', minItems: 1, maxItems: 4, items: { type: 'string', minLength: 1, maxLength: 240 } },
-        anchorTemplate: { type: 'string', maxLength: 80, description: 'For board_led: the semantic template of the single anchor representation (e.g. triangle_angle_sum, fraction_comparison).' },
-        anchorQuestion: { type: 'string', maxLength: 300, description: 'For board_led: the instructional question the anchor representation answers.' },
-        stages: {
-          type: 'array', minItems: 3, maxItems: 5,
-          items: {
-            type: 'object', additionalProperties: false,
-            properties: {
-              id: { type: 'string', minLength: 1, maxLength: 80 },
-              kind: { type: 'string', enum: ['orient', 'model', 'guided_check', 'independent_check', 'closure'] },
-              objective: { type: 'string', minLength: 1, maxLength: 240 },
-              boardPurpose: { type: 'string', enum: ['establish_anchor', 'reveal_relation', 'demonstrate_change', 'compare_cases', 'elicit_learner_work', 'test_prediction', 'summarize', 'none'] },
-              allowedBoardMutation: { type: 'string', enum: ['establish', 'extend', 'emphasize', 'compare', 'none'] },
-              learnerOpportunity: { type: 'string', minLength: 1, maxLength: 300 },
-              evidenceExpected: { type: 'string', minLength: 1, maxLength: 240 },
-            },
-            required: ['id', 'kind', 'objective', 'boardPurpose', 'allowedBoardMutation', 'learnerOpportunity', 'evidenceExpected'],
-          },
-        },
-      },
-      required: ['goal', 'mode', 'successCriteria', 'stages'],
-    },
-  },
   {
     type: 'function' as const,
     name: 'inspect_board',
@@ -55,7 +23,7 @@ export const REALTIME_TOOLS = [
     type: 'function' as const,
     name: 'semantic_visual_plan',
     description:
-      'Stage the one board change for this teaching turn, before speaking about it. Actions are additive only — visible work never disappears: establish (build the blueprint anchor, once), extend (small additions belong in board_ops), emphasize (highlight named visible objects), compare (an announced side case; the learner view does not switch), none. Trigger: the current blueprint stage needs its board purpose fulfilled. Exception: never call this twice in one tutor turn, and never before the blueprint exists. The application assigns sections, owns geometry and acceptance, and confirms visibility before you may describe the result.',
+      'Stage the one board change for this teaching turn, before speaking about it. Actions are additive only — visible work never disappears: establish (reveal the pre-compiled anchor scene, once), extend (small additions belong in board_ops), emphasize (highlight named visible objects), compare (an announced side case; the learner view does not switch), none. Trigger: the current blueprint stage needs its board purpose fulfilled. Exception: never call this twice in one tutor turn. The application assigns sections, owns geometry and acceptance, and confirms visibility before you may describe the result.',
     parameters: {
       type: 'object',
       additionalProperties: false,
