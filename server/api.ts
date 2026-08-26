@@ -163,6 +163,9 @@ export function createApi(
     const evidence = await repo.listEvidence(session.id);
     const events = await repo.listEvents(session.id, 1000);
     const compiled = await repo.getCompiledLesson(session.id);
+    if (compiled?.status === 'pending' && Date.now() - compiled.updatedAt > 20_000 && child) {
+      void startCompilation(session.id, session.goal, compiled.lesson?.objective ?? session.goal, child);
+    }
     res.json({
       session,
       child,

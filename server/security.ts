@@ -83,7 +83,8 @@ export class SecurityBoundary {
     }
     const parentId = this.parentId(request) ?? 'anonymous';
     const ip = request.ip || request.socket.remoteAddress || 'unknown';
-    const costly = request.path.includes('fallback-turn') || request.path.includes('/sessions');
+    const mutating = !['GET', 'HEAD', 'OPTIONS'].includes(request.method);
+    const costly = mutating && (request.path.includes('fallback-turn') || request.path.includes('/sessions'));
     if (!this.allow(`http:${parentId}:${ip}:${request.path}`, costly ? 30 : 180, 60_000)) {
       response.status(429).json({ error: 'Too many requests. Try again shortly.' });
       return;
