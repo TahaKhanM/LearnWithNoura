@@ -82,6 +82,7 @@ function createCoordinatorState(goal: string): CoordinatorState {
     childHoldsFloor: false,
     lastCreateSource: 'start',
     retryCreateOnDone: false,
+    toolContinueAfterResponseId: null,
     clientIdentity: null,
     clientSequence: 0,
     lastClientSequence: -1,

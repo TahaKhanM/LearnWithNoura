@@ -10,7 +10,7 @@ import {
 } from './storyboardRunner.js';
 import { recordTerminalResponseTelemetry } from './telemetryGlue.js';
 import { handleToolCall } from './toolHandling.js';
-import { noteResponseCreateSettled, requestModelResponse, sendResponseCreate, setEndpointingEagerness } from './turnFloor.js';
+import { MAX_TOOL_CONTINUES, noteResponseCreateSettled, requestModelResponse, sendResponseCreate, setEndpointingEagerness } from './turnFloor.js';
 import { replayBoard } from './sessionRestore.js';
 
 /**
@@ -208,11 +208,22 @@ export async function handleUpstreamEvent(ctx: CoordinatorContext, event: Upstre
       }
       ctx.sendClient({ type: 'response_done', response_id: response?.id, status }, responseIdentity);
       if (response?.id === state.activeResponseId) state.activeResponseId = null;
-      if (state.retryCreateOnDone) {
-        // The child asked something while a response was still running;
-        // their question must not be dropped.
-        state.retryCreateOnDone = false;
-        sendResponseCreate(ctx, state.lastCreateSource);
+      const finishedId = response?.id ?? null;
+      const toolContinueDue = Boolean(finishedId && state.toolContinueAfterResponseId === finishedId);
+      if (toolContinueDue) {
+        state.toolContinueAfterResponseId = null;
+        if (!state.storyboardRun && !state.childHoldsFloor && state.toolContinues < MAX_TOOL_CONTINUES) {
+          state.toolContinues += 1;
+          sendResponseCreate(ctx, 'tool');
+        }
+      } else if (state.retryCreateOnDone) {
+        const learnerRetry = ['user', 'board', 'voice', 'start'].includes(state.lastCreateSource);
+        if (state.storyboardRun && !learnerRetry) {
+          state.retryCreateOnDone = false;
+        } else {
+          state.retryCreateOnDone = false;
+          sendResponseCreate(ctx, state.lastCreateSource === 'beat' ? 'tool' : state.lastCreateSource);
+        }
       }
       noteStoryboardResponseDone(ctx, response?.id ?? null, status);
       break;
@@ -227,10 +238,8 @@ export async function handleUpstreamEvent(ctx: CoordinatorContext, event: Upstre
         /active response in progress/i.test(error?.message ?? '');
       if (alreadyActive) {
         noteResponseCreateSettled(ctx);
-        if (['user', 'board', 'voice'].includes(state.lastCreateSource)) state.retryCreateOnDone = true;
-        // A rejected beat create is retried by the runner at the next
-        // quiet floor, never via the learner-turn retry path.
         if (state.lastCreateSource === 'beat') noteStoryboardCreateRejected(ctx);
+        else state.retryCreateOnDone = true;
       }
       const benign = error?.code === 'response_cancel_not_active' || alreadyActive;
       ctx.log(`session ${ctx.sessionId}: upstream error ${JSON.stringify(event.error).slice(0, 300)}`);

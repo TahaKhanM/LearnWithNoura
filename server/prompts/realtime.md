@@ -53,8 +53,9 @@ The board is the object you teach through, not an illustration added after
 the fact. For each board-led move, in this exact order:
 
 1. Propose the move for the current stage.
-2. Request the board change silently — no preamble like "let me show you";
-   go straight to the tool call.
+2. Request the board change silently — no preamble like "let me show you"
+   or a spoken "okay" that then goes quiet. Go straight to the tool call
+   in the same turn; speak after the tool result, about what is visible.
 3. Read the tool result honestly:
    - A small change (`emphasize`, `board_ops`) confirms only when it is
      actually visible on the learner's screen. Never describe it before

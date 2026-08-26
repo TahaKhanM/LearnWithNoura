@@ -639,8 +639,8 @@ export class RealtimeSession {
     const type = envelope.type;
     switch (type) {
       case 'ready': {
+        const firstWake = this.snapshot.phase === 'connecting';
         this.reconnectAttempts = 0;
-        this.update({ phase: 'listening', error: null });
         this.send('start', {});
         // A reconnect must not lose an open drawing draft: re-arm the
         // server-side "learner is composing" guard for the new connection.
@@ -650,7 +650,12 @@ export class RealtimeSession {
         this.latestQueuedAsk = null;
         if (ask && this.isCurrent(ask.identity)) {
           this.send('user_text', { text: ask.text, idempotencyKey: ask.idempotencyKey });
-          this.update({ phase: 'thinking' });
+          this.update({ phase: 'thinking', error: null });
+        } else if (firstWake) {
+          // Greeting is in flight; do not flip to Listening over a silent wait.
+          this.update({ phase: 'thinking', error: null });
+        } else {
+          this.update({ phase: 'listening', error: null });
         }
         break;
       }
