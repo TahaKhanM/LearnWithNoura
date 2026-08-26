@@ -44,7 +44,7 @@ The active path is:
 
 See [the active architecture ADR](docs/architecture/2026-08-23-noura-runtime-architecture.md), [Board Intelligence v2](docs/architecture/2026-08-23-board-intelligence-v2.md), [threat model](docs/privacy/threat-model.md) and [traceability matrix](docs/traceability/2026-08-23-noura-traceability.md).
 
-## Phase 0 telemetry and prepared smoke
+## Phase 0 telemetry and controlled smoke
 
 Privacy-safe observations are validated, pseudonymized with deterministic
 session-scoped opaque identifiers and submitted to a bounded ordered
@@ -68,9 +68,12 @@ The Phase 0 timing boundaries are deliberately narrow:
 - “First audio” ends when the browser handles the first accepted tutor audio delta for the current response. It is a browser-received boundary, not speaker onset or acoustic evidence.
 - `board_reveal_to_narration` is `first scheduled audible sample − first committed board paint` on one browser monotonic clock. Positive means the board appeared first; negative means scheduled narration came first. It is not animation-completion time.
 
-These offline and browser-observer definitions prevent lifecycle regressions, but no live-provider latency or target-hardware acoustic claim has been made.
+These offline and browser-observer definitions prevent lifecycle regressions.
+One authorized synthetic Preview session produced provider usage and duration
+observations, but no live-provider latency distribution or target-hardware
+acoustic claim has been made.
 
-The live journey is prepared, not authorized or executed by the default gates:
+The live journey is never authorized or executed by the default gates:
 
 ```bash
 npm run test:smoke-report
@@ -96,6 +99,20 @@ currency charge and the script never invents one. `--report-fixture <path>`
 and `npm run test:smoke-report` exercise report construction offline and never
 establish live-provider evidence. Do not run the normal journey, deploy or
 make paid/provider calls without explicit authorization.
+
+For an access-gated `*.vercel.app` deployment, an explicitly authorized
+operator may supply Vercel's 32-character automation secret through
+`NOURA_VERCEL_PROTECTION_BYPASS`. The harness exchanges it server-side for the
+host-bound `_vercel_jwt` cookie before opening a page; the raw secret is not
+placed on browser requests or copied into reports. The temporary secret must be
+revoked after the run.
+
+The August 26 authorized exercise proved one provider-backed lesson and its
+complete, gap-free parent-scoped telemetry log, but did not produce one
+uninterrupted passing reporter run because the deployed nested log adapter was
+missing during that lesson. The adapter is now present and offline gates are
+green. Exact evidence and remaining limits are recorded in the
+[Phase 0 telemetry handoff](docs/architecture/2026-08-25-phase-0-telemetry-handoff.md).
 
 Gap accounting makes known loss visible but is not an end-to-end delivery
 guarantee. If a browser connection never reaches another accepted `ready` or a

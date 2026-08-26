@@ -2,11 +2,25 @@
 
 ## Proven offline
 
-- Final reviewed code head: `e03cde8` against pre-Phase-0 base `d8e2258`.
+- Latest local code head: `e75084a`. A fresh sequential full-gate run at this
+  head passed build, server typecheck, lint, 351/351 Vitest rows,
+  69/69 deterministic smoke-report rows, audit with zero production
+  vulnerabilities, 351/351 integration rows, 16/16 security rows, 6/6 storage
+  rows, brand and all 8 runtime-model assertions, 12/12 browser E2E rows,
+  48/48 unchanged visual baselines, 3/3 accessibility rows, and
+  `git diff --check`.
+- Independent whole-branch reviewed code head: `e03cde8` against pre-Phase-0
+  base `d8e2258`.
   The final whole-branch reviewer retained its **Ready to merge** verdict, with
   no Critical or Important findings, after reviewing the final test-only
   `e03cde8` change; this does not claim another full rerun at a later handoff
   head.
+- Post-review deployment-readiness commits are `5315144` (Vercel worker-union
+  narrowing), `ffe0a32` (protected-preview smoke bootstrap), `a62733b`,
+  `199a416`, `403e5dd`, and `e75084a` (condition-based current home-flow
+  selectors), plus `5b3bee5` (nested Vercel session-log adapter). The bypass
+  implementation received a high-capability implementation pass and an
+  independent security review with no remaining High or Medium blocker.
 - Complete Phase 0 commit ledger through the reviewed head:
   - contract, plan, and initial implementation:
     `e899e5b`, `d850246`, `0f9b03b`, `fce1a6f`, `ee146d3`, `b4bd342`,
@@ -80,26 +94,53 @@
 - No visual snapshot, runtime model/provider identifier, `response.create` or
   VAD ownership, learner draft/Done behavior, tutor permanence behavior, broad
   parent-route cache policy, dependency, migration, table, or service changed.
-- Nothing was pushed or deployed; no provider/live smoke/paid/resource call ran.
-  The three pre-existing untracked architecture prompt/review documents remain
-  untouched and uncommitted, with SHA-256 hashes
+- At the original `e03cde8` verification checkpoint nothing had been pushed or
+  deployed and no provider/live smoke/paid/resource call had run. The later
+  explicitly authorized outcome is recorded below. The three pre-existing
+  untracked architecture prompt/review documents remain untouched and
+  uncommitted, with SHA-256 hashes
   `f8d4fbc9b58f50382402531a9a402babb60734e68d449129480f605e53569f23`,
   `c96d8a90af6b3ceed89ab82f1155a6b54c5bf064c696bb819a6087f0b617580e`,
   and `6aad9f869949c89ca263fdd12dabe85d4aa64f77cb404b509d967843610a6b02`.
 - Runtime identifiers remain `gpt-realtime-2.1`, `gpt-4o-mini-transcribe`, and `gpt-5.6-terra`; Realtime reasoning remains `low`, fallback `none`, and summary `low`. WebSocket plus browser-owned PCM, generation cancellation, released-only replay, parent scoping, and every active runtime invariant remain unchanged.
 
-## Requires authorized live verification
+## Authorized live verification outcome
 
-- Please explicitly authorize deployment of Phase 0 and at most two short synthetic live sessions using synthetic learner data only. Phase 1 has not begun and will not begin under this authorization request.
-- Live remains unverified. Normal execution of `NOURA_BASE_URL=https://authorized-origin.example npm run e2e:live -- --authorized-live-run --text-only` may reach the configured provider and must not occur until deployment and live-provider authorization are explicit.
-- An authorized synthetic run must capture `/api/version` and the parent-owned
-  session log from the authenticated browser context, then retain the exact
-  allowlisted report with git SHA, runtime model IDs, session ID, elapsed
-  duration, tutor-audio total, reconciled `response.done` token categories,
-  Phase 0 aggregates/gap totals, and unresolved observations.
-- Provider token counts can be verified only from a real `response.done.response.usage` projection. Currency is not present there; any USD amount remains optional user input manually reconciled against the provider billing surface. Any local rate-card result must be labelled an estimate with source date.
-- Physical acoustic onset/silence, target device/OS/browser, microphone/speaker path, room noise, real autoplay/permission behavior, and genuine browser zoom still require target-hardware evidence. The prepared synthetic browser report cannot verify them.
-- Any future live smoke remains capped at two short synthetic sessions and must use synthetic learner data only.
+- Explicit authorization was used for a temporary protected Vercel Preview and
+  at most two short synthetic sessions. No Production deployment occurred and
+  Phase 1 did not begin.
+- One provider-backed text-only session completed the application journey on
+  runtime artifact `5315144`: synthetic learner Maya, triangle-angle lesson,
+  same-origin Realtime WebSocket, tutor audio/captions, a seven-object exact
+  triangle scene, one typed learner interruption, immutable ending, and the
+  Parent Area. Screenshots retained only the synthetic product surfaces.
+- The parent-scoped log was recovered from the same durable session after
+  `5b3bee5` exposed the already implemented Express route through Vercel's
+  nested filesystem adapter. The deployed route returned `200`,
+  `Cache-Control: no-store`, schema `1.0.0`, `truncated: false`, and zero
+  telemetry gaps. Observed metrics were:
+  - `ask_to_first_audio`: one observation at 3,998 ms;
+  - `tutor_audio_output_duration`: three observations, 4,350–16,400 ms,
+    mean 8,783 ms;
+  - provider usage: 43,554 total tokens, including 41,625 input-text,
+    1,385 output-text, 544 output-audio, and 27,328 cached-text tokens.
+- This is partial live-provider evidence, not a passing smoke-report claim.
+  The original session's reporter reached the Parent Area but exited nonzero
+  because `/api/sessions/:id/log` was then a Vercel platform `404`. The route
+  was fixed and directly verified, but no later provider-backed session
+  completed the full report. Other attempts stopped before `POST /api/sessions`
+  and made no provider call. The final fixed head therefore remains unverified
+  as a single uninterrupted live end-to-end run.
+- No live latency percentile, acoustic onset/silence, billed currency,
+  target-device, real microphone/speaker, room-noise, autoplay/permission, or
+  genuine zoom claim is made. The observed 3,998 ms text-ask boundary is one
+  synthetic observation only.
+- The temporary automation bypass was revoked, Preview access to the Production
+  database was removed, temporary Preview database settings were deleted, and
+  all DB-enabled preview deployments were deleted. Nothing was pushed.
+- Any additional provider run or deployment now requires fresh explicit
+  authorization. Provider billing reconciliation remains manual because
+  `response.done.response.usage` does not contain a currency charge.
 
 ## Deferred
 
