@@ -1101,6 +1101,36 @@ describe('realtime proxy response annotation', () => {
     expect(toolOutput(upstream, 'targeted-call')).toMatchObject({ ok: true, currentStage: { id: 'check', kind: 'guided_check' } });
   });
 
+  it('rejects a manipulate teaching move without a compiled check in conversation-led and orient stages', async () => {
+    vi.stubGlobal('WebSocket', FakeUpstream);
+    const repo = new Repo(openTestDb());
+    const child = repo.createChild('Maya', 10);
+    const session = repo.createSession(child.id, 'fractions');
+    seedCompiledLesson(repo, session.id, 'conversation_led');
+    const client = new FakeClient();
+    await connectRealtimeProxy(client as never, { apiKey: 'offline-fixture', model: 'gpt-realtime-2.1', repo, sessionId: session.id, createUpstream: () => new FakeUpstream() as never });
+    const active = { ...identity, sessionId: session.id };
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 0, 'hello', {})));
+    const upstream = FakeUpstream.latest;
+    upstream.emit({ type: 'session.updated' });
+    await flushProxy();
+
+    upstream.emit({ type: 'response.created', response: { id: 'manip-response' } });
+    upstream.emit({
+      type: 'response.function_call_arguments.done', response_id: 'manip-response', call_id: 'manip-call', name: 'propose_teaching_move',
+      arguments: JSON.stringify({
+        rationale: 'Invent a manipulate task', microObjective: 'Move a mark', strategy: 'invented',
+        childFacingText: 'Slide the mark.', questionOrTask: 'Slide the mark to one half.',
+        taskId: 'invented-manip', responseMode: 'manipulate', proposedAction: 'question',
+      }),
+    });
+    await flushProxy();
+    expect(toolOutput(upstream, 'manip-call')).toMatchObject({
+      ok: false,
+      error: expect.stringContaining('compiled manipulativeCheck'),
+    });
+  });
+
   it('feeds client board-quality rejection back into the model context', async () => {
     vi.stubGlobal('WebSocket', FakeUpstream);
     const repo = new Repo(openTestDb());

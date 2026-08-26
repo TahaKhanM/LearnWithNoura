@@ -98,6 +98,16 @@ describe('released board context', () => {
     expect(items.find((item) => item.id === 'pond')?.spec).toMatchObject({ kind: 'image', at: [80, 60] });
   });
 
+  it('honors op.semanticGroupId on add when apply is not given a group', () => {
+    const board = new BoardContextTracker();
+    board.apply([
+      { op: 'add', id: 'op-grouped', spec: { kind: 'box', at: [500, 300], text: 'one' }, semanticGroupId: 'from-op' },
+    ], 'tutor');
+    expect(board.visibleOps()).toEqual([
+      expect.objectContaining({ id: 'op-grouped', semanticGroupId: 'from-op' }),
+    ]);
+  });
+
   it('emits visible ops that preserve region membership for the current-board raster', () => {
     const board = new BoardContextTracker();
     board.apply([{ op: 'add', id: 'one-box', spec: { kind: 'box', at: [500, 300], text: 'one' } }], 'tutor', 'region-one');

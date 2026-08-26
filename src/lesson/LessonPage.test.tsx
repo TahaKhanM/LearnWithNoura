@@ -294,6 +294,51 @@ describe('LessonPage board observations', () => {
     });
   });
 
+  it('queues a second draft navigation instead of silently overwriting the first', async () => {
+    window.sessionStorage.setItem('noura.draft.session-1', JSON.stringify({
+      draftId: 'draft-open',
+      semanticGroupId: 'group-a',
+      entries: [{
+        op: {
+          op: 'add',
+          id: 'learner-mark',
+          spec: { kind: 'path', points: [[10, 10], [20, 20]] },
+        },
+        inverse: { op: 'erase', id: 'learner-mark' },
+        note: 'a stroke',
+      }],
+    }));
+    const { session } = await renderStartedLesson();
+    await replayTutor(session, [circle('object-a', 180)], 'group-a', 'First');
+    await replayTutor(session, [circle('object-b', 420)], 'group-b', 'Second');
+    fireEvent.click(screen.getByRole('button', { name: 'Open it' }));
+    await replayTutor(session, [circle('object-c', 260)], 'group-c', 'Third');
+    fireEvent.click(screen.getByRole('button', { name: 'Open it' }));
+    expect((screen.getByLabelText('Board section') as HTMLSelectElement).value).toBe('group-a');
+    expect(session.recordSectionNavigation).not.toHaveBeenCalledWith(
+      expect.objectContaining({ cause: 'notice_open' }),
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('draft-done'));
+    });
+    await act(async () => {
+      session.onSubmissionResult('submission-1', true);
+    });
+
+    expect((screen.getByLabelText('Board section') as HTMLSelectElement).value).toBe('group-c');
+    expect(session.recordSectionNavigation).toHaveBeenCalledWith({
+      previousGroupId: 'group-a',
+      nextGroupId: 'group-b',
+      cause: 'notice_open',
+    });
+    expect(session.recordSectionNavigation).toHaveBeenCalledWith({
+      previousGroupId: 'group-b',
+      nextGroupId: 'group-c',
+      cause: 'notice_open',
+    });
+  });
+
   it('records draft restoration as navigation after Begin', async () => {
     window.sessionStorage.setItem('noura.draft.session-1', JSON.stringify({
       draftId: 'draft-restored',

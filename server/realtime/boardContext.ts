@@ -35,7 +35,7 @@ export class BoardContextTracker {
     for (const op of ops) {
       if (op.op === 'add') {
         const existing = this.items.find((item) => item.id === op.id);
-        const group = semanticGroupId ?? existing?.semanticGroupId;
+        const group = semanticGroupId ?? op.semanticGroupId ?? existing?.semanticGroupId;
         const next: BoardContextItem = {
           id: op.id,
           owner,

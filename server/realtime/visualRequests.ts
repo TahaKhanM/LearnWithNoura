@@ -265,6 +265,12 @@ function startAnchorStoryboard(
       });
       return;
     }
+    // Recheck at first-beat scheduling: speech may have started after the
+    // post-await stale check and before the run is armed.
+    if (visualRequestIsStale(ctx, epoch)) {
+      staleAbandon();
+      return;
+    }
     state.visualPlanState = 'rendering';
     const steps = storyboardRunSteps(scene);
     finishTool(ctx, callId, responseId, {
