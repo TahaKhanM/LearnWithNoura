@@ -691,7 +691,7 @@ export class PostgresRepo implements DomainRepository, ManagedDomainRepository {
       return true;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      if (/permission denied/i.test(message)) return false;
+      if (/permission denied|must be owner/i.test(message)) return false;
       throw error;
     }
   }

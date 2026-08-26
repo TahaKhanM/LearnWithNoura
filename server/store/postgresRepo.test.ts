@@ -148,7 +148,7 @@ describe('PostgresRepo domain contract', () => {
     restrictedPool.query = ((text: unknown, values?: unknown[]) => {
       const sql = String(text);
       if (/^\s*(CREATE|ALTER)\b/i.test(sql)) {
-        return Promise.reject(new Error('permission denied for schema noura'));
+        return Promise.reject(new Error('must be owner of table children'));
       }
       return query(text as string, values);
     }) as typeof restrictedPool.query;
