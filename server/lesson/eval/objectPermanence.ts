@@ -1,54 +1,72 @@
+import { applyOps, emptyScene, type SceneState } from '../../../src/board/scene.js';
+import { RenderedTutorObjectTracker } from '../../../src/board/renderedObjectTracker.js';
 import type { ObjectPermanenceFixture } from './types.js';
 
 export type ObjectPermanenceResult = {
   pass: boolean;
   tutorObjectsVisible: string[];
-  unexplainedDisappearances: Array<{ objectId: string; cause: string; source: 'board_event' | 'metric' }>;
+  unexplainedDisappearances: Array<{ objectId: string; cause: string; source: 'board_event' }>;
 };
 
 /**
- * Reconstructs tutor object permanence from a released-board event log.
- * Tutor removals outside announced section navigation or disappearance metrics fail the gate.
+ * Replays production BoardOps through applyOps and scores tutor permanence with
+ * RenderedTutorObjectTracker. Tutor erase/clear/same-id overwrite outside
+ * announced section navigation fail the gate.
  */
 export function scoreObjectPermanence(fixture: ObjectPermanenceFixture): ObjectPermanenceResult {
-  const visibleTutor = new Set<string>();
+  const tracker = new RenderedTutorObjectTracker();
+  let scene: SceneState = emptyScene;
   const unexplainedDisappearances: ObjectPermanenceResult['unexplainedDisappearances'] = [];
-  const navigationTimes = fixture.sectionNavigations.map((entry) => entry.ts).sort((left, right) => left - right);
+  const navigationByTs = new Map(
+    fixture.sectionNavigations.map((entry) => [entry.ts, entry] as const),
+  );
 
-  const isDuringNavigation = (ts: number): boolean =>
-    fixture.sectionNavigations.some((entry) => entry.ts === ts);
+  const sortedBatches = [...fixture.boardOpBatches].sort((left, right) => left.ts - right.ts);
+  for (const batch of sortedBatches) {
+    const navigation = navigationByTs.get(batch.ts);
+    const tutorIdsBefore = new Set(
+      scene.items.filter((item) => item.owner === 'tutor').map((item) => item.id),
+    );
 
-  const sortedEvents = [...fixture.releasedEvents].sort((left, right) => left.ts - right.ts);
-  for (const event of sortedEvents) {
-    if (event.owner !== 'tutor') continue;
-    if (event.kind === 'add') {
-      visibleTutor.add(event.objectId);
-      continue;
+    const applied = applyOps(scene, batch.ops, batch.owner, batch.semanticGroupId);
+    scene = applied.scene;
+
+    if (batch.owner === 'tutor' && !navigation) {
+      for (const op of batch.ops) {
+        if (op.op === 'add' && tutorIdsBefore.has(op.id) && !applied.added.includes(op.id)) {
+          unexplainedDisappearances.push({
+            objectId: op.id,
+            cause: 'tutor_same_id_overwrite_without_navigation',
+            source: 'board_event',
+          });
+        }
+      }
     }
-    if (!visibleTutor.has(event.objectId)) continue;
-    visibleTutor.delete(event.objectId);
-    if (!isDuringNavigation(event.ts)) {
+
+    const tutorIds = scene.items.filter((item) => item.owner === 'tutor').map((item) => item.id);
+    const disappearances = tracker.observe({
+      visibleTutorIds: tutorIds,
+      allTutorIds: tutorIds,
+      navigation: navigation
+        ? {
+            previousGroupId: navigation.previousSemanticGroupId,
+            nextGroupId: navigation.nextSemanticGroupId,
+            cause: 'picker',
+          }
+        : null,
+    });
+    for (const disappearance of disappearances) {
       unexplainedDisappearances.push({
-        objectId: event.objectId,
-        cause: 'tutor_remove_without_navigation',
+        objectId: disappearance.objectId,
+        cause: disappearance.cause,
         source: 'board_event',
       });
     }
   }
 
-  for (const metric of fixture.disappearanceMetrics) {
-    unexplainedDisappearances.push({
-      objectId: metric.objectId,
-      cause: metric.cause,
-      source: 'metric',
-    });
-  }
-
-  void navigationTimes;
-
   return {
     pass: unexplainedDisappearances.length === 0,
-    tutorObjectsVisible: [...visibleTutor].sort(),
+    tutorObjectsVisible: scene.items.filter((item) => item.owner === 'tutor').map((item) => item.id).sort(),
     unexplainedDisappearances,
   };
 }

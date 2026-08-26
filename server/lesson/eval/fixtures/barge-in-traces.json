@@ -1,7 +1,11 @@
 {
   "schemaVersion": "1.0.0",
-  "label": "dual-gate traces — labelled confirmed-then-cancelled vs true interrupt",
+  "label": "dual-gate traces — labelled confirmed-then-cancelled vs provider_completed",
   "expectPass": true,
+  "expectedConfirmedThenCancelled": 1,
+  "expectedUnlabelledCancellations": 1,
+  "expectedProviderCompletedAfterConfirmed": 1,
+  "expectedProviderFailed": 0,
   "traces": [
     { "gateOutcome": "local_only_rejected" },
     { "gateOutcome": "provider_only_rejected" },

@@ -1,5 +1,7 @@
 import type { TurnLatencyFixture } from './types.js';
 
+const MIN_SAMPLES_FOR_PERCENTILE = 5;
+
 export type PercentileComputation =
   | { status: 'insufficient_n'; n: number; required: number }
   | { status: 'computed'; n: number; p50: number; p95: number; valuesMs: number[] };
@@ -37,10 +39,10 @@ function percentile(sorted: number[], p: number): number {
 
 /**
  * Computes turn-latency percentiles from Phase 0 duration metric fixtures.
- * A single observation is never labelled a percentile.
+ * A single observation is never labelled a percentile; required n is floored at 5.
  */
 export function scoreTurnLatencyPercentiles(fixture: TurnLatencyFixture): TurnLatencyPercentileResult {
-  const required = fixture.minSamplesForPercentile;
+  const required = Math.max(MIN_SAMPLES_FOR_PERCENTILE, fixture.minSamplesForPercentile);
   const responseStarted = fixture.metrics
     .filter((row) => row.name === 'speech_end_to_response_started')
     .map((row) => row.valueMs);

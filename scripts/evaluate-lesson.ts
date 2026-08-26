@@ -3,14 +3,16 @@ import { join, resolve } from 'node:path';
 import { parseLessonEvalAuthorization } from '../server/lesson/eval/authorization.js';
 import { runOfflineLessonEval } from '../server/lesson/eval/runLessonEval.js';
 
-const outputDir = resolve(process.argv[2] ?? 'artifacts/evaluation');
+const argv = process.argv.slice(2);
+const auth = parseLessonEvalAuthorization(argv);
+const outputArg = argv.find((arg) => !arg.startsWith('-'));
+const outputDir = resolve(outputArg ?? 'artifacts/evaluation');
 mkdirSync(outputDir, { recursive: true });
 
-const auth = parseLessonEvalAuthorization(process.argv.slice(2));
 if (auth.authorizedLiveRun) {
   console.error(JSON.stringify({
     ok: false,
-    error: 'Live lesson evaluation is not implemented offline; remove --authorized-live-run or use the authorized smoke reporter.',
+    error: 'Live lesson evaluation is not implemented; remove --authorized-live-run or use the authorized smoke reporter.',
     liveSessionBudget: auth.liveSessionBudget,
   }, null, 2));
   process.exit(1);
@@ -28,6 +30,8 @@ console.log(JSON.stringify({
     dimension: gate.dimension,
     fixtureLabel: gate.fixtureLabel,
     pass: gate.pass,
+    expectPass: gate.expectPass,
+    scorerPass: gate.details.pass,
   })),
 }, null, 2));
 

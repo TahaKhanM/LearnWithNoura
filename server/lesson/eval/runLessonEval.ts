@@ -29,108 +29,107 @@ function gateMatchesExpectation(pass: boolean, expectPass: boolean): boolean {
   return pass === expectPass;
 }
 
+function pushGate<T extends { label: string; expectPass: boolean }, R extends { pass: boolean }>(
+  gates: DimensionGateResult[],
+  dimension: string,
+  fixture: T,
+  score: R,
+): void {
+  gates.push({
+    dimension,
+    fixtureLabel: fixture.label,
+    pass: gateMatchesExpectation(score.pass, fixture.expectPass),
+    expectPass: fixture.expectPass,
+    details: score as Record<string, unknown>,
+  });
+}
+
 export function runOfflineLessonEval(): LessonEvalReport {
   const gates: DimensionGateResult[] = [];
 
-  const revealCoherent = readFixture('reveal-narration-coherent.json', RevealNarrationFixtureSchema);
-  const revealCoherentScore = scoreRevealNarrationCoherence(revealCoherent);
-  gates.push({
-    dimension: 'revealNarrationCoherence',
-    fixtureLabel: revealCoherent.label,
-    pass: gateMatchesExpectation(revealCoherentScore.pass, revealCoherent.expectPass),
-    expectPass: revealCoherent.expectPass,
-    details: revealCoherentScore,
-  });
+  pushGate(
+    gates,
+    'revealNarrationCoherence',
+    readFixture('reveal-narration-coherent.json', RevealNarrationFixtureSchema),
+    scoreRevealNarrationCoherence(readFixture('reveal-narration-coherent.json', RevealNarrationFixtureSchema)),
+  );
 
-  const revealIncoherent = readFixture('reveal-narration-incoherent.json', RevealNarrationFixtureSchema);
-  const revealIncoherentScore = scoreRevealNarrationCoherence(revealIncoherent);
-  gates.push({
-    dimension: 'revealNarrationCoherence',
-    fixtureLabel: revealIncoherent.label,
-    pass: gateMatchesExpectation(revealIncoherentScore.pass, revealIncoherent.expectPass),
-    expectPass: revealIncoherent.expectPass,
-    details: revealIncoherentScore,
-  });
+  pushGate(
+    gates,
+    'revealNarrationCoherence',
+    readFixture('reveal-narration-incoherent.json', RevealNarrationFixtureSchema),
+    scoreRevealNarrationCoherence(readFixture('reveal-narration-incoherent.json', RevealNarrationFixtureSchema)),
+  );
 
-  const permanencePass = readFixture('object-permanence-pass.json', ObjectPermanenceFixtureSchema);
-  const permanencePassScore = scoreObjectPermanence(permanencePass);
-  gates.push({
-    dimension: 'objectPermanence',
-    fixtureLabel: permanencePass.label,
-    pass: gateMatchesExpectation(permanencePassScore.pass, permanencePass.expectPass),
-    expectPass: permanencePass.expectPass,
-    details: permanencePassScore,
-  });
+  pushGate(
+    gates,
+    'revealNarrationCoherence',
+    readFixture('reveal-narration-consecutive-reveals.json', RevealNarrationFixtureSchema),
+    scoreRevealNarrationCoherence(readFixture('reveal-narration-consecutive-reveals.json', RevealNarrationFixtureSchema)),
+  );
 
-  const permanenceFail = readFixture('object-permanence-fail.json', ObjectPermanenceFixtureSchema);
-  const permanenceFailScore = scoreObjectPermanence(permanenceFail);
-  gates.push({
-    dimension: 'objectPermanence',
-    fixtureLabel: permanenceFail.label,
-    pass: gateMatchesExpectation(permanenceFailScore.pass, permanenceFail.expectPass),
-    expectPass: permanenceFail.expectPass,
-    details: permanenceFailScore,
-  });
+  pushGate(
+    gates,
+    'objectPermanence',
+    readFixture('object-permanence-pass.json', ObjectPermanenceFixtureSchema),
+    scoreObjectPermanence(readFixture('object-permanence-pass.json', ObjectPermanenceFixtureSchema)),
+  );
 
-  const latencySufficient = readFixture('turn-latency-metrics.json', TurnLatencyFixtureSchema);
-  const latencyScore = scoreTurnLatencyPercentiles(latencySufficient);
-  gates.push({
-    dimension: 'turnLatencyPercentiles',
-    fixtureLabel: latencySufficient.label,
-    pass: gateMatchesExpectation(latencyScore.pass, latencySufficient.expectPass),
-    expectPass: latencySufficient.expectPass,
-    details: latencyScore,
-  });
+  pushGate(
+    gates,
+    'objectPermanence',
+    readFixture('object-permanence-fail.json', ObjectPermanenceFixtureSchema),
+    scoreObjectPermanence(readFixture('object-permanence-fail.json', ObjectPermanenceFixtureSchema)),
+  );
 
-  const latencyInsufficient = readFixture('turn-latency-insufficient.json', TurnLatencyFixtureSchema);
-  const latencyInsufficientScore = scoreTurnLatencyPercentiles(latencyInsufficient);
-  gates.push({
-    dimension: 'turnLatencyPercentiles',
-    fixtureLabel: latencyInsufficient.label,
-    pass: gateMatchesExpectation(latencyInsufficientScore.pass, latencyInsufficient.expectPass),
-    expectPass: latencyInsufficient.expectPass,
-    details: latencyInsufficientScore,
-  });
+  pushGate(
+    gates,
+    'objectPermanence',
+    readFixture('object-permanence-fail-overwrite.json', ObjectPermanenceFixtureSchema),
+    scoreObjectPermanence(readFixture('object-permanence-fail-overwrite.json', ObjectPermanenceFixtureSchema)),
+  );
 
-  const bargeInTraces = readFixture('barge-in-traces.json', FalseBargeInFixtureSchema);
-  const bargeInScore = scoreFalseBargeIns(bargeInTraces);
-  gates.push({
-    dimension: 'falseBargeIns',
-    fixtureLabel: bargeInTraces.label,
-    pass: gateMatchesExpectation(bargeInScore.pass, bargeInTraces.expectPass),
-    expectPass: bargeInTraces.expectPass,
-    details: bargeInScore,
-  });
+  pushGate(
+    gates,
+    'turnLatencyPercentiles',
+    readFixture('turn-latency-metrics.json', TurnLatencyFixtureSchema),
+    scoreTurnLatencyPercentiles(readFixture('turn-latency-metrics.json', TurnLatencyFixtureSchema)),
+  );
 
-  const bargeInIsolation = readFixture('barge-in-negative-control.json', FalseBargeInFixtureSchema);
-  const bargeInIsolationScore = scoreFalseBargeIns(bargeInIsolation);
-  gates.push({
-    dimension: 'falseBargeIns',
-    fixtureLabel: bargeInIsolation.label,
-    pass: gateMatchesExpectation(bargeInIsolationScore.pass, bargeInIsolation.expectPass),
-    expectPass: bargeInIsolation.expectPass,
-    details: bargeInIsolationScore,
-  });
+  pushGate(
+    gates,
+    'turnLatencyPercentiles',
+    readFixture('turn-latency-insufficient.json', TurnLatencyFixtureSchema),
+    scoreTurnLatencyPercentiles(readFixture('turn-latency-insufficient.json', TurnLatencyFixtureSchema)),
+  );
 
-  const blueprintGood = readFixture('blueprint-good.json', BlueprintQualityFixtureSchema);
-  const blueprintGoodScore = scoreBlueprintQuality(blueprintGood);
-  gates.push({
-    dimension: 'blueprintQuality',
-    fixtureLabel: blueprintGood.label,
-    pass: gateMatchesExpectation(blueprintGoodScore.pass, blueprintGood.expectPass),
-    expectPass: blueprintGood.expectPass,
-    details: blueprintGoodScore,
-  });
+  pushGate(
+    gates,
+    'falseBargeIns',
+    readFixture('barge-in-traces.json', FalseBargeInFixtureSchema),
+    scoreFalseBargeIns(readFixture('barge-in-traces.json', FalseBargeInFixtureSchema)),
+  );
 
-  const blueprintWeak = readFixture('blueprint-weak.json', BlueprintQualityFixtureSchema);
-  const blueprintWeakScore = scoreBlueprintQuality(blueprintWeak);
-  gates.push({
-    dimension: 'blueprintQuality',
-    fixtureLabel: blueprintWeak.label,
-    pass: gateMatchesExpectation(blueprintWeakScore.pass, blueprintWeak.expectPass),
-    expectPass: blueprintWeak.expectPass,
-    details: blueprintWeakScore,
-  });
+  pushGate(
+    gates,
+    'falseBargeIns',
+    readFixture('barge-in-negative-control.json', FalseBargeInFixtureSchema),
+    scoreFalseBargeIns(readFixture('barge-in-negative-control.json', FalseBargeInFixtureSchema)),
+  );
+
+  pushGate(
+    gates,
+    'blueprintQuality',
+    readFixture('blueprint-good.json', BlueprintQualityFixtureSchema),
+    scoreBlueprintQuality(readFixture('blueprint-good.json', BlueprintQualityFixtureSchema)),
+  );
+
+  pushGate(
+    gates,
+    'blueprintQuality',
+    readFixture('blueprint-weak.json', BlueprintQualityFixtureSchema),
+    scoreBlueprintQuality(readFixture('blueprint-weak.json', BlueprintQualityFixtureSchema)),
+  );
 
   return {
     schemaVersion: LESSON_EVAL_SCHEMA_VERSION,

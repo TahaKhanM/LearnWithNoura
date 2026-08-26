@@ -5,33 +5,62 @@
   "storyboard": [
     {
       "id": "reveal-line",
+      "reveal": "outline",
       "objectIds": ["lesson-anchor-line"],
       "narration": "Here is one number line from zero to one."
     },
     {
       "id": "reveal-marks",
+      "reveal": "relation",
       "objectIds": ["lesson-anchor-prompt"],
       "narration": "One-half and three-quarters are marked for you."
     },
     {
       "id": "reveal-marker",
+      "reveal": "label",
       "objectIds": ["lesson-anchor-zone-three-quarters", "lesson-anchor-marker"],
       "narration": "This marker is yours to move."
     }
   ],
+  "anchorScene": {
+    "ops": [
+      { "op": "add", "id": "lesson-anchor-line", "spec": { "kind": "numberline", "at": [130, 300], "w": 740, "min": 0, "max": 1 } },
+      { "op": "add", "id": "lesson-anchor-prompt", "spec": { "kind": "text", "at": [130, 250], "text": "Compare the marks" } },
+      { "op": "add", "id": "lesson-anchor-zone-three-quarters", "spec": { "kind": "point", "at": [620, 300] } },
+      { "op": "add", "id": "lesson-anchor-marker", "spec": { "kind": "point", "at": [500, 300], "label": "?" } }
+    ],
+    "storyboard": [
+      {
+        "id": "reveal-line",
+        "reveal": "outline",
+        "objectIds": ["lesson-anchor-line"],
+        "narration": "Here is one number line from zero to one."
+      },
+      {
+        "id": "reveal-marks",
+        "reveal": "relation",
+        "objectIds": ["lesson-anchor-prompt"],
+        "narration": "One-half and three-quarters are marked for you."
+      },
+      {
+        "id": "reveal-marker",
+        "reveal": "label",
+        "objectIds": ["lesson-anchor-zone-three-quarters", "lesson-anchor-marker"],
+        "narration": "This marker is yours to move."
+      }
+    ]
+  },
   "timeline": [
     { "kind": "reveal", "stepId": "reveal-line", "objectIds": ["lesson-anchor-line"] },
     {
       "kind": "narration",
       "stepId": "reveal-line",
-      "referencedObjectIds": ["lesson-anchor-line"],
       "narrationText": "Here is one number line from zero to one."
     },
     { "kind": "reveal", "stepId": "reveal-marks", "objectIds": ["lesson-anchor-prompt"] },
     {
       "kind": "narration",
       "stepId": "reveal-marks",
-      "referencedObjectIds": ["lesson-anchor-prompt"],
       "narrationText": "One-half and three-quarters are marked for you."
     },
     {
@@ -42,7 +71,6 @@
     {
       "kind": "narration",
       "stepId": "reveal-marker",
-      "referencedObjectIds": ["lesson-anchor-marker"],
       "narrationText": "This marker is yours to move."
     }
   ]

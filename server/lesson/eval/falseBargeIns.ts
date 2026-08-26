@@ -3,7 +3,8 @@ import type { FalseBargeInFixture } from './types.js';
 export type FalseBargeInResult = {
   pass: boolean;
   confirmedThenCancelled: number;
-  trueInterrupts: number;
+  providerCompletedAfterConfirmed: number;
+  providerFailed: number;
   unresolvedConfirmed: number;
   unlabelledCancellations: number;
   localOnlyRejected: number;
@@ -11,12 +12,14 @@ export type FalseBargeInResult = {
 };
 
 /**
- * Counts confirmed-then-cancelled gate outcomes vs labelled true interrupts.
- * Unlabelled cancellations are reported separately — never as proven false barge-ins.
+ * Counts confirmed-then-cancelled gate outcomes vs provider_completed after
+ * confirmed and from unlabelled cancellations. Unlabelled rows are reported
+ * separately — never as proven false barge-ins.
  */
 export function scoreFalseBargeIns(fixture: FalseBargeInFixture): FalseBargeInResult {
   let confirmedThenCancelled = 0;
-  let trueInterrupts = 0;
+  let providerCompletedAfterConfirmed = 0;
+  let providerFailed = 0;
   let unresolvedConfirmed = 0;
   let unlabelledCancellations = 0;
   let localOnlyRejected = 0;
@@ -45,19 +48,23 @@ export function scoreFalseBargeIns(fixture: FalseBargeInFixture): FalseBargeInRe
     if (trace.cancelOutcome === 'provider_cancelled') {
       confirmedThenCancelled += 1;
     } else if (trace.cancelOutcome === 'provider_completed') {
-      trueInterrupts += 1;
+      providerCompletedAfterConfirmed += 1;
+    } else if (trace.cancelOutcome === 'provider_failed') {
+      providerFailed += 1;
     }
   }
 
-  let pass = fixture.expectPass;
-  if (fixture.expectedConfirmedThenCancelled !== undefined) {
-    pass = confirmedThenCancelled === fixture.expectedConfirmedThenCancelled;
-  }
+  const pass =
+    confirmedThenCancelled === fixture.expectedConfirmedThenCancelled &&
+    unlabelledCancellations === fixture.expectedUnlabelledCancellations &&
+    providerCompletedAfterConfirmed === fixture.expectedProviderCompletedAfterConfirmed &&
+    providerFailed === fixture.expectedProviderFailed;
 
   return {
     pass,
     confirmedThenCancelled,
-    trueInterrupts,
+    providerCompletedAfterConfirmed,
+    providerFailed,
     unresolvedConfirmed,
     unlabelledCancellations,
     localOnlyRejected,

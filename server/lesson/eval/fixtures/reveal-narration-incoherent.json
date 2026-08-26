@@ -5,11 +5,13 @@
   "storyboard": [
     {
       "id": "reveal-line",
+      "reveal": "outline",
       "objectIds": ["lesson-anchor-line"],
       "narration": "Here is one number line from zero to one."
     },
     {
       "id": "reveal-marker",
+      "reveal": "label",
       "objectIds": ["lesson-anchor-marker"],
       "narration": "This marker is yours to move."
     }
@@ -18,14 +20,12 @@
     {
       "kind": "narration",
       "stepId": "reveal-marker",
-      "referencedObjectIds": ["lesson-anchor-marker"],
       "narrationText": "This marker is yours to move."
     },
     { "kind": "reveal", "stepId": "reveal-line", "objectIds": ["lesson-anchor-line"] },
     {
       "kind": "narration",
       "stepId": "reveal-line",
-      "referencedObjectIds": ["lesson-anchor-line"],
       "narrationText": "Here is one number line from zero to one."
     },
     { "kind": "reveal", "stepId": "reveal-marker", "objectIds": ["lesson-anchor-marker"] }

@@ -2,7 +2,6 @@
   "schemaVersion": "1.0.0",
   "label": "triangle-angle-sum fixture blueprint — known good",
   "expectPass": true,
-  "minimumTotalScore": 0.7,
   "blueprint": {
     "blueprintId": "blueprint-fixture-triangle-angle-sum",
     "goal": "Explain why the three angles of any triangle add up to 180 degrees",

@@ -1,8 +1,11 @@
 {
   "schemaVersion": "1.0.0",
-  "label": "dual-gate isolation — confirmed-then-cancelled count must match",
+  "label": "dual-gate isolation — pinned confirmed, unlabelled, and completed counts",
   "expectPass": true,
   "expectedConfirmedThenCancelled": 2,
+  "expectedUnlabelledCancellations": 0,
+  "expectedProviderCompletedAfterConfirmed": 1,
+  "expectedProviderFailed": 0,
   "traces": [
     {
       "gateOutcome": "confirmed",

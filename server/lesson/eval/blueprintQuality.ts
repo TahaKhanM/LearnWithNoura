@@ -31,6 +31,7 @@ export type BlueprintDimensionScore = {
   score: number;
   rationale: string;
   source: 'structural' | 'scripted_judge';
+  applicable: boolean;
 };
 
 export type BlueprintQualityResult = {
@@ -70,6 +71,7 @@ function scoreStagePurpose(blueprint: LessonBlueprint): BlueprintDimensionScore 
       ? 'Stages have distinct objectives and a orient→model/check progression.'
       : 'Stages overlap in purpose or lack the expected progression.',
     source: 'structural',
+    applicable: true,
   };
 }
 
@@ -88,6 +90,7 @@ function scoreCheckTaskPairing(blueprint: LessonBlueprint): BlueprintDimensionSc
       score: 0.4,
       rationale: 'No guided or independent check stage present.',
       source: 'structural',
+      applicable: true,
     };
   }
 
@@ -107,6 +110,7 @@ function scoreCheckTaskPairing(blueprint: LessonBlueprint): BlueprintDimensionSc
       ? 'Check stages include explicit questionOrTask wording.'
       : 'A check stage is missing task wording.',
     source: 'structural',
+    applicable: true,
   };
 }
 
@@ -123,6 +127,7 @@ function scoreVisualIntent(blueprint: LessonBlueprint): BlueprintDimensionScore 
       score: 1,
       rationale: 'Conversation-led lesson does not require board anchor authorship.',
       source: 'structural',
+      applicable: true,
     };
   }
 
@@ -139,6 +144,7 @@ function scoreVisualIntent(blueprint: LessonBlueprint): BlueprintDimensionScore 
       ? 'Board-led blueprint declares anchor template and an establish stage.'
       : 'Board-led blueprint is missing anchor intent or establish stage.',
     source: 'structural',
+    applicable: true,
   };
 }
 
@@ -154,9 +160,10 @@ function scoreManipulatePairing(blueprint: LessonBlueprint): BlueprintDimensionS
       dimensionId: dimension.id,
       label: dimension.label,
       weight: dimension.weight,
-      score: 1,
-      rationale: 'No manipulate checks — pairing rule vacuously satisfied.',
+      score: 0,
+      rationale: 'No manipulate checks — dimension excluded from weighted total.',
       source: 'structural',
+      applicable: false,
     };
   }
 
@@ -170,6 +177,7 @@ function scoreManipulatePairing(blueprint: LessonBlueprint): BlueprintDimensionS
       ? 'Every manipulate check includes manipulativeCheck.'
       : 'At least one manipulate check lacks manipulativeCheck.',
     source: 'structural',
+    applicable: true,
   };
 }
 
@@ -178,13 +186,24 @@ function scoreNoAssessmentInImages(blueprint: LessonBlueprint): BlueprintDimensi
   const dimension = rubric.dimensions.find((entry) => entry.id === 'no_assessment_in_images');
   if (!dimension) throw new Error('Missing no_assessment_in_images rubric dimension.');
 
-  const forbidden = /\b(answer|correct|=?[\d./]+(?:°|%)?|assessment target)\b/i;
-  const anchorText = [
+  if (blueprint.mode !== 'board_led') {
+    return {
+      dimensionId: dimension.id,
+      label: dimension.label,
+      weight: dimension.weight,
+      score: 1,
+      rationale: 'Conversation-led lesson has no image-bound anchor intent.',
+      source: 'structural',
+      applicable: true,
+    };
+  }
+
+  const forbidden = /\b(answer|correct|assessment target)\b/i;
+  const imageIntentText = [
     blueprint.anchor?.instructionalQuestion ?? '',
-    ...blueprint.successCriteria,
-    ...blueprint.stages.flatMap((stage) => (stage.checks ?? []).map((check) => check.questionOrTask)),
+    blueprint.anchor?.template ?? '',
   ].join('\n');
-  const leaksAssessment = forbidden.test(anchorText) && blueprint.mode === 'board_led';
+  const leaksAssessment = forbidden.test(imageIntentText);
 
   return {
     dimensionId: dimension.id,
@@ -192,9 +211,10 @@ function scoreNoAssessmentInImages(blueprint: LessonBlueprint): BlueprintDimensi
     weight: dimension.weight,
     score: leaksAssessment ? 0.25 : 1,
     rationale: leaksAssessment
-      ? 'Blueprint text embeds assessment-like literals that belong in BoardOp overlays.'
-      : 'No assessment targets detected in image-bound blueprint text.',
+      ? 'Anchor illustration intent embeds assessment-like wording that belongs in BoardOp overlays.'
+      : 'No assessment targets detected in image-bound anchor intent.',
     source: 'structural',
+    applicable: true,
   };
 }
 
@@ -222,6 +242,7 @@ export function scoreBlueprintQuality(fixture: BlueprintQualityFixture): Bluepri
         score: override.score,
         rationale: override.rationale,
         source: 'scripted_judge',
+        applicable: true,
       });
       continue;
     }
@@ -234,23 +255,22 @@ export function scoreBlueprintQuality(fixture: BlueprintQualityFixture): Bluepri
         score: 0,
         rationale: `No offline scorer registered for ${dimension.id}.`,
         source: 'structural',
+        applicable: true,
       });
       continue;
     }
     dimensions.push(scorer(fixture.blueprint));
   }
 
-  const totalScore = dimensions.reduce((sum, entry) => sum + entry.score * entry.weight, 0);
-  const passThreshold = fixture.minimumTotalScore ?? rubric.passThreshold;
+  const applicable = dimensions.filter((entry) => entry.applicable);
+  const totalWeight = applicable.reduce((sum, entry) => sum + entry.weight, 0);
+  const weightedSum = applicable.reduce((sum, entry) => sum + entry.score * entry.weight, 0);
+  const totalScore = totalWeight > 0 ? weightedSum / totalWeight : 0;
+  const passThreshold = rubric.passThreshold;
   return {
     pass: totalScore >= passThreshold,
     totalScore: Number(totalScore.toFixed(4)),
     passThreshold,
     dimensions,
   };
-}
-
-/** Live strong-model judge adapter entry point — blocked unless authorized. */
-export function createLiveBlueprintJudgeAdapter(_options: { authorizedLiveRun: boolean }): null {
-  return null;
 }

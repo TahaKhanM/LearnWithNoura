@@ -1,7 +1,7 @@
 {
   "schemaVersion": "1.0.0",
   "title": "Noura compiled-lesson blueprint quality rubric",
-  "description": "Fixed offline rubric for Phase 5 blueprint quality scoring. Live strong-model judging uses the same dimensions behind --authorized-live-run.",
+  "description": "Fixed offline rubric for Phase 5 blueprint quality scoring. Live strong-model judging is not implemented.",
   "dimensions": [
     {
       "id": "stage_purpose",

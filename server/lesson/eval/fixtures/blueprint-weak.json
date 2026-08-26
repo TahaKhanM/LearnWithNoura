@@ -2,7 +2,6 @@
   "schemaVersion": "1.0.0",
   "label": "weak blueprint — duplicate stage purpose and missing guided checks",
   "expectPass": false,
-  "minimumTotalScore": 0.72,
   "blueprint": {
     "blueprintId": "blueprint-weak-eval-fixture",
     "goal": "Compare fractions quickly",

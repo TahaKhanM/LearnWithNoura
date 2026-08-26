@@ -33,27 +33,28 @@ labels a single duration observation as a percentile.
 Scoring dimensions (all deterministic offline):
 
 1. **Reveal–narration coherence** — scripted storyboard timelines must
-   narrate each reveal before the next reveal and reference only visible
-   object ids. Includes one passing and one failing fixture.
-2. **Object permanence** — released-board event logs plus optional
-   `tutor_object_disappearance` metrics; tutor removals outside announced
-   section navigation fail. Includes one passing permanence log and one
-   failing disappearance log.
+   narrate each reveal before the next reveal; referenced object ids are
+   derived from each storyboard step’s `objectIds`. When `anchorScene` is
+   present, reveal ops are bound to production `storyboardRunSteps`. Includes
+   passing, narration-before-reveal failing, and consecutive-reveal failing
+   fixtures.
+2. **Object permanence** — production `BoardOp` batches replayed through
+   `applyOps` and scored with `RenderedTutorObjectTracker`; tutor erase,
+   clear, and same-id overwrite outside announced section navigation fail.
+   Includes one passing log and two failing logs (erase and overwrite).
 3. **Turn-latency percentiles** — Phase 0 fixtures of
    `speech_end_to_response_started` and `speech_end_to_first_audio` compute
-   p50/p95 only when `minSamplesForPercentile` is met; otherwise the report
-   states `insufficient_n`.
-4. **False barge-ins** — dual-gate traces count confirmed-then-cancelled
-   (`barge_in_gate_outcome: confirmed` plus
-   `barge_in_cancel_outcome: provider_cancelled`) separately from labelled
-   true interrupts and from unlabelled cancellations. Includes a negative-control
-   fixture on the confirmed-then-cancelled count.
+   p50/p95 only when n ≥ 5 (hard floor); otherwise the report states
+   `insufficient_n`.
+4. **False barge-ins** — dual-gate traces count confirmed-then-cancelled,
+   `provider_completed` after confirmed, `provider_failed`, and unlabelled
+   cancellations separately. Scorer pass matches pinned expected counts only.
+   Includes fixtures that pin all four expected counts.
 5. **Blueprint quality** — fixed rubric at
-   `server/lesson/eval/blueprint-quality-rubric.json`; default offline path
-   uses structural scoring plus scripted judgments for known-good and
-   known-weak compiled-lesson fixtures. Live strong-model judging remains
-   behind `--authorized-live-run` with the same two-session cap as the smoke
-   reporter; the default script refuses live invocation.
+   `server/lesson/eval/blueprint-quality-rubric.json` (`passThreshold: 0.7`);
+   default offline path uses structural scoring for known-good and known-weak
+   compiled-lesson fixtures. Live strong-model judging is **not implemented**;
+   the default script refuses live invocation.
 
 The blueprint rubric, fixtures, and scorer modules compose with — and do not
 replace — `npm run test:av`, `npm run test:smoke-report`, and the existing

@@ -1,6 +1,6 @@
 {
   "schemaVersion": "1.0.0",
-  "label": "triangle anchor — tutor erase outside navigation",
+  "label": "triangle anchor — tutor same-id overwrite outside navigation",
   "expectPass": false,
   "boardOpBatches": [
     {
@@ -16,7 +16,7 @@
     {
       "owner": "tutor",
       "ts": 900,
-      "ops": [{ "op": "erase", "id": "lesson-anchor-angle-a" }]
+      "ops": [{ "op": "add", "id": "lesson-anchor-angle-a", "spec": { "kind": "point", "at": [250, 220], "label": "replaced" } }]
     }
   ],
   "sectionNavigations": []

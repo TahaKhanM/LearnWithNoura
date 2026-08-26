@@ -2,11 +2,27 @@
   "schemaVersion": "1.0.0",
   "label": "triangle anchor — tutor objects persist",
   "expectPass": true,
-  "releasedEvents": [
-    { "kind": "add", "objectId": "lesson-anchor-triangle", "owner": "tutor", "ts": 100 },
-    { "kind": "add", "objectId": "lesson-anchor-angle-a", "owner": "tutor", "ts": 420 },
-    { "kind": "add", "objectId": "lesson-anchor-sum", "owner": "tutor", "ts": 880 },
-    { "kind": "add", "objectId": "learner-mark-1", "owner": "learner", "ts": 1200 }
+  "boardOpBatches": [
+    {
+      "owner": "tutor",
+      "ts": 100,
+      "ops": [{ "op": "add", "id": "lesson-anchor-triangle", "spec": { "kind": "point", "at": [100, 200] } }]
+    },
+    {
+      "owner": "tutor",
+      "ts": 420,
+      "ops": [{ "op": "add", "id": "lesson-anchor-angle-a", "spec": { "kind": "point", "at": [200, 200] } }]
+    },
+    {
+      "owner": "tutor",
+      "ts": 880,
+      "ops": [{ "op": "add", "id": "lesson-anchor-sum", "spec": { "kind": "point", "at": [300, 200] } }]
+    },
+    {
+      "owner": "learner",
+      "ts": 1200,
+      "ops": [{ "op": "add", "id": "learner-mark-1", "spec": { "kind": "point", "at": [400, 200] } }]
+    }
   ],
   "sectionNavigations": [
     {
@@ -14,6 +30,5 @@
       "previousSemanticGroupId": "lesson-anchor",
       "nextSemanticGroupId": "side-compare"
     }
-  ],
-  "disappearanceMetrics": []
+  ]
 }
