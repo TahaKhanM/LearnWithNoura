@@ -7,6 +7,8 @@
 
 import { BOARD_W, BOARD_H, PALETTE, type Vec, type ShapeSpec, type AxesSpec } from '../../shared/boardOps';
 import { compileExpression } from '../../shared/expr';
+import { compileArc, compileCurve } from './compileCurves';
+import { compileAsset } from './compileAssets';
 import { measureText, wrapText, TEXT_SIZES } from './measure';
 import type { SceneItem } from './scene';
 
@@ -24,6 +26,8 @@ export interface PathNode {
    * coordinates (arc commands carry radii and flags, not points).
    */
   bbox?: BBox;
+  /** ViewBox-local path data placed on the board (used by curated assets). */
+  transform?: string;
 }
 
 export interface TextNode {
@@ -36,6 +40,8 @@ export interface TextNode {
   anchor: 'start' | 'middle' | 'end';
   /** Estimated width, so animation can reveal left to right. */
   w: number;
+  /** Margin-note rendering: Caveat via the existing draw-on treatment. */
+  style?: 'handwritten';
 }
 
 export interface KatexNode {
@@ -433,8 +439,11 @@ function compileSpec(
     }
 
     case 'text': {
+      const written = textNodes(spec.at, spec.text, SIZE(spec.size), color, spec.align ?? 'start');
       nodes.push(
-        ...textNodes(spec.at, spec.text, SIZE(spec.size), color, spec.align ?? 'start'),
+        ...(spec.style === 'handwritten'
+          ? written.map((node) => ({ ...node, style: 'handwritten' as const }))
+          : written),
       );
       break;
     }
@@ -978,6 +987,18 @@ function compileSpec(
       });
       break;
     }
+
+    case 'arc':
+      nodes.push(...compileArc(spec, color));
+      break;
+
+    case 'curve':
+      nodes.push(...compileCurve(spec, color));
+      break;
+
+    case 'asset':
+      nodes.push(...compileAsset(spec, color));
+      break;
   }
 
   return nodes;
@@ -1007,6 +1028,8 @@ function defaultColor(spec: ShapeSpec): string {
       return PALETTE.amber;
     case 'label':
       return INK_SOFT;
+    case 'asset':
+      return PALETTE.blue;
     default:
       return INK;
   }
@@ -1130,7 +1153,7 @@ export function compileScene(items: SceneItem[]): CompiledItem[] {
     }
     // Solid/container geometry participates in node-label and edge-label
     // spacing. Stroke-only diagrams remain available for nearby annotations.
-    if (['box', 'table', 'bars'].includes(item.spec.kind)) ctx.occupied.push(bbox);
+    if (['box', 'table', 'bars', 'asset'].includes(item.spec.kind)) ctx.occupied.push(bbox);
     compiled.push({ id: item.id, owner: item.owner, revision: item.revision, nodes, bbox });
   }
   return compiled;

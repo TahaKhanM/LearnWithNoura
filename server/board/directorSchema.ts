@@ -47,7 +47,7 @@ export type DirectorPolicyResult =
  * new object ids must not collide with visible board objects.
  */
 export function applyDirectorBoardPolicy(rawOps: unknown, policy: DirectorPolicyInput): DirectorPolicyResult {
-  const validated = validateOps(rawOps);
+  const validated = validateOps(rawOps, { tier: 'authored' });
   if (validated.rejected.length > 0) {
     return {
       ok: false,

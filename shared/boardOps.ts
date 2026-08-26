@@ -8,6 +8,19 @@
  * single definition of what may reach the board.
  */
 
+import {
+  authoredRejectionReason,
+  isAuthoredOnlySpec,
+  updatePropsYieldAuthored,
+  validateAuthoredKind,
+  type ArcSpec,
+  type AssetSpec,
+  type CurveSpec,
+} from './authoredSpecs';
+
+export type { ArcSpec, AssetSpec, CurveSpec } from './authoredSpecs';
+export { AUTHORED_ONLY_KINDS } from './authoredSpecs';
+
 export const BOARD_W = 1000;
 export const BOARD_H = 600;
 
@@ -82,6 +95,8 @@ export interface TextSpec {
   text: string;
   size?: TextSize;
   align?: 'start' | 'middle' | 'end';
+  /** Director/compiler-only margin-note style. Fast-tier board_ops reject it. */
+  style?: 'handwritten';
 }
 
 /** LaTeX rendered deterministically with KaTeX, never hand-drawn glyphs. */
@@ -190,7 +205,10 @@ export type ShapeSpec =
   | BoxSpec
   | ConnectorSpec
   | TableSpec
-  | PathSpec;
+  | PathSpec
+  | ArcSpec
+  | CurveSpec
+  | AssetSpec;
 
 export type SpecKind = ShapeSpec['kind'];
 
@@ -199,6 +217,8 @@ export interface AddOp {
   id: string;
   color?: string;
   spec: ShapeSpec;
+  /** Region membership for current-board rasters. Not accepted from the voice model. */
+  semanticGroupId?: string;
 }
 
 export interface UpdateOp {
@@ -413,7 +433,8 @@ export function validateSpec(raw: RawOp): ShapeSpec | null {
         raw.size === 'small' || raw.size === 'big' ? raw.size : undefined;
       const align =
         raw.align === 'middle' || raw.align === 'end' ? raw.align : undefined;
-      return { kind: 'text', at, text, ...(size ? { size } : {}), ...(align ? { align } : {}) };
+      const style = raw.style === 'handwritten' ? 'handwritten' as const : undefined;
+      return { kind: 'text', at, text, ...(size ? { size } : {}), ...(align ? { align } : {}), ...(style ? { style } : {}) };
     }
     case 'equation': {
       const at = vec(raw.at);
@@ -594,9 +615,11 @@ export function validateSpec(raw: RawOp): ShapeSpec | null {
       };
     }
     default:
-      return null;
+      return validateAuthoredKind(raw);
   }
 }
+
+export type OpsValidationTier = 'fast' | 'authored';
 
 export interface ValidatedOps {
   ops: BoardOp[];
@@ -608,7 +631,8 @@ export interface ValidatedOps {
  * (and reported back to the model as tool output) rather than failing the
  * whole call: a lesson should survive one bad mark.
  */
-export function validateOps(rawOps: unknown): ValidatedOps {
+export function validateOps(rawOps: unknown, options?: { tier?: OpsValidationTier }): ValidatedOps {
+  const tier = options?.tier ?? 'fast';
   const out: ValidatedOps = { ops: [], rejected: [] };
   if (!Array.isArray(rawOps)) {
     out.rejected.push({ reason: 'ops must be an array', raw: rawOps });
@@ -632,14 +656,22 @@ export function validateOps(rawOps: unknown): ValidatedOps {
           : op;
         const spec = validateSpec(normalizedSpec as RawOp);
         if (!spec) {
+          const kind = (normalizedSpec as RawOp).kind ?? op.kind;
           out.rejected.push({
-            reason: `invalid or unsupported spec for kind "${String(op.kind)}"`,
+            reason: authoredRejectionReason(kind, normalizedSpec as Record<string, unknown>),
             raw,
           });
           break;
         }
         if (spec.kind === 'path') {
           out.rejected.push({ reason: 'path is learner-only', raw });
+          break;
+        }
+        if (tier === 'fast' && isAuthoredOnlySpec(spec)) {
+          out.rejected.push({
+            reason: `${spec.kind === 'text' ? 'handwritten style' : spec.kind} is director/compiler-only`,
+            raw,
+          });
           break;
         }
         const color = normalizeColor(op.color);
@@ -652,7 +684,17 @@ export function validateOps(rawOps: unknown): ValidatedOps {
           out.rejected.push({ reason: 'update requires id and props', raw });
           break;
         }
-        out.ops.push({ op: 'update', id: opId, props: op.props as Record<string, unknown> });
+        const props = op.props as Record<string, unknown>;
+        if (tier === 'fast' && updatePropsYieldAuthored(props)) {
+          out.rejected.push({
+            reason: props.style === 'handwritten'
+              ? 'handwritten style is director/compiler-only'
+              : `${String(props.kind)} is director/compiler-only`,
+            raw,
+          });
+          break;
+        }
+        out.ops.push({ op: 'update', id: opId, props });
         break;
       }
       case 'highlight': {
@@ -686,8 +728,16 @@ export function validateOps(rawOps: unknown): ValidatedOps {
 /**
  * Applies an update's props onto an existing spec by re-validating the
  * merged flat object. An update that would corrupt the spec is ignored.
+ * Fast tier (the default) cannot introduce authored-only vocabulary.
  */
-export function applyUpdate(spec: ShapeSpec, props: Record<string, unknown>): ShapeSpec {
+export function applyUpdate(
+  spec: ShapeSpec,
+  props: Record<string, unknown>,
+  options?: { tier?: OpsValidationTier },
+): ShapeSpec {
   const merged = { ...(spec as unknown as Record<string, unknown>), ...props, kind: spec.kind };
-  return validateSpec(merged as RawOp) ?? spec;
+  const next = validateSpec(merged as RawOp) ?? spec;
+  const tier = options?.tier ?? 'fast';
+  if (tier === 'fast' && isAuthoredOnlySpec(next) && !isAuthoredOnlySpec(spec)) return spec;
+  return next;
 }

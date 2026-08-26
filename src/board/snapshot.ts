@@ -1,6 +1,7 @@
 import { BOARD_H, BOARD_W } from '../../shared/boardOps';
 import { compileScene, type BBox, type RenderNode } from './compile';
 import { FONT_HAND } from './measure';
+import { layoutRegions, REGION_GUTTER } from './regionLayout';
 import type { SceneState } from './scene';
 
 /**
@@ -19,25 +20,37 @@ export interface SceneSnapshotOptions {
 
 const SNAPSHOT_BACKGROUND = '#fcfbf7';
 
-/** Deterministic markup for one scene at the full 1000×600 board viewBox. */
+/** Deterministic markup for one scene. A single region stays 1000×600;
+ * multiple regions tile horizontally with the same gutter as the live camera. */
 export function sceneToCanonicalSvg(scene: SceneState): string {
+  const layout = layoutRegions(scene);
   const compiled = compileScene(scene.items);
+  const width = layout.ids.length <= 1
+    ? BOARD_W
+    : layout.ids.length * BOARD_W + (layout.ids.length - 1) * REGION_GUTTER;
   const body = compiled
-    .map((item) => `<g data-item="${escapeXml(item.id)}">${item.nodes.map(nodeMarkup).join('')}</g>`)
+    .map((item) => {
+      const origin = layout.offset(scene.items.find((candidate) => candidate.id === item.id)?.semanticGroupId);
+      const transform = origin.x === 0 && origin.y === 0 ? '' : ` transform="translate(${origin.x} ${origin.y})"`;
+      return `<g data-item="${escapeXml(item.id)}"${transform}>${item.nodes.map(nodeMarkup).join('')}</g>`;
+    })
     .join('');
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${BOARD_W}" height="${BOARD_H}" viewBox="0 0 ${BOARD_W} ${BOARD_H}">` +
-    `<rect x="0" y="0" width="${BOARD_W}" height="${BOARD_H}" fill="${SNAPSHOT_BACKGROUND}"/>${body}</svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${BOARD_H}" viewBox="0 0 ${width} ${BOARD_H}">` +
+    `<rect x="0" y="0" width="${width}" height="${BOARD_H}" fill="${SNAPSHOT_BACKGROUND}"/>${body}</svg>`;
 }
 
 function nodeMarkup(node: RenderNode): string {
   if (node.type === 'path') {
     return `<path d="${escapeXml(node.d)}" stroke="${escapeXml(node.color)}" stroke-width="${node.width}"` +
       ` stroke-linecap="round" stroke-linejoin="round" fill="${escapeXml(node.fill ?? 'none')}"` +
-      `${node.dash ? ' stroke-dasharray="7 7"' : ''}/>`;
+      `${node.dash ? ' stroke-dasharray="7 7"' : ''}` +
+      `${node.transform ? ` transform="${escapeXml(node.transform)}"` : ''}/>`;
   }
   if (node.type === 'text') {
+    const handwritten = node.style === 'handwritten';
     return `<text x="${node.x}" y="${node.y}" font-size="${node.size}" fill="${escapeXml(node.color)}"` +
-      ` text-anchor="${node.anchor}" font-family="${escapeXml(FONT_HAND)}" font-weight="600">${escapeXml(node.text)}</text>`;
+      ` text-anchor="${node.anchor}" font-family="${escapeXml(FONT_HAND)}" font-weight="${handwritten ? 500 : 600}"` +
+      `${handwritten ? ' data-style="handwritten"' : ''}>${escapeXml(node.text)}</text>`;
   }
   // Equations render as deterministic plain math text. KaTeX HTML needs its
   // external stylesheet, which a serialized snapshot cannot rely on; readable
@@ -95,7 +108,9 @@ export async function renderSceneImage(scene: SceneState, options: SceneSnapshot
       // One image carries both global context and a legible detail crop. This
       // preserves spatial grounding while giving Realtime vision enough pixels
       // to inspect a small learner mark.
-      context.drawImage(image, 0, 0, BOARD_W, BOARD_H, 0, 96, 640, 384);
+      const srcW = image.naturalWidth || BOARD_W;
+      const srcH = image.naturalHeight || BOARD_H;
+      context.drawImage(image, 0, 0, srcW, srcH, 0, 96, 640, 384);
       context.strokeStyle = '#d9d4ca';
       context.lineWidth = 2;
       context.strokeRect(0, 96, 640, 384);
@@ -112,7 +127,9 @@ export async function renderSceneImage(scene: SceneState, options: SceneSnapshot
       context.strokeStyle = '#2c5be0';
       context.strokeRect(dx - 4, dy - 4, target.w + 8, target.h + 8);
     } else {
-      context.drawImage(image, 0, 0, BOARD_W, BOARD_H, 0, 0, canvas.width, canvas.height);
+      const srcW = image.naturalWidth || BOARD_W;
+      const srcH = image.naturalHeight || BOARD_H;
+      context.drawImage(image, 0, 0, srcW, srcH, 0, 0, canvas.width, canvas.height);
     }
     for (const quality of [0.82, 0.68, 0.54, 0.4]) {
       const dataUrl = canvas.toDataURL('image/jpeg', quality);

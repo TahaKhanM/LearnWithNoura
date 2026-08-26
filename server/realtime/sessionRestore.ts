@@ -25,7 +25,7 @@ export async function replayBoard(ctx: CoordinatorContext): Promise<void> {
     .filter((e) => ['board_ops', 'semantic_scene'].includes(e.type) && e.released)
     .map((e) => {
       const payload = e.payload as { ops?: unknown[]; semanticObjectId?: unknown; groupLabel?: unknown; replacesGroup?: unknown; plan?: { groups?: Array<{ id?: unknown; label?: unknown }> } };
-      const ops = validateOps(payload.ops).ops;
+      const ops = validateOps(payload.ops, { tier: 'authored' }).ops;
       const semanticObjectId = typeof payload.semanticObjectId === 'string'
         ? payload.semanticObjectId
         : typeof payload.plan?.groups?.[0]?.id === 'string' ? payload.plan.groups[0].id : undefined;

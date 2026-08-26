@@ -48,6 +48,11 @@ describe('realtime prompt / tool-surface consistency', () => {
     }
     expect(prompt).toContain('INTENT');
     expect(prompt).toContain('never supply geometry');
+    // Director/compiler-only vocabulary must never be taught to the voice model.
+    expect(prompt).not.toMatch(/kind":"arc"/);
+    expect(prompt).not.toMatch(/kind":"curve"/);
+    expect(prompt).not.toMatch(/kind":"asset"/);
+    expect(prompt).not.toContain('handwritten');
   });
 
   it('uses only identifiers the shared validators know', () => {

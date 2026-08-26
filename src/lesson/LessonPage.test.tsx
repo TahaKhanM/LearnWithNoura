@@ -30,6 +30,10 @@ vi.mock('./Avatar', () => ({
   Avatar: () => <div data-testid="avatar" />,
 }));
 
+vi.mock('../board/snapshot', () => ({
+  renderSceneImage: async () => 'data:image/jpeg;base64,dGVzdA==',
+}));
+
 vi.mock('./realtimeSession', () => {
   const identity: GenerationIdentity = {
     sessionId: 'session-1',
@@ -68,8 +72,8 @@ vi.mock('./realtimeSession', () => {
     setMuted = vi.fn();
     end = vi.fn();
     start = vi.fn(async () => {});
-    subscribe = () => () => {};
     getIdentity = () => identity;
+    private readonly listeners = new Set<() => void>();
     private readonly snapshot = {
       phase: 'listening' as const,
       identity,
@@ -84,10 +88,24 @@ vi.mock('./realtimeSession', () => {
       voiceEnergy: 0,
       error: null,
       metrics: {},
-      task: null,
+      task: null as null | {
+        taskId: string;
+        prompt: string;
+        responseMode: 'draw';
+        submitPolicy: 'explicit';
+        semanticGroupId: string;
+      },
       submission: null,
     };
     getSnapshot = () => this.snapshot;
+    subscribe = (listener: () => void) => {
+      this.listeners.add(listener);
+      return () => this.listeners.delete(listener);
+    };
+    setTask(task: NonNullable<typeof this.snapshot.task> | null) {
+      this.snapshot.task = task;
+      this.listeners.forEach((listener) => listener());
+    }
 
     constructor() {
       lessonHarness.sessions.push(this);
@@ -114,6 +132,14 @@ interface SessionDouble {
   ): Promise<boolean | void> | boolean | void;
   onLearnerBoardReplay(ops: BoardOp[], semanticGroupId?: string): void;
   getIdentity(): GenerationIdentity;
+  onSubmissionResult: (submissionId: string, accepted: boolean, error?: string) => void;
+  setTask(task: {
+    taskId: string;
+    prompt: string;
+    responseMode: 'draw';
+    submitPolicy: 'explicit';
+    semanticGroupId: string;
+  } | null): void;
   recordSectionNavigation: ReturnType<typeof vi.fn>;
   recordTutorObjectDisappearance: ReturnType<typeof vi.fn>;
   noteBoardReveal: ReturnType<typeof vi.fn>;
@@ -215,6 +241,56 @@ describe('LessonPage board observations', () => {
       cause: 'picker',
     });
     expect(session.recordSectionNavigation).toHaveBeenCalledTimes(3);
+  });
+
+  it('queues task_focus during an open draft and pans after Done', async () => {
+    window.sessionStorage.setItem('noura.draft.session-1', JSON.stringify({
+      draftId: 'draft-open',
+      semanticGroupId: 'group-a',
+      entries: [{
+        op: {
+          op: 'add',
+          id: 'learner-mark',
+          spec: { kind: 'path', points: [[10, 10], [20, 20]] },
+        },
+        inverse: { op: 'erase', id: 'learner-mark' },
+        note: 'a stroke',
+      }],
+    }));
+    const { session } = await renderStartedLesson();
+    await replayTutor(session, [circle('object-a', 180)], 'group-a', 'First');
+    await replayTutor(session, [circle('object-b', 420)], 'group-b', 'Second');
+
+    expect((screen.getByLabelText('Board section') as HTMLSelectElement).value).toBe('group-a');
+    expect((screen.getByLabelText('Board section') as HTMLSelectElement).disabled).toBe(true);
+
+    act(() => {
+      session.setTask({
+        taskId: 'task-region-2',
+        prompt: 'Draw on the second idea',
+        responseMode: 'draw',
+        submitPolicy: 'explicit',
+        semanticGroupId: 'group-b',
+      });
+    });
+    expect((screen.getByLabelText('Board section') as HTMLSelectElement).value).toBe('group-a');
+    expect(session.recordSectionNavigation).not.toHaveBeenCalledWith(
+      expect.objectContaining({ nextGroupId: 'group-b', cause: 'task_focus' }),
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('draft-done'));
+    });
+    await act(async () => {
+      session.onSubmissionResult('submission-1', true);
+    });
+
+    expect((screen.getByLabelText('Board section') as HTMLSelectElement).value).toBe('group-b');
+    expect(session.recordSectionNavigation).toHaveBeenCalledWith({
+      previousGroupId: 'group-a',
+      nextGroupId: 'group-b',
+      cause: 'task_focus',
+    });
   });
 
   it('records draft restoration as navigation after Begin', async () => {
@@ -452,7 +528,7 @@ describe('RealtimeSession board metric recorders', () => {
       recordSectionNavigation(input: {
         previousGroupId: string | null;
         nextGroupId: string;
-        cause: 'initial_anchor' | 'notice_open' | 'picker' | 'draft_restore';
+        cause: 'initial_anchor' | 'notice_open' | 'picker' | 'draft_restore' | 'arrow' | 'task_focus' | 'tutor_announce';
       }): void;
       recordTutorObjectDisappearance(input: {
         objectId: string;

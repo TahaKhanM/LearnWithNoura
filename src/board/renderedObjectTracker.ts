@@ -1,4 +1,4 @@
-export type NavigationCause = 'initial_anchor' | 'notice_open' | 'picker' | 'draft_restore';
+export type NavigationCause = 'initial_anchor' | 'notice_open' | 'picker' | 'draft_restore' | 'arrow' | 'task_focus' | 'tutor_announce';
 
 export interface AnnouncedBoardNavigation {
   previousGroupId: string | null;
