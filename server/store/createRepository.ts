@@ -36,7 +36,7 @@ export function createRepositoryRuntime(
         ? { rejectUnauthorized: false }
         : { rejectUnauthorized: true },
     });
-    const managed = new PostgresRepo(pool, env.NOURA_POSTGRES_AUTO_MIGRATE === 'true');
+    const managed = new PostgresRepo(pool, env.NOURA_POSTGRES_AUTO_MIGRATE !== 'false');
     const telemetry = new AsyncDomainTelemetryRepository(managed);
     return {
       repo: managed,
