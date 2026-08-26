@@ -728,3 +728,180 @@ describe('the storyboard runner', () => {
     await flushProxy();
   });
 });
+
+describe('visual request scoping across turns', () => {
+  it('abandons a slow anchor preflight that completes after a learner turn, with an honest tool failure', async () => {
+    const harness = await connectBoardLed({ preflightTimeoutMs: 5_000 });
+    harness.upstream.emit({ type: 'response.created', response: { id: 'anchor-response' } });
+    harness.upstream.emit({
+      type: 'response.function_call_arguments.done', response_id: 'anchor-response', call_id: 'anchor-call', name: 'request_visual',
+      arguments: JSON.stringify({
+        schemaVersion: '3.0.0', requestId: 'anchor-request', action: 'establish',
+        purpose: 'Anchor the comparison', idea: 'Both fractions on one shared number line', density: 'minimal',
+      }),
+    });
+    await flushProxy();
+    const preflight = [...harness.client.sent].reverse().find((event) => event.type === 'visual_preflight');
+    expect(preflight).toBeDefined();
+
+    // The learner completes a turn while the preflight is still in flight.
+    harness.upstream.emit({ type: 'input_audio_buffer.speech_started' });
+    harness.upstream.emit({ type: 'input_audio_buffer.speech_stopped' });
+    await flushProxy();
+
+    // The stale acceptance arrives now: nothing may build mid-learner-turn.
+    harness.emitClient('visual_preflight_result', {
+      preflight_id: (preflight!.payload as { preflight_id?: string }).preflight_id,
+      accepted: true,
+      reasons: [],
+    });
+    await flushProxy();
+    await flushProxy();
+    expect(harness.boardCues()).toEqual([]);
+    expect(harness.toolOutput('anchor-call')).toMatchObject({
+      ok: false, accepted: false, reason: expect.stringContaining('moved on'),
+    });
+    expect(harness.metrics.filter((metric) => metric.name === 'storyboard_outcome')).toEqual([
+      expect.objectContaining({ dimensions: expect.objectContaining({ outcome: 'abandoned', source: 'anchor', revealedSteps: 0 }) }),
+    ]);
+  });
+
+  it('abandons a superseded Director completion explicitly and builds only the newest request', async () => {
+    const gates = new Map<string, () => void>();
+    const directVisual: BoardDirector = async (request) => {
+      await new Promise<void>((resolve) => { gates.set(request.sectionId, resolve); });
+      return {
+        ok: true,
+        scene: {
+          groupId: request.sectionId,
+          groupLabel: `Case ${request.sectionId}`,
+          template: null,
+          ops: [{ op: 'add', id: `${request.sectionId}-box`, spec: { kind: 'box', at: [500, 200], w: 320, h: 120, text: 'case' } }],
+          storyboard: [{ id: `${request.sectionId}-outline`, reveal: 'outline', narration: 'Look at this case.', objectIds: [`${request.sectionId}-box`] }],
+        },
+      };
+    };
+    const harness = await connectBoardLed({ directVisual });
+    harness.upstream.emit({ type: 'response.created', response: { id: 'turn1-response' } });
+    harness.upstream.emit({
+      type: 'response.function_call_arguments.done', response_id: 'turn1-response', call_id: 'alt1-call', name: 'request_visual',
+      arguments: JSON.stringify({
+        schemaVersion: '3.0.0', requestId: 'alt1-case', action: 'compare',
+        purpose: 'Contrast with an equal case', idea: 'A case where the two fractions are equal', density: 'minimal',
+      }),
+    });
+    await flushProxy();
+    expect(harness.toolOutput('alt1-call')).toMatchObject({ status: 'preparing', semanticGroupId: 'lesson-anchor-alt1' });
+    harness.upstream.emit({ type: 'response.done', response: { id: 'turn1-response', status: 'completed', output: [{ type: 'function_call' }] } });
+
+    // A learner turn starts the next teaching turn; the tutor asks for a
+    // DIFFERENT comparison before the first one ever finished.
+    harness.upstream.emit({ type: 'input_audio_buffer.speech_started' });
+    harness.upstream.emit({ type: 'input_audio_buffer.speech_stopped' });
+    await flushProxy();
+    harness.upstream.emit({ type: 'response.created', response: { id: 'turn2-response' } });
+    harness.upstream.emit({
+      type: 'response.function_call_arguments.done', response_id: 'turn2-response', call_id: 'alt2-call', name: 'request_visual',
+      arguments: JSON.stringify({
+        schemaVersion: '3.0.0', requestId: 'alt2-case', action: 'compare',
+        purpose: 'Contrast with an unequal case', idea: 'A case where one fraction is clearly larger', density: 'minimal',
+      }),
+    });
+    await flushProxy();
+    expect(harness.toolOutput('alt2-call')).toMatchObject({ status: 'preparing', semanticGroupId: 'lesson-anchor-alt2' });
+
+    // The stale alt1 completion arrives: it is abandoned explicitly (honest
+    // note, telemetry), builds nothing, and interrupts nothing.
+    const createsBefore = harness.responseCreates().length;
+    gates.get('lesson-anchor-alt1')!();
+    await flushProxy();
+    expect(harness.systemNotes().filter((note) => note.includes('lesson has moved on'))).toHaveLength(1);
+    expect(harness.boardCues()).toEqual([]);
+    expect(harness.responseCreates().length).toBe(createsBefore);
+    expect(harness.repo.listEventsForInternalAudit(harness.session.id).filter((event) => event.type === 'directed_scene')).toEqual([]);
+    expect(harness.metrics.filter((metric) => metric.name === 'storyboard_outcome')).toEqual([
+      expect.objectContaining({ dimensions: expect.objectContaining({ outcome: 'abandoned', source: 'director' }) }),
+    ]);
+
+    // The newest request is the one that builds.
+    harness.upstream.emit({ type: 'response.done', response: { id: 'turn2-response', status: 'completed', output: [{ type: 'function_call' }] } });
+    gates.get('lesson-anchor-alt2')!();
+    await flushProxy();
+    const preflight = [...harness.client.sent].reverse().find((event) => event.type === 'visual_preflight');
+    expect(preflight?.payload).toMatchObject({ semanticObjectId: 'lesson-anchor-alt2' });
+    harness.emitClient('visual_preflight_result', {
+      preflight_id: (preflight!.payload as { preflight_id?: string }).preflight_id,
+      accepted: true,
+      reasons: [],
+    });
+    await flushProxy();
+    await flushProxy();
+    expect(harness.repo.listEvents(harness.session.id).some((event) => event.type === 'directed_scene')).toBe(true);
+    expect(harness.boardCues()).toHaveLength(1);
+    expect(JSON.stringify(harness.boardCues()[0].payload)).toContain('lesson-anchor-alt2');
+  });
+
+  it('abandons a Director completion that lands while another build is active, leaving that run untouched', async () => {
+    let releaseDirector!: () => void;
+    const directVisual: BoardDirector = async (request) => {
+      await new Promise<void>((resolve) => { releaseDirector = resolve; });
+      return {
+        ok: true,
+        scene: {
+          groupId: request.sectionId,
+          groupLabel: 'Slow case',
+          template: null,
+          ops: [
+            { op: 'add', id: 'slow-box', spec: { kind: 'box', at: [500, 200], w: 320, h: 120, text: 'slow' } },
+            { op: 'add', id: 'slow-label', spec: { kind: 'label', target: 'slow-box', side: 'below', text: 'late' } },
+          ],
+          storyboard: [
+            { id: 'slow-outline', reveal: 'outline', narration: 'One.', objectIds: ['slow-box'] },
+            { id: 'slow-label-step', reveal: 'label', narration: 'Two.', objectIds: ['slow-label'] },
+          ],
+        },
+      };
+    };
+    const harness = await connectBoardLed({ directVisual });
+    harness.upstream.emit({ type: 'response.created', response: { id: 'turn1-response' } });
+    harness.upstream.emit({
+      type: 'response.function_call_arguments.done', response_id: 'turn1-response', call_id: 'slow-call', name: 'request_visual',
+      arguments: JSON.stringify({
+        schemaVersion: '3.0.0', requestId: 'slow-case', action: 'compare',
+        purpose: 'Contrast with an equal case', idea: 'A case where the two fractions are equal', density: 'minimal',
+      }),
+    });
+    await flushProxy();
+    expect(harness.toolOutput('slow-call')).toMatchObject({ status: 'preparing' });
+    // The covering continuation resolves like any tutor response.
+    harness.upstream.emit({ type: 'response.created', response: { id: 'cover-2' } });
+    harness.upstream.emit({ type: 'response.done', response: { id: 'cover-2', status: 'completed', output: [] } });
+    harness.upstream.emit({ type: 'response.done', response: { id: 'turn1-response', status: 'completed', output: [{ type: 'function_call' }] } });
+
+    // A learner turn, then the tutor establishes the compiled anchor: a
+    // storyboard run is now active when the slow Director result lands.
+    harness.upstream.emit({ type: 'input_audio_buffer.speech_started' });
+    harness.upstream.emit({ type: 'input_audio_buffer.speech_stopped' });
+    await flushProxy();
+    await harness.establish('turn2-response', 'anchor-call');
+    expect(harness.toolOutput('anchor-call')).toMatchObject({ status: 'building' });
+    expect(harness.boardCues()).toHaveLength(1);
+
+    releaseDirector();
+    await flushProxy();
+    // The stale completion is abandoned honestly, exactly once, and the
+    // active anchor run is untouched: no failure state, no interruption.
+    expect(harness.systemNotes().filter((note) => note.includes('lesson has moved on'))).toHaveLength(1);
+    expect(harness.metrics.filter((metric) => metric.name === 'storyboard_outcome')).toEqual([
+      expect.objectContaining({ dimensions: { outcome: 'abandoned', source: 'director', revealedSteps: 0, totalSteps: 2 } }),
+    ]);
+    expect(harness.progressEvents().every((event) => event.status === 'active')).toBe(true);
+
+    // The anchor build continues normally.
+    harness.upstream.emit({ type: 'response.done', response: { id: 'turn2-response', status: 'completed', output: [{ type: 'function_call' }] } });
+    harness.showStep(0);
+    await flushProxy();
+    expect(harness.scopedCreates()).toHaveLength(1);
+    expect(harness.scopedCreates()[0].response?.instructions).toContain('Here is one number line from zero to one.');
+  });
+});
