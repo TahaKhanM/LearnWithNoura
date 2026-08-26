@@ -1,0 +1,280 @@
+{
+  "compiledLessonId": "compiled-fixture-triangle-angle-sum",
+  "schemaVersion": "1.0.0",
+  "goal": "Why do triangle angles add up to 180 degrees?",
+  "objective": "Explain why the three angles of any triangle add up to 180 degrees",
+  "blueprint": {
+    "blueprintId": "blueprint-fixture-triangle-angle-sum",
+    "goal": "Explain why the three angles of any triangle add up to 180 degrees",
+    "mode": "board_led",
+    "successCriteria": [
+      "Learner explains that the three angles rearrange into a straight line",
+      "Learner finds a missing angle from the other two"
+    ],
+    "anchor": {
+      "semanticGroupId": "lesson-anchor",
+      "template": "triangle_angle_sum",
+      "instructionalQuestion": "Why do the three corner angles always fill a straight line?",
+      "invariantObjectIds": []
+    },
+    "stages": [
+      {
+        "id": "orient",
+        "kind": "orient",
+        "objective": "Meet the triangle and its three corner angles",
+        "boardPurpose": "establish_anchor",
+        "allowedBoardMutation": "establish",
+        "learnerOpportunity": "Point out the widest-looking corner",
+        "evidenceExpected": "recall",
+        "checks": [
+          {
+            "id": "orient-widest",
+            "questionOrTask": "Which corner of the triangle looks the widest to you?",
+            "responseMode": "voice",
+            "targetObjectIds": [
+              "lesson-anchor-angle-a",
+              "lesson-anchor-angle-b",
+              "lesson-anchor-angle-c"
+            ],
+            "misconceptions": [
+              {
+                "anticipatedAnswer": "The top corner is always the biggest",
+                "tactic": "Compare a tall narrow corner with a low wide one directly on the board."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "model",
+        "kind": "model",
+        "objective": "See the three angles fill the straight line",
+        "boardPurpose": "reveal_relation",
+        "allowedBoardMutation": "extend",
+        "learnerOpportunity": "Predict the total before the sum is revealed",
+        "evidenceExpected": "reasoning",
+        "checks": [
+          {
+            "id": "model-predict",
+            "questionOrTask": "If we slide all three angles onto the straight line, how much of it do you think they fill?",
+            "responseMode": "voice",
+            "targetObjectIds": [
+              "lesson-anchor-straight-line"
+            ],
+            "misconceptions": [
+              {
+                "anticipatedAnswer": "They fill more than the line",
+                "tactic": "Trace each angle onto the line one at a time and stop exactly at the end."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "apply",
+        "kind": "guided_check",
+        "objective": "Use the 180-degree sum to find a missing angle",
+        "boardPurpose": "elicit_learner_work",
+        "allowedBoardMutation": "emphasize",
+        "learnerOpportunity": "Work out the third angle aloud from two given angles",
+        "evidenceExpected": "application",
+        "checks": [
+          {
+            "id": "apply-missing",
+            "questionOrTask": "A triangle has angles of 60 degrees and 80 degrees. What must the third angle be?",
+            "responseMode": "voice",
+            "targetObjectIds": [
+              "lesson-anchor-sum"
+            ],
+            "misconceptions": [
+              {
+                "anticipatedAnswer": "140 degrees",
+                "tactic": "Return to the sum equation and subtract both known angles from 180 step by step."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "closure",
+        "kind": "closure",
+        "objective": "Say the rule in their own words",
+        "boardPurpose": "summarize",
+        "allowedBoardMutation": "none",
+        "learnerOpportunity": "Explain the straight-line idea to a friend",
+        "evidenceExpected": "explanation"
+      }
+    ],
+    "currentStageIndex": 0,
+    "detourStack": []
+  },
+  "anchorScene": {
+    "groupId": "lesson-anchor",
+    "groupLabel": "Triangle angle sum",
+    "template": "triangle_angle_sum",
+    "ops": [
+      {
+        "op": "add",
+        "id": "lesson-anchor-triangle",
+        "spec": {
+          "kind": "polygon",
+          "points": [
+            [
+              230,
+              430
+            ],
+            [
+              500,
+              135
+            ],
+            [
+              770,
+              430
+            ]
+          ]
+        },
+        "color": "#26231F"
+      },
+      {
+        "op": "add",
+        "id": "lesson-anchor-straight-line",
+        "spec": {
+          "kind": "line",
+          "from": [
+            165,
+            135
+          ],
+          "to": [
+            835,
+            135
+          ],
+          "dash": true
+        },
+        "color": "#26231F"
+      },
+      {
+        "op": "add",
+        "id": "lesson-anchor-angle-a",
+        "spec": {
+          "kind": "angle",
+          "vertex": [
+            230,
+            430
+          ],
+          "from": [
+            770,
+            430
+          ],
+          "to": [
+            500,
+            135
+          ],
+          "label": "A",
+          "radius": 48
+        },
+        "color": "#2C5BE0"
+      },
+      {
+        "op": "add",
+        "id": "lesson-anchor-angle-c",
+        "spec": {
+          "kind": "angle",
+          "vertex": [
+            500,
+            135
+          ],
+          "from": [
+            230,
+            430
+          ],
+          "to": [
+            770,
+            430
+          ],
+          "label": "C",
+          "radius": 54
+        },
+        "color": "#F0A227"
+      },
+      {
+        "op": "add",
+        "id": "lesson-anchor-angle-b",
+        "spec": {
+          "kind": "angle",
+          "vertex": [
+            770,
+            430
+          ],
+          "from": [
+            500,
+            135
+          ],
+          "to": [
+            230,
+            430
+          ],
+          "label": "B",
+          "radius": 48
+        },
+        "color": "#E14B3C"
+      },
+      {
+        "op": "add",
+        "id": "lesson-anchor-straight-label",
+        "spec": {
+          "kind": "label",
+          "target": "lesson-anchor-straight-line",
+          "text": "straight line = 180°",
+          "side": "above"
+        },
+        "color": "#26231F"
+      },
+      {
+        "op": "add",
+        "id": "lesson-anchor-sum",
+        "spec": {
+          "kind": "equation",
+          "at": [
+            390,
+            480
+          ],
+          "latex": "A+B+C=180^\\circ",
+          "size": "big"
+        },
+        "color": "#14A07A"
+      }
+    ],
+    "storyboard": [
+      {
+        "id": "compiled-fixture-triangle-angle-sum:lesson-anchor:0:outline",
+        "reveal": "outline",
+        "narration": "Here is one triangle with its dashed straight line resting on top.",
+        "objectIds": [
+          "lesson-anchor-triangle",
+          "lesson-anchor-straight-line"
+        ]
+      },
+      {
+        "id": "compiled-fixture-triangle-angle-sum:lesson-anchor:1:relation",
+        "reveal": "relation",
+        "narration": "Each coloured arc marks one of the three corner angles.",
+        "objectIds": [
+          "lesson-anchor-angle-a",
+          "lesson-anchor-angle-c",
+          "lesson-anchor-angle-b"
+        ]
+      },
+      {
+        "id": "compiled-fixture-triangle-angle-sum:lesson-anchor:2:label",
+        "reveal": "label",
+        "narration": "Together the three angles fill the straight line, and a straight line is 180 degrees.",
+        "objectIds": [
+          "lesson-anchor-straight-label",
+          "lesson-anchor-sum"
+        ]
+      }
+    ]
+  },
+  "compiledAt": 0,
+  "compilerModel": "fixture-compiler"
+}

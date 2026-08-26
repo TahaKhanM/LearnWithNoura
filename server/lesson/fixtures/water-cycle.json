@@ -1,0 +1,257 @@
+{
+  "compiledLessonId": "compiled-fixture-water-cycle",
+  "schemaVersion": "1.0.0",
+  "goal": "How does the water cycle work?",
+  "objective": "Explain how water cycles through evaporation, condensation, precipitation, and collection",
+  "blueprint": {
+    "blueprintId": "blueprint-fixture-water-cycle",
+    "goal": "Explain how water cycles through evaporation, condensation, precipitation, and collection",
+    "mode": "board_led",
+    "successCriteria": [
+      "Learner narrates one full trip of a water drop around the cycle",
+      "Learner names what drives evaporation"
+    ],
+    "anchor": {
+      "semanticGroupId": "lesson-anchor",
+      "template": "causal_cycle",
+      "instructionalQuestion": "How does the same water keep going around and around?",
+      "invariantObjectIds": []
+    },
+    "stages": [
+      {
+        "id": "orient",
+        "kind": "orient",
+        "objective": "Meet the four stages of the cycle",
+        "boardPurpose": "establish_anchor",
+        "allowedBoardMutation": "establish",
+        "learnerOpportunity": "Say which stage they have seen in real life",
+        "evidenceExpected": "recall",
+        "checks": [
+          {
+            "id": "orient-seen",
+            "questionOrTask": "Which of these four stages have you seen with your own eyes?",
+            "responseMode": "voice",
+            "targetObjectIds": [
+              "lesson-anchor-node-0",
+              "lesson-anchor-node-2"
+            ],
+            "misconceptions": [
+              {
+                "anticipatedAnswer": "Rain is new water from space",
+                "tactic": "Ask where puddles go after a sunny day and connect that to the rain they saw."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "model",
+        "kind": "model",
+        "objective": "Follow one water drop around the loop",
+        "boardPurpose": "reveal_relation",
+        "allowedBoardMutation": "extend",
+        "learnerOpportunity": "Predict where the drop goes after each stage",
+        "evidenceExpected": "reasoning",
+        "checks": [
+          {
+            "id": "model-next",
+            "questionOrTask": "A water drop has just evaporated into the sky. What happens to it next?",
+            "responseMode": "voice",
+            "targetObjectIds": [
+              "lesson-anchor-node-1"
+            ],
+            "misconceptions": [
+              {
+                "anticipatedAnswer": "It disappears forever",
+                "tactic": "Point at the loop arrow and ask what the cold sky does to invisible water."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "apply",
+        "kind": "guided_check",
+        "objective": "Narrate the full cycle without help",
+        "boardPurpose": "elicit_learner_work",
+        "allowedBoardMutation": "emphasize",
+        "learnerOpportunity": "Tell the story of one drop through all four stages",
+        "evidenceExpected": "explanation",
+        "checks": [
+          {
+            "id": "apply-narrate",
+            "questionOrTask": "Tell me the whole journey of one drop, starting from a puddle, using all four stages.",
+            "responseMode": "voice",
+            "targetObjectIds": [
+              "lesson-anchor-edge-loop"
+            ],
+            "misconceptions": [
+              {
+                "anticipatedAnswer": "The journey ends at collection",
+                "tactic": "Follow the loop arrow back to evaporation and ask what the sun does to the collected water."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "closure",
+        "kind": "closure",
+        "objective": "Connect the cycle to their own weather",
+        "boardPurpose": "summarize",
+        "allowedBoardMutation": "none",
+        "learnerOpportunity": "Explain where today’s clouds came from",
+        "evidenceExpected": "application"
+      }
+    ],
+    "currentStageIndex": 0,
+    "detourStack": []
+  },
+  "anchorScene": {
+    "groupId": "lesson-anchor",
+    "groupLabel": "The water cycle",
+    "template": "causal_cycle",
+    "ops": [
+      {
+        "op": "add",
+        "id": "lesson-anchor-node-0",
+        "spec": {
+          "kind": "box",
+          "at": [
+            500,
+            110
+          ],
+          "text": "Evaporation"
+        },
+        "color": "#2C5BE0"
+      },
+      {
+        "op": "add",
+        "id": "lesson-anchor-node-1",
+        "spec": {
+          "kind": "box",
+          "at": [
+            800,
+            300
+          ],
+          "text": "Condensation"
+        },
+        "color": "#F0A227"
+      },
+      {
+        "op": "add",
+        "id": "lesson-anchor-node-2",
+        "spec": {
+          "kind": "box",
+          "at": [
+            500,
+            490
+          ],
+          "text": "Precipitation"
+        },
+        "color": "#F0A227"
+      },
+      {
+        "op": "add",
+        "id": "lesson-anchor-node-3",
+        "spec": {
+          "kind": "box",
+          "at": [
+            200,
+            300
+          ],
+          "text": "Collection"
+        },
+        "color": "#14A07A"
+      },
+      {
+        "op": "add",
+        "id": "lesson-anchor-edge-0",
+        "spec": {
+          "kind": "line",
+          "from": [
+            580.2578121776517,
+            160.82994771251273
+          ],
+          "to": [
+            719.7421878223483,
+            249.17005228748727
+          ],
+          "arrow": "end"
+        },
+        "color": "#26231F"
+      },
+      {
+        "op": "add",
+        "id": "lesson-anchor-edge-1",
+        "spec": {
+          "kind": "line",
+          "from": [
+            719.7421878223483,
+            350.82994771251276
+          ],
+          "to": [
+            580.2578121776517,
+            439.17005228748724
+          ],
+          "arrow": "end"
+        },
+        "color": "#26231F"
+      },
+      {
+        "op": "add",
+        "id": "lesson-anchor-edge-2",
+        "spec": {
+          "kind": "line",
+          "from": [
+            419.7421878223483,
+            439.17005228748724
+          ],
+          "to": [
+            280.2578121776517,
+            350.82994771251276
+          ],
+          "arrow": "end"
+        },
+        "color": "#26231F"
+      },
+      {
+        "op": "add",
+        "id": "lesson-anchor-edge-loop",
+        "spec": {
+          "kind": "connector",
+          "from": "lesson-anchor-node-3",
+          "to": "lesson-anchor-node-0",
+          "label": "continues"
+        },
+        "color": "#2C5BE0"
+      }
+    ],
+    "storyboard": [
+      {
+        "id": "compiled-fixture-water-cycle:lesson-anchor:0:outline",
+        "reveal": "outline",
+        "narration": "Here are the four stops water visits on its journey.",
+        "objectIds": [
+          "lesson-anchor-node-0",
+          "lesson-anchor-node-1",
+          "lesson-anchor-node-2",
+          "lesson-anchor-node-3"
+        ]
+      },
+      {
+        "id": "compiled-fixture-water-cycle:lesson-anchor:3:connector",
+        "reveal": "connector",
+        "narration": "The arrows show the direction the water travels, around and around forever.",
+        "objectIds": [
+          "lesson-anchor-edge-0",
+          "lesson-anchor-edge-1",
+          "lesson-anchor-edge-2",
+          "lesson-anchor-edge-loop"
+        ]
+      }
+    ]
+  },
+  "compiledAt": 0,
+  "compilerModel": "fixture-compiler"
+}
