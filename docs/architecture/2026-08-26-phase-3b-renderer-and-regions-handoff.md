@@ -156,6 +156,24 @@ new ones above.
 - Reconnect camera derivation (lands on the first/anchor region) in a live
   multi-region lesson.
 
+## Rework (adversarial reviews, 2026-08-26)
+
+Two independent reviews of `1666601..646b8dd` asked for a rework. Findings
+and resolutions:
+
+| ID | Finding | Resolution | Proving test |
+| --- | --- | --- | --- |
+| H1 | Fast-tier `update` could set `style: handwritten` (and would accept future authored-only props). | `validateOps` rejects authored-only update props on the fast tier. `applyUpdate` defaults to fast and will not introduce authored-only vocabulary; `applyOps` / board-context replay pass `{ tier: 'authored' }` so a validated Director update still lands. | `authoredSpecs.test.ts` add+update batch; `boardOps.test.ts` applyUpdate tiers; `scene.test.ts` typeset remains typeset |
+| M1 | Director current-board JPEG flattened every region into one 1000×600 tile. | `visibleOps()` preserves `semanticGroupId`. `applyOps` reads it when the caller does not pass a group. `sceneToCanonicalSvg` tiles regions with the live gutter; a single region is still `0 0 1000 600`. | `snapshot.test.ts` two boxes at `[500,300]` get distinct translates; `boardContext.test.ts` visibleOps membership |
+| M2 | `sceneForGroup` kept ungrouped items in every scoped slice. | Ungrouped items belong to region 0 only (first named section), matching `layoutRegions`. | `sceneGroups.test.ts` |
+| M-draft | `task_focus` during an open draft was dropped. | Queue the navigation in a ref; flush on Done (submission ack) or Cancel. Camera still does not move while the draft is open. | `LessonPage.test.tsx` queues then pans to region 2 after Done |
+| L-peek | Compact focus hiding compared neighbour local boxes to the active-region crop. | `contains` now uses the camera (world) against origin-offset node boxes. | `BoardCanvas.test.tsx` two-region compact focus |
+| L1 | Board summary omitted handwritten style. | `describeSpec` appends `, handwritten`. | `boardContext.test.ts` |
+| L2 | `camera.ts` comment claimed a first-target jump the code did not do. | Comment aligned with `instant \|\| prefersReducedMotion()`. | n/a (comment only) |
+| L3 | `tutor_announce` auto-pan. | Still deferred. Not implemented. | n/a |
+
+No existing visual baselines were regenerated.
+
 ## Deferred
 
 - Vertical / grid region layouts (horizontal strip only).
