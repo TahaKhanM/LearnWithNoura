@@ -36,11 +36,11 @@ Board Intelligence v2 tests reconstruct released tutor and learner objects while
 
 Canonical geometry includes every exact subject template plus relationship-map, worked-step, comparison and proportional part–whole grammars at desktop, tablet and mobile-focus sizes. Compact traversal must expose every required annotation/equation without clipping. The real Lesson has desktop/mobile board-awareness baselines; adversarial browser coverage verifies section isolation, section-bound learner marks, specific highlight de-emphasis, status semantics and the original triangle/text stroke collision.
 
-## Prepared live-provider smoke
+## Controlled live-provider smoke
 
 Offline fixtures are the default. `npm run test:av` drives the production `ResponseCueTimeline` and `CharacterAttentionController`; it derives one caption-cue error and one visual-cue error from observed scheduler releases, final correction from observed playback completion, pending/stale cues from post-cancel scheduler state, interruption attention from controller output, and audio resumption/silence from PCM windows. It retains seven non-redundant gates and publishes a full 7×7 negative-control matrix. Every row mutates captured trace or PCM input, must make its named gate false, and must leave all six unrelated gates at the passing baseline; the evaluator exits nonzero if isolation fails. It does not report distribution percentiles from single observations. The JSON report and WAV are written under `artifacts/evaluation/`; they are deterministic offline production-module evidence, not provider, rendered-browser, frame-performance or target-hardware evidence. The former generic drawbox MP4 and assigned mobile-frame/render-phase metrics were removed because they did not observe a Noura application surface.
 
-The synthetic live reporter is prepared but remains unexecuted:
+The synthetic live reporter remains excluded from every default gate:
 
 ```bash
 # DO NOT RUN without explicit deployment and live-provider authorization.
@@ -58,6 +58,14 @@ nonzero when speech-end-to-response-start, speech-end-to-first-audio,
 tutor-audio-duration, or provider-usage observations are absent. Text-only mode
 requires its text-ask first-audio boundary and does not require either
 speech-end metric.
+
+For an authorized protected `*.vercel.app` target, provide the temporary
+32-character automation credential only through
+`NOURA_VERCEL_PROTECTION_BYPASS`. The harness validates the target, performs a
+manual-redirect server-side bootstrap, accepts only Vercel's host-bound
+`_vercel_jwt` cookie, and opens the browser without the raw secret in request
+headers. Revoke the bypass and remove temporary data-service access immediately
+afterward.
 
 The one JSON report contains:
 
@@ -86,7 +94,14 @@ fallback/failed transport phase never recovers, final observations can be lost
 before the aggregate client gap is delivered. Reject such a run as unable to
 prove telemetry completeness.
 
-A future authorized pre-merge live smoke remains limited to two short synthetic sessions. Never loop paid calls for screenshots. Until that authorization and run occur, live-provider behavior, live latency, billed currency, acoustic silence, and target-hardware results remain UNVERIFIED.
+The August 26 authorized exercise completed one provider-backed synthetic
+lesson and recovered a complete, gap-free parent-scoped telemetry log after the
+missing nested Vercel route adapter was deployed. It did not produce a single
+uninterrupted passing reporter run, so the final fixed head is not claimed as
+live-verified. Never loop paid calls for screenshots. Every future deployment
+or provider run requires fresh explicit authorization and must remain short and
+synthetic. Live latency distributions, billed currency, acoustic silence, and
+target-hardware results remain UNVERIFIED.
 
 ## Target hardware
 
