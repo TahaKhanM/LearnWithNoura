@@ -24,9 +24,13 @@ import type {
 
 type Queryable = Pick<Pool | PoolClient, 'query'>;
 
+const COMPILED_LESSON_EVENT_TYPE = 'noura.compiled_lesson';
+
 /** Managed Postgres implementation of the complete Noura domain contract. */
 export class PostgresRepo implements DomainRepository, ManagedDomainRepository {
   private initialized: Promise<void> | null = null;
+  private compiledLessonStorage: 'table' | 'sidecar' = 'table';
+  private boardAssetsStorage: 'table' | 'unavailable' = 'table';
 
   constructor(private readonly pool: Pool, private readonly autoMigrate = true) {}
 
@@ -40,7 +44,8 @@ export class PostgresRepo implements DomainRepository, ManagedDomainRepository {
       await this.initialize();
       const result = await this.pool.query('SELECT 1 AS ok');
       return Number(result.rows[0]?.ok) === 1;
-    } catch {
+    } catch (error) {
+      console.error(`[storage] health failed: ${String(error instanceof Error ? error.message : error).slice(0, 240)}`);
       return false;
     }
   }
@@ -164,14 +169,38 @@ export class PostgresRepo implements DomainRepository, ManagedDomainRepository {
       const session = await this.getSessionWith(client, sessionId);
       if (!session) throw new Error('Unknown session.');
       const now = Date.now();
-      await client.query(
-        `INSERT INTO noura.compiled_lessons (session_id, status, lesson_json, failure_reason, created_at, updated_at)
-         VALUES ($1, $2, $3::jsonb, $4, $5, $5)
-         ON CONFLICT (session_id) DO UPDATE SET
-           status = EXCLUDED.status, lesson_json = EXCLUDED.lesson_json,
-           failure_reason = EXCLUDED.failure_reason, updated_at = EXCLUDED.updated_at`,
-        [sessionId, update.status, lesson ? JSON.stringify(lesson) : null, update.failureReason ?? null, now],
-      );
+      if (this.compiledLessonStorage === 'sidecar') {
+        const existing = await this.getCompiledLessonWith(client, sessionId);
+        const payload = {
+          status: update.status,
+          lesson,
+          failureReason: update.failureReason ?? null,
+          createdAt: existing?.createdAt ?? now,
+          updatedAt: now,
+        };
+        if (existing) {
+          await client.query(
+            `UPDATE noura.events SET payload = $1::jsonb, ts = $2
+             WHERE session_id = $3 AND type = $4`,
+            [JSON.stringify(payload), now, sessionId, COMPILED_LESSON_EVENT_TYPE],
+          );
+        } else {
+          await client.query(
+            `INSERT INTO noura.events (session_id, ts, type, payload, released)
+             VALUES ($1::text, $2::bigint, $3::text, $4::jsonb, FALSE)`,
+            [sessionId, now, COMPILED_LESSON_EVENT_TYPE, JSON.stringify(payload)],
+          );
+        }
+      } else {
+        await client.query(
+          `INSERT INTO noura.compiled_lessons (session_id, status, lesson_json, failure_reason, created_at, updated_at)
+           VALUES ($1, $2, $3::jsonb, $4, $5, $5)
+           ON CONFLICT (session_id) DO UPDATE SET
+             status = EXCLUDED.status, lesson_json = EXCLUDED.lesson_json,
+             failure_reason = EXCLUDED.failure_reason, updated_at = EXCLUDED.updated_at`,
+          [sessionId, update.status, lesson ? JSON.stringify(lesson) : null, update.failureReason ?? null, now],
+        );
+      }
       const stored = await this.getCompiledLessonWith(client, sessionId);
       if (!stored) throw new Error('Compiled lesson write failed.');
       return stored;
@@ -180,6 +209,9 @@ export class PostgresRepo implements DomainRepository, ManagedDomainRepository {
 
   async putBoardAsset(record: BoardAssetRecord): Promise<void> {
     await this.initialize();
+    if (this.boardAssetsStorage === 'unavailable') {
+      throw new Error('Board assets table is not available.');
+    }
     await this.pool.query(
       `INSERT INTO noura.board_assets (id, cache_key, mime, bytes, created_at, parent_id, session_id)
        VALUES ($1, $2, $3, $4, $5, $6, $7)
@@ -200,6 +232,7 @@ export class PostgresRepo implements DomainRepository, ManagedDomainRepository {
 
   async getBoardAsset(id: string): Promise<BoardAssetRecord | null> {
     await this.initialize();
+    if (this.boardAssetsStorage === 'unavailable') return null;
     const result = await this.pool.query(
       'SELECT id, cache_key, mime, bytes, created_at, parent_id, session_id FROM noura.board_assets WHERE id = $1',
       [id],
@@ -209,6 +242,7 @@ export class PostgresRepo implements DomainRepository, ManagedDomainRepository {
 
   async getBoardAssetByCacheKey(cacheKey: string): Promise<BoardAssetRecord | null> {
     await this.initialize();
+    if (this.boardAssetsStorage === 'unavailable') return null;
     const result = await this.pool.query(
       'SELECT id, cache_key, mime, bytes, created_at, parent_id, session_id FROM noura.board_assets WHERE cache_key = $1',
       [cacheKey],
@@ -443,21 +477,32 @@ export class PostgresRepo implements DomainRepository, ManagedDomainRepository {
   }
 
   private async initializeSchema(): Promise<void> {
-    await this.pool.query(`
-      CREATE SCHEMA IF NOT EXISTS noura;
-      CREATE TABLE IF NOT EXISTS noura.schema_migrations (
+    const appliedAt = Date.now();
+    await this.applyOptionalDdl('CREATE SCHEMA IF NOT EXISTS noura');
+    const tables: Array<{ name: string; required: boolean; sql: string }> = [
+      {
+        name: 'schema_migrations',
+        required: true,
+        sql: `CREATE TABLE IF NOT EXISTS noura.schema_migrations (
         version INTEGER PRIMARY KEY,
         applied_at BIGINT NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS noura.children (
+      )`,
+      },
+      {
+        name: 'children',
+        required: true,
+        sql: `CREATE TABLE IF NOT EXISTS noura.children (
         id TEXT PRIMARY KEY,
         parent_id TEXT NOT NULL,
         name TEXT NOT NULL,
         age INTEGER,
         created_at BIGINT NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS idx_noura_children_parent ON noura.children(parent_id, created_at);
-      CREATE TABLE IF NOT EXISTS noura.sessions (
+      )`,
+      },
+      {
+        name: 'sessions',
+        required: true,
+        sql: `CREATE TABLE IF NOT EXISTS noura.sessions (
         id TEXT PRIMARY KEY,
         child_id TEXT NOT NULL REFERENCES noura.children(id),
         goal TEXT NOT NULL,
@@ -469,10 +514,12 @@ export class PostgresRepo implements DomainRepository, ManagedDomainRepository {
         ended_event_id BIGINT,
         summary_version INTEGER,
         summary_through_event_id BIGINT
-      );
-      CREATE INDEX IF NOT EXISTS idx_noura_sessions_child ON noura.sessions(child_id, started_at DESC);
-      CREATE INDEX IF NOT EXISTS idx_noura_sessions_parent ON noura.sessions(parent_session_id);
-      CREATE TABLE IF NOT EXISTS noura.events (
+      )`,
+      },
+      {
+        name: 'events',
+        required: true,
+        sql: `CREATE TABLE IF NOT EXISTS noura.events (
         id BIGSERIAL PRIMARY KEY,
         session_id TEXT NOT NULL REFERENCES noura.sessions(id),
         ts BIGINT NOT NULL,
@@ -480,9 +527,12 @@ export class PostgresRepo implements DomainRepository, ManagedDomainRepository {
         payload JSONB NOT NULL,
         released BOOLEAN NOT NULL DEFAULT TRUE,
         release_requested BOOLEAN NOT NULL DEFAULT FALSE
-      );
-      CREATE INDEX IF NOT EXISTS idx_noura_events_session ON noura.events(session_id, id);
-      CREATE TABLE IF NOT EXISTS noura.fallback_turns (
+      )`,
+      },
+      {
+        name: 'fallback_turns',
+        required: true,
+        sql: `CREATE TABLE IF NOT EXISTS noura.fallback_turns (
         session_id TEXT NOT NULL REFERENCES noura.sessions(id),
         idempotency_key TEXT NOT NULL,
         connection_epoch INTEGER NOT NULL,
@@ -493,10 +543,12 @@ export class PostgresRepo implements DomainRepository, ManagedDomainRepository {
         created_at BIGINT NOT NULL,
         updated_at BIGINT NOT NULL,
         PRIMARY KEY (session_id, idempotency_key)
-      );
-      CREATE UNIQUE INDEX IF NOT EXISTS idx_noura_fallback_one_active_session
-        ON noura.fallback_turns(session_id) WHERE status = 'active';
-      CREATE TABLE IF NOT EXISTS noura.evidence (
+      )`,
+      },
+      {
+        name: 'evidence',
+        required: true,
+        sql: `CREATE TABLE IF NOT EXISTS noura.evidence (
         id BIGSERIAL PRIMARY KEY,
         session_id TEXT NOT NULL REFERENCES noura.sessions(id),
         ts BIGINT NOT NULL,
@@ -524,22 +576,24 @@ export class PostgresRepo implements DomainRepository, ManagedDomainRepository {
         retrieval_of TEXT,
         released BOOLEAN NOT NULL DEFAULT TRUE,
         idempotency_key TEXT
-      );
-      CREATE INDEX IF NOT EXISTS idx_noura_evidence_session ON noura.evidence(session_id, id);
-      CREATE INDEX IF NOT EXISTS idx_noura_evidence_child ON noura.evidence(child_id, id DESC);
-      CREATE TABLE IF NOT EXISTS noura.compiled_lessons (
+      )`,
+      },
+      {
+        name: 'compiled_lessons',
+        required: false,
+        sql: `CREATE TABLE IF NOT EXISTS noura.compiled_lessons (
         session_id TEXT PRIMARY KEY REFERENCES noura.sessions(id),
         status TEXT NOT NULL,
         lesson_json JSONB,
         failure_reason TEXT,
         created_at BIGINT NOT NULL,
         updated_at BIGINT NOT NULL
-      );
-      INSERT INTO noura.schema_migrations (version, applied_at) VALUES (1, ${Date.now()})
-      ON CONFLICT (version) DO NOTHING;
-      INSERT INTO noura.schema_migrations (version, applied_at) VALUES (2, ${Date.now()})
-      ON CONFLICT (version) DO NOTHING;
-      CREATE TABLE IF NOT EXISTS noura.board_assets (
+      )`,
+      },
+      {
+        name: 'board_assets',
+        required: false,
+        sql: `CREATE TABLE IF NOT EXISTS noura.board_assets (
         id TEXT PRIMARY KEY,
         cache_key TEXT NOT NULL UNIQUE,
         mime TEXT NOT NULL,
@@ -547,22 +601,99 @@ export class PostgresRepo implements DomainRepository, ManagedDomainRepository {
         created_at BIGINT NOT NULL,
         parent_id TEXT,
         session_id TEXT
+      )`,
+      },
+    ];
+    for (const table of tables) {
+      if (await this.tableUsable(`noura.${table.name}`)) continue;
+      const created = await this.applyOptionalDdl(table.sql);
+      if (!created && table.required) {
+        throw new Error(`Cannot create required table noura.${table.name}.`);
+      }
+    }
+    const optionalDdl = [
+      'CREATE INDEX IF NOT EXISTS idx_noura_children_parent ON noura.children(parent_id, created_at)',
+      'CREATE INDEX IF NOT EXISTS idx_noura_sessions_child ON noura.sessions(child_id, started_at DESC)',
+      'CREATE INDEX IF NOT EXISTS idx_noura_sessions_parent ON noura.sessions(parent_session_id)',
+      'CREATE INDEX IF NOT EXISTS idx_noura_events_session ON noura.events(session_id, id)',
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_noura_fallback_one_active_session
+        ON noura.fallback_turns(session_id) WHERE status = 'active'`,
+      'CREATE INDEX IF NOT EXISTS idx_noura_evidence_session ON noura.evidence(session_id, id)',
+      'CREATE INDEX IF NOT EXISTS idx_noura_evidence_child ON noura.evidence(child_id, id DESC)',
+    ];
+    if (await this.tableUsable('noura.board_assets')) {
+      optionalDdl.push(
+        'CREATE INDEX IF NOT EXISTS idx_noura_board_assets_cache ON noura.board_assets(cache_key)',
+        'ALTER TABLE noura.board_assets ADD COLUMN IF NOT EXISTS parent_id TEXT',
+        'ALTER TABLE noura.board_assets ADD COLUMN IF NOT EXISTS session_id TEXT',
       );
-      CREATE INDEX IF NOT EXISTS idx_noura_board_assets_cache ON noura.board_assets(cache_key);
-      INSERT INTO noura.schema_migrations (version, applied_at) VALUES (3, ${Date.now()})
-      ON CONFLICT (version) DO NOTHING;
-      ALTER TABLE noura.board_assets ADD COLUMN IF NOT EXISTS parent_id TEXT;
-      ALTER TABLE noura.board_assets ADD COLUMN IF NOT EXISTS session_id TEXT;
-      INSERT INTO noura.schema_migrations (version, applied_at) VALUES (4, ${Date.now()})
-      ON CONFLICT (version) DO NOTHING;
-    `);
+    }
+    for (const sql of optionalDdl) {
+      await this.applyOptionalDdl(sql);
+    }
+    if (await this.tableUsable('noura.schema_migrations')) {
+      await this.pool.query(
+        'INSERT INTO noura.schema_migrations (version, applied_at) VALUES (1, $1) ON CONFLICT (version) DO NOTHING',
+        [appliedAt],
+      );
+      if (await this.tableUsable('noura.compiled_lessons')) {
+        await this.pool.query(
+          'INSERT INTO noura.schema_migrations (version, applied_at) VALUES (2, $1) ON CONFLICT (version) DO NOTHING',
+          [appliedAt],
+        );
+      }
+      if (await this.tableUsable('noura.board_assets')) {
+        await this.pool.query(
+          'INSERT INTO noura.schema_migrations (version, applied_at) VALUES (3, $1) ON CONFLICT (version) DO NOTHING',
+          [appliedAt],
+        );
+        await this.pool.query(
+          'INSERT INTO noura.schema_migrations (version, applied_at) VALUES (4, $1) ON CONFLICT (version) DO NOTHING',
+          [appliedAt],
+        );
+      }
+    }
+    await this.detectOptionalStorage();
   }
 
   private async verifySchema(): Promise<void> {
-    const result = await this.pool.query(
-      'SELECT version FROM noura.schema_migrations WHERE version IN (1, 2, 3, 4)',
-    );
-    if (result.rowCount !== 4) throw new Error('Noura Postgres schema migrations 1, 2, 3, and 4 are not all applied.');
+    for (const table of ['schema_migrations', 'children', 'sessions', 'events', 'fallback_turns', 'evidence'] as const) {
+      if (!(await this.tableUsable(`noura.${table}`))) {
+        throw new Error(`Noura Postgres is missing required table noura.${table}.`);
+      }
+    }
+    await this.detectOptionalStorage();
+  }
+
+  private async detectOptionalStorage(): Promise<void> {
+    this.compiledLessonStorage = (await this.tableUsable('noura.compiled_lessons')) ? 'table' : 'sidecar';
+    this.boardAssetsStorage = (await this.tableUsable('noura.board_assets')) ? 'table' : 'unavailable';
+    if (this.compiledLessonStorage === 'sidecar') {
+      console.warn('[storage] compiled_lessons is unavailable; storing compiled lessons as unreleased sidecar events');
+    }
+    if (this.boardAssetsStorage === 'unavailable') {
+      console.warn('[storage] board_assets is unavailable; generated illustrations cannot persist');
+    }
+  }
+
+  private async tableUsable(qualifiedName: string): Promise<boolean> {
+    try {
+      await this.pool.query(`SELECT 1 FROM ${qualifiedName} LIMIT 0`);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  private async applyOptionalDdl(sql: string): Promise<boolean> {
+    try {
+      await this.pool.query(sql);
+      return true;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (/permission denied|must be owner/i.test(message)) return false;
+      throw error;
+    }
   }
 
   private async getChildWith(queryable: Queryable, id: string): Promise<Child | null> {
@@ -579,6 +710,25 @@ export class PostgresRepo implements DomainRepository, ManagedDomainRepository {
   }
 
   private async getCompiledLessonWith(queryable: Queryable, sessionId: string): Promise<CompiledLessonRecord | null> {
+    if (this.compiledLessonStorage === 'sidecar') {
+      const result = await queryable.query(
+        `SELECT payload FROM noura.events
+         WHERE session_id = $1 AND type = $2
+         ORDER BY id DESC LIMIT 1`,
+        [sessionId, COMPILED_LESSON_EVENT_TYPE],
+      );
+      const payload = result.rows[0] ? jsonValue(result.rows[0].payload) : null;
+      if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
+      const record = payload as Record<string, unknown>;
+      return {
+        sessionId,
+        status: String(record.status) as CompiledLessonStatus,
+        lesson: record.lesson ? CompiledLessonSchema.parse(record.lesson) : null,
+        failureReason: nullableString(record.failureReason),
+        createdAt: Number(record.createdAt),
+        updatedAt: Number(record.updatedAt),
+      };
+    }
     const result = await queryable.query(
       'SELECT session_id, status, lesson_json, failure_reason, created_at, updated_at FROM noura.compiled_lessons WHERE session_id = $1',
       [sessionId],
@@ -613,10 +763,11 @@ export class PostgresRepo implements DomainRepository, ManagedDomainRepository {
       `SELECT * FROM (
          SELECT id, session_id, ts, type, payload, released FROM noura.events
          WHERE session_id = $1 AND ($2::boolean = TRUE OR released = TRUE)
+           AND type <> $5
            AND ($3::bigint IS NULL OR id <= $3)
          ORDER BY id DESC LIMIT $4
        ) latest ORDER BY id`,
-      [sessionId, includeUnreleased, throughEventId ?? null, boundedLimit(limit)],
+      [sessionId, includeUnreleased, throughEventId ?? null, boundedLimit(limit), COMPILED_LESSON_EVENT_TYPE],
     );
     return result.rows.map(mapEvent);
   }

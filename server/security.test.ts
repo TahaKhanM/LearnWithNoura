@@ -24,6 +24,28 @@ describe('security boundary', () => {
     expect(capabilityFromProtocols(`noura.v1, cap.${token}`)).toBe(token);
   });
 
+  it('does not treat lesson-status GETs as costly session writes', async () => {
+    const boundary = new SecurityBoundary(readRuntimeConfig({}));
+    const app = express();
+    app.use(boundary.originAndRateGuard);
+    app.get('/api/sessions/:id', (_req, res) => res.json({ ok: true }));
+    app.post('/api/sessions', (_req, res) => res.status(201).json({ ok: true }));
+
+    for (let index = 0; index < 31; index += 1) {
+      const response = await request(app).get('/api/sessions/session-1');
+      expect(response.status).toBe(200);
+    }
+
+    let lastWrite = 201;
+    for (let index = 0; index < 31; index += 1) {
+      lastWrite = (await request(app)
+        .post('/api/sessions')
+        .set('Origin', 'https://learnwithnoura.com')
+        .send({})).status;
+    }
+    expect(lastWrite).toBe(429);
+  });
+
   it('applies bounded per-key rate limits', () => {
     const boundary = new SecurityBoundary(readRuntimeConfig({}));
     expect(boundary.allow('parent:child:session:ip', 2, 1000)).toBe(true);

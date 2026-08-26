@@ -4,9 +4,9 @@
  * is the only intake that does.
  */
 
-import { isBoardAssetId } from './boardAssets';
-import { validateManipulativeKind } from './manipulativeSpecs';
-import type { DraggableSpec, SnapZoneSpec, TappableSpec } from './manipulativeSpecs';
+import { isBoardAssetId } from './boardAssets.js';
+import { validateManipulativeKind } from './manipulativeSpecs.js';
+import type { DraggableSpec, SnapZoneSpec, TappableSpec } from './manipulativeSpecs.js';
 
 /** Local copies so this module does not import boardOps (cycle: boardOps → here). */
 const BOARD_W = 1000;
@@ -16,7 +16,7 @@ type Vec = [number, number];
 export const AUTHORED_ONLY_KINDS = ['arc', 'curve', 'asset', 'draggable', 'snapZone', 'tappable', 'image'] as const;
 export type AuthoredOnlyKind = (typeof AUTHORED_ONLY_KINDS)[number];
 
-export type { DraggableSpec, SnapZoneSpec, TappableSpec } from './manipulativeSpecs';
+export type { DraggableSpec, SnapZoneSpec, TappableSpec } from './manipulativeSpecs.js';
 
 export interface CenterArcSpec {
   kind: 'arc';

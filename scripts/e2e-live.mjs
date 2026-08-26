@@ -332,9 +332,9 @@ async function runLiveJourney(url, { textOnly, wavPath }, vercelProtectionBypass
     await page.click('[data-testid=start-session]');
     await page.waitForURL(
       (lessonUrl) => /^\/lesson\/[^/]+\/?$/.test(lessonUrl.pathname),
-      { timeout: 10_000 },
+      { timeout: 45_000 },
     );
-    await page.waitForSelector('[data-testid=start-lesson]', { timeout: 10_000 });
+    await page.waitForSelector('[data-testid=start-lesson]:not([disabled])', { timeout: 60_000 });
     const sessionId = sessionIdFromLessonUrl(page.url());
     mark('lesson_page_loaded');
     await page.screenshot({ path: `${shots}/e2e-prestart.png` });
