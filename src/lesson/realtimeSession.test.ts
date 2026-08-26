@@ -153,7 +153,7 @@ describe('RealtimeSession connecting metric queue', () => {
 });
 
 describe('RealtimeSession playback-bound release', () => {
-  it('releases captions on transcript arrival but holds visuals and lesson state while the response plays', async () => {
+  it('releases captions and ordinary visuals on arrival but holds lesson state while the response plays', async () => {
     const { session, harness, voice } = sessionWithVoice();
     const board = vi.fn(async () => true);
     session.onBoardOps = board;
@@ -169,14 +169,15 @@ describe('RealtimeSession playback-bound release', () => {
       response_id: 'response', state: { activeConcept: 'future concept', characterAttentionTarget: 'semantic_object' },
     }, { providerResponseId: 'response', semanticObjectId: 'fraction-scale' }));
 
-    // Captions are live on arrival; playback-bound cues wait.
     expect(session.getSnapshot().captions.map((caption) => caption.text)).toEqual(['First phrase.']);
     expect(session.getSnapshot().lessonState).toEqual({});
-    expect(board).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(board).toHaveBeenCalledTimes(1));
 
     voice.emitBoundary('stopped', 'response', 4_000);
-    await vi.waitFor(() => expect(board).toHaveBeenCalledTimes(1));
-    expect(session.getSnapshot().lessonState).toMatchObject({ activeConcept: 'future concept', characterAttentionTarget: 'semantic_object' });
+    await vi.waitFor(() => expect(session.getSnapshot().lessonState).toMatchObject({
+      activeConcept: 'future concept',
+      characterAttentionTarget: 'semantic_object',
+    }));
   });
 
   it('releases visuals immediately when their response is not audibly playing', async () => {

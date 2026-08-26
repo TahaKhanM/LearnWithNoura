@@ -191,6 +191,18 @@ async function flushProxy(): Promise<void> {
   }
 }
 
+/** Acknowledge a deferred covering `response.create` so the floor is free. */
+async function settleUnscopedCreate(
+  harness: { upstream: FakeUpstream; responseCreates(): Array<{ response?: { instructions?: string } }> },
+  responseId: string,
+): Promise<void> {
+  const last = harness.responseCreates().at(-1);
+  if (!last || last.response?.instructions) return;
+  harness.upstream.emit({ type: 'response.created', response: { id: responseId } });
+  harness.upstream.emit({ type: 'response.done', response: { id: responseId, status: 'completed', output: [] } });
+  await flushProxy();
+}
+
 afterEach(() => vi.unstubAllGlobals());
 
 describe('the storyboard runner', () => {
@@ -430,10 +442,10 @@ describe('the storyboard runner', () => {
       stageBrief: expect.stringContaining('orient'),
       boardSummary: expect.stringContaining('board is empty'),
     });
-    // The covering continuation resolves like any tutor response.
-    harness.upstream.emit({ type: 'response.created', response: { id: 'cover-2' } });
-    harness.upstream.emit({ type: 'response.done', response: { id: 'cover-2', status: 'completed', output: [] } });
+    // Covering speech waits until the acknowledgement response finishes.
+    harness.upstream.emit({ type: 'response.done', response: { id: 'cover-response', status: 'completed', output: [{ type: 'function_call' }] } });
     await flushProxy();
+    await settleUnscopedCreate(harness, 'cover-2');
 
     // The directed scene preflights through the client, persists for
     // reconnect, and builds step by step like the anchor.
@@ -444,7 +456,6 @@ describe('the storyboard runner', () => {
       accepted: true,
       reasons: [],
     });
-    harness.upstream.emit({ type: 'response.done', response: { id: 'cover-response', status: 'completed', output: [{ type: 'function_call' }] } });
     await flushProxy();
     await flushProxy();
     expect(harness.repo.listEvents(harness.session.id).some((event) => event.type === 'directed_scene')).toBe(true);
@@ -548,11 +559,9 @@ describe('the storyboard runner', () => {
     });
     await flushProxy();
     expect(harness.toolOutput('compare-call')).toMatchObject({ status: 'preparing' });
-    // The covering narration finishes before the Director fails.
-    harness.upstream.emit({ type: 'response.created', response: { id: 'cover-2' } });
-    harness.upstream.emit({ type: 'response.done', response: { id: 'cover-2', status: 'completed', output: [] } });
     harness.upstream.emit({ type: 'response.done', response: { id: 'cover-response', status: 'completed', output: [{ type: 'function_call' }] } });
     await flushProxy();
+    await settleUnscopedCreate(harness, 'cover-2');
     const createsBefore = harness.responseCreates().length;
     rejectDirector();
     await flushProxy();
@@ -932,10 +941,9 @@ describe('visual request scoping across turns', () => {
     });
     await flushProxy();
     expect(harness.toolOutput('slow-call')).toMatchObject({ status: 'preparing' });
-    // The covering continuation resolves like any tutor response.
-    harness.upstream.emit({ type: 'response.created', response: { id: 'cover-2' } });
-    harness.upstream.emit({ type: 'response.done', response: { id: 'cover-2', status: 'completed', output: [] } });
     harness.upstream.emit({ type: 'response.done', response: { id: 'turn1-response', status: 'completed', output: [{ type: 'function_call' }] } });
+    await flushProxy();
+    await settleUnscopedCreate(harness, 'cover-2');
 
     // A learner turn, then the tutor establishes the compiled anchor: a
     // storyboard run is now active when the slow Director result lands.

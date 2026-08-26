@@ -85,14 +85,16 @@ describe('raw Realtime sideband to playback-bound session integration', () => {
       expect('audioSampleOffsets' in envelope).toBe(false);
     }
 
-    // Captions are live on transcript arrival; visuals and semantic state
-    // wait for the child to finish hearing the response.
+    // Captions and ordinary board marks are live on arrival; lesson state
+    // waits for the child to finish hearing the response.
     expect(harness.session.getSnapshot().captions.map((caption) => caption.text)).toEqual(['Repeated phrase.']);
     expect(harness.session.getSnapshot().lessonState).toEqual({});
-    expect(harness.boardReleases).toEqual([]);
+    expect(harness.boardReleases).toEqual(['freeform-turn-0']);
 
     harness.voice.emitBoundary('stopped', 'response-matrix', 1_500);
-    await vi.waitFor(() => expect(harness.boardReleases).toHaveLength(1));
+    await vi.waitFor(() => expect(harness.session.getSnapshot().lessonState).toMatchObject({
+      activeConcept: 'fraction comparison',
+    }));
     expect(harness.session.getSnapshot().lessonState).toMatchObject({
       activeConcept: 'fraction comparison',
       characterAttentionTarget: 'learner',
@@ -162,24 +164,25 @@ describe('raw Realtime sideband to playback-bound session integration', () => {
     const staleEnvelopes = harness.client.sent.slice();
     harness.markDelivered();
 
+    const releasedBeforeReconnect = harness.boardReleases.length;
     harness.replaceForReconnect();
     await flushProxy();
     for (const envelope of staleEnvelopes) harness.deliverDirect(envelope);
     harness.voice.emitBoundary('stopped', 'before-reconnect', 1_000);
     expect(harness.session.getSnapshot().captions).toEqual([]);
     expect(harness.session.getSnapshot().lessonState).toEqual({});
-    expect(harness.boardReleases).toEqual([]);
+    expect(harness.boardReleases).toHaveLength(releasedBeforeReconnect);
 
     // The reconnected identity keeps working over the same voice call.
     harness.voice.emitBoundary('started', 'after-reconnect');
     emitResponse(harness.upstream, 'after-reconnect', orderings[0].steps);
     await harness.pump();
     expect(harness.session.getSnapshot().captions.map((caption) => caption.text)).toEqual(['Repeated phrase.']);
+    expect(harness.boardReleases.length).toBeGreaterThan(releasedBeforeReconnect);
 
     harness.session.end();
     harness.voice.emitBoundary('stopped', 'after-reconnect', 500);
     expect(harness.session.getSnapshot().phase).toBe('ended');
-    expect(harness.boardReleases).toEqual([]);
   });
 });
 

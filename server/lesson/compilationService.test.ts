@@ -1,19 +1,27 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createLiveCompilationService } from './compilationService.js';
+import { PROVISIONAL_COMPILER_MODEL } from './provisionalLesson.js';
 
 describe('createLiveCompilationService', () => {
-  it('hands the background compile promise to keepAlive so serverless can wait', async () => {
+  it('returns a ready provisional lesson immediately and keeps it if the background compile fails', async () => {
     const keepAlive = vi.fn();
-    const upsert = vi.fn(async (_sessionId: string, update: { status: string }) => ({
-      sessionId: 'session-1',
-      status: update.status,
-      lesson: null,
-      failureReason: null,
-      createdAt: 1,
-      updatedAt: 1,
-    }));
+    let stored: { status: string; lesson: { compilerModel?: string } | null } | null = null;
+    const upsert = vi.fn(async (_sessionId: string, update: { status: string; lesson?: { compilerModel?: string } | null }) => {
+      stored = {
+        sessionId: 'session-1',
+        status: update.status,
+        lesson: update.lesson ?? stored?.lesson ?? null,
+        failureReason: null,
+        createdAt: 1,
+        updatedAt: 1,
+      };
+      return stored;
+    });
     const service = createLiveCompilationService({
-      repo: { upsertCompiledLesson: upsert } as never,
+      repo: {
+        upsertCompiledLesson: upsert,
+        getCompiledLesson: async () => stored,
+      } as never,
       client: {
         chat: {
           completions: {
@@ -29,17 +37,19 @@ describe('createLiveCompilationService', () => {
       keepAlive,
     });
 
-    const pending = await service.start({
+    const ready = await service.start({
       sessionId: 'session-1',
       goal: 'fractions',
       objective: 'Place 3/4 on a number line',
     });
 
-    expect(pending.status).toBe('pending');
+    expect(ready.status).toBe('ready');
+    expect(ready.lesson?.compilerModel).toBe(PROVISIONAL_COMPILER_MODEL);
     expect(keepAlive).toHaveBeenCalledTimes(1);
     const work = keepAlive.mock.calls[0]?.[0];
     expect(work).toBeInstanceOf(Promise);
     await work;
-    expect(upsert).toHaveBeenCalledWith('session-1', expect.objectContaining({ status: 'failed' }));
+    expect(upsert).toHaveBeenCalledTimes(1);
+    expect(upsert).not.toHaveBeenCalledWith('session-1', expect.objectContaining({ status: 'failed' }));
   });
 });

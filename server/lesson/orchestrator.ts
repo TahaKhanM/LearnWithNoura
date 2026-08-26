@@ -116,7 +116,7 @@ export function reduceLesson(state: LessonOrchestrationState, event: Orchestrato
         if (blueprint.mode === 'board_led' && blueprint.anchor && move.anchorGroupId && move.anchorGroupId !== blueprint.anchor.semanticGroupId) {
           throw new Error(`The lesson anchor is ${blueprint.anchor.semanticGroupId}; a move cannot change the anchor representation.`);
         }
-        if (move.proposedAction === 'visual' && move.boardPurpose === 'none') {
+        if (move.proposedAction === 'visual' && move.boardPurpose === 'none' && blueprint.mode !== 'conversation_led') {
           throw new Error('A visual move needs a real board purpose; use boardPurpose none only for speech-only moves.');
         }
         if (blueprint.mode === 'board_led' && stage && stage.allowedBoardMutation !== 'none' && move.proposedAction === 'explain' && move.boardPurpose === 'none') {

@@ -639,8 +639,8 @@ export class RealtimeSession {
     const type = envelope.type;
     switch (type) {
       case 'ready': {
+        const firstWake = this.snapshot.phase === 'connecting';
         this.reconnectAttempts = 0;
-        this.update({ phase: 'listening', error: null });
         this.send('start', {});
         // A reconnect must not lose an open drawing draft: re-arm the
         // server-side "learner is composing" guard for the new connection.
@@ -650,7 +650,12 @@ export class RealtimeSession {
         this.latestQueuedAsk = null;
         if (ask && this.isCurrent(ask.identity)) {
           this.send('user_text', { text: ask.text, idempotencyKey: ask.idempotencyKey });
-          this.update({ phase: 'thinking' });
+          this.update({ phase: 'thinking', error: null });
+        } else if (firstWake) {
+          // Greeting is in flight; do not flip to Listening over a silent wait.
+          this.update({ phase: 'thinking', error: null });
+        } else {
+          this.update({ phase: 'listening', error: null });
         }
         break;
       }
@@ -704,7 +709,9 @@ export class RealtimeSession {
       case 'transcript_delta': {
         // Captions release on arrival: the transcript is the fastest honest
         // signal that Noura is answering, and phrase smoothing keeps the
-        // reading pace natural. Playback boundaries own visuals and tasks.
+        // reading pace natural. Ordinary board draws also apply on arrival
+        // so the picture is visible while she talks; lesson state and
+        // storyboard reveals still wait on playback boundaries.
         if (typeof message.delta !== 'string') break;
         const responseId = String(message.response_id ?? '');
         if (this.deadResponses.has(responseId)) break;

@@ -47,6 +47,8 @@ export interface CoordinatorState {
   lastCreateSource: ResponseCreateSource;
   /** A user ask hit an active response; ask again once it finishes. */
   retryCreateOnDone: boolean;
+  /** Tool results wait for this response to finish before continuing. */
+  toolContinueAfterResponseId: string | null;
   clientIdentity: GenerationIdentity | null;
   clientSequence: number;
   lastClientSequence: number;

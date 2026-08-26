@@ -14,13 +14,11 @@ export type ResponseCue =
 export type ResponsePlaybackStatus = 'playing' | 'pending' | 'finished';
 
 /**
- * Deterministic cue scheduler bound to real playback boundaries. While a
- * response is audibly playing (between the provider's data-channel
- * `output_audio_buffer.started` and `.stopped` for it), its visuals, task
- * banner, and final caption correction wait — the child hears the thought
- * before the board changes under them. A response that is not playing (tool
- * results before speech, no-audio responses, retired playback) releases its
- * cues immediately, which also keeps the server's visibility barrier live.
+ * Deterministic cue scheduler bound to real playback boundaries. Ordinary
+ * board draws release as soon as they arrive so the picture is visible
+ * while the tutor is still talking about it. Lesson-state, task banners,
+ * and final caption corrections still wait while that response is audibly
+ * playing. A response that is not playing releases those immediately.
  *
  * Storyboard step cues (`awaitNarration`) bind to the END of their tagged
  * response: they hold until that response has finished playing, so a reveal
@@ -46,8 +44,8 @@ export class ResponseCueTimeline {
     const waiting: ResponseCue[] = [];
     for (const cue of this.pending) {
       const playback = status(cue.responseId);
-      const held = cue.kind === 'visual' && cue.awaitNarration
-        ? playback !== 'finished'
+      const held = cue.kind === 'visual'
+        ? cue.awaitNarration && playback !== 'finished'
         : playback === 'playing';
       if (held) waiting.push(cue);
       else ready.push(cue);

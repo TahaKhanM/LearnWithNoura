@@ -9,7 +9,7 @@ import type { CoordinatorContext, ResponseCreateSource } from './coordinatorCont
  */
 
 /** Stop auto-continuing tool chains after this many rounds per turn. */
-const MAX_TOOL_CONTINUES = 14;
+export const MAX_TOOL_CONTINUES = 14;
 
 /** Every `response.create` flows through here so the coordinator always
  * knows whether one is in flight (the storyboard runner must never race a
@@ -92,7 +92,18 @@ export function finishTool(
   });
   if (options.continueResponse === false) return;
   if (state.cancelledResponses.has(responseId) || state.childHoldsFloor) return;
+  if (state.storyboardRun) return;
   if (state.toolContinues >= MAX_TOOL_CONTINUES) return;
+  // Creating a follow-up while the "okay" response is still active is
+  // rejected by the provider (`conversation_already_has_active_response`)
+  // and used to be dropped for tool-sourced creates — the learner heard
+  // the acknowledgement, then silence. Wait for that response to finish,
+  // and coalesce several tools from the same turn into one continuation.
+  if (state.activeResponseId !== null || state.pendingResponseCreates > 0) {
+    state.toolContinueAfterResponseId = state.activeResponseId ?? state.toolContinueAfterResponseId;
+    state.lastCreateSource = 'tool';
+    return;
+  }
   state.toolContinues += 1;
   sendResponseCreate(ctx, 'tool');
 }
