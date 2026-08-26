@@ -1,5 +1,11 @@
 import type OpenAI from 'openai';
-import { prepareIllustration, type IllustrationHooks, type IllustrationPrepareResult } from './illustration.js';
+import {
+  persistIllustrationRecord,
+  prepareIllustration,
+  type IllustrationHooks,
+  type IllustrationPrepareOk,
+  type IllustrationPrepareResult,
+} from './illustration.js';
 import type { IllustrationDirectorPort } from './director.js';
 import type {
   IllustrationBrief,
@@ -83,6 +89,7 @@ export function createLiveIllustrationService(options: LiveIllustrationOptions):
 
   return {
     enabled: options.enabled,
+    store: options.store,
     prepare: (brief: IllustrationBrief, hooks?: IllustrationHooks): Promise<IllustrationPrepareResult> =>
       prepareIllustration({
         generate,
@@ -91,5 +98,7 @@ export function createLiveIllustrationService(options: LiveIllustrationOptions):
         model: options.imageModel,
         enabled: options.enabled,
       }, brief, hooks),
+    persist: (result: IllustrationPrepareOk, owner?: { parentId?: string; sessionId?: string }) =>
+      persistIllustrationRecord(options.store, result, owner),
   };
 }

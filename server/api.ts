@@ -1,4 +1,4 @@
-import { Router, type Request } from 'express';
+import { Router, type Request, type Response } from 'express';
 import type OpenAI from 'openai';
 import { CompiledLessonSchema, type CompiledLessonRecord } from '../shared/compiledLesson.js';
 import type { DomainRepository } from './store/domain.js';
@@ -19,6 +19,7 @@ import {
 export interface ApiSecurity {
   parentId(request: Request): string | null;
   issueLessonCapability?(sessionId: string, childId: string, parentId: string): string;
+  verifyLessonCapability?(token: string | null, sessionId: string): { sub: string; parentId?: string } | null;
 }
 
 const LOCAL_SECURITY: ApiSecurity = { parentId: () => 'local-synthetic-parent' };
@@ -139,12 +140,14 @@ export function createApi(
     }
     const session = await repo.createSession(child.id, cleanGoal);
     const record = await startCompilation(session.id, cleanGoal, cleanObjective, child);
+    const lessonCapability = security.issueLessonCapability
+      ? security.issueLessonCapability(session.id, child.id, parentId)
+      : null;
+    if (lessonCapability) appendLessonCapabilityCookie(res, lessonCapability);
     res.status(201).json({
       session,
       compilation: compilationView(record),
-      ...(security.issueLessonCapability
-        ? { lessonCapability: security.issueLessonCapability(session.id, child.id, parentId) }
-        : {}),
+      ...(lessonCapability ? { lessonCapability } : {}),
     });
   });
 
@@ -252,18 +255,24 @@ export function createApi(
         child ?? { name: '', age: null },
       );
     }
+    const lessonCapability = security.issueLessonCapability
+      ? security.issueLessonCapability(continued.id, continued.childId, parentId)
+      : null;
+    if (lessonCapability) appendLessonCapabilityCookie(res, lessonCapability);
     res.status(201).json({
       session: continued,
       compilation: compilationView(record),
-      ...(security.issueLessonCapability
-        ? { lessonCapability: security.issueLessonCapability(continued.id, continued.childId, parentId) }
-        : {}),
+      ...(lessonCapability ? { lessonCapability } : {}),
     });
   });
 
   router.get('/board-assets/:assetId', async (req, res) => {
     const parentId = parent(req);
-    if (!parentId) { res.status(401).json({ error: 'Parent authentication required.' }); return; }
+    const lessonToken = lessonCapabilityToken(req);
+    if (!parentId && !lessonToken) {
+      res.status(401).json({ error: 'Parent authentication required.' });
+      return;
+    }
     const assetId = String(req.params.assetId ?? '');
     if (!/^img-[a-z0-9]{8,40}$/.test(assetId)) {
       res.status(404).json({ error: 'not found' });
@@ -272,6 +281,16 @@ export function createApi(
     const asset = await repo.getBoardAsset(assetId);
     if (!asset) {
       res.status(404).json({ error: 'not found' });
+      return;
+    }
+    const parentOwns = Boolean(parentId && asset.parentId && parentId === asset.parentId);
+    const lessonOwns = Boolean(
+      lessonToken
+      && asset.sessionId
+      && security.verifyLessonCapability?.(lessonToken, asset.sessionId),
+    );
+    if (!parentOwns && !lessonOwns) {
+      res.status(parentId || lessonToken ? 404 : 401).json({ error: 'not found' });
       return;
     }
     res.setHeader('Content-Type', asset.mime);
@@ -297,4 +316,32 @@ export function createApi(
   });
 
   return router;
+}
+
+function lessonCapabilityToken(request: Request): string | null {
+  const authorization = request.headers.authorization;
+  if (typeof authorization === 'string' && /^Lesson\s+\S/i.test(authorization)) {
+    return authorization.replace(/^Lesson\s+/i, '').trim();
+  }
+  const queryCap = request.query.cap;
+  if (typeof queryCap === 'string' && queryCap.trim()) return queryCap.trim();
+  const cookies = parseCookieHeader(request.headers.cookie ?? '');
+  return cookies.noura_lesson ?? null;
+}
+
+function appendLessonCapabilityCookie(response: Response, token: string): void {
+  const secure = process.env.NODE_ENV === 'production' ? '; Secure' : '';
+  response.appendHeader(
+    'Set-Cookie',
+    `noura_lesson=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=7200${secure}`,
+  );
+}
+
+function parseCookieHeader(header: string): Record<string, string> {
+  return Object.fromEntries(
+    header.split(';')
+      .map((part) => part.trim().split('='))
+      .filter((pair) => pair.length === 2)
+      .map(([key, value]) => [decodeURIComponent(key), decodeURIComponent(value)]),
+  );
 }

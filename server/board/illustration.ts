@@ -27,6 +27,7 @@ export interface IllustrationPrepareOk {
   ok: true;
   spec: ImageSpec;
   objectId: string;
+  record: IllustrationRecord;
   cacheHit: boolean;
   latencyMs: number;
   imageCount: number;
@@ -132,7 +133,6 @@ export async function prepareIllustration(
       bytes: generated.bytes,
       createdAt: (deps.now ?? Date.now)(),
     };
-    await deps.store.put(record);
     return ok(record, brief, alt, { cacheHit: false, latencyMs: elapsed(), imageCount, totalTokens });
   }
 
@@ -160,8 +160,21 @@ function ok(
       alt,
     },
     objectId: `illust-${record.id.slice(4, 12)}`,
+    record,
     ...stats,
   };
+}
+
+export async function persistIllustrationRecord(
+  store: IllustrationStore,
+  result: IllustrationPrepareOk,
+  owner?: { parentId?: string; sessionId?: string },
+): Promise<void> {
+  await store.put({
+    ...result.record,
+    ...(owner?.parentId ? { parentId: owner.parentId } : {}),
+    ...(owner?.sessionId ? { sessionId: owner.sessionId } : {}),
+  });
 }
 
 function fail(

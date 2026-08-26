@@ -349,4 +349,59 @@ describe('the Board Director pipeline', () => {
     expect(prepareCalls).toBe(0);
     expect(userText(scripted.calls[1])).toContain('Illustrations are not available');
   });
+
+  it('does not leave a get-able asset after a failed illustration attempt', async () => {
+    const { MemoryIllustrationStore } = await import('./memoryIllustrationStore');
+    const { persistIllustrationRecord } = await import('./illustration');
+    const store = new MemoryIllustrationStore();
+    const record = {
+      id: 'img-a1b2c3d4e5f67890',
+      cacheKey: 'd'.repeat(64),
+      mime: 'image/png' as const,
+      bytes: Uint8Array.from([137, 80, 78, 71]),
+      createdAt: 1,
+    };
+    const prepared = {
+      ok: true as const,
+      spec: {
+        kind: 'image' as const,
+        assetId: record.id,
+        at: [80, 60] as [number, number],
+        w: 840,
+        h: 420,
+        alt: 'A pond habitat',
+      },
+      objectId: 'illust-pond',
+      record,
+      cacheHit: false,
+      latencyMs: 12,
+      imageCount: 1,
+      totalTokens: 40,
+    };
+    const scripted = scriptedClient([
+      validProposal({
+        representation: 'illustration',
+        illustration: {
+          purpose: 'Show a pond habitat',
+          subject: 'A calm pond with a frog and reeds',
+          requiredElements: ['frog'],
+          forbiddenElements: ['text'],
+        },
+      }),
+    ]);
+    const result = await directVisual(deps(scripted.client, {
+      illustrations: {
+        enabled: true,
+        store,
+        prepare: async () => prepared,
+      },
+      maxCorrectionRounds: 0,
+      validateScene: async () => ({ ok: false, issues: ['labels collide'] }),
+    }), request({ purpose: 'Show a pond habitat', idea: 'A frog lives among the reeds' }));
+
+    expect(result.ok).toBe(false);
+    expect(await store.getById(record.id)).toBeNull();
+    await persistIllustrationRecord(store, { ...prepared, ok: true });
+    expect(await store.getById(record.id)).not.toBeNull();
+  });
 });

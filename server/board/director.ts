@@ -2,7 +2,14 @@ import type { BoardOp } from '../../shared/boardOps.js';
 import type { SceneValidator } from '../lesson/compiler.js';
 import type { SceneRenderer } from '../lesson/headlessSceneValidator.js';
 import { directorProposePrompt, DIRECTOR_VISION_PROMPT } from './directorPrompts.js';
-import type { IllustrationBrief, IllustrationHooks, IllustrationPrepareResult } from './illustration.js';
+import {
+  persistIllustrationRecord,
+  type IllustrationBrief,
+  type IllustrationHooks,
+  type IllustrationPrepareOk,
+  type IllustrationPrepareResult,
+} from './illustration.js';
+import type { IllustrationStore } from './illustrationTypes.js';
 import {
   applyDirectorBoardPolicy,
   buildDirectedScene,
@@ -50,6 +57,7 @@ export interface DirectorSceneRequest {
   stageBrief: string;
   learnerContext: string;
   illustrationHooks?: IllustrationHooks;
+  assetOwner?: { parentId?: string; sessionId?: string };
 }
 
 export type DirectorResult =
@@ -59,6 +67,8 @@ export type DirectorResult =
 export interface IllustrationDirectorPort {
   enabled: boolean;
   prepare(brief: IllustrationBrief, hooks?: IllustrationHooks): Promise<IllustrationPrepareResult>;
+  store?: IllustrationStore;
+  persist?(result: IllustrationPrepareOk, owner?: { parentId?: string; sessionId?: string }): Promise<void>;
 }
 
 export interface BoardDirectorDeps {
@@ -172,7 +182,12 @@ export async function directVisual(deps: BoardDirectorDeps, request: DirectorSce
     } catch (error) {
       feedback = [`The vision inspection reply was invalid: ${describeError(error)}`];
     }
-    if (approved) return { ok: true, scene, ...(lastIllustration ? { illustration: lastIllustration } : {}) };
+    if (approved) {
+      if (lastIllustration?.ok) {
+        await persistAcceptedIllustration(deps, lastIllustration, request.assetOwner);
+      }
+      return { ok: true, scene, ...(lastIllustration ? { illustration: lastIllustration } : {}) };
+    }
   }
 
   return {
@@ -180,6 +195,20 @@ export async function directVisual(deps: BoardDirectorDeps, request: DirectorSce
     reasons: feedback.length > 0 ? feedback : ['The Director produced no acceptable scene.'],
     ...(lastIllustration ? { illustration: lastIllustration } : {}),
   };
+}
+
+async function persistAcceptedIllustration(
+  deps: BoardDirectorDeps,
+  result: IllustrationPrepareOk,
+  owner?: { parentId?: string; sessionId?: string },
+): Promise<void> {
+  if (deps.illustrations?.persist) {
+    await deps.illustrations.persist(result, owner);
+    return;
+  }
+  if (deps.illustrations?.store) {
+    await persistIllustrationRecord(deps.illustrations.store, result, owner);
+  }
 }
 
 function proposalMessages(

@@ -238,11 +238,19 @@ function migrate(database: DatabaseSync): void {
       cache_key TEXT NOT NULL UNIQUE,
       mime TEXT NOT NULL,
       bytes BLOB NOT NULL,
-      created_at INTEGER NOT NULL
+      created_at INTEGER NOT NULL,
+      parent_id TEXT,
+      session_id TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_board_assets_cache ON board_assets(cache_key);
 
     INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (3, unixepoch() * 1000);
+  `);
+
+  addColumn(database, 'board_assets', 'parent_id TEXT');
+  addColumn(database, 'board_assets', 'session_id TEXT');
+  database.exec(`
+    INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (4, unixepoch() * 1000);
   `);
 }
 

@@ -369,6 +369,7 @@ function startDirectedScene(
           partialDataUrl: dataUrl,
         }),
       },
+      assetOwner: await resolveAssetOwner(ctx),
     });
     recordIllustrationMetric(ctx, result.illustration);
     if (visualRequestIsStale(ctx, epoch)) {
@@ -490,4 +491,15 @@ export function anchorHandoff(ctx: CoordinatorContext): string {
 
 export function directorHandoff(): string {
   return 'Then connect the picture to what you were teaching in one short sentence, and ask the learner one small, concrete question about what they can see, delivered via propose_teaching_move with the exact wording as questionOrTask. Stop after asking.';
+}
+
+async function resolveAssetOwner(
+  ctx: CoordinatorContext,
+): Promise<{ parentId?: string; sessionId: string }> {
+  const session = await ctx.repo.getSession(ctx.sessionId);
+  const child = session ? await ctx.repo.getChild(session.childId) : null;
+  return {
+    sessionId: ctx.sessionId,
+    ...(child?.parentId ? { parentId: child.parentId } : {}),
+  };
 }
