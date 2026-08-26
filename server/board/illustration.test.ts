@@ -91,7 +91,8 @@ describe('prepareIllustration', () => {
     const store = new MemoryIllustrationStore();
     const first = await prepareIllustration(deps({ store }), brief());
     expect(first.ok).toBe(true);
-    const second = await prepareIllustration(deps({ store }), brief({
+    const secondDeps = deps({ store });
+    const second = await prepareIllustration(secondDeps, brief({
       purpose: 'SHOW A POND HABITAT so the child can name living things',
     }));
     expect(second.ok).toBe(true);
@@ -99,6 +100,29 @@ describe('prepareIllustration', () => {
     expect(second.cacheHit).toBe(true);
     expect(second.imageCount).toBe(0);
     expect(second.spec.assetId).toBe(first.spec.assetId);
+    expect(secondDeps.visionCalls).toBeGreaterThan(0);
+  });
+
+  it('does not return a cache hit as accepted when stored bytes fail vision', async () => {
+    const store = new MemoryIllustrationStore();
+    const first = await prepareIllustration(deps({ store }), brief());
+    expect(first.ok).toBe(true);
+    const result = await prepareIllustration(deps({
+      store,
+      vision: {
+        inspect: async () => JSON.stringify({
+          approved: false,
+          issues: ['unsafe photoreal child'],
+          hasEmbeddedText: false,
+          unsafe: true,
+          missingRequired: [],
+        }),
+      },
+    }), brief());
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.cacheHit).toBe(true);
+    expect(result.reasons.some((reason) => /unsafe|safety|child/i.test(reason))).toBe(true);
   });
 
   it('retries after a vision rejection and fails closed after two retries', async () => {

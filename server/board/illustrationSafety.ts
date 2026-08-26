@@ -5,8 +5,16 @@
  */
 
 const UNSAFE_SUBJECT = /\b(kill|murder|gore|bloodbath|weapon|gun|rifle|pistol|knife|sword|bomb|war|torture|suicide|self-?harm|porn|nude|naked|sex|sexual|abuse|assault|hang|shoot|stab)\b/i;
-const PHOTOREAL_CHILD = /\bphotoreal(?:istic)?\s+(?:child|children|kid|kids|toddler|baby|infant|teen)\b/i;
-const REAL_CHILD_PHOTO = /\b(?:photo(?:graph)?|photograph)\s+of\s+(?:a\s+)?(?:child|children|kid|toddler|baby)\b/i;
+const CHILD_SYNONYM = '(?:child|children|kid|kids|toddler|baby|infant|teen)';
+const PHOTOREAL_CHILD = new RegExp(
+  String.raw`\b(?:photoreal(?:istic)?|realistic)\s+${CHILD_SYNONYM}\b`,
+  'i',
+);
+const REAL_CHILD_PHOTO = new RegExp(
+  String.raw`\b(?:picture|portrait|photo(?:graph)?|photograph|selfie)\s+of\s+(?:a\s+)?${CHILD_SYNONYM}\b`,
+  'i',
+);
+const SELFIE_CHILD = new RegExp(String.raw`\bselfie\s+(?:of\s+(?:a\s+)?)?${CHILD_SYNONYM}\b`, 'i');
 
 export function refuseUnsafeIllustrationBrief(input: {
   purpose: string;
@@ -15,7 +23,7 @@ export function refuseUnsafeIllustrationBrief(input: {
   forbiddenElements: readonly string[];
 }): string | null {
   const haystack = [input.purpose, input.subject, ...input.requiredElements, ...input.forbiddenElements].join(' ');
-  if (UNSAFE_SUBJECT.test(haystack) || PHOTOREAL_CHILD.test(haystack) || REAL_CHILD_PHOTO.test(haystack)) {
+  if (UNSAFE_SUBJECT.test(haystack) || PHOTOREAL_CHILD.test(haystack) || REAL_CHILD_PHOTO.test(haystack) || SELFIE_CHILD.test(haystack)) {
     return 'This illustration subject is not safe for a child lesson. Choose a non-violent, non-photoreal educational scene.';
   }
   return null;

@@ -90,6 +90,10 @@ export async function prepareIllustration(
   const cacheKey = illustrationCacheKey(brief);
   const cached = await deps.store.getByCacheKey(cacheKey);
   if (cached) {
+    const cachedVision = await inspectCachedRecord(deps, brief, cached);
+    if (!cachedVision.ok) {
+      return fail(cachedVision.reasons, { cacheHit: true, latencyMs: elapsed() });
+    }
     return ok(cached, brief, alt, { cacheHit: true, latencyMs: elapsed(), imageCount: 0, totalTokens: 0 });
   }
 
@@ -173,6 +177,21 @@ function fail(
     totalTokens: extras.totalTokens ?? 0,
     refused: extras.refused ?? false,
   };
+}
+
+async function inspectCachedRecord(
+  deps: PrepareIllustrationDeps,
+  brief: IllustrationBrief,
+  record: IllustrationRecord,
+): Promise<{ ok: true } | { ok: false; reasons: string[] }> {
+  if (!record.bytes?.length) {
+    return { ok: false, reasons: ['The cached illustration has no stored bytes to inspect.'] };
+  }
+  const visionReply = await deps.vision.inspect({
+    prompt: visionUserText(brief),
+    imageDataUrl: toDataUrl(record.bytes, record.mime),
+  });
+  return parseVision(visionReply);
 }
 
 function visionUserText(brief: IllustrationBrief): string {

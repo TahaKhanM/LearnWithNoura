@@ -208,12 +208,24 @@ describe('authored-tier manipulatives', () => {
     }
   });
 
-  it('rejects fast-tier updates that mention manipulative authored fields', () => {
+  it('applies a fast-tier point update of at', () => {
     const { ops, rejected } = validateOps([
-      { op: 'update', id: 'zone', props: { from: 0, to: 1 } },
-    ]);
-    expect(ops).toHaveLength(0);
-    expect(rejected[0].reason).toMatch(/manipulative|authored|director/i);
+      { op: 'update', id: 'p1', props: { at: [120, 80] } },
+    ], { tier: 'fast' });
+    expect(rejected).toHaveLength(0);
+    expect(ops).toEqual([{ op: 'update', id: 'p1', props: { at: [120, 80] } }]);
+  });
+
+  it('rejects fast-tier updates of selected, assetId, and handwritten style', () => {
+    for (const props of [
+      { selected: true },
+      { assetId: 'img-a1b2c3d4e5f67890' },
+      { style: 'handwritten' },
+    ]) {
+      const { ops, rejected } = validateOps([{ op: 'update', id: 'x', props }], { tier: 'fast' });
+      expect(ops).toHaveLength(0);
+      expect(rejected[0].reason).toMatch(/director|compiler|authored|handwritten|manipulative/i);
+    }
   });
 });
 

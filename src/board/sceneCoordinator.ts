@@ -101,7 +101,7 @@ export class BoardSceneCoordinator {
     // section disappear because today's quality budget became stricter.
     const effectiveOps: BoardOp[] = replacesGroup ? [{ op: 'clear' }, ...ops] : ops;
     const scope = replacesGroup ?? semanticGroupId;
-    const applied = applyOps(this.value, effectiveOps, 'tutor', scope);
+    const applied = applyOps(this.value, effectiveOps, 'tutor', scope, { tier: 'authored' });
     const scoped = layoutTutorAnnotations(scope ? sceneForGroup(applied.scene, scope) : applied.scene);
     const committed = scope ? mergeScopedScene(applied.scene, scoped) : scoped;
     this.value = committed;

@@ -41,7 +41,7 @@ export function applyOps(
   ops: BoardOp[],
   owner: Owner,
   semanticGroupId?: string,
-  options?: { manipulativeDraft?: boolean },
+  options?: { manipulativeDraft?: boolean; tier?: 'fast' | 'authored' },
 ): AppliedOps {
   let items = scene.items;
   let epoch = scene.epoch;
@@ -88,7 +88,7 @@ export function applyOps(
           if (existing.owner !== owner) return existing;
           return {
             ...existing,
-            spec: applyUpdate(existing.spec, op.props, { tier: 'authored' }),
+            spec: applyUpdate(existing.spec, op.props, { tier: options?.tier ?? 'fast' }),
             revision: existing.revision + 1,
           };
         });

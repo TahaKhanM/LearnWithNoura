@@ -112,7 +112,7 @@ export async function handleToolCall(ctx: CoordinatorContext, name: string, rawA
     }
 
     case 'board_ops': {
-      const validated = validateOps(args.ops);
+      const validated = validateOps(args.ops, { tier: 'fast' });
       // Raw destructive clears are not available to the model: visible
       // tutor work never disappears during the ordinary lesson flow.
       const clears = validated.ops.filter((op) => op.op === 'clear');

@@ -31,7 +31,7 @@ export class BoardContextTracker {
     this.items = items;
   }
 
-  apply(ops: BoardOp[], owner: BoardOwner, semanticGroupId?: string, semanticGroupLabel?: string): void {
+  apply(ops: BoardOp[], owner: BoardOwner, semanticGroupId?: string, semanticGroupLabel?: string, options?: { tier?: 'fast' | 'authored' }): void {
     for (const op of ops) {
       if (op.op === 'add') {
         const existing = this.items.find((item) => item.id === op.id);
@@ -54,7 +54,7 @@ export class BoardContextTracker {
             return { ...item, spec: applyManipulativeProps(item.spec, op.props) };
           }
           if (item.owner !== owner) return item;
-          return { ...item, spec: applyUpdate(item.spec, op.props, { tier: 'authored' }) };
+          return { ...item, spec: applyUpdate(item.spec, op.props, { tier: options?.tier ?? 'fast' }) };
         });
       } else if (op.op === 'erase') {
         this.items = this.items.filter((item) => item.owner !== owner || (item.id !== op.id && !dependsOn(item.spec, op.id)));
@@ -159,8 +159,8 @@ export class BoardContextTracker {
 
   /** Applies an atomic section replacement: scoped clear plus the new ops. */
   applyReplacement(ops: BoardOp[], semanticGroupId: string, semanticGroupLabel?: string): void {
-    this.apply([{ op: 'clear' }], 'tutor', semanticGroupId);
-    this.apply(ops, 'tutor', semanticGroupId, semanticGroupLabel);
+    this.apply([{ op: 'clear' }], 'tutor', semanticGroupId, undefined, { tier: 'authored' });
+    this.apply(ops, 'tutor', semanticGroupId, semanticGroupLabel, { tier: 'authored' });
   }
 
   observeBoardRejection(reason: string): void {
@@ -246,7 +246,7 @@ export async function loadReleasedBoardContext(repo: DomainRepository, sessionId
       : typeof payload.plan?.groups?.[0]?.label === 'string' ? payload.plan.groups[0].label : undefined;
     if (owner === 'tutor' && typeof payload.replacesGroup === 'string' && payload.replacesGroup) {
       tracker.applyReplacement(ops, payload.replacesGroup, semanticGroupLabel);
-    } else tracker.apply(ops, owner, semanticGroupId, semanticGroupLabel);
+    } else tracker.apply(ops, owner, semanticGroupId, semanticGroupLabel, { tier: 'authored' });
     if (owner === 'learner') {
       const parsedAnalysis = LearnerBoardAnalysisSchema.safeParse((event.payload as { analysis?: unknown }).analysis);
       if (parsedAnalysis.success) tracker.observeLearnerAnalysis(parsedAnalysis.data);
