@@ -3,6 +3,17 @@ import { applyOps, emptyScene } from './scene';
 import { LearnerDraftController } from '../lesson/learnerDraft';
 
 describe('manipulative draft lifecycle', () => {
+  it('records one draft entry per completed drag gesture', () => {
+    const draft = new LearnerDraftController();
+    draft.begin({ taskId: 'place-marker' });
+    draft.addManipulativeUpdate(
+      { op: 'update', id: 'marker', props: { at: [685, 300] } },
+      { op: 'update', id: 'marker', props: { at: [200, 300] } },
+      'moved marker',
+    );
+    expect(draft.getSnapshot().entryCount).toBe(1);
+  });
+
   it('undo and redo restore draggable position during an open draft', () => {
     const scene = applyOps(emptyScene, [{
       op: 'add',

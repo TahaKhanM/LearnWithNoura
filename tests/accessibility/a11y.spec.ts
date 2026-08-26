@@ -14,7 +14,7 @@ test('Home has no serious or critical automated accessibility violations', async
 test('canonical board fixture exposes a programmatic long description', async ({ page }) => {
   await page.goto('/dev/board');
   await page.getByRole('button', { name: 'fractions' }).click();
-  const board = page.getByRole('img', { name: 'Shared Noura whiteboard' });
+  const board = page.getByRole('group', { name: 'Shared Noura whiteboard' });
   await expect(board).toHaveAttribute('aria-describedby', 'noura-board-description');
   await expect(page.locator('#noura-board-description')).toContainText('number line');
   const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag22aa']).analyze();
@@ -227,6 +227,63 @@ test('actual Lesson start, listening, thinking, speaking/visual, reduced-motion 
     label: 'Next part of this board section', focusVisible: true, outlineStyle: 'solid', contained: true,
   });
   expect(focusAppearance.outlineWidth).toBeGreaterThanOrEqual(2);
+});
+
+test('manipulate controls stay out of img role and meet hit-target minimums', async ({ page, request }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const { session, lessonCapability } = await createSyntheticSession(request, `a11y-manip-${Date.now().toString(36)}`);
+  await installFakeRealtime(page);
+  await setLessonCapability(page, session.id, lessonCapability);
+  await page.goto(`/lesson/${session.id}`);
+  await page.getByRole('button', { name: 'Begin' }).click();
+  await page.waitForFunction(() => Boolean((window as typeof window & { __nouraFakeSocket?: { identity?: unknown } }).__nouraFakeSocket?.identity));
+  await page.evaluate(() => {
+    const socket = (window as typeof window & { __nouraFakeSocket: { emit(type: string, payload: Record<string, unknown>, optional?: Record<string, unknown>): void } }).__nouraFakeSocket;
+    socket.emit('learner_task', {
+      task: {
+        taskId: 'place-three-quarters',
+        prompt: 'Drag the marker onto three-quarters.',
+        responseMode: 'manipulate',
+        submitPolicy: 'explicit',
+        manipulativeCheck: { targetId: 'lesson-anchor-marker', predicate: 'snapped', snapZoneId: 'lesson-anchor-zone-three-quarters', tolerance: 12 },
+      },
+    });
+    socket.emit('board_ops', {
+      response_id: 'setup',
+      ops: [
+        { op: 'add', id: 'lesson-anchor-line', spec: { kind: 'numberline', at: [130, 300], w: 740, min: 0, max: 1 } },
+        { op: 'add', id: 'lesson-anchor-zone-three-quarters', spec: { kind: 'snapZone', shape: 'interval', at: [685, 300], numberlineId: 'lesson-anchor-line', from: 0.7, to: 0.8, tolerance: 12 } },
+        { op: 'add', id: 'lesson-anchor-marker', spec: { kind: 'draggable', handle: 'token', at: [200, 300], size: 44, label: 'marker' } },
+      ],
+    }, { semanticObjectId: 'lesson-anchor' });
+  });
+  const board = page.getByRole('group', { name: 'Shared Noura whiteboard' });
+  await expect(board).toBeVisible();
+  const fitOverview = page.getByRole('button', { name: 'Fit the full board overview' });
+  if (await fitOverview.isVisible()) await fitOverview.click();
+  const marker = page.locator('[data-manipulative-id="lesson-anchor-marker"]');
+  await expect(marker).toBeVisible();
+  const hitSize = await marker.evaluate((node) => {
+    const svg = node.ownerSVGElement;
+    const viewBox = svg?.viewBox.baseVal;
+    const svgRect = svg?.getBoundingClientRect();
+    const r = Number(node.getAttribute('r') ?? '0');
+    const scale = svgRect && viewBox ? svgRect.width / viewBox.width : 1;
+    const cssDiameter = r * 2 * scale;
+    return {
+      role: node.getAttribute('role'),
+      logical: Number(node.getAttribute('data-manipulative-hit-size')),
+      cssDiameter,
+    };
+  });
+  expect(hitSize.logical).toBeGreaterThanOrEqual(44);
+  expect(hitSize.cssDiameter).toBeGreaterThanOrEqual(44 * 0.95);
+  expect(hitSize.role).toBe('slider');
+  await marker.focus();
+  const tabbables = await page.evaluate(() =>
+    [...document.querySelectorAll<HTMLElement>('.board__manipulative-hit[tabindex="0"]')].map((node) => node.getAttribute('data-manipulative-id')),
+  );
+  expect(tabbables).toEqual(['lesson-anchor-marker']);
 });
 
 async function assertNoSeriousAxe(page: import('@playwright/test').Page) {

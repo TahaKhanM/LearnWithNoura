@@ -193,3 +193,26 @@ describe('curated educational assets', () => {
     }
   });
 });
+
+describe('authored-tier manipulatives', () => {
+  it('rejects fast-tier add of draggable, snapZone, and tappable kinds', () => {
+    for (const kind of ['draggable', 'snapZone', 'tappable'] as const) {
+      const raw = kind === 'draggable'
+        ? [{ op: 'add', id: 'm', kind, handle: 'token', at: [200, 300], size: 44 }]
+        : kind === 'snapZone'
+          ? [{ op: 'add', id: 'z', kind, shape: 'interval', at: [685, 300], from: 0.7, to: 0.8 }]
+          : [{ op: 'add', id: 't', kind, shape: 'circle', at: [400, 300], r: 22 }];
+      const fast = validateOps(raw);
+      expect(fast.ops).toHaveLength(0);
+      expect(fast.rejected[0].reason).toMatch(/director|compiler|authored/i);
+    }
+  });
+
+  it('rejects fast-tier updates that mention manipulative authored fields', () => {
+    const { ops, rejected } = validateOps([
+      { op: 'update', id: 'zone', props: { from: 0, to: 1 } },
+    ]);
+    expect(ops).toHaveLength(0);
+    expect(rejected[0].reason).toMatch(/manipulative|authored|director/i);
+  });
+});

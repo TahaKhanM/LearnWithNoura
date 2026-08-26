@@ -133,4 +133,22 @@ describe('applyUpdate', () => {
       style: 'handwritten',
     });
   });
+
+  it('blocks fast-tier updates to existing manipulatives', () => {
+    const draggable = { kind: 'draggable' as const, at: [200, 300] as [number, number], handle: 'token' as const, size: 44 };
+    expect(applyUpdate(draggable, { at: [685, 300] })).toEqual(draggable);
+    expect(applyUpdate(draggable, { at: [685, 300] }, { tier: 'fast' })).toEqual(draggable);
+
+    const snapZone = {
+      kind: 'snapZone' as const,
+      shape: 'interval' as const,
+      at: [685, 300] as [number, number],
+      from: 0.7,
+      to: 0.8,
+    };
+    expect(applyUpdate(snapZone, { from: 0, to: 1 }, { tier: 'fast' })).toEqual(snapZone);
+
+    const tappable = { kind: 'tappable' as const, at: [400, 300] as [number, number], shape: 'circle' as const };
+    expect(applyUpdate(tappable, { selected: true }, { tier: 'fast' })).toEqual(tappable);
+  });
 });

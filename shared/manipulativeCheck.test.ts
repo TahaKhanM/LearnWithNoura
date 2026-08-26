@@ -85,6 +85,66 @@ describe('evaluateManipulativeCheck tolerance', () => {
     expect(result.passed).toBe(false);
   });
 
+  it('passes at exactly tolerance and fails at tolerance plus epsilon', () => {
+    const tolerance = 12;
+    const edgeX = 130 + 0.7 * 740;
+    const passAt = edgeX - tolerance;
+    const failAt = edgeX - tolerance - 0.01;
+    const looseZoneItems = items.map((item) =>
+      item.id === zoneId ? { ...item, spec: { ...item.spec, tolerance: undefined } } : item,
+    );
+    const passItems = looseZoneItems.map((item) =>
+      item.id === markerId ? { ...item, spec: { ...item.spec, at: [passAt, 300] as [number, number] } } : item,
+    );
+    const failItems = looseZoneItems.map((item) =>
+      item.id === markerId ? { ...item, spec: { ...item.spec, at: [failAt, 300] as [number, number] } } : item,
+    );
+    expect(evaluateManipulativeCheck({
+      check: { targetId: markerId, predicate: 'snapped', snapZoneId: zoneId, tolerance },
+      items: passItems,
+    }).passed).toBe(true);
+    expect(evaluateManipulativeCheck({
+      check: { targetId: markerId, predicate: 'snapped', snapZoneId: zoneId, tolerance },
+      items: failItems,
+    }).passed).toBe(false);
+  });
+
+  it('prefers zone tolerance over check tolerance when both are set', () => {
+    const outsideX = 130 + 0.8 * 740 + 11;
+    const moved = items.map((item) =>
+      item.id === markerId ? { ...item, spec: { ...item.spec, at: [outsideX, 300] as [number, number] } } : item,
+    );
+    expect(evaluateManipulativeCheck({
+      check: { targetId: markerId, predicate: 'snapped', snapZoneId: zoneId, tolerance: 20 },
+      items: moved,
+    }).passed).toBe(false);
+  });
+
+  it('fail-closed when snap zone, selection, or number line is missing', () => {
+    expect(evaluateManipulativeCheck({
+      check: { targetId: markerId, predicate: 'snapped' },
+      items,
+    }).passed).toBe(false);
+    expect(evaluateManipulativeCheck({
+      check: { targetId: 'fraction-line', predicate: 'selected' },
+      items,
+    }).passed).toBe(false);
+    const noLineZone = items.map((item) =>
+      item.id === zoneId ? { ...item, spec: { ...item.spec, numberlineId: 'missing-line' } } : item,
+    );
+    expect(evaluateManipulativeCheck({
+      check: { targetId: markerId, predicate: 'snapped', snapZoneId: zoneId, tolerance: 12 },
+      items: noLineZone,
+    }).passed).toBe(false);
+    const degenerateLine = items.map((item) =>
+      item.id === lineId ? { ...item, spec: { ...item.spec, min: 1, max: 1 } } : item,
+    );
+    expect(evaluateManipulativeCheck({
+      check: { targetId: markerId, predicate: 'snapped', snapZoneId: zoneId, tolerance: 12 },
+      items: degenerateLine,
+    }).passed).toBe(false);
+  });
+
   it('property: points inside the box always pass within checks', () => {
     fc.assert(fc.property(
       fc.integer({ min: -5, max: 5 }),

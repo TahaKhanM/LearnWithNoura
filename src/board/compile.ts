@@ -276,6 +276,7 @@ interface CompileContext {
   axes: Map<string, AxesMap>;
   /** All occupied boxes so far, for label collision avoidance. */
   occupied: BBox[];
+  items: SceneItem[];
 }
 
 const SIZE = (name: 'small' | 'normal' | 'big' | undefined) => TEXT_SIZES[name ?? 'normal'];
@@ -1006,7 +1007,7 @@ function compileSpec(
       break;
 
     case 'snapZone':
-      nodes.push(...compileSnapZone(spec));
+      nodes.push(...compileSnapZone(spec, ctx.items));
       break;
 
     case 'tappable':
@@ -1159,7 +1160,7 @@ function clampBox(box: BBox): BBox {
  * far (render-inspect-repair, done eagerly at compile time).
  */
 export function compileScene(items: SceneItem[]): CompiledItem[] {
-  const ctx: CompileContext = { bboxes: new Map(), axes: new Map(), occupied: [] };
+  const ctx: CompileContext = { bboxes: new Map(), axes: new Map(), occupied: [], items };
   const compiled: CompiledItem[] = [];
   for (const item of items) {
     const nodes = compileSpec(item, ctx);

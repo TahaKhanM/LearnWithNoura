@@ -435,6 +435,13 @@ export function LessonPage({ sessionId }: LessonPageProps) {
     signalBoardActivity('learner', 1_200);
   }, [session, ensureDraftOpen, signalBoardActivity]);
 
+  const handleManipulativeDragPreview = useCallback((op: UpdateOp) => {
+    ensureDraftOpen();
+    const result = boardState.current.applyManipulativeDraft([op], activeVisualGroupRef.current);
+    setScene(result.scene);
+    signalBoardActivity('learner', 1_200);
+  }, [ensureDraftOpen, signalBoardActivity]);
+
   const handleManipulativeMove = useCallback((op: UpdateOp, inverse: UpdateOp, note: string) => {
     applyManipulativeChange(op, inverse, note);
   }, [applyManipulativeChange]);
@@ -738,6 +745,7 @@ export function LessonPage({ sessionId }: LessonPageProps) {
             manipulativeEnabled={started && (snap.task?.responseMode === 'manipulate' || snap.task?.responseMode === 'mixed')}
             manipulativeFeedback={manipulativeFeedback}
             manipulativeCheckTargetId={snap.task?.manipulativeCheck?.targetId}
+            onManipulativeDragPreview={handleManipulativeDragPreview}
             onManipulativeMove={handleManipulativeMove}
             onManipulativeTap={handleManipulativeTap}
           />

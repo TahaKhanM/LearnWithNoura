@@ -2,11 +2,13 @@
  * Compile interactive manipulatives into render nodes and hit-target metadata.
  */
 
-import { PALETTE, type Vec } from '../../shared/boardOps';
+import { PALETTE, type NumberlineSpec, type Vec } from '../../shared/boardOps';
 import type { DraggableSpec, SnapZoneSpec, TappableSpec } from '../../shared/manipulativeSpecs';
 import { MIN_MANIPULATIVE_HIT_PX } from '../../shared/manipulativeSpecs';
+import { numberlineXFromSpec } from '../../shared/manipulativeCheck';
 import { measureText, TEXT_SIZES } from './measure';
 import type { PathNode, TextNode } from './compile';
+import type { SceneItem } from './scene';
 
 const INK_SOFT = '#5C574F';
 
@@ -85,7 +87,7 @@ export function compileDraggable(spec: DraggableSpec, color: string): { nodes: A
   return { nodes, hit: { itemId: '', kind: 'draggable', cx, cy, r, ...(spec.label ? { label: spec.label } : {}) } };
 }
 
-export function compileSnapZone(spec: SnapZoneSpec): Array<PathNode> {
+export function compileSnapZone(spec: SnapZoneSpec, items: SceneItem[] = []): Array<PathNode> {
   const color = PALETTE.violet;
   if (spec.shape === 'box') {
     const w = spec.w ?? MIN_MANIPULATIVE_HIT_PX;
@@ -104,6 +106,26 @@ export function compileSnapZone(spec: SnapZoneSpec): Array<PathNode> {
     }];
   }
   if (spec.shape === 'interval') {
+    const line = spec.numberlineId ? items.find((item) => item.id === spec.numberlineId) : undefined;
+    if (line?.spec.kind === 'numberline' && spec.from !== undefined && spec.to !== undefined) {
+      const nl = line.spec as NumberlineSpec;
+      const x0 = numberlineXFromSpec(nl, spec.from);
+      const x1 = numberlineXFromSpec(nl, spec.to);
+      const y = nl.at[1] - 22;
+      const h = 44;
+      const x = Math.min(x0, x1);
+      const w = Math.abs(x1 - x0);
+      return [{
+        type: 'path',
+        d: `M ${x} ${y} L ${x + w} ${y} L ${x + w} ${y + h} L ${x} ${y + h} Z`,
+        color,
+        width: 2,
+        dash: true,
+        fill: wash(color, 0.1),
+        length: 2 * (w + h),
+        bbox: { x, y, w, h },
+      }];
+    }
     const w = spec.w ?? 80;
     const x = spec.at[0];
     const y = spec.at[1] - 22;

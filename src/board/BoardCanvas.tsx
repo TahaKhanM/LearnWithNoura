@@ -50,6 +50,7 @@ interface BoardCanvasProps {
   manipulativeEnabled?: boolean;
   manipulativeFeedback?: ManipulativeFeedback;
   manipulativeCheckTargetId?: string;
+  onManipulativeDragPreview?: (op: UpdateOp) => void;
   onManipulativeMove?: (op: UpdateOp, inverse: UpdateOp, note: string) => void;
   onManipulativeTap?: (op: UpdateOp, inverse: UpdateOp, note: string) => void;
 }
@@ -191,6 +192,7 @@ export function BoardCanvas({
   manipulativeEnabled = false,
   manipulativeFeedback = 'idle',
   manipulativeCheckTargetId,
+  onManipulativeDragPreview,
   onManipulativeMove,
   onManipulativeTap,
 }: BoardCanvasProps) {
@@ -415,7 +417,7 @@ export function BoardCanvas({
       data-camera-region={activeRegionId ?? ''}
       data-viewbox={`${camera.x},${camera.y},${camera.w},${camera.h}`}
       preserveAspectRatio="xMidYMid meet"
-      role="img"
+      role="group"
       aria-label="Shared Noura whiteboard"
       aria-describedby="noura-board-description"
       onPointerDown={onPointerDown}
@@ -517,13 +519,14 @@ export function BoardCanvas({
       <Pen pos={pen} />
       </g>
 
-      {manipulativeEnabled && onManipulativeMove && onManipulativeTap && (
+      {manipulativeEnabled && onManipulativeDragPreview && onManipulativeMove && onManipulativeTap && (
         <ManipulativeLayer
           scene={scene}
           enabled={interactive && manipulativeEnabled}
           pointFromClient={boardPoint}
           regionOffset={(groupId) => regionLayout.offset(groupId)}
           activeRegionId={activeRegionId}
+          onDragPreview={onManipulativeDragPreview}
           onMove={onManipulativeMove}
           onTap={onManipulativeTap}
           feedback={manipulativeFeedback}
