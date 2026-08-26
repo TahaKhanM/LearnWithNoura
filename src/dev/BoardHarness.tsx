@@ -86,6 +86,31 @@ const SCENES: Record<string, BoardOp[]> = {
   comparison: semantic('comparison', 'comparison', { leftTitle: 'Solid', rightTitle: 'Liquid', leftItems: ['Fixed shape', 'Particles packed'], rightItems: ['Takes container shape', 'Particles move'] }),
   'part-whole': semantic('part_whole', 'quantitative', { labels: ['Known', 'Unknown'], values: [3, 2], wholeLabel: 'Five equal parts' }),
   'no-board': semantic('no_board', 'none'),
+  handwritten: [
+    { op: 'add', id: 'note-box', spec: { kind: 'box', at: [500, 280], w: 280, h: 90, text: 'Water cycle' } },
+    { op: 'add', id: 'margin-note', spec: { kind: 'text', at: [80, 90], text: 'starts with the sun', style: 'handwritten', size: 'small' } },
+  ],
+  assets: [
+    { op: 'add', id: 'icon-sun', spec: { kind: 'asset', assetId: 'sun', at: [220, 200], size: 88, label: 'Sun' }, color: 'amber' },
+    { op: 'add', id: 'icon-cloud', spec: { kind: 'asset', assetId: 'cloud', at: [500, 180], size: 88, label: 'Cloud' }, color: 'blue' },
+    { op: 'add', id: 'icon-drop', spec: { kind: 'asset', assetId: 'raindrop', at: [760, 200], size: 80, label: 'Rain' }, color: 'blue' },
+    { op: 'add', id: 'icon-plant', spec: { kind: 'asset', assetId: 'plant', at: [500, 420], size: 88, label: 'Plant' }, color: 'green' },
+  ],
+  'arc-curve': [
+    { op: 'add', id: 'guide-arc', spec: { kind: 'arc', center: [380, 280], r: 110, startDeg: 200, endDeg: 340 }, color: 'blue' },
+    { op: 'add', id: 'smooth-curve', spec: { kind: 'curve', points: [[120, 420], [280, 180], [620, 500], [860, 220]] }, color: 'violet' },
+    { op: 'add', id: 'arc-label', spec: { kind: 'text', at: [300, 120], text: 'smooth path' } },
+  ],
+};
+
+const GROUPED_SCENES: Record<string, { groups: Array<{ id: string; ops: BoardOp[] }>; camera: string }> = {
+  'two-regions': {
+    camera: 'region-two',
+    groups: [
+      { id: 'region-one', ops: [{ op: 'add', id: 'one-box', spec: { kind: 'box', at: [900, 280], w: 160, h: 90, text: 'First idea' } }] },
+      { id: 'region-two', ops: [{ op: 'add', id: 'two-box', spec: { kind: 'box', at: [500, 280], w: 300, h: 100, text: 'Second idea' } }] },
+    ],
+  },
 };
 
 const SCENE_GROUPS: Record<string, string> = {
@@ -103,6 +128,10 @@ const SCENE_GROUPS: Record<string, string> = {
   comparison: 'group-comparison',
   'part-whole': 'group-part_whole',
   'no-board': 'group-no_board',
+  handwritten: 'group-handwritten',
+  assets: 'group-assets',
+  'arc-curve': 'group-arc-curve',
+  'two-regions': 'region-two',
 };
 
 export function BoardHarness() {
@@ -115,21 +144,28 @@ export function BoardHarness() {
   const animatorRef = useRef<BoardAnimator | null>(null);
   const nonce = useRef(0);
 
+  const [cameraRegionId, setCameraRegionId] = useState<string | undefined>();
   const load = useCallback((name: string) => {
+    const grouped = GROUPED_SCENES[name];
     const ops = SCENES[name] ?? [];
     setRejections([]);
     setActive(name);
     setFocusIndex(0);
     setOverview(false);
+    setCameraRegionId(grouped?.camera ?? SCENE_GROUPS[name]);
     setScene((previous) => {
-      const cleared = applyOps(previous, [{ op: 'clear' }], 'tutor');
-      return applyOps(cleared.scene, ops, 'tutor').scene;
+      let next = applyOps(previous, [{ op: 'clear' }], 'tutor').scene;
+      if (grouped) {
+        for (const group of grouped.groups) next = applyOps(next, group.ops, 'tutor', group.id).scene;
+        return next;
+      }
+      return applyOps(next, ops, 'tutor', ['handwritten', 'assets', 'arc-curve'].includes(name) ? SCENE_GROUPS[name] : undefined).scene;
     });
   }, []);
 
   useEffect(() => {
     const requested = new URLSearchParams(window.location.search).get('scene');
-    if (requested && SCENES[requested]) load(requested);
+    if (requested && (SCENES[requested] || GROUPED_SCENES[requested])) load(requested);
   }, [load]);
 
   useEffect(() => {
@@ -151,7 +187,7 @@ export function BoardHarness() {
 
   // The extra adversarial/canonical scene is addressable by URL for visual
   // tests without perturbing every established fixture screenshot.
-  const buttons = useMemo(() => Object.keys(SCENES).filter((name) => !['triangle-angles', 'relationship-map', 'worked-steps', 'comparison', 'part-whole'].includes(name)), []);
+  const buttons = useMemo(() => Object.keys(SCENES).filter((name) => !['triangle-angles', 'relationship-map', 'worked-steps', 'comparison', 'part-whole', 'handwritten', 'assets', 'arc-curve'].includes(name)), []);
   const activeGroup = SCENE_GROUPS[active];
   const viewCount = deriveSemanticViewports(scene, activeGroup, highlights.map((highlight) => highlight.id)).length;
   return (
@@ -183,6 +219,7 @@ export function BoardHarness() {
           longDescription={describeScene(scene)}
           animatorRef={(animator) => { animatorRef.current = animator; }}
           focusSemanticObjectId={activeGroup}
+          cameraRegionId={cameraRegionId ?? activeGroup}
           focusIndex={focusIndex}
           overview={overview}
         />

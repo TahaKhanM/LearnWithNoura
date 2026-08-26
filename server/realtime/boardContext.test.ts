@@ -23,7 +23,7 @@ describe('released board context', () => {
     const board = await loadReleasedBoardContext(repo, session.id);
     const snapshot = board.toolSnapshot();
     expect(snapshot.visibleObjectIds).toEqual(['visible-triangle', 'sketch-arrow']);
-    expect(snapshot.summary).toContain('sketch-arrow [section angle-proof] [learner]');
+    expect(snapshot.summary).toContain('sketch-arrow [region 1 of 1: angle-proof] [learner]');
     expect(snapshot.summary).not.toContain('unheard-label');
     expect(snapshot.visibleGroups).toEqual([{ id: 'angle-proof', objectCount: 2, learnerMarkCount: 1 }]);
     expect(snapshot.recentLearnerObservations).toEqual(['pointing_mark sketch-arrow near visible-triangle']);

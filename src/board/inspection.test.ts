@@ -14,6 +14,17 @@ describe('scene inspection and repair', () => {
     expect(second.issues.every((issue) => issue.kind !== 'non_finite')).toBe(true);
   });
 
+  it('bounds tutor arcs, curves, and assets inside the safe board', () => {
+    const scene = applyOps(emptyScene, [
+      { op: 'add', id: 'arc', spec: { kind: 'arc', center: [200, 200], r: 40, startDeg: 20, endDeg: 200 } },
+      { op: 'add', id: 'curve', spec: { kind: 'curve', points: [[80, 400], [160, 320], [240, 480], [320, 400]] } },
+      { op: 'add', id: 'sun', spec: { kind: 'asset', assetId: 'leaf', at: [500, 220], size: 64 } },
+    ], 'tutor').scene;
+    const report = inspectScene(scene);
+    expect(report.issues.filter((issue) => issue.kind === 'non_finite')).toEqual([]);
+    expect(report.issues.filter((issue) => issue.kind === 'bounds' && ['arc', 'curve', 'sun'].includes(issue.itemId))).toEqual([]);
+  });
+
   it('detects destructive text-bearing collisions', () => {
     const scene = applyOps(emptyScene, [
       { op: 'add', id: 'a', spec: { kind: 'box', at: [400, 300], text: 'First idea' } },

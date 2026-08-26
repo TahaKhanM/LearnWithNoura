@@ -22,6 +22,11 @@
   pointer-events: none;
 }
 
+.board__text--handwritten {
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+
 .board__item { transition: opacity 180ms ease; }
 .board__item--deemphasized { opacity: 0.58; }
 

@@ -21,6 +21,10 @@ The board is 1000 wide and 600 tall; origin top-left. Every op is {"op":"add","i
 - {"kind":"numberline","at":[x,y],"w":n,"min":a,"max":b,"step":s,"marks":[{"value":v,"label":"½"}]}
 - {"kind":"box","at":[cx,cy],"text":"..."} and {"kind":"connector","from":"idOrPoint","to":"idOrPoint","label":"..."}
 - {"kind":"table","at":[x,y],"rows":[["a","b"]],"headerRow":true}
+- {"kind":"arc","center":[x,y],"r":n,"startDeg":0,"endDeg":90} or {"kind":"arc","from":[x,y],"through":[x,y],"to":[x,y]} — smooth tutor arcs
+- {"kind":"curve","points":[[x,y],[cp1],[cp2],[end],...]} — cubic Bézier, 4+3k points
+- {"kind":"text","at":[x,y],"text":"few words","style":"handwritten"} — short margin notes only; equations stay KaTeX
+- {"kind":"asset","assetId":"sun|cloud|raindrop|leaf|tree|root|atom|cell|magnet|battery|bulb|thermometer|heart|lungs|globe|mountain|river|volcano|gear|scale|beaker|cycle|person|book|…","at":[x,y],"size":72,"label":"optional"} — curated local icons. Prefer an asset when a simple silhouette teaches faster than constructed geometry (weather, organisms, lab tools). Prefer exact geometry for measured maths.
 
 Hard rules:
 - Add operations only. Nothing visible may be erased, cleared, replaced, or updated.

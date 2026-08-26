@@ -137,6 +137,7 @@ export function LessonPage({ sessionId }: LessonPageProps) {
   }, [sessionId]);
 
   const openSection = useCallback((groupId: string, cause: NavigationCause) => {
+    if (draftRef.current.isOpen && cause !== 'draft_restore') return;
     const previousGroupId = activeVisualGroupRef.current ?? null;
     if (previousGroupId !== groupId) {
       const navigation: AnnouncedBoardNavigation = {
@@ -504,16 +505,25 @@ export function LessonPage({ sessionId }: LessonPageProps) {
 
   const lastChildLine = [...snap.captions].reverse().find((c) => c.role === 'child');
   const lastTutorLine = [...snap.captions].reverse().find((c) => c.role === 'tutor');
-  const visibleScene = useMemo(() => sceneForGroup(scene, activeVisualGroupId), [scene, activeVisualGroupId]);
+  const regionScene = useMemo(() => sceneForGroup(scene, activeVisualGroupId), [scene, activeVisualGroupId]);
   const activeVisualGroup = visualGroups.find((group) => group.id === activeVisualGroupId);
-  const semanticViewCount = deriveSemanticViewports(visibleScene, activeVisualGroupId).length;
+  const semanticViewCount = deriveSemanticViewports(regionScene, activeVisualGroupId).length;
   const activeBoardItemCount = groupItemCount(scene, activeVisualGroupId);
   const draftActive = draftSnap.status === 'open' || draftSnap.status === 'submitting' || draftSnap.status === 'error';
+  useEffect(() => {
+    const target = snap.task?.semanticGroupId;
+    if (!target || draftActive || target === activeVisualGroupId) return;
+    if (!visualGroups.some((group) => group.id === target)) return;
+    openSection(target, 'task_focus');
+  }, [snap.task, draftActive, activeVisualGroupId, visualGroups, openSection]);
+  const regionCount = visualGroups.length;
+  const regionIndex = Math.max(0, visualGroups.findIndex((group) => group.id === activeVisualGroupId));
 
   useEffect(() => {
+    const tutorIds = scene.items.filter((item) => item.owner === 'tutor').map((item) => item.id);
     const snapshot = {
-      visibleTutorIds: visibleScene.items.filter((item) => item.owner === 'tutor').map((item) => item.id),
-      allTutorIds: scene.items.filter((item) => item.owner === 'tutor').map((item) => item.id),
+      visibleTutorIds: tutorIds,
+      allTutorIds: tutorIds,
       navigation: pendingNavigationRef.current,
       intentionallyRetiredTutorIds: pendingReplacementIdsRef.current ?? undefined,
     };
@@ -522,7 +532,7 @@ export function LessonPage({ sessionId }: LessonPageProps) {
     for (const disappearance of renderedTutorObjectTracker.current.observe(snapshot)) {
       session.recordTutorObjectDisappearance(disappearance);
     }
-  }, [scene, session, visibleScene]);
+  }, [scene, session]);
 
   const statusLabel =
     draftSnap.status === 'submitting'
@@ -621,7 +631,7 @@ export function LessonPage({ sessionId }: LessonPageProps) {
         )}
         <div className={`lesson__surface${boardOverview ? ' lesson__surface--overview' : ''}`}>
           <BoardCanvas
-            scene={visibleScene}
+            scene={scene}
             highlights={highlights}
             animationRequest={boardAnimation}
             tool={tool}
@@ -632,9 +642,10 @@ export function LessonPage({ sessionId }: LessonPageProps) {
             onLearnerActivityStart={() => session.beginLearnerActivity()}
             onTutorPen={handleTutorPen}
             onLearnerAttention={handleLearnerAttention}
-            longDescription={describeScene(visibleScene)}
+            longDescription={describeScene(scene)}
             animatorRef={handleAnimatorReady}
             focusSemanticObjectId={activeVisualGroupId}
+            cameraRegionId={activeVisualGroupId}
             focusIndex={focusIndex}
             overview={boardOverview}
           />
@@ -696,11 +707,35 @@ export function LessonPage({ sessionId }: LessonPageProps) {
                 <select
                   aria-label="Board section"
                   value={activeVisualGroupId}
+                  disabled={draftActive}
                   onChange={(event) => openSection(event.target.value, 'picker')}
                 >
                   {visualGroups.map((group) => <option key={group.id} value={group.id}>{group.label}</option>)}
                 </select>
               </label>
+            )}
+            {regionCount > 1 && (
+              <>
+                <button
+                  className="lesson__tool lesson__pan-control"
+                  aria-label="Previous board region"
+                  disabled={draftActive || regionIndex <= 0}
+                  onClick={() => openSection(visualGroups[regionIndex - 1].id, 'arrow')}
+                >
+                  <svg viewBox="0 0 24 24"><path d="m15 5-7 7 7 7" /></svg>
+                </button>
+                <span className="lesson__part" data-testid="board-region-part">
+                  Part {regionIndex + 1} of {regionCount}: {activeVisualGroup?.label ?? ''}
+                </span>
+                <button
+                  className="lesson__tool lesson__pan-control"
+                  aria-label="Next board region"
+                  disabled={draftActive || regionIndex >= regionCount - 1}
+                  onClick={() => openSection(visualGroups[regionIndex + 1].id, 'arrow')}
+                >
+                  <svg viewBox="0 0 24 24"><path d="m9 5 7 7-7 7" /></svg>
+                </button>
+              </>
             )}
             {activeVisualGroupId && !boardOverview && (
               <>
@@ -813,7 +848,7 @@ export function LessonPage({ sessionId }: LessonPageProps) {
         )}
         {started && sectionNotice && (
           <p className="lesson__section-notice" role="status" data-testid="section-notice">
-            Noura added a new board section: <strong>{sectionNotice.label}</strong>. Your current board stays put.
+            Noura added a new board section: <strong>{sectionNotice.label}</strong>. It is beside this one — your view stays put until you open it.
             <button className="lesson__section-open" onClick={() => openSection(sectionNotice.id, 'notice_open')}>
               Open it
             </button>

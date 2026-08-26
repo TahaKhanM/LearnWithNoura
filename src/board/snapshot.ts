@@ -33,11 +33,14 @@ function nodeMarkup(node: RenderNode): string {
   if (node.type === 'path') {
     return `<path d="${escapeXml(node.d)}" stroke="${escapeXml(node.color)}" stroke-width="${node.width}"` +
       ` stroke-linecap="round" stroke-linejoin="round" fill="${escapeXml(node.fill ?? 'none')}"` +
-      `${node.dash ? ' stroke-dasharray="7 7"' : ''}/>`;
+      `${node.dash ? ' stroke-dasharray="7 7"' : ''}` +
+      `${node.transform ? ` transform="${escapeXml(node.transform)}"` : ''}/>`;
   }
   if (node.type === 'text') {
+    const handwritten = node.style === 'handwritten';
     return `<text x="${node.x}" y="${node.y}" font-size="${node.size}" fill="${escapeXml(node.color)}"` +
-      ` text-anchor="${node.anchor}" font-family="${escapeXml(FONT_HAND)}" font-weight="600">${escapeXml(node.text)}</text>`;
+      ` text-anchor="${node.anchor}" font-family="${escapeXml(FONT_HAND)}" font-weight="${handwritten ? 500 : 600}"` +
+      `${handwritten ? ' data-style="handwritten"' : ''}>${escapeXml(node.text)}</text>`;
   }
   // Equations render as deterministic plain math text. KaTeX HTML needs its
   // external stylesheet, which a serialized snapshot cannot rely on; readable

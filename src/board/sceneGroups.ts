@@ -1,9 +1,9 @@
 import type { SceneState } from './scene';
 
 /**
- * Semantic groups are board sections/pages, not layers painted into one plane.
- * Global legacy items remain visible for backward-compatible replay, while all
- * v2 tutor and learner work is scoped to its section.
+ * Section-scoped slice for snapshots, preflight, and quality — not a render
+ * filter. The live canvas shows every region; this helper captures one tile
+ * in its local 1000×600 space. Legacy items without a group stay in region 0.
  */
 export function sceneForGroup(scene: SceneState, semanticGroupId?: string): SceneState {
   if (!semanticGroupId) return scene;

@@ -1,0 +1,174 @@
+import { describe, expect, it } from 'vitest';
+import { BOARD_H, BOARD_W, PALETTE, validateOps } from './boardOps';
+import { BOARD_ASSET_IDS, getBoardAsset } from './boardAssets';
+
+describe('authored-tier tutor curves', () => {
+  it('accepts a center-radius arc on the authored tier and rejects it on the fast tier', () => {
+    const raw = [{
+      op: 'add',
+      id: 'arc-1',
+      kind: 'arc',
+      center: [400, 300],
+      r: 80,
+      startDeg: 0,
+      endDeg: 90,
+      color: 'blue',
+    }];
+    const authored = validateOps(raw, { tier: 'authored' });
+    expect(authored.rejected).toHaveLength(0);
+    expect(authored.ops).toHaveLength(1);
+    expect(authored.ops[0]).toMatchObject({
+      op: 'add',
+      id: 'arc-1',
+      color: PALETTE.blue,
+      spec: { kind: 'arc', center: [400, 300], r: 80, startDeg: 0, endDeg: 90 },
+    });
+
+    const fast = validateOps(raw);
+    expect(fast.ops).toHaveLength(0);
+    expect(fast.rejected[0].reason).toMatch(/director|compiler|authored/i);
+  });
+
+  it('accepts a three-point arc and rejects collinear points', () => {
+    const good = validateOps([{
+      op: 'add',
+      id: 'arc-3',
+      kind: 'arc',
+      from: [200, 400],
+      through: [400, 200],
+      to: [600, 400],
+    }], { tier: 'authored' });
+    expect(good.rejected).toHaveLength(0);
+    expect(good.ops[0]).toMatchObject({
+      spec: { kind: 'arc', from: [200, 400], through: [400, 200], to: [600, 400] },
+    });
+
+    const collinear = validateOps([{
+      op: 'add',
+      id: 'flat',
+      kind: 'arc',
+      from: [100, 300],
+      through: [200, 300],
+      to: [300, 300],
+    }], { tier: 'authored' });
+    expect(collinear.ops).toHaveLength(0);
+    expect(collinear.rejected[0].reason).toMatch(/collinear|arc/i);
+  });
+
+  it('accepts a bounded cubic Bézier curve and clamps points and width', () => {
+    const { ops, rejected } = validateOps([{
+      op: 'add',
+      id: 'curve-1',
+      kind: 'curve',
+      points: [[-50, 300], [200, -20], [400, 800], [1200, 300]],
+      width: 40,
+    }], { tier: 'authored' });
+    expect(rejected).toHaveLength(0);
+    const spec = (ops[0] as { spec: { points: number[][]; width: number } }).spec;
+    expect(spec.points[0][0]).toBe(0);
+    expect(spec.points[1][1]).toBe(0);
+    expect(spec.points[2][1]).toBe(BOARD_H);
+    expect(spec.points[3][0]).toBe(BOARD_W);
+    expect(spec.width).toBeLessThanOrEqual(12);
+  });
+
+  it('rejects a curve with too few points or a non-cubic length', () => {
+    const short = validateOps([{
+      op: 'add', id: 'c', kind: 'curve', points: [[10, 10], [20, 20]],
+    }], { tier: 'authored' });
+    expect(short.ops).toHaveLength(0);
+
+    const odd = validateOps([{
+      op: 'add', id: 'c2', kind: 'curve', points: [[10, 10], [20, 20], [30, 30], [40, 40], [50, 50]],
+    }], { tier: 'authored' });
+    expect(odd.ops).toHaveLength(0);
+  });
+
+  it('still refuses learner-only paths on both tiers', () => {
+    const raw = [{ op: 'add', id: 'p', kind: 'path', points: [[0, 0], [10, 10]] }];
+    expect(validateOps(raw).rejected[0].reason).toContain('learner-only');
+    expect(validateOps(raw, { tier: 'authored' }).rejected[0].reason).toContain('learner-only');
+  });
+});
+
+describe('handwritten annotation style', () => {
+  it('accepts short handwritten text on the authored tier only', () => {
+    const raw = [{
+      op: 'add',
+      id: 'note',
+      kind: 'text',
+      at: [80, 80],
+      text: 'watch this',
+      style: 'handwritten',
+    }];
+    const authored = validateOps(raw, { tier: 'authored' });
+    expect(authored.rejected).toHaveLength(0);
+    expect(authored.ops[0]).toMatchObject({ spec: { kind: 'text', style: 'handwritten', text: 'watch this' } });
+
+    const fast = validateOps(raw);
+    expect(fast.ops).toHaveLength(0);
+    expect(fast.rejected[0].reason).toMatch(/handwritten|authored|director/i);
+  });
+
+  it('does not attach handwritten style to ordinary fast-tier text', () => {
+    const { ops, rejected } = validateOps([{
+      op: 'add', id: 't', kind: 'text', at: [10, 40], text: 'typeset',
+    }]);
+    expect(rejected).toHaveLength(0);
+    expect((ops[0] as { spec: { style?: string } }).spec.style).toBeUndefined();
+  });
+});
+
+describe('curated educational assets', () => {
+  it('accepts a registry asset on the authored tier and rejects unknown ids', () => {
+    const good = validateOps([{
+      op: 'add',
+      id: 'sun-1',
+      kind: 'asset',
+      assetId: 'sun',
+      at: [200, 160],
+      size: 72,
+      color: 'amber',
+    }], { tier: 'authored' });
+    expect(good.rejected).toHaveLength(0);
+    expect(good.ops[0]).toMatchObject({
+      spec: { kind: 'asset', assetId: 'sun', at: [200, 160], size: 72 },
+    });
+
+    const unknown = validateOps([{
+      op: 'add', id: 'x', kind: 'asset', assetId: 'not-a-real-icon', at: [100, 100],
+    }], { tier: 'authored' });
+    expect(unknown.ops).toHaveLength(0);
+    expect(unknown.rejected[0].reason).toMatch(/unknown asset/i);
+  });
+
+  it('rejects assets from the voice-model fast tier', () => {
+    const { ops, rejected } = validateOps([{
+      op: 'add', id: 'sun-1', kind: 'asset', assetId: 'sun', at: [200, 160],
+    }]);
+    expect(ops).toHaveLength(0);
+    expect(rejected[0].reason).toMatch(/director|compiler|authored/i);
+  });
+
+  it('walks the registry: unique ids, a11y labels, and safe viewBox-normalized paths', () => {
+    expect(BOARD_ASSET_IDS.length).toBeGreaterThanOrEqual(40);
+    expect(BOARD_ASSET_IDS.length).toBeLessThanOrEqual(60);
+    const seen = new Set<string>();
+    for (const id of BOARD_ASSET_IDS) {
+      expect(seen.has(id), `duplicate asset id ${id}`).toBe(false);
+      seen.add(id);
+      const asset = getBoardAsset(id);
+      expect(asset, `missing asset ${id}`).toBeDefined();
+      if (!asset) continue;
+      expect(asset.id).toBe(id);
+      expect(asset.label.length).toBeGreaterThan(0);
+      expect(asset.viewBox).toBe(24);
+      expect(asset.paths.length).toBeGreaterThan(0);
+      for (const d of asset.paths) {
+        expect(d.length).toBeGreaterThan(2);
+        expect(d.length).toBeLessThanOrEqual(800);
+        expect(d).toMatch(/^[MmLlHhVvCcSsQqTtAaZz0-9eE.,+\-\s]+$/);
+      }
+    }
+  });
+});

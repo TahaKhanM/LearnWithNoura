@@ -1,5 +1,6 @@
 import { BOARD_H, BOARD_W, type Vec } from '../../shared/boardOps';
 import { compileScene, nodeBBox, type BBox, type CompiledItem } from './compile';
+import { sampleArcSegments, sampleCurveSegments } from './compileCurves';
 import type { SceneItem, SceneState } from './scene';
 
 interface Segment { from: Vec; to: Vec }
@@ -149,6 +150,17 @@ function geometryObstacles(items: SceneItem[], compiled: Map<string, CompiledIte
       case 'path':
         segments.push(...segmentsForPoints(spec.points, false));
         break;
+      case 'curve':
+        segments.push(...sampleCurveSegments(spec));
+        break;
+      case 'arc':
+        segments.push(...sampleArcSegments(spec));
+        break;
+      case 'asset': {
+        const box = compiled.get(item.id)?.bbox;
+        if (box) solids.push(box);
+        break;
+      }
       case 'circle':
         segments.push(...ellipseSegments(spec.center, spec.r, spec.r));
         break;

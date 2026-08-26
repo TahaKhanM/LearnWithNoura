@@ -452,7 +452,7 @@ describe('RealtimeSession board metric recorders', () => {
       recordSectionNavigation(input: {
         previousGroupId: string | null;
         nextGroupId: string;
-        cause: 'initial_anchor' | 'notice_open' | 'picker' | 'draft_restore';
+        cause: 'initial_anchor' | 'notice_open' | 'picker' | 'draft_restore' | 'arrow' | 'task_focus' | 'tutor_announce';
       }): void;
       recordTutorObjectDisappearance(input: {
         objectId: string;

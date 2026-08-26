@@ -8,6 +8,18 @@
  * single definition of what may reach the board.
  */
 
+import {
+  AUTHORED_ONLY_KINDS,
+  authoredRejectionReason,
+  validateAuthoredKind,
+  type ArcSpec,
+  type AssetSpec,
+  type CurveSpec,
+} from './authoredSpecs';
+
+export type { ArcSpec, AssetSpec, CurveSpec } from './authoredSpecs';
+export { AUTHORED_ONLY_KINDS } from './authoredSpecs';
+
 export const BOARD_W = 1000;
 export const BOARD_H = 600;
 
@@ -82,6 +94,8 @@ export interface TextSpec {
   text: string;
   size?: TextSize;
   align?: 'start' | 'middle' | 'end';
+  /** Director/compiler-only margin-note style. Fast-tier board_ops reject it. */
+  style?: 'handwritten';
 }
 
 /** LaTeX rendered deterministically with KaTeX, never hand-drawn glyphs. */
@@ -190,7 +204,10 @@ export type ShapeSpec =
   | BoxSpec
   | ConnectorSpec
   | TableSpec
-  | PathSpec;
+  | PathSpec
+  | ArcSpec
+  | CurveSpec
+  | AssetSpec;
 
 export type SpecKind = ShapeSpec['kind'];
 
@@ -413,7 +430,8 @@ export function validateSpec(raw: RawOp): ShapeSpec | null {
         raw.size === 'small' || raw.size === 'big' ? raw.size : undefined;
       const align =
         raw.align === 'middle' || raw.align === 'end' ? raw.align : undefined;
-      return { kind: 'text', at, text, ...(size ? { size } : {}), ...(align ? { align } : {}) };
+      const style = raw.style === 'handwritten' ? 'handwritten' as const : undefined;
+      return { kind: 'text', at, text, ...(size ? { size } : {}), ...(align ? { align } : {}), ...(style ? { style } : {}) };
     }
     case 'equation': {
       const at = vec(raw.at);
@@ -594,9 +612,11 @@ export function validateSpec(raw: RawOp): ShapeSpec | null {
       };
     }
     default:
-      return null;
+      return validateAuthoredKind(raw);
   }
 }
+
+export type OpsValidationTier = 'fast' | 'authored';
 
 export interface ValidatedOps {
   ops: BoardOp[];
@@ -608,7 +628,8 @@ export interface ValidatedOps {
  * (and reported back to the model as tool output) rather than failing the
  * whole call: a lesson should survive one bad mark.
  */
-export function validateOps(rawOps: unknown): ValidatedOps {
+export function validateOps(rawOps: unknown, options?: { tier?: OpsValidationTier }): ValidatedOps {
+  const tier = options?.tier ?? 'fast';
   const out: ValidatedOps = { ops: [], rejected: [] };
   if (!Array.isArray(rawOps)) {
     out.rejected.push({ reason: 'ops must be an array', raw: rawOps });
@@ -632,14 +653,24 @@ export function validateOps(rawOps: unknown): ValidatedOps {
           : op;
         const spec = validateSpec(normalizedSpec as RawOp);
         if (!spec) {
+          const kind = (normalizedSpec as RawOp).kind ?? op.kind;
           out.rejected.push({
-            reason: `invalid or unsupported spec for kind "${String(op.kind)}"`,
+            reason: authoredRejectionReason(kind, normalizedSpec as Record<string, unknown>),
             raw,
           });
           break;
         }
         if (spec.kind === 'path') {
           out.rejected.push({ reason: 'path is learner-only', raw });
+          break;
+        }
+        const authoredKind = (AUTHORED_ONLY_KINDS as readonly string[]).includes(spec.kind)
+          || (spec.kind === 'text' && spec.style === 'handwritten');
+        if (tier === 'fast' && authoredKind) {
+          out.rejected.push({
+            reason: `${spec.kind === 'text' ? 'handwritten style' : spec.kind} is director/compiler-only`,
+            raw,
+          });
           break;
         }
         const color = normalizeColor(op.color);

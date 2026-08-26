@@ -103,6 +103,33 @@ describe('compileScene', () => {
     expect(circle.bbox).toEqual({ x: 250, y: 150, w: 100, h: 100 });
   });
 
+  it('compiles a center-radius tutor arc with an explicit bbox', () => {
+    const [arc] = compile([
+      { op: 'add', id: 'a', spec: { kind: 'arc', center: [400, 300], r: 80, startDeg: 0, endDeg: 90 } },
+    ]);
+    expect((arc.nodes[0] as { d: string }).d).toContain('A ');
+    expect(arc.bbox.w).toBeGreaterThan(0);
+    expect(arc.bbox.h).toBeGreaterThan(0);
+  });
+
+  it('compiles a cubic Bézier curve through its control points', () => {
+    const [curve] = compile([
+      { op: 'add', id: 'c', spec: { kind: 'curve', points: [[100, 300], [250, 100], [400, 500], [600, 300]] } },
+    ]);
+    expect((curve.nodes[0] as { d: string }).d).toContain('C ');
+    expect(curve.bbox.w).toBeGreaterThan(100);
+  });
+
+  it('compiles a curated asset with a label and marks handwritten text', () => {
+    const items = compile([
+      { op: 'add', id: 'sun', spec: { kind: 'asset', assetId: 'sun', at: [200, 180], size: 72, label: 'Sun' } },
+      { op: 'add', id: 'note', spec: { kind: 'text', at: [80, 80], text: 'watch this', style: 'handwritten' } },
+    ]);
+    expect(items[0].nodes.some((node) => node.type === 'path' && 'transform' in node && node.transform)).toBe(true);
+    expect(items[0].nodes.some((node) => node.type === 'text' && node.text === 'Sun')).toBe(true);
+    expect(items[1].nodes[0]).toMatchObject({ type: 'text', style: 'handwritten', text: 'watch this' });
+  });
+
   it('renders equations as KaTeX nodes with estimated bounds', () => {
     const [eq] = compile([
       { op: 'add', id: 'e', spec: { kind: 'equation', at: [100, 100], latex: '\\frac{a}{b}' } },

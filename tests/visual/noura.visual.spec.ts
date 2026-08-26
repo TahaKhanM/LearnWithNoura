@@ -82,6 +82,47 @@ for (const scene of ['pythagorean', 'triangle-angles', 'unit-circle', 'slopes', 
   }
 }
 
+test('handwritten annotation style', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.goto('/dev/board?scene=handwritten');
+  await expect(page.locator('[data-active-scene]')).toContainText('handwritten');
+  await expect(page.locator('[data-style="handwritten"]')).toHaveCount(1);
+  await expect(page).toHaveScreenshot('scene-handwritten.png', { animations: 'disabled' });
+});
+
+test('curated assets scene', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.goto('/dev/board?scene=assets');
+  await expect(page.locator('[data-active-scene]')).toContainText('assets');
+  await expect(page.locator('[data-item="icon-sun"]')).toBeVisible();
+  await expect(page).toHaveScreenshot('scene-assets.png', { animations: 'disabled' });
+});
+
+test('arc and curve scene', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.goto('/dev/board?scene=arc-curve');
+  await expect(page.locator('[data-active-scene]')).toContainText('arc-curve');
+  await expect(page).toHaveScreenshot('scene-arc-curve.png', { animations: 'disabled' });
+});
+
+test('two-region board with camera on region 1 showing the gutter hint', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.goto('/dev/board?scene=two-regions');
+  await expect(page.locator('[data-active-scene]')).toContainText('two-regions');
+  await expect(page.locator('[data-camera-region]')).toHaveAttribute('data-camera-region', 'region-two');
+  await expect(page.locator('[data-item="one-box"]')).toHaveCount(1);
+  await expect(page.locator('[data-item="two-box"]')).toBeVisible();
+  const viewBox = await page.locator('.board__svg').getAttribute('data-viewbox');
+  const origin = Number((viewBox ?? '').split(',')[0]);
+  expect(origin).toBeGreaterThan(800);
+  expect(origin).toBeLessThan(1000);
+  await expect(page).toHaveScreenshot('scene-two-regions-gutter.png', { animations: 'disabled' });
+});
+
 async function focusedTextGeometry(page: import('@playwright/test').Page) {
   return page.locator('.board__svg').evaluate((svg) => {
     const viewBox = svg.getAttribute('viewBox')?.split(/\s+/).map(Number) ?? [];

@@ -6,6 +6,8 @@ import { compileScene, nodeBBox, type RenderNode, type BBox } from './compile';
 import type { SceneState } from './scene';
 import { BoardAnimator, hideForAnimation, type PenPosition } from './animator';
 import { contains, deriveSemanticViewport } from './semanticViewport';
+import { cameraViewBox, layoutRegions } from './regionLayout';
+import { useAnimatedCamera } from './camera';
 import { FONT_HAND } from './measure';
 import './Board.css';
 
@@ -41,6 +43,8 @@ interface BoardCanvasProps {
   focusSemanticObjectId?: string;
   focusIndex?: number;
   overview?: boolean;
+  /** Active spatial region; the camera pans here. Defaults to the focus group. */
+  cameraRegionId?: string;
 }
 
 function KatexBlock({ node }: { node: Extract<RenderNode, { type: 'katex' }> }) {
@@ -90,6 +94,7 @@ const NodeView = memo(function NodeView({
         strokeLinecap="round"
         strokeLinejoin="round"
         fill={node.fill ?? 'none'}
+        transform={node.transform}
         strokeDasharray={node.dash ? '7 7' : undefined}
         style={animationPending ? {
           strokeDasharray: `${Math.max(1, node.length)}`,
@@ -110,8 +115,9 @@ const NodeView = memo(function NodeView({
         fill={node.color}
         textAnchor={node.anchor}
         fontFamily={FONT_HAND}
-        fontWeight={600}
-        className="board__text"
+        fontWeight={node.style === 'handwritten' ? 500 : 600}
+        className={node.style === 'handwritten' ? 'board__text board__text--handwritten' : 'board__text'}
+        data-style={node.style === 'handwritten' ? 'handwritten' : undefined}
         visibility={hiddenInFocus ? 'hidden' : 'visible'}
         data-required-text={node.text}
         data-required-text-key={textKey}
@@ -174,7 +180,9 @@ export function BoardCanvas({
   focusSemanticObjectId,
   focusIndex = 0,
   overview = false,
+  cameraRegionId,
 }: BoardCanvasProps) {
+  const activeRegionId = cameraRegionId ?? focusSemanticObjectId;
   const svgRef = useRef<SVGSVGElement>(null);
   const animator = useMemo(() => new BoardAnimator(), []);
   const [pen, setPen] = useState<PenPosition | null>(null);
@@ -225,6 +233,12 @@ export function BoardCanvas({
   }, []);
 
   const compiled = useMemo(() => fontsReady ? compileScene(scene.items) : [], [scene.items, fontsReady]);
+  const regionLayout = useMemo(() => layoutRegions(scene), [scene]);
+  const regionItems = useMemo(
+    () => scene.items.filter((item) => !activeRegionId || !item.semanticGroupId || item.semanticGroupId === activeRegionId),
+    [scene.items, activeRegionId],
+  );
+  const regionScene = useMemo(() => ({ ...scene, items: regionItems }), [scene, regionItems]);
   const pendingAnimationIds = useMemo(
     () => new Set(animationRequest?.itemIds ?? []),
     [animationRequest],
@@ -234,9 +248,20 @@ export function BoardCanvas({
   const semanticViewport = useMemo(
     () => overview || !compact
       ? { x: 0, y: 0, w: BOARD_W, h: BOARD_H, itemIds: [] }
-      : deriveSemanticViewport(scene, focusSemanticObjectId, focusIndex),
-    [scene, focusSemanticObjectId, focusIndex, overview, compact],
+      : deriveSemanticViewport(regionScene, focusSemanticObjectId, focusIndex),
+    [regionScene, focusSemanticObjectId, focusIndex, overview, compact],
   );
+  const settledCamera = useMemo(() => {
+    if (overview || !compact) return cameraViewBox(regionLayout, activeRegionId);
+    const origin = regionLayout.offset(activeRegionId);
+    return {
+      x: origin.x + semanticViewport.x,
+      y: origin.y + semanticViewport.y,
+      w: semanticViewport.w,
+      h: semanticViewport.h,
+    };
+  }, [regionLayout, activeRegionId, overview, compact, semanticViewport]);
+  const camera = useAnimatedCamera(settledCamera, overview);
 
   // Animation is an explicit released-checkpoint transaction. The nodes are
   // already hidden declaratively in this commit, and this layout effect queues
@@ -288,17 +313,23 @@ export function BoardCanvas({
       pt.x = clientX;
       pt.y = clientY;
       const p = pt.matrixTransform(ctm.inverse());
+      const local = regionLayout.localPoint(activeRegionId, [p.x, p.y]);
       return [
-        Math.max(0, Math.min(BOARD_W, p.x)),
-        Math.max(0, Math.min(BOARD_H, p.y)),
+        Math.max(0, Math.min(BOARD_W, local[0])),
+        Math.max(0, Math.min(BOARD_H, local[1])),
       ];
     }
     const rect = svg.getBoundingClientRect();
-    return [
-      Math.max(0, Math.min(BOARD_W, ((clientX - rect.left) / rect.width) * BOARD_W)),
-      Math.max(0, Math.min(BOARD_H, ((clientY - rect.top) / rect.height) * BOARD_H)),
+    const world: Vec = [
+      camera.x + ((clientX - rect.left) / rect.width) * camera.w,
+      camera.y + ((clientY - rect.top) / rect.height) * camera.h,
     ];
-  }, []);
+    const local = regionLayout.localPoint(activeRegionId, world);
+    return [
+      Math.max(0, Math.min(BOARD_W, local[0])),
+      Math.max(0, Math.min(BOARD_H, local[1])),
+    ];
+  }, [regionLayout, activeRegionId, camera]);
 
   const onPointerDown = useCallback(
     (e: React.PointerEvent<SVGSVGElement>) => {
@@ -367,9 +398,10 @@ export function BoardCanvas({
       className={`board__svg board__svg--${tool}`}
       data-fonts-ready={fontsReady}
       data-animation-request={animationRequest?.id ?? ''}
-      viewBox={`${semanticViewport.x} ${semanticViewport.y} ${semanticViewport.w} ${semanticViewport.h}`}
+      viewBox={`${camera.x} ${camera.y} ${camera.w} ${camera.h}`}
       data-semantic-object={focusSemanticObjectId ?? ''}
-      data-viewbox={`${semanticViewport.x},${semanticViewport.y},${semanticViewport.w},${semanticViewport.h}`}
+      data-camera-region={activeRegionId ?? ''}
+      data-viewbox={`${camera.x},${camera.y},${camera.w},${camera.h}`}
       preserveAspectRatio="xMidYMid meet"
       role="img"
       aria-label="Shared Noura whiteboard"
@@ -379,27 +411,34 @@ export function BoardCanvas({
       onPointerUp={onPointerUp}
       onPointerCancel={onPointerUp}
     >
-      {highlightBoxes.map((h) => (
+      {highlightBoxes.map((h) => {
+        const source = scene.items.find((item) => item.id === h.id);
+        const origin = regionLayout.offset(source?.semanticGroupId);
+        return (
         <rect
           key={`${h.id}-${h.nonce}`}
           className="board__highlight"
-          x={h.bbox.x - 12}
-          y={h.bbox.y - 12}
+          x={origin.x + h.bbox.x - 12}
+          y={origin.y + h.bbox.y - 12}
           width={h.bbox.w + 24}
           height={h.bbox.h + 24}
           rx={12}
         />
-      ))}
+        );
+      })}
 
       {compiled.map((item) => {
         const els: (SVGElement | null)[] = [];
         nodeEls.current.set(item.id, els);
+        const origin = regionLayout.offset(scene.items.find((candidate) => candidate.id === item.id)?.semanticGroupId);
         return (
           <g
             // Keyed by stable id: a scoped section replacement or clear must
             // never remount preserved learner strokes in other sections.
             key={item.id}
+            transform={origin.x === 0 && origin.y === 0 ? undefined : `translate(${origin.x} ${origin.y})`}
             data-item={item.id}
+            data-region={scene.items.find((candidate) => candidate.id === item.id)?.semanticGroupId ?? ''}
             data-animation-pending={pendingAnimationIds.has(item.id) ? 'true' : undefined}
             onPointerDown={eraseTarget(item.id, item.owner)}
             className={[
@@ -445,6 +484,10 @@ export function BoardCanvas({
         );
       })}
 
+      <g transform={(() => {
+        const origin = regionLayout.offset(activeRegionId);
+        return origin.x === 0 && origin.y === 0 ? undefined : `translate(${origin.x} ${origin.y})`;
+      })()}>
       {liveStroke && liveStroke.length > 1 && (
         <path
           d={`M ${liveStroke.map((p) => `${p[0]} ${p[1]}`).join(' L ')}`}
@@ -457,6 +500,7 @@ export function BoardCanvas({
       )}
 
       <Pen pos={pen} />
+      </g>
     </svg>
       <p id="noura-board-description" className="board__long-description">
         {longDescription ?? 'The shared teaching board is empty.'}
