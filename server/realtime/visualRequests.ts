@@ -1,12 +1,11 @@
 import { z } from 'zod';
 import type { BoardOp } from '../../shared/boardOps.js';
 import type { AnchorScene } from '../../shared/compiledLesson.js';
-import type { DirectedScene } from '../board/directorSchema.js';
 import { currentStage } from '../lesson/orchestrator.js';
 import { anchorGroupId, preflightWithClient, stageAndConfirmPlan } from './boardStaging.js';
 import type { CoordinatorContext } from './coordinatorContext.js';
 import { refreshBoardInstructions } from './sessionConfig.js';
-import { startStoryboardRun, type StoryboardRunStep } from './storyboardRunner.js';
+import { startStoryboardRun, storyboardRunSteps } from './storyboardRunner.js';
 import { finishTool, sendResponseCreate, tutorFloorIsFree } from './turnFloor.js';
 
 /**
@@ -190,7 +189,7 @@ function startAnchorStoryboard(ctx: CoordinatorContext, callId: string, response
       return;
     }
     state.visualPlanState = 'rendering';
-    const steps = runStepsFrom(scene);
+    const steps = storyboardRunSteps(scene);
     finishTool(ctx, callId, responseId, {
       ok: true,
       accepted: true,
@@ -300,7 +299,7 @@ function startDirectedScene(
       source: 'director',
       groupId: scene.groupId,
       groupLabel: scene.groupLabel,
-      steps: runStepsFrom(scene),
+      steps: storyboardRunSteps(scene),
       revealAfterResponseId: floorBusy ? null : state.activeResponseId ?? state.lastCompletedResponseId,
       firstBeatFraming: request.action === 'compare'
         ? [`A new board section called “${scene.groupLabel}” was just added beside the current work; the learner's view does not switch by itself. Tell the learner it is there and where to look before this beat.`]
@@ -335,21 +334,10 @@ function failDirectedScene(ctx: CoordinatorContext, reasons: string[]): void {
   if (tutorFloorIsFree(ctx)) sendResponseCreate(ctx, 'tool');
 }
 
-function runStepsFrom(scene: AnchorScene | DirectedScene): StoryboardRunStep[] {
-  const addOps = scene.ops.filter((op) => op.op === 'add');
-  return scene.storyboard.map((step) => ({
-    id: step.id,
-    reveal: step.reveal,
-    narration: step.narration,
-    objectIds: step.objectIds,
-    ops: addOps.filter((op) => step.objectIds.includes(op.id)),
-  }));
-}
-
-/** The final beat of an anchor build delivers the stage's check through the
- * existing delivered-task contract; beats replace the session instructions,
- * so the exact wording rides inside the handoff lines. */
-function anchorHandoff(ctx: CoordinatorContext): string {
+/** The closing move of an anchor build delivers the stage's check through
+ * the existing delivered-task contract; handoff responses replace the
+ * session instructions, so the exact wording rides inside these lines. */
+export function anchorHandoff(ctx: CoordinatorContext): string {
   const stage = currentStage(ctx.state.lessonState);
   const check = stage?.checks?.[0];
   if (check) {
@@ -359,6 +347,6 @@ function anchorHandoff(ctx: CoordinatorContext): string {
   return 'Then invite the learner into the picture with one small, concrete question about what they can see, delivered via propose_teaching_move with the exact wording as questionOrTask. Stop after asking.';
 }
 
-function directorHandoff(): string {
+export function directorHandoff(): string {
   return 'Then connect the picture to what you were teaching in one short sentence, and ask the learner one small, concrete question about what they can see, delivered via propose_teaching_move with the exact wording as questionOrTask. Stop after asking.';
 }

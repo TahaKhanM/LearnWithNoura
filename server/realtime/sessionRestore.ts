@@ -1,9 +1,12 @@
 import { normalizeColor, validateOps, validateSpec, type BoardOp } from '../../shared/boardOps.js';
+import { AnchorSceneSchema, type AnchorScene } from '../../shared/compiledLesson.js';
 import { LessonBlueprintSchema, type LessonBlueprint } from '../../shared/pedagogy.js';
 import { DeliveredTaskSchema, type DeliveredTask } from '../../shared/lessonTurn.js';
 import { reduceLesson } from '../lesson/orchestrator.js';
 import type { DomainRepository } from '../store/domain.js';
 import type { CoordinatorContext } from './coordinatorContext.js';
+import { startStoryboardRun, storyboardRunSteps, type StoryboardSource } from './storyboardRunner.js';
+import { anchorHandoff, directorHandoff } from './visualRequests.js';
 
 /**
  * Session bootstrap after connect/reconnect: replay the board the child
@@ -49,6 +52,53 @@ export async function replayBoard(ctx: CoordinatorContext): Promise<void> {
   if (learnerBatches.length > 0) ctx.sendClient({ type: 'learner_board_replay', batches: learnerBatches });
   restoreBlueprint(ctx, events);
   await restoreDeliveredTask(ctx, events);
+  restoreStoryboardRun(ctx, events);
+}
+
+/**
+ * A reconnect resumes an in-progress storyboard build: the revealed steps
+ * were replayed above as released board truth; the run restarts paused at
+ * the first unrevealed step and continues once the resume greeting has
+ * played out, with reconnect framing in the next beat.
+ */
+function restoreStoryboardRun(ctx: CoordinatorContext, events: StoredEvents): void {
+  interface StoredProgress { runId: string; source: StoryboardSource; revealedSteps: number; totalSteps: number; status: string }
+  let progress: StoredProgress | null = null;
+  const directedScenes = new Map<string, AnchorScene>();
+  for (const event of events) {
+    if (event.type === 'storyboard_progress') {
+      const payload = event.payload as Partial<StoredProgress>;
+      if (typeof payload.runId === 'string' &&
+          (payload.source === 'anchor' || payload.source === 'director') &&
+          typeof payload.revealedSteps === 'number' &&
+          typeof payload.totalSteps === 'number' &&
+          typeof payload.status === 'string') {
+        progress = payload as StoredProgress;
+      }
+    } else if (event.type === 'directed_scene') {
+      const payload = event.payload as { runId?: unknown; scene?: unknown };
+      const scene = AnchorSceneSchema.safeParse(payload.scene);
+      if (typeof payload.runId === 'string' && scene.success) directedScenes.set(payload.runId, scene.data);
+    }
+  }
+  if (!progress || progress.status !== 'active' || progress.revealedSteps >= progress.totalSteps) return;
+  const scene = progress.source === 'anchor'
+    ? ctx.compiledLesson?.anchorScene ?? null
+    : directedScenes.get(progress.runId) ?? null;
+  if (!scene) return;
+  ctx.state.visualPlanState = 'rendering';
+  startStoryboardRun(ctx, {
+    runId: progress.runId,
+    source: progress.source,
+    groupId: scene.groupId,
+    groupLabel: scene.groupLabel,
+    steps: storyboardRunSteps(scene),
+    revealAfterResponseId: null,
+    startPaused: true,
+    firstBeatFraming: ['The lesson just resumed after a reconnection. Briefly reconnect to the picture you were building before this beat.'],
+    handoff: progress.source === 'anchor' ? anchorHandoff(ctx) : directorHandoff(),
+    alreadyRevealedSteps: progress.revealedSteps,
+  });
 }
 
 /** A refresh resumes the same blueprint at the same stage; the lesson plan

@@ -471,6 +471,59 @@ describe('the storyboard runner', () => {
     expect(harness.progressEvents().at(-1)).toMatchObject({ status: 'completed', source: 'director', revealedSteps: 2, totalSteps: 2 });
   });
 
+  it('restores an in-progress build on reconnect and resumes at the first unrevealed step', async () => {
+    const harness = await connectBoardLed();
+    await harness.establish();
+    harness.upstream.emit({ type: 'response.done', response: { id: 'anchor-response', status: 'completed', output: [{ type: 'function_call' }] } });
+    harness.showStep(0);
+    await flushProxy();
+    harness.upstream.emit({ type: 'response.created', response: { id: 'beat-0' } });
+    await flushProxy();
+    // One of three steps is on the learner's screen; the connection drops.
+
+    const client2 = new FakeClient();
+    await connectRealtimeProxy(client2 as never, {
+      apiKey: 'offline-fixture', model: 'gpt-realtime-2.1', repo: harness.repo, sessionId: harness.session.id,
+      createUpstream: () => new FakeUpstream() as never,
+      telemetryRepo: {
+        appendMetric: async () => 0,
+        hasPriorReleasedSessionStart: async () => true,
+      },
+    });
+    const upstream2 = FakeUpstream.latest;
+    const active2: GenerationIdentity = { sessionId: harness.session.id, connectionEpoch: 2, turnId: 'turn-1', generationId: 'generation-1' };
+    let sequence2 = 0;
+    const emit2 = (type: string, payload: Record<string, unknown>) =>
+      client2.emit('message', JSON.stringify(createRuntimeEvent(active2, sequence2++, type, payload)));
+    emit2('hello', {});
+    upstream2.emit({ type: 'session.updated' });
+    await flushProxy();
+
+    // The revealed step replays as released board truth; the unrevealed
+    // steps wait — the run is restored paused, not restarted.
+    const replay = client2.sent.find((event) => event.type === 'board_replay');
+    expect(JSON.stringify(replay?.payload)).toContain('anchor-scale');
+    expect(JSON.stringify(replay?.payload)).not.toContain('anchor-mark');
+    expect(client2.sent.filter((event) => event.type === 'board_ops')).toEqual([]);
+
+    // The resume greeting resolves; the build continues at its playback
+    // boundary, at the first unrevealed step, with reconnect framing.
+    emit2('start', {});
+    await flushProxy();
+    upstream2.emit({ type: 'response.created', response: { id: 'resume-response' } });
+    upstream2.emit({ type: 'response.done', response: { id: 'resume-response', status: 'completed', output: [] } });
+    await flushProxy();
+    const cues = client2.sent.filter((event) => event.type === 'board_ops');
+    expect(cues).toHaveLength(1);
+    expect(cues[0].payload).toMatchObject({ checkpoint: 'relation', response_id: 'resume-response', await_narration: true });
+    emit2('ops_shown', { event_id: (cues[0].payload as { event_id?: number }).event_id });
+    await flushProxy();
+    const beat = upstream2.ofType<ResponseCreatePayload>('response.create')
+      .filter((event) => typeof event.response?.instructions === 'string').at(-1);
+    expect(beat?.response?.instructions).toContain('resumed after a reconnection');
+    expect(beat?.response?.instructions).toContain('This mark sits at two thirds.');
+  });
+
   it('bridges a Director failure honestly and allows one simpler retry', async () => {
     let rejectDirector!: () => void;
     const directorGate = new Promise<void>((resolve) => { rejectDirector = resolve; });

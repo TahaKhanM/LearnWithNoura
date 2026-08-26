@@ -79,6 +79,22 @@ export interface StoryboardRunInput {
   handoff: string;
   /** Steps already confirmed visible (reconnect restoration). */
   alreadyRevealedSteps?: number;
+  /** Hold the run until the next response resolves (reconnect: the resume
+   * greeting speaks first; the build continues at its playback boundary). */
+  startPaused?: boolean;
+}
+
+/** Derives runnable steps from any anchor-shaped scene (compiled anchor or
+ * Director output): each step carries the add operations it reveals. */
+export function storyboardRunSteps(scene: { ops: BoardOp[]; storyboard: ReadonlyArray<{ id: string; reveal: string; narration: string; objectIds: string[] }> }): StoryboardRunStep[] {
+  const addOps = scene.ops.filter((op) => op.op === 'add');
+  return scene.storyboard.map((step) => ({
+    id: step.id,
+    reveal: step.reveal,
+    narration: step.narration,
+    objectIds: step.objectIds,
+    ops: addOps.filter((op) => step.objectIds.includes(op.id)),
+  }));
 }
 
 export function startStoryboardRun(ctx: CoordinatorContext, input: StoryboardRunInput): void {
@@ -106,6 +122,7 @@ export function startStoryboardRun(ctx: CoordinatorContext, input: StoryboardRun
     completeStoryboardRun(ctx, 'completed');
     return;
   }
+  if (input.startPaused) return;
   if (input.revealAfterResponseId !== null) {
     ctx.trackSideEffect(sendStepCue(ctx, input.revealAfterResponseId));
     return;
