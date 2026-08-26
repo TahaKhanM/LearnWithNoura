@@ -143,6 +143,10 @@ export function createLiveCompilationService(options: LiveCompilationOptions): L
           })).catch(() => {});
         }
       })();
+      if (!options.harnessUrl) {
+        await work;
+        return (await options.repo.getCompiledLesson(input.sessionId)) ?? pending;
+      }
       options.keepAlive?.(work);
       return pending;
     },
