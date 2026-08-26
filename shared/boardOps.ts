@@ -9,8 +9,9 @@
  */
 
 import {
-  AUTHORED_ONLY_KINDS,
   authoredRejectionReason,
+  isAuthoredOnlySpec,
+  updatePropsYieldAuthored,
   validateAuthoredKind,
   type ArcSpec,
   type AssetSpec,
@@ -216,6 +217,8 @@ export interface AddOp {
   id: string;
   color?: string;
   spec: ShapeSpec;
+  /** Region membership for current-board rasters. Not accepted from the voice model. */
+  semanticGroupId?: string;
 }
 
 export interface UpdateOp {
@@ -664,9 +667,7 @@ export function validateOps(rawOps: unknown, options?: { tier?: OpsValidationTie
           out.rejected.push({ reason: 'path is learner-only', raw });
           break;
         }
-        const authoredKind = (AUTHORED_ONLY_KINDS as readonly string[]).includes(spec.kind)
-          || (spec.kind === 'text' && spec.style === 'handwritten');
-        if (tier === 'fast' && authoredKind) {
+        if (tier === 'fast' && isAuthoredOnlySpec(spec)) {
           out.rejected.push({
             reason: `${spec.kind === 'text' ? 'handwritten style' : spec.kind} is director/compiler-only`,
             raw,
@@ -683,7 +684,17 @@ export function validateOps(rawOps: unknown, options?: { tier?: OpsValidationTie
           out.rejected.push({ reason: 'update requires id and props', raw });
           break;
         }
-        out.ops.push({ op: 'update', id: opId, props: op.props as Record<string, unknown> });
+        const props = op.props as Record<string, unknown>;
+        if (tier === 'fast' && updatePropsYieldAuthored(props)) {
+          out.rejected.push({
+            reason: props.style === 'handwritten'
+              ? 'handwritten style is director/compiler-only'
+              : `${String(props.kind)} is director/compiler-only`,
+            raw,
+          });
+          break;
+        }
+        out.ops.push({ op: 'update', id: opId, props });
         break;
       }
       case 'highlight': {
@@ -717,8 +728,16 @@ export function validateOps(rawOps: unknown, options?: { tier?: OpsValidationTie
 /**
  * Applies an update's props onto an existing spec by re-validating the
  * merged flat object. An update that would corrupt the spec is ignored.
+ * Fast tier (the default) cannot introduce authored-only vocabulary.
  */
-export function applyUpdate(spec: ShapeSpec, props: Record<string, unknown>): ShapeSpec {
+export function applyUpdate(
+  spec: ShapeSpec,
+  props: Record<string, unknown>,
+  options?: { tier?: OpsValidationTier },
+): ShapeSpec {
   const merged = { ...(spec as unknown as Record<string, unknown>), ...props, kind: spec.kind };
-  return validateSpec(merged as RawOp) ?? spec;
+  const next = validateSpec(merged as RawOp) ?? spec;
+  const tier = options?.tier ?? 'fast';
+  if (tier === 'fast' && isAuthoredOnlySpec(next) && !isAuthoredOnlySpec(spec)) return spec;
+  return next;
 }

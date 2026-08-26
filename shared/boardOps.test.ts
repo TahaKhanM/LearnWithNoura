@@ -122,4 +122,15 @@ describe('applyUpdate', () => {
     const updated = applyUpdate(spec, { kind: 'text', text: 'x', at: [0, 0] });
     expect(updated.kind).toBe('circle');
   });
+
+  it('strips handwritten style on the fast tier and keeps it on the authored tier', () => {
+    const spec = { kind: 'text' as const, at: [10, 20] as [number, number], text: 'typeset' };
+    expect(applyUpdate(spec, { style: 'handwritten' })).toEqual(spec);
+    expect(applyUpdate(spec, { style: 'handwritten' }, { tier: 'fast' })).toEqual(spec);
+    expect(applyUpdate(spec, { style: 'handwritten' }, { tier: 'authored' })).toMatchObject({
+      kind: 'text',
+      text: 'typeset',
+      style: 'handwritten',
+    });
+  });
 });

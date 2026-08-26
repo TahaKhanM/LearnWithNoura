@@ -117,6 +117,27 @@ describe('handwritten annotation style', () => {
     expect(rejected).toHaveLength(0);
     expect((ops[0] as { spec: { style?: string } }).spec.style).toBeUndefined();
   });
+
+  it('rejects a fast-tier add+update batch that smuggles handwritten style', () => {
+    const { ops, rejected } = validateOps([
+      { op: 'add', id: 't', kind: 'text', at: [10, 40], text: 'typeset' },
+      { op: 'update', id: 't', props: { style: 'handwritten' } },
+    ]);
+    expect(ops).toHaveLength(1);
+    expect(ops[0]).toMatchObject({ op: 'add', id: 't', spec: { kind: 'text', text: 'typeset' } });
+    expect((ops[0] as { spec: { style?: string } }).spec.style).toBeUndefined();
+    expect(rejected.some((entry) => /handwritten|authored|director/i.test(entry.reason))).toBe(true);
+  });
+
+  it('accepts an authored-tier update that applies handwritten style', () => {
+    const { ops, rejected } = validateOps([
+      { op: 'add', id: 't', kind: 'text', at: [10, 40], text: 'typeset' },
+      { op: 'update', id: 't', props: { style: 'handwritten' } },
+    ], { tier: 'authored' });
+    expect(rejected).toHaveLength(0);
+    expect(ops).toHaveLength(2);
+    expect(ops[1]).toMatchObject({ op: 'update', id: 't', props: { style: 'handwritten' } });
+  });
 });
 
 describe('curated educational assets', () => {

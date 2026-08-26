@@ -51,7 +51,9 @@ export function applyOps(scene: SceneState, ops: BoardOp[], owner: Owner, semant
           owner,
           spec: op.spec,
           revision: 0,
-          ...((semanticGroupId ?? previous?.semanticGroupId) ? { semanticGroupId: semanticGroupId ?? previous?.semanticGroupId } : {}),
+          ...((semanticGroupId ?? op.semanticGroupId ?? previous?.semanticGroupId)
+            ? { semanticGroupId: semanticGroupId ?? op.semanticGroupId ?? previous?.semanticGroupId }
+            : {}),
           ...(op.color ? { color: op.color } : {}),
         };
         if (index === -1) {
@@ -71,7 +73,7 @@ export function applyOps(scene: SceneState, ops: BoardOp[], owner: Owner, semant
           existing.id === op.id && existing.owner === owner
             ? {
                 ...existing,
-                spec: applyUpdate(existing.spec, op.props),
+                spec: applyUpdate(existing.spec, op.props, { tier: 'authored' }),
                 revision: existing.revision + 1,
               }
             : existing,

@@ -61,4 +61,24 @@ describe('released board context', () => {
     expect(board.toolSnapshot('angles').visibleObjectIds).toEqual(['angle-line']);
     expect(board.toolSnapshot('missing').visibleObjectIds).toEqual(['fraction-line', 'angle-line']);
   });
+
+  it('describes handwritten text in the board summary', () => {
+    const board = new BoardContextTracker();
+    board.apply([{
+      op: 'add',
+      id: 'margin-note',
+      spec: { kind: 'text', at: [80, 80], text: 'watch this', style: 'handwritten' },
+    }], 'tutor', 'notes', 'Notes');
+    expect(board.toolSnapshot().summary).toContain('text “watch this”, handwritten');
+  });
+
+  it('emits visible ops that preserve region membership for the current-board raster', () => {
+    const board = new BoardContextTracker();
+    board.apply([{ op: 'add', id: 'one-box', spec: { kind: 'box', at: [500, 300], text: 'one' } }], 'tutor', 'region-one');
+    board.apply([{ op: 'add', id: 'two-box', spec: { kind: 'box', at: [500, 300], text: 'two' } }], 'tutor', 'region-two');
+    expect(board.visibleOps()).toEqual([
+      expect.objectContaining({ id: 'one-box', semanticGroupId: 'region-one' }),
+      expect.objectContaining({ id: 'two-box', semanticGroupId: 'region-two' }),
+    ]);
+  });
 });

@@ -73,6 +73,7 @@ export function LessonPage({ sessionId }: LessonPageProps) {
   const activeVisualGroupRef = useRef<string | undefined>(undefined);
   const visualGroupsRef = useRef<Array<{ id: string; label: string }>>([]);
   const pendingNavigationRef = useRef<AnnouncedBoardNavigation | null>(null);
+  const queuedDraftNavigationRef = useRef<{ groupId: string; cause: NavigationCause } | null>(null);
   const pendingReplacementIdsRef = useRef<string[] | null>(null);
   const renderedTutorObjectTracker = useRef(new RenderedTutorObjectTracker());
 
@@ -137,7 +138,10 @@ export function LessonPage({ sessionId }: LessonPageProps) {
   }, [sessionId]);
 
   const openSection = useCallback((groupId: string, cause: NavigationCause) => {
-    if (draftRef.current.isOpen && cause !== 'draft_restore') return;
+    if (draftRef.current.isOpen && cause !== 'draft_restore') {
+      queuedDraftNavigationRef.current = { groupId, cause };
+      return;
+    }
     const previousGroupId = activeVisualGroupRef.current ?? null;
     if (previousGroupId !== groupId) {
       const navigation: AnnouncedBoardNavigation = {
@@ -156,6 +160,14 @@ export function LessonPage({ sessionId }: LessonPageProps) {
       setSectionNotice((current) => current?.id === groupId ? null : current);
     }
   }, [session]);
+
+  const flushQueuedDraftNavigation = useCallback(() => {
+    const pending = queuedDraftNavigationRef.current;
+    queuedDraftNavigationRef.current = null;
+    if (!pending) return;
+    if (!visualGroupsRef.current.some((group) => group.id === pending.groupId)) return;
+    openSection(pending.groupId, pending.cause);
+  }, [openSection]);
 
   const registerVisualGroup = useCallback((cue?: VisualCueMetadata) => {
     if (!cue?.semanticObjectId) return;
@@ -278,6 +290,7 @@ export function LessonPage({ sessionId }: LessonPageProps) {
       if (accepted) {
         draftRef.current.submitSucceeded();
         signalBoardActivity('learner', 1_800);
+        flushQueuedDraftNavigation();
       } else {
         draftRef.current.submitFailed(error ?? 'Your drawing did not reach Noura. It is still on the board — press Done to try again.');
         // The drawing is still composable, so re-arm the server-side
@@ -407,7 +420,8 @@ export function LessonPage({ sessionId }: LessonPageProps) {
     const draftId = controller.getSnapshot().draftId;
     applyDraftOps(controller.cancel());
     if (draftId) session.notifyDraftState(false, draftId);
-  }, [applyDraftOps, session]);
+    flushQueuedDraftNavigation();
+  }, [applyDraftOps, session, flushQueuedDraftNavigation]);
 
   /**
    * Done: freeze exactly what is on the board now, render the canonical

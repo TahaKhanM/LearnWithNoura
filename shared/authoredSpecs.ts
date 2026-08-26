@@ -147,6 +147,17 @@ export function validateAuthoredKind(raw: Record<string, unknown>): ArcSpec | Cu
   }
 }
 
+export function isAuthoredOnlySpec(spec: { kind: string; style?: string }): boolean {
+  return (AUTHORED_ONLY_KINDS as readonly string[]).includes(spec.kind)
+    || (spec.kind === 'text' && spec.style === 'handwritten');
+}
+
+/** Fast-tier update props that would introduce authored-only vocabulary. */
+export function updatePropsYieldAuthored(props: Record<string, unknown>): boolean {
+  if (props.style === 'handwritten') return true;
+  return typeof props.kind === 'string' && (AUTHORED_ONLY_KINDS as readonly string[]).includes(props.kind);
+}
+
 export function authoredRejectionReason(kind: unknown, raw: Record<string, unknown>): string {
   if (kind === 'arc' && raw.from && raw.through && raw.to) return 'invalid or collinear three-point arc';
   if (kind === 'asset' && typeof raw.assetId === 'string' && !isBoardAssetId(raw.assetId)) {

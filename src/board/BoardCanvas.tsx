@@ -262,15 +262,6 @@ export function BoardCanvas({
     };
   }, [regionLayout, activeRegionId, overview, compact, semanticViewport]);
   const camera = useAnimatedCamera(settledCamera, overview);
-  const focusBox = useMemo(() => {
-    const origin = regionLayout.offset(activeRegionId);
-    return {
-      x: camera.x - origin.x,
-      y: camera.y - origin.y,
-      w: camera.w,
-      h: camera.h,
-    };
-  }, [regionLayout, activeRegionId, camera]);
 
   // Animation is an explicit released-checkpoint transaction. The nodes are
   // already hidden declaratively in this commit, and this layout effect queues
@@ -464,7 +455,9 @@ export function BoardCanvas({
               item.bbox.y + item.bbox.h / 2,
             ], 'focus')}
           >
-            {item.nodes.map((node, i) => (
+            {item.nodes.map((node, i) => {
+              const box = nodeBBox(node);
+              return (
               <NodeView
                 key={`${i}-${item.revision}`}
                 node={node}
@@ -473,13 +466,14 @@ export function BoardCanvas({
                 hiddenInFocus={Boolean(
                   compact && !overview && focusSemanticObjectId &&
                   (node.type === 'text' || node.type === 'katex') &&
-                  !contains(focusBox, nodeBBox(node), -12),
+                  !contains(camera, { ...box, x: origin.x + box.x, y: origin.y + box.y }, -12),
                 )}
                 refCallback={(el) => {
                   els[i] = el;
                 }}
               />
-            ))}
+              );
+            })}
             {tool === 'erase' && item.owner === 'learner' && (
               <rect
                 x={item.bbox.x - 8}

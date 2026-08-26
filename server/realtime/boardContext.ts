@@ -46,7 +46,7 @@ export class BoardContextTracker {
         else if (this.items[index].owner === owner) this.items[index] = next;
       } else if (op.op === 'update') {
         this.items = this.items.map((item) => item.id === op.id && item.owner === owner
-          ? { ...item, spec: applyUpdate(item.spec, op.props) }
+          ? { ...item, spec: applyUpdate(item.spec, op.props, { tier: 'authored' }) }
           : item);
       } else if (op.op === 'erase') {
         this.items = this.items.filter((item) => item.owner !== owner || (item.id !== op.id && !dependsOn(item.spec, op.id)));
@@ -105,6 +105,7 @@ export class BoardContextTracker {
       id: item.id,
       spec: item.spec,
       ...(item.color ? { color: item.color } : {}),
+      ...(item.semanticGroupId ? { semanticGroupId: item.semanticGroupId } : {}),
     }));
   }
 
@@ -270,7 +271,7 @@ function describeSpec(spec: ShapeSpec): string {
     case 'ellipse': return `ellipse centred at (${spec.center})`;
     case 'point': return `point at (${spec.at})${spec.label ? ` labelled “${spec.label}”` : ''}`;
     case 'angle': return `angle at (${spec.vertex})${spec.label ? ` labelled “${spec.label}”` : ''}`;
-    case 'text': return `text “${spec.text}”`;
+    case 'text': return `text “${spec.text}”${spec.style === 'handwritten' ? ', handwritten' : ''}`;
     case 'equation': return `equation ${spec.latex}`;
     case 'label': return `label “${spec.text}” attached to ${spec.target}`;
     case 'axes': return `axes ${spec.xRange.join('..')} by ${spec.yRange.join('..')}`;

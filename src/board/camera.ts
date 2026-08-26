@@ -6,9 +6,9 @@ function prefersReducedMotion(): boolean {
 }
 
 /**
- * Smoothly pans the camera box. Reduced motion, an explicit instant flag,
- * and the first committed target all jump — compact focus crops must match
- * the derived viewport on the same render as the scene (no stale viewBox).
+ * Smoothly pans the camera box. Reduced motion and an explicit instant
+ * flag skip interpolation and return `target` on the same render so
+ * compact focus crops match the derived viewport (no stale viewBox).
  */
 export function useAnimatedCamera(target: CameraBox, instant: boolean): CameraBox {
   const skipAnim = instant || prefersReducedMotion();
