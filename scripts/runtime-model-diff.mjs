@@ -16,6 +16,7 @@ const assertions = [
   ['realtime model', files.config.includes("'gpt-realtime-2.1'")],
   ['transcription model', files.sessionConfig.includes("'gpt-4o-mini-transcribe'")],
   ['text model', files.config.includes("'gpt-5.6-terra'")],
+  ['illustration model', files.config.includes("'gpt-image-1.5'")],
   ['Realtime sideband endpoint', files.sessionConfig.includes("'wss://api.openai.com/v1/realtime'")],
   ['Realtime calls endpoint', files.callBootstrap.includes("'https://api.openai.com/v1/realtime/calls'")],
   ['fallback Chat Completions', files.fallback.includes('client.chat.completions.create')],

@@ -273,4 +273,80 @@ describe('the Board Director pipeline', () => {
     expect(userImages(scripted.calls[0])).toEqual([]);
     expect(userText(scripted.calls[2])).toContain('The vision inspection reply was invalid');
   });
+
+  it('places a generated illustration under exact overlay BoardOps and never trusts the image for labels', async () => {
+    const scripted = scriptedClient([
+      validProposal({
+        representation: 'illustration',
+        illustration: {
+          purpose: 'Show a pond habitat',
+          subject: 'A calm pond with a frog and reeds',
+          requiredElements: ['frog'],
+          forbiddenElements: ['text'],
+        },
+        ops: [
+          { op: 'add', id: 'frog-label', spec: { kind: 'text', at: [200, 540], text: 'frog' } },
+          { op: 'add', id: 'eq', spec: { kind: 'equation', at: [700, 540], latex: 'living+nonliving' } },
+        ],
+        storyboard: [
+          { id: 'step-label', reveal: 'label', narration: 'The frog lives at the edge of the pond.', objectIds: ['frog-label', 'eq'] },
+        ],
+      }),
+      approval,
+    ]);
+    const prepared = {
+      ok: true as const,
+      spec: {
+        kind: 'image' as const,
+        assetId: 'img-a1b2c3d4e5f67890',
+        at: [80, 60] as [number, number],
+        w: 840,
+        h: 420,
+        alt: 'A pond habitat',
+      },
+      objectId: 'illust-pond',
+      cacheHit: false,
+      latencyMs: 12,
+      imageCount: 1,
+      totalTokens: 40,
+    };
+    const result = await directVisual(deps(scripted.client, {
+      illustrations: {
+        enabled: true,
+        prepare: async () => prepared,
+      },
+    }), request({ purpose: 'Show a pond habitat', idea: 'A frog lives among the reeds' }));
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.scene.ops[0]).toMatchObject({ op: 'add', id: 'illust-pond', spec: { kind: 'image', assetId: 'img-a1b2c3d4e5f67890' } });
+    expect(result.scene.ops.map((op) => op.op === 'add' ? op.spec.kind : '')).toEqual(['image', 'text', 'equation']);
+    expect(JSON.stringify(result.scene.ops)).not.toContain('data:image');
+    expect(result.scene.storyboard[0].objectIds[0]).toBe('illust-pond');
+    expect(result.illustration).toMatchObject({ ok: true, cacheHit: false, imageCount: 1 });
+  });
+
+  it('does not request an illustration when the feature is off', async () => {
+    const scripted = scriptedClient([
+      validProposal({
+        representation: 'illustration',
+        illustration: { purpose: 'Show a frog', subject: 'A frog', requiredElements: [], forbiddenElements: [] },
+      }),
+      validProposal(),
+      approval,
+    ]);
+    let prepareCalls = 0;
+    const result = await directVisual(deps(scripted.client, {
+      illustrations: {
+        enabled: false,
+        prepare: async () => {
+          prepareCalls += 1;
+          throw new Error('prepare must not run when illustrations are off');
+        },
+      },
+    }), request());
+    expect(result.ok).toBe(true);
+    expect(prepareCalls).toBe(0);
+    expect(userText(scripted.calls[1])).toContain('Illustrations are not available');
+  });
 });

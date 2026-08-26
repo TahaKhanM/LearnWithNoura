@@ -13,8 +13,19 @@ import { AnchorSceneSchema, StoryboardStepSchema, type AnchorScene } from '../..
 export type DirectedScene = AnchorScene;
 
 /** What the Director model must return for one proposal round. */
+export const IllustrationBriefSchema = z.object({
+  purpose: z.string().min(1).max(300),
+  subject: z.string().min(1).max(200),
+  style: z.string().min(1).max(120).optional(),
+  requiredElements: z.array(z.string().min(1).max(80)).max(8).default([]),
+  forbiddenElements: z.array(z.string().min(1).max(80)).max(8).default([]),
+  alt: z.string().min(1).max(200).optional(),
+});
+
 export const DirectorProposalSchema = z.object({
   groupLabel: z.string().min(1).max(160),
+  representation: z.enum(['diagram', 'illustration']).default('diagram'),
+  illustration: IllustrationBriefSchema.optional(),
   ops: z.array(z.unknown()).min(1).max(40),
   storyboard: z.array(StoryboardStepSchema).min(1).max(8),
 });

@@ -56,6 +56,30 @@ describe('session telemetry contract', () => {
     }).success).toBe(false);
   });
 
+  it('accepts illustration generation latency with cache and image-count dimensions', () => {
+    expect(MetricInputSchema.safeParse({
+      schemaVersion: '1.0.0',
+      name: 'illustration_generation',
+      unit: 'ms',
+      value: 1800,
+      dimensions: { cache: 'miss', outcome: 'accepted', imageCount: 1, totalTokens: 80 },
+    }).success).toBe(true);
+    expect(MetricInputSchema.safeParse({
+      schemaVersion: '1.0.0',
+      name: 'illustration_generation',
+      unit: 'ms',
+      value: 4,
+      dimensions: { cache: 'hit', outcome: 'accepted', imageCount: 0, totalTokens: 0 },
+    }).success).toBe(true);
+    expect(MetricInputSchema.safeParse({
+      schemaVersion: '1.0.0',
+      name: 'illustration_generation',
+      unit: 'ms',
+      value: 12,
+      dimensions: { cache: 'miss', outcome: 'cheap', imageCount: 1, totalTokens: 1 },
+    }).success).toBe(false);
+  });
+
   it('rejects unknown names, free-form outcomes, and non-finite values', () => {
     expect(MetricInputSchema.safeParse({ schemaVersion: '1.0.0', name: 'child_text', unit: 'count', value: 1 }).success).toBe(false);
     expect(MetricInputSchema.safeParse({
@@ -79,6 +103,7 @@ describe('session telemetry contract', () => {
       'speech_end_to_first_audio',
       'ask_to_first_audio',
       'tutor_audio_output_duration',
+      'illustration_generation',
     ] as const;
 
     for (const name of nonBoardDurationNames) {

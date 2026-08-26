@@ -19,6 +19,8 @@ export interface RuntimeConfig {
   compilerReasoningEffort: 'low' | 'medium' | 'high';
   directorModel: string;
   directorReasoningEffort: 'low' | 'medium' | 'high';
+  illustrationModel: string;
+  illustrationsEnabled: boolean;
   buildSha: string;
   environment: string;
 }
@@ -60,6 +62,8 @@ export function readRuntimeConfig(env: NodeJS.ProcessEnv = process.env): Runtime
     directorReasoningEffort: env.NOURA_DIRECTOR_REASONING_EFFORT === 'low' || env.NOURA_DIRECTOR_REASONING_EFFORT === 'high'
       ? env.NOURA_DIRECTOR_REASONING_EFFORT
       : 'medium',
+    illustrationModel: env.NOURA_ILLUSTRATION_MODEL || 'gpt-image-1.5',
+    illustrationsEnabled: env.NOURA_ILLUSTRATIONS !== 'off',
     buildSha: env.NOURA_BUILD_SHA || env.VERCEL_GIT_COMMIT_SHA || 'local-uncommitted',
     environment: env.VERCEL_ENV || deploymentMode,
   };
