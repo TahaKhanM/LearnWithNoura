@@ -8,6 +8,11 @@ export type ResponseCue =
   | { kind: 'task'; cueId: string; responseId: string; sequence: number; identity: GenerationIdentity; task: DeliveredTask }
   | { kind: 'final'; cueId: string; responseId: string; sequence: number; identity: GenerationIdentity; text: string };
 
+/** What the session knows about a response's audible playback: currently
+ * playing, not started yet (audio may still come), or finished for good
+ * (played out, retired, done-with-no-audio, or no voice plane at all). */
+export type ResponsePlaybackStatus = 'playing' | 'pending' | 'finished';
+
 /**
  * Deterministic cue scheduler bound to real playback boundaries. While a
  * response is audibly playing (between the provider's data-channel
@@ -16,6 +21,12 @@ export type ResponseCue =
  * before the board changes under them. A response that is not playing (tool
  * results before speech, no-audio responses, retired playback) releases its
  * cues immediately, which also keeps the server's visibility barrier live.
+ *
+ * Storyboard step cues (`awaitNarration`) bind to the END of their tagged
+ * response: they hold until that response has finished playing, so a reveal
+ * lands exactly at the previous beat's playback boundary rather than at its
+ * start. A response that will never play (finished with no audio, retired,
+ * or a session without a voice plane) releases them immediately.
  */
 export class ResponseCueTimeline {
   private pending: ResponseCue[] = [];
@@ -30,11 +41,15 @@ export class ResponseCueTimeline {
     return true;
   }
 
-  drain(isPlaying: (responseId: string) => boolean): ResponseCue[] {
+  drain(status: (responseId: string) => ResponsePlaybackStatus): ResponseCue[] {
     const ready: ResponseCue[] = [];
     const waiting: ResponseCue[] = [];
     for (const cue of this.pending) {
-      if (isPlaying(cue.responseId)) waiting.push(cue);
+      const playback = status(cue.responseId);
+      const held = cue.kind === 'visual' && cue.awaitNarration
+        ? playback !== 'finished'
+        : playback === 'playing';
+      if (held) waiting.push(cue);
       else ready.push(cue);
     }
     this.pending = waiting;

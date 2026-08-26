@@ -20,6 +20,7 @@ import type { ClientCueOptional, CoordinatorContext, CoordinatorState } from './
 import type { GenerationIdentity } from '../../shared/runtimeProtocol.js';
 import { latestVoiceCallId, type SidebandRegistry } from './callBootstrap.js';
 import { handleClientEvent } from './clientEvents.js';
+import { noteStoryboardClientIdentityChanged } from './storyboardRunner.js';
 import { handleUpstreamEvent, type UpstreamEvent } from './upstreamEvents.js';
 import { initialSessionUpdate, realtimeCallUrl, REALTIME_URL } from './sessionConfig.js';
 
@@ -411,6 +412,7 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
         state.clientSequence = 0;
         state.lastClientSequence = -1;
         flushPendingClientPayloads();
+        noteStoryboardClientIdentityChanged(ctx);
       }
       if (envelope.sequence <= state.lastClientSequence) return;
       state.lastClientSequence = envelope.sequence;

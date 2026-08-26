@@ -7,7 +7,7 @@ import {
   type RuntimeEventEnvelope,
 } from '../../shared/runtimeProtocol';
 import { GenerationScope } from './generationScope';
-import { ResponseCueTimeline, type ResponseCue } from './responseTimeline';
+import { ResponseCueTimeline, type ResponseCue, type ResponsePlaybackStatus } from './responseTimeline';
 import { VoiceInterruptionGate } from './voiceInterruption';
 import { WebRtcVoiceTransport, type PlaybackBoundary, type VoiceTransport, type VoiceTransportHandlers } from './voiceTransport';
 import type { LearnerBoardAnalysis } from '../../shared/learnerBoard';
@@ -91,6 +91,10 @@ export class RealtimeSession {
   private phraseBuffers = new Map<string, string>();
   private currentResponseId: string | null = null;
   private deadResponses = new Set<string>();
+  /** Responses whose audible playback has started (playback binds reveals). */
+  private startedResponses = new Set<string>();
+  /** Responses whose generation finished, playing or not. */
+  private finishedResponses = new Set<string>();
   private reconnectAttempts = 0;
   private closedByUs = false;
   private started = false;
@@ -499,6 +503,26 @@ export class RealtimeSession {
     if (this.deadResponses.size > 48) this.deadResponses.delete(this.deadResponses.values().next().value as string);
   }
 
+  private rememberBounded(set: Set<string>, responseId: string): void {
+    set.add(responseId);
+    if (set.size > 48) set.delete(set.values().next().value as string);
+  }
+
+  /**
+   * The playback truth a cue binds to. A storyboard reveal waits for its
+   * tagged response to FINISH playing; "finished" also covers responses
+   * that will never play — retired ones, a done response whose audio never
+   * started, and sessions with no voice plane at all — so a build can never
+   * deadlock on silence.
+   */
+  private responsePlaybackStatus(responseId: string): ResponsePlaybackStatus {
+    if (!this.voice || this.deadResponses.has(responseId)) return 'finished';
+    if (this.voice.playingResponseId() === responseId) return 'playing';
+    if (this.startedResponses.has(responseId)) return 'finished';
+    if (this.finishedResponses.has(responseId)) return 'finished';
+    return 'pending';
+  }
+
   private interruptLocally(reason: 'voice' | 'text' | 'server' | 'interaction'): void {
     const identity = this.scope.identity;
     const interruptedResponseId = this.voice?.playingResponseId() ?? this.currentResponseId;
@@ -546,6 +570,7 @@ export class RealtimeSession {
     }
     if (boundary === 'started' && responseId && !this.deadResponses.has(responseId)) {
       this.currentResponseId = responseId;
+      this.rememberBounded(this.startedResponses, responseId);
       const awaitedRevealMetric = this.responseTiming.noteNarrationScheduled(responseId, performance.now());
       if (awaitedRevealMetric) this.emitMetric(awaitedRevealMetric, this.scope.identity, responseId);
       if (this.speechStoppedAt > 0) {
@@ -787,6 +812,9 @@ export class RealtimeSession {
         break;
       }
       case 'response_done': {
+        if (typeof message.response_id === 'string' && message.response_id) {
+          this.rememberBounded(this.finishedResponses, message.response_id);
+        }
         if (message.status === 'cancelled' && this.cancelRequestedAt > 0) {
           const providerCancelConfirmationMs = Math.round(performance.now() - this.cancelRequestedAt);
           this.update({ metrics: { ...this.snapshot.metrics, providerCancelConfirmationMs } });
@@ -824,8 +852,7 @@ export class RealtimeSession {
     if (!this.scope.active) return;
     const energy = this.voice?.readVoiceEnergy() ?? 0;
     if (Math.abs(energy - this.snapshot.voiceEnergy) > 0.01) this.update({ voiceEnergy: energy });
-    const playing = this.voice?.playingResponseId() ?? null;
-    for (const cue of this.timeline.drain((responseId) => responseId === playing)) this.releaseCue(cue);
+    for (const cue of this.timeline.drain((responseId) => this.responsePlaybackStatus(responseId))) this.releaseCue(cue);
   }
 
   private releaseCue(cue: ResponseCue): void {

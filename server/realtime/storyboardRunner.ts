@@ -226,6 +226,20 @@ export function noteStoryboardCreateRejected(ctx: CoordinatorContext): void {
   run.cancelPendingBeat = false;
 }
 
+/**
+ * A confirmed barge-in advances the client's generation identity, so a step
+ * cue re-sent before the first new-identity envelope arrived was rejected by
+ * the client's gate. The identity change is that first envelope: re-send the
+ * pending step under the fresh identity (applying the same board event twice
+ * is idempotent on every layer).
+ */
+export function noteStoryboardClientIdentityChanged(ctx: CoordinatorContext): void {
+  const run = ctx.state.storyboardRun;
+  if (!run) return;
+  if (run.pendingStepEventId !== null) run.needsResend = true;
+  advanceStoryboardRun(ctx);
+}
+
 async function sendStepCue(ctx: CoordinatorContext, tagResponseId: string | null): Promise<void> {
   const { state } = ctx;
   const run = state.storyboardRun;
