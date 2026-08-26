@@ -1,7 +1,7 @@
 import type { BoardOp } from '../../shared/boardOps.js';
 import type { SemanticCheckpoint, SemanticScenePlan } from '../../shared/semanticScene.js';
 import type { CoordinatorContext } from './coordinatorContext.js';
-import { identityForResponse, responseSegment } from './responseRegistry.js';
+import { identityForResponse } from './responseRegistry.js';
 import { refreshBoardInstructions } from './sessionConfig.js';
 import { finishTool } from './turnFloor.js';
 
@@ -97,9 +97,6 @@ export function stageAndConfirmPlan(ctx: CoordinatorContext, callId: string, res
     state.planAttemptsThisTurn += 1;
     state.visualPlanState = 'preparing';
   }
-  // Captured synchronously: staging may finish after this response seals,
-  // in which case cues are delivered directly at its final audio boundary.
-  const planSegment = responseSegment(ctx, responseId);
   const stagingTask = (async () => {
     if (!input.skipPreflight && input.ops.length > 0 && groupId) {
       const preflight = await preflightWithClient(ctx, { ops: input.ops, semanticGroupId: groupId, groupLabel });
@@ -141,14 +138,13 @@ export function stageAndConfirmPlan(ctx: CoordinatorContext, callId: string, res
         groupLabel: checkpoint.groupLabel,
         checkpoint: checkpoint.reveal,
       };
-      const cueOptional = {
-        visualCueId: checkpoint.id,
-        semanticObjectId: checkpoint.semanticObjectId,
-      };
-      if (!planSegment.isSealed()) planSegment.addSemanticCue(cuePayload, cueOptional);
-      else if (!state.cancelledResponses.has(responseId)) {
-        const total = planSegment.totalSamples();
-        ctx.sendClient(cuePayload, identityForResponse(ctx, responseId), { ...cueOptional, audioSampleOffsets: { start: total, end: total } });
+      // Sent immediately, tagged with its response: the browser binds the
+      // reveal to the playback boundaries it observes on its data channel.
+      if (!state.cancelledResponses.has(responseId)) {
+        ctx.sendClient(cuePayload, identityForResponse(ctx, responseId), {
+          visualCueId: checkpoint.id,
+          semanticObjectId: checkpoint.semanticObjectId,
+        });
       }
     }
     for (const op of input.ops) if (op.op === 'add') state.objectsCreatedThisTurn.add(op.id);

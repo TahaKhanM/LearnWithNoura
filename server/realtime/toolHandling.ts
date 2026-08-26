@@ -6,7 +6,7 @@ import type { Confidence, Verdict } from '../store/repo.js';
 import { currentStage, reduceLesson } from '../lesson/orchestrator.js';
 import type { CoordinatorContext } from './coordinatorContext.js';
 import { anchorGroupId, assignSectionToPlan, stageAndConfirmPlan } from './boardStaging.js';
-import { identityForResponse, responseSegment } from './responseRegistry.js';
+import { identityForResponse } from './responseRegistry.js';
 import { finishTool } from './turnFloor.js';
 
 /**
@@ -283,7 +283,7 @@ export async function handleToolCall(ctx: CoordinatorContext, name: string, rawA
           characterAttentionTarget: state.lessonState.characterAttentionTarget,
         };
         await ctx.repo.addEvent(ctx.sessionId, 'lesson_state', lessonStatePayload);
-        responseSegment(ctx, responseId).addSemanticCue({ type: 'lesson_state', state: lessonStatePayload }, {
+        ctx.sendClient({ type: 'lesson_state', state: lessonStatePayload, response_id: responseId }, identityForResponse(ctx, responseId), {
           ...(state.lessonState.activeSemanticObjectId ? { semanticObjectId: state.lessonState.activeSemanticObjectId } : {}),
         });
         const stage = currentStage(state.lessonState);
@@ -334,13 +334,13 @@ export async function handleToolCall(ctx: CoordinatorContext, name: string, rawA
           groupLabel: state.lessonState.microObjective || 'Working board',
         }, false);
         state.pendingBoardOps.set(eventId, { ops, semanticGroupId, groupLabel: state.lessonState.microObjective || 'Working board' });
-        responseSegment(ctx, responseId).addSemanticCue({
+        ctx.sendClient({
           type: 'board_ops',
           ops,
           response_id: responseId,
           event_id: eventId,
           groupLabel: state.lessonState.microObjective || 'Working board',
-        }, { semanticObjectId: semanticGroupId });
+        }, identityForResponse(ctx, responseId), { semanticObjectId: semanticGroupId });
       }
       finishTool(ctx, callId, responseId, {
         ok: validated.rejected.length === 0,
@@ -427,7 +427,7 @@ export async function handleToolCall(ctx: CoordinatorContext, name: string, rawA
         nextStep: args.next_step ? String(args.next_step).slice(0, 240) : undefined,
       };
       await ctx.repo.addEvent(ctx.sessionId, 'lesson_state', lessonStatePayload);
-      responseSegment(ctx, responseId).addSemanticCue({ type: 'lesson_state', state: lessonStatePayload });
+      ctx.sendClient({ type: 'lesson_state', state: lessonStatePayload, response_id: responseId }, identityForResponse(ctx, responseId));
       finishTool(ctx, callId, responseId, { ok: true });
       break;
     }

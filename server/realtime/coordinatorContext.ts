@@ -6,7 +6,6 @@ import type { DomainRepository } from '../store/domain.js';
 import type { SessionTelemetryWriter } from '../session/telemetryWriter.js';
 import type { SessionTelemetryRepository } from '../session/telemetryRepository.js';
 import type { BoardContextTracker } from './boardContext.js';
-import type { ResponseSegmentAnnotator } from './segmentAnnotator.js';
 
 /**
  * Shared mutable state and wiring for one lesson's realtime coordination.
@@ -52,9 +51,12 @@ export interface CoordinatorState {
   pendingClientPayloads: unknown[];
   responseIdentities: Map<string, GenerationIdentity>;
   responseTranscript: Map<string, string>;
-  responseSegments: Map<string, ResponseSegmentAnnotator>;
+  /** The conversation item each response speaks, for truthful truncation. */
+  responseItems: Map<string, string>;
   pendingVoiceBargeInResponses: Set<string>;
   terminalTelemetryResponses: Set<string>;
+  /** Responses whose client-reported playback duration was already recorded. */
+  reportedPlaybackResponses: Set<string>;
   pendingBoardOps: Map<number, PendingBoardOpsEntry>;
   activeResponseId: string | null;
   speechInProgress: boolean;
@@ -93,7 +95,7 @@ export interface CoordinatorState {
 
 export type ClientCueOptional = Partial<Pick<
   RuntimeEventEnvelope,
-  'audioSampleOffsets' | 'visualCueId' | 'semanticObjectId' | 'idempotencyKey'
+  'visualCueId' | 'semanticObjectId' | 'idempotencyKey'
 >>;
 
 export interface CoordinatorContext {

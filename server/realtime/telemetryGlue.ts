@@ -1,9 +1,7 @@
-import { Buffer } from 'node:buffer';
 import type { RuntimeEventEnvelope } from '../../shared/runtimeProtocol.js';
 import { TELEMETRY_SCHEMA_VERSION, type MetricInput } from '../../shared/sessionTelemetry.js';
 import { metricContextFromIdentity } from '../session/telemetryRecorder.js';
 import type { CoordinatorContext } from './coordinatorContext.js';
-import { OUTPUT_AUDIO_SAMPLES_PER_MS } from './sessionConfig.js';
 import { addBounded } from './responseRegistry.js';
 
 /**
@@ -13,6 +11,8 @@ import { addBounded } from './responseRegistry.js';
  */
 
 const MAX_TERMINAL_TELEMETRY_RESPONSES = 512;
+const MAX_REPORTED_PLAYBACK_RESPONSES = 512;
+const MAX_PLAYBACK_DURATION_MS = 30 * 60_000;
 export const MAX_PENDING_VOICE_BARGE_INS = 256;
 
 export function isAllowedClientMetric(input: MetricInput): boolean {
@@ -75,15 +75,6 @@ export function recordTerminalResponseTelemetry(
     response.id,
   );
   ctx.telemetryWriter.submitProviderUsage(response.usage, context);
-  const outputSamples = state.responseSegments.get(response.id)?.totalSamples();
-  if (outputSamples !== undefined && outputSamples > 0) {
-    ctx.telemetryWriter.submit({
-      schemaVersion: TELEMETRY_SCHEMA_VERSION,
-      name: 'tutor_audio_output_duration',
-      unit: 'ms',
-      value: Math.round(outputSamples / OUTPUT_AUDIO_SAMPLES_PER_MS),
-    }, context);
-  }
   if (state.pendingVoiceBargeInResponses.has(response.id)) {
     const outcome = status === 'cancelled'
       ? 'provider_cancelled'
@@ -101,7 +92,26 @@ export function recordTerminalResponseTelemetry(
   }
 }
 
-export function pcmSampleCount(base64: string): number {
-  try { return Math.floor(Buffer.from(base64, 'base64').byteLength / 2); }
-  catch { return 0; }
+/**
+ * Audio no longer transits the server, so output duration comes from the
+ * browser's playback-boundary relay. It is trusted only for a response this
+ * coordinator created, recorded at most once per response, and bounded.
+ */
+export function recordClientPlaybackStop(
+  ctx: CoordinatorContext,
+  message: Record<string, unknown>,
+): void {
+  const { state } = ctx;
+  const responseId = typeof message.response_id === 'string' ? message.response_id : '';
+  const identity = responseId ? state.responseIdentities.get(responseId) : undefined;
+  const playedMs = typeof message.playedMs === 'number' ? message.playedMs : Number.NaN;
+  if (!identity || state.reportedPlaybackResponses.has(responseId)) return;
+  if (!Number.isFinite(playedMs) || playedMs <= 0 || playedMs > MAX_PLAYBACK_DURATION_MS) return;
+  addBounded(state.reportedPlaybackResponses, responseId, MAX_REPORTED_PLAYBACK_RESPONSES);
+  ctx.telemetryWriter.submit({
+    schemaVersion: TELEMETRY_SCHEMA_VERSION,
+    name: 'tutor_audio_output_duration',
+    unit: 'ms',
+    value: Math.round(playedMs),
+  }, metricContextFromIdentity(identity, responseId));
 }

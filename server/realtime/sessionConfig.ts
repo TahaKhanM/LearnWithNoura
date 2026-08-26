@@ -5,7 +5,6 @@ import type { CoordinatorContext } from './coordinatorContext.js';
 /** Provider session configuration for one lesson. */
 
 export const REALTIME_URL = 'wss://api.openai.com/v1/realtime';
-export const OUTPUT_AUDIO_SAMPLES_PER_MS = 24;
 
 /** The sideband control channel for an existing WebRTC call. */
 export function realtimeCallUrl(callId: string): string {
