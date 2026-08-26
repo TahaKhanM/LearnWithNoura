@@ -2,9 +2,15 @@ import { DeliveredTaskSchema, type DeliveredTask } from '../../shared/lessonTurn
 import { reduceLesson, responseHandoff } from '../lesson/orchestrator.js';
 import type { CoordinatorContext } from './coordinatorContext.js';
 import { identityForResponse } from './responseRegistry.js';
+import {
+  noteStoryboardCreateRejected,
+  noteStoryboardResponseCreated,
+  noteStoryboardResponseDone,
+  pauseStoryboardRun,
+} from './storyboardRunner.js';
 import { recordTerminalResponseTelemetry } from './telemetryGlue.js';
 import { handleToolCall } from './toolHandling.js';
-import { requestModelResponse, setEndpointingEagerness } from './turnFloor.js';
+import { noteResponseCreateSettled, requestModelResponse, sendResponseCreate, setEndpointingEagerness } from './turnFloor.js';
 import { replayBoard } from './sessionRestore.js';
 
 /**
@@ -48,17 +54,19 @@ export async function handleUpstreamEvent(ctx: CoordinatorContext, event: Upstre
 
     case 'response.created': {
       // Responses are only created by the deterministic coordinator
-      // (requestModelResponse / finishTool), which already owns the floor.
-      // A response starting therefore never *changes* floor ownership here.
-      // High eagerness is a one-turn accelerator (barge-in or a delivered
-      // voice question). Ordinary turns retain medium semantic endpointing
-      // so a child can pause and think.
+      // (requestModelResponse / finishTool / the storyboard runner), which
+      // already owns the floor. A response starting therefore never
+      // *changes* floor ownership here. High eagerness is a one-turn
+      // accelerator (barge-in or a delivered voice question). Ordinary
+      // turns retain medium semantic endpointing so a child can pause.
       setEndpointingEagerness(ctx, 'medium');
+      noteResponseCreateSettled(ctx);
       const response = event.response as { id?: string } | undefined;
       if (response?.id && state.clientIdentity) {
         state.activeResponseId = response.id;
         state.responseIdentities.set(response.id, { ...state.clientIdentity });
       }
+      if (response?.id) noteStoryboardResponseCreated(ctx, response.id);
       ctx.sendClient({ type: 'response_started', response_id: response?.id }, identityForResponse(ctx, response?.id));
       break;
     }
@@ -110,6 +118,9 @@ export async function handleUpstreamEvent(ctx: CoordinatorContext, event: Upstre
       state.toolContinues = 0;
       state.childHoldsFloor = true;
       state.speechInProgress = true;
+      // A learner speaking pauses any storyboard build; revealed objects
+      // stay visible and the run resumes after their turn resolves.
+      pauseStoryboardRun(ctx);
       ctx.sendClient({ type: 'speech_started' });
       break;
 
@@ -143,20 +154,27 @@ export async function handleUpstreamEvent(ctx: CoordinatorContext, event: Upstre
         | undefined;
       const status = response?.status ?? 'unknown';
       if (status === 'cancelled' && response?.id) state.cancelledResponses.add(response.id);
+      if (response?.id && status !== 'cancelled') state.lastCompletedResponseId = response.id;
       const responseIdentity = identityForResponse(ctx, response?.id);
       recordTerminalResponseTelemetry(ctx, response, status);
       const hasFunctionCall = response?.output?.some((item) => item.type === 'function_call') ?? false;
       const delivered = response?.id ? (state.responseTranscript.get(response.id) ?? '') : '';
+      // A narration beat is a tutor-floor continuation inside a storyboard
+      // build: it never delivers tasks, never turns a trailing question
+      // mark into a handoff, and never spawns a bounded continuation. The
+      // runner's closing handoff response is unmarked, so the stage task
+      // flows through the ordinary contract below.
+      const isMidStoryboardBeat = response?.id !== undefined && state.beatResponses.has(response.id);
       // Explicit handoff: a task proposed via propose_teaching_move is
       // delivered once the model finishes speaking it — question mark or
       // imperative alike. The client shows the task banner when playback of
       // this response actually finishes.
-      if (status === 'completed' && response?.id && !state.cancelledResponses.has(response.id) &&
+      if (!isMidStoryboardBeat && status === 'completed' && response?.id && !state.cancelledResponses.has(response.id) &&
           state.pendingDeliveredTask && (delivered.trim() || !hasFunctionCall)) {
         const task = state.pendingDeliveredTask;
         state.pendingDeliveredTask = null;
         await deliverTask(ctx, response.id, task);
-      } else if (status === 'completed' && response?.id && !hasFunctionCall && !state.cancelledResponses.has(response.id)) {
+      } else if (!isMidStoryboardBeat && status === 'completed' && response?.id && !hasFunctionCall && !state.cancelledResponses.has(response.id)) {
         if (/[?？]\s*$/.test(delivered.trim())) {
           // A spoken question without a structured move still yields the
           // floor as a voice-mode task.
@@ -182,8 +200,7 @@ export async function handleUpstreamEvent(ctx: CoordinatorContext, event: Upstre
               }],
             },
           });
-          state.lastCreateSource = 'tool';
-          ctx.sendUpstream({ type: 'response.create' });
+          sendResponseCreate(ctx, 'tool');
         }
       }
       ctx.sendClient({ type: 'response_done', response_id: response?.id, status }, responseIdentity);
@@ -192,8 +209,9 @@ export async function handleUpstreamEvent(ctx: CoordinatorContext, event: Upstre
         // The child asked something while a response was still running;
         // their question must not be dropped.
         state.retryCreateOnDone = false;
-        ctx.sendUpstream({ type: 'response.create' });
+        sendResponseCreate(ctx, state.lastCreateSource);
       }
+      noteStoryboardResponseDone(ctx);
       break;
     }
 
@@ -204,7 +222,13 @@ export async function handleUpstreamEvent(ctx: CoordinatorContext, event: Upstre
       const alreadyActive =
         error?.code === 'conversation_already_has_active_response' ||
         /active response in progress/i.test(error?.message ?? '');
-      if (alreadyActive && ['user', 'board', 'voice'].includes(state.lastCreateSource)) state.retryCreateOnDone = true;
+      if (alreadyActive) {
+        noteResponseCreateSettled(ctx);
+        if (['user', 'board', 'voice'].includes(state.lastCreateSource)) state.retryCreateOnDone = true;
+        // A rejected beat create is retried by the runner at the next
+        // quiet floor, never via the learner-turn retry path.
+        if (state.lastCreateSource === 'beat') noteStoryboardCreateRejected(ctx);
+      }
       const benign = error?.code === 'response_cancel_not_active' || alreadyActive;
       ctx.log(`session ${ctx.sessionId}: upstream error ${JSON.stringify(event.error).slice(0, 300)}`);
       if (!benign) {

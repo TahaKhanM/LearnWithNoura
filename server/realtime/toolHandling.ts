@@ -1,15 +1,15 @@
-import { validateOps, type BoardOp } from '../../shared/boardOps.js';
+import { validateOps } from '../../shared/boardOps.js';
 import { ResponseTaxonomySchema, TeachingMoveSchema, type ResponseTaxonomy, type TeachingMove } from '../../shared/pedagogy.js';
-import { adaptSemanticScene, normalizeVisualAction, VisualActionSchema } from '../../shared/semanticScene.js';
 import { DeliveredTaskSchema, submitPolicyForMode, type DeliveredTask } from '../../shared/lessonTurn.js';
 import type { Confidence, Verdict } from '../store/repo.js';
 import { currentStage, reduceLesson } from '../lesson/orchestrator.js';
 import type { CoordinatorContext } from './coordinatorContext.js';
-import { anchorGroupId, assignSectionToPlan, stageAndConfirmPlan } from './boardStaging.js';
+import { anchorGroupId } from './boardStaging.js';
 import { schedulePlannedDetour } from './detourPlanning.js';
 import { identityForResponse } from './responseRegistry.js';
 import { refreshBoardInstructions } from './sessionConfig.js';
 import { finishTool } from './turnFloor.js';
+import { handleVisualRequest } from './visualRequests.js';
 
 /**
  * Tool-call execution. Board operations are validated before a single mark
@@ -38,180 +38,8 @@ export async function handleToolCall(ctx: CoordinatorContext, name: string, rawA
       break;
     }
 
-    case 'semantic_visual_plan': {
-      try {
-        const requestedAction = (args as { intent?: { action?: unknown } }).intent?.action;
-        const normalizedAction = normalizeVisualAction(VisualActionSchema.catch('establish').parse(requestedAction ?? 'establish'));
-        // Object permanence: visible tutor work never disappears. Replace
-        // is not a live action in any form.
-        if (normalizedAction === 'replace') {
-          finishTool(ctx, callId, responseId, {
-            ok: false,
-            accepted: false,
-            reason: 'Visible board work never disappears. Replacement is not available: extend or emphasize the anchor, or add an announced comparison beside it.',
-            board: state.boardContext.toolSnapshot(),
-          });
-          break;
-        }
-        if (normalizedAction === 'none') {
-          finishTool(ctx, callId, responseId, {
-            ok: true,
-            accepted: true,
-            action: 'none',
-            noBoard: true,
-            board: state.boardContext.toolSnapshot(),
-          });
-          break;
-        }
-        // One visual plan per logical tutor turn. The budget resets only
-        // when a genuine learner turn begins the next teaching turn; a
-        // failed attempt may retry exactly once with a simpler plan.
-        const planActiveThisTurn = state.planStagedThisTurn && state.visualPlanState !== 'failed';
-        if ((planActiveThisTurn || state.planAttemptsThisTurn >= 2) && ['establish', 'compare'].includes(normalizedAction)) {
-          finishTool(ctx, callId, responseId, {
-            ok: false,
-            accepted: false,
-            reason: 'One visual plan per teaching turn. Teach with what is on the board now, then wait for the learner.',
-            visualPlanState: state.visualPlanState,
-            anchorGroupId: anchorGroupId(ctx),
-            board: state.boardContext.toolSnapshot(),
-          });
-          break;
-        }
-        const blueprint = state.lessonState.blueprint;
-        if (!blueprint && ['establish', 'compare'].includes(normalizedAction)) {
-          finishTool(ctx, callId, responseId, {
-            ok: false,
-            accepted: false,
-            reason: 'This lesson has no blueprint loaded; teach conversationally and use small board_ops increments only.',
-            board: state.boardContext.toolSnapshot(),
-          });
-          break;
-        }
-        if (normalizedAction === 'extend') {
-          // Extensions are small, incremental, and belong in board_ops so
-          // they attach to existing visible objects rather than a template.
-          finishTool(ctx, callId, responseId, {
-            ok: true,
-            accepted: false,
-            action: 'extend',
-            reason: 'Extend the anchor with small board_ops increments that reference visible IDs; no new section is created.',
-            anchorGroupId: anchorGroupId(ctx),
-            board: state.boardContext.toolSnapshot(),
-          });
-          break;
-        }
-        if (normalizedAction === 'emphasize') {
-          const requestedIds = (args as { intent?: { targetObjectIds?: unknown } }).intent?.targetObjectIds;
-          const targets = Array.isArray(requestedIds)
-            ? requestedIds.filter((id): id is string => typeof id === 'string' && state.boardContext.hasObject(id)).slice(0, 12)
-            : [];
-          if (targets.length === 0) {
-            finishTool(ctx, callId, responseId, {
-              ok: false,
-              accepted: false,
-              reason: 'Emphasize needs visible target object ids. Inspect the board and name the objects to highlight.',
-              board: state.boardContext.toolSnapshot(),
-            });
-            break;
-          }
-          const group = state.boardContext.groupOfObject(targets[0]) ?? anchorGroupId(ctx) ?? undefined;
-          stageAndConfirmPlan(ctx, callId, responseId, {
-            ops: targets.map((id) => ({ op: 'highlight', id } as BoardOp)),
-            checkpoints: [{
-              id: `emphasize-${responseId}-${targets.join('-')}`.slice(0, 120),
-              semanticObjectId: group ?? 'board',
-              groupLabel: state.boardContext.groupLabelOf(group) ?? 'Board',
-              reveal: 'emphasis',
-              ops: targets.map((id) => ({ op: 'highlight', id } as BoardOp)),
-            }],
-            action: 'emphasize',
-            skipPreflight: true,
-          });
-          break;
-        }
-        // establish | compare: the server, not the model, assigns the
-        // section. The anchor is established once; comparisons are added
-        // beside it in an announced side section that never auto-switches
-        // the learner's view.
-        const anchor = anchorGroupId(ctx) ?? 'lesson-anchor';
-        let assignedGroupId = anchor;
-        if (normalizedAction === 'establish') {
-          if (state.boardContext.hasGroup(anchor)) {
-            finishTool(ctx, callId, responseId, {
-              ok: false,
-              accepted: false,
-              reason: `The anchor section ${anchor} is already on the board. Extend or emphasize it; do not rebuild it.`,
-              anchorGroupId: anchor,
-              board: state.boardContext.toolSnapshot(),
-            });
-            break;
-          }
-          const compiledAnchor = ctx.compiledLesson?.anchorScene;
-          if (compiledAnchor && compiledAnchor.groupId === anchor) {
-            // Establish resolves to the pre-compiled, pre-validated anchor
-            // scene: the voice model triggers the reveal but never invents
-            // the geometry. Runtime preflight still applies, fail closed.
-            const addOps = compiledAnchor.ops.filter((op) => op.op === 'add');
-            stageAndConfirmPlan(ctx, callId, responseId, {
-              ops: addOps,
-              checkpoints: compiledAnchor.storyboard.map((step) => ({
-                id: step.id,
-                semanticObjectId: compiledAnchor.groupId,
-                groupLabel: compiledAnchor.groupLabel,
-                reveal: step.reveal,
-                ops: addOps.filter((op) => step.objectIds.includes(op.id)),
-              })),
-              action: 'establish',
-              storyboard: compiledAnchor.storyboard.map((step) => ({
-                id: step.id,
-                reveal: step.reveal,
-                narration: step.narration,
-              })),
-            });
-            break;
-          }
-        } else {
-          assignedGroupId = `${anchor}-alt${++state.comparisonSectionCounter}`;
-        }
-        const planInput = assignSectionToPlan(args, assignedGroupId);
-        const { plan, ops, checkpoints } = adaptSemanticScene(planInput);
-        const densityLimit = plan.intent.density === 'minimal' ? 14 : 30;
-        if (ops.length > densityLimit) {
-          finishTool(ctx, callId, responseId, {
-            ok: false,
-            accepted: false,
-            reason: `The ${plan.intent.density} visual exceeds its ${densityLimit}-object density budget. Simplify or split the teaching move.`,
-            questionAnswered: plan.intent.questionAnswered,
-            board: state.boardContext.toolSnapshot(),
-          });
-          break;
-        }
-        const equivalent = state.boardContext.equivalentTutorScene(ops);
-        if (equivalent.equivalent) {
-          finishTool(ctx, callId, responseId, {
-            ok: true,
-            accepted: false,
-            reason: 'An equivalent visual is already visible. Reuse its IDs and adapt it in place.',
-            equivalentObjects: equivalent.duplicates,
-            board: state.boardContext.toolSnapshot(),
-          });
-          break;
-        }
-        stageAndConfirmPlan(ctx, callId, responseId, {
-          ops,
-          checkpoints,
-          action: normalizedAction,
-          plan,
-          ...(normalizedAction === 'compare' ? { announcement: `A comparison was added beside the anchor as section ${assignedGroupId}. Tell the learner it is there; their view does not switch automatically.` } : {}),
-        });
-      } catch (error) {
-        finishTool(ctx, callId, responseId, {
-          ok: false,
-          accepted: false,
-          error: String(error).slice(0, 260),
-        });
-      }
+    case 'request_visual': {
+      await handleVisualRequest(ctx, args, callId, responseId);
       break;
     }
 

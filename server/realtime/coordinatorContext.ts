@@ -3,11 +3,13 @@ import type { CompiledLesson } from '../../shared/compiledLesson.js';
 import type { GenerationIdentity, RuntimeEventEnvelope } from '../../shared/runtimeProtocol.js';
 import type { DeliveredTask } from '../../shared/lessonTurn.js';
 import type { LessonStage } from '../../shared/pedagogy.js';
+import type { BoardDirector } from '../board/director.js';
 import type { LessonOrchestrationState } from '../lesson/orchestrator.js';
 import type { DomainRepository } from '../store/domain.js';
 import type { SessionTelemetryWriter } from '../session/telemetryWriter.js';
 import type { SessionTelemetryRepository } from '../session/telemetryRepository.js';
 import type { BoardContextTracker } from './boardContext.js';
+import type { StoryboardRunState } from './storyboardRunner.js';
 
 /**
  * Shared mutable state and wiring for one lesson's realtime coordination.
@@ -19,7 +21,7 @@ import type { BoardContextTracker } from './boardContext.js';
  * exactly: one lesson, one upstream provider connection, one browser client.
  */
 
-export type ResponseCreateSource = 'tool' | 'user' | 'board' | 'voice' | 'start';
+export type ResponseCreateSource = 'tool' | 'user' | 'board' | 'voice' | 'start' | 'beat';
 
 export interface PendingBoardOpsEntry {
   ops: BoardOp[];
@@ -93,6 +95,19 @@ export interface CoordinatorState {
   comparisonSectionCounter: number;
   /** Server-side mirror of the board the learner has actually seen. */
   boardContext: BoardContextTracker;
+  /** response.create sends not yet confirmed by a response.created event.
+   * The storyboard runner never starts a beat while one is in flight. */
+  pendingResponseCreates: number;
+  /** The last terminal, non-cancelled provider response — the playback
+   * boundary a deferred reveal cue binds to on the client. */
+  lastCompletedResponseId: string | null;
+  /** Provider responses created as storyboard narration beats. Beats are
+   * tutor-floor continuations: they never trigger handoff machinery. The
+   * runner's closing handoff response is deliberately NOT in this set — it
+   * delivers the stage task through the ordinary contract. */
+  beatResponses: Set<string>;
+  /** The storyboard run currently revealing a scene beat by beat. */
+  storyboardRun: StoryboardRunState | null;
 }
 
 export type ClientCueOptional = Partial<Pick<
@@ -117,6 +132,12 @@ export interface CoordinatorContext {
    * when no compiler is wired (the simple detour then always stands). */
   readonly planDetour: ((input: { objective: string; reason: string; returnStageObjective: string }) => Promise<LessonStage[]>) | null;
   readonly detourPlanTimeoutMs: number;
+  /** The Board Director for slow-tier scene requests; null when none is
+   * wired — new-scene requests then fail closed with a clean rejection. */
+  readonly directVisual: BoardDirector | null;
+  /** How long one storyboard step may await its visibility confirmation
+   * (covers the previous beat's playback plus the draw-on animation). */
+  readonly stepRevealTimeoutMs: number;
   readonly state: CoordinatorState;
   sendClient(
     payload: Record<string, unknown>,

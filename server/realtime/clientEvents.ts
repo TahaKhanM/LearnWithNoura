@@ -8,6 +8,7 @@ import type { CoordinatorContext } from './coordinatorContext.js';
 import { addBounded, identityForResponse } from './responseRegistry.js';
 import { refreshBoardInstructions } from './sessionConfig.js';
 import { conversationContext, learnerBoardOps, safeBoardImage } from './sessionRestore.js';
+import { advanceStoryboardRun, pauseStoryboardRun } from './storyboardRunner.js';
 import { isAllowedClientMetric, MAX_PENDING_VOICE_BARGE_INS, recordClientPlaybackStop, trustedClientResponseId } from './telemetryGlue.js';
 import { requestModelResponse, setEndpointingEagerness } from './turnFloor.js';
 
@@ -111,6 +112,10 @@ export async function handleClientEvent(
       }
       state.childHoldsFloor = true;
       if (state.activeResponseId) state.cancelledResponses.add(state.activeResponseId);
+      // A barge-in mid-storyboard cancels the current beat via the ordinary
+      // generation machinery below; the runner pauses and later resumes at
+      // the first unrevealed step. Revealed objects stay visible.
+      pauseStoryboardRun(ctx);
       state.lessonState = reduceLesson(state.lessonState, { type: 'INTERRUPTED' });
       if (message.reason === 'voice') setEndpointingEagerness(ctx, 'high');
       ctx.sendUpstream({ type: 'response.cancel' });
@@ -161,6 +166,9 @@ export async function handleClientEvent(
       if (state.draftOpen !== open) {
         state.draftOpen = open;
         await ctx.repo.addEvent(ctx.sessionId, 'learner_draft', { draftId, open });
+        // A cancelled draft frees the floor without a learner turn; a
+        // paused storyboard build may continue.
+        if (!open) advanceStoryboardRun(ctx);
       }
       break;
     }
