@@ -1,10 +1,10 @@
 /// <reference lib="dom" />
 
-import { Buffer } from 'node:buffer';
 import { EventEmitter } from 'node:events';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createRuntimeEvent, type RuntimeEventEnvelope } from '../../shared/runtimeProtocol';
+import type { RuntimeEventEnvelope } from '../../shared/runtimeProtocol';
 import { RealtimeSession } from '../../src/lesson/realtimeSession';
+import { FakeVoiceTransport } from '../../src/lesson/fakeVoiceTransport';
 import { openTestDb } from '../store/db';
 import { Repo } from '../store/repo';
 import { connectRealtimeProxy } from './proxy';
@@ -34,93 +34,64 @@ class FakeClient extends EventEmitter {
 }
 
 interface SessionInternals {
-  audioOut: {
-    speaking: boolean;
-    append(responseId: string): void;
-    currentEnergy(): number;
-    playedSamples(responseId: string): number;
-    stop(): never[];
-    close(): Promise<void>;
-  };
+  ws: { readyState: number; send(raw: string): void; close?(): void } | null;
   handleServer(raw: unknown): void;
   handleMicEnergy(rms: number): void;
   releasePending(): void;
   connectionEpoch: number;
   cancelGeneration(reason: string): void;
   activateScope(advanceGeneration: boolean): void;
+  connectVoice(): Promise<void>;
+  send(type: string, payload: Record<string, unknown>): void;
 }
 
-type RawStep = 'audio-small' | 'audio-rest' | 'text-a' | 'text-b' | 'board-tool' | 'state-tool' | 'transcript-done' | 'audio-done';
+type RawStep = 'text-a' | 'text-b' | 'board-tool' | 'state-tool' | 'transcript-done';
 
 const orderings: Array<{ name: string; steps: RawStep[] }> = [
   {
     name: 'normal interleaving',
-    steps: ['audio-small', 'text-a', 'audio-rest', 'text-b', 'board-tool', 'state-tool', 'transcript-done', 'audio-done'],
+    steps: ['text-a', 'text-b', 'board-tool', 'state-tool', 'transcript-done'],
   },
   {
-    name: 'transcript before audio with tools before PCM',
-    steps: ['text-a', 'text-b', 'board-tool', 'state-tool', 'transcript-done', 'audio-small', 'audio-rest', 'audio-done'],
+    name: 'tools before any transcript',
+    steps: ['board-tool', 'state-tool', 'text-a', 'text-b', 'transcript-done'],
   },
   {
-    name: 'audio before transcript with tools after PCM',
-    steps: ['audio-small', 'audio-rest', 'audio-done', 'text-a', 'text-b', 'board-tool', 'state-tool', 'transcript-done'],
+    name: 'tools after the whole transcript',
+    steps: ['text-a', 'text-b', 'transcript-done', 'board-tool', 'state-tool'],
   },
   {
-    name: 'multiple pending repeated phrases across a no-audio thinking gap',
-    steps: ['text-a', 'text-b', 'board-tool', 'audio-small', 'state-tool', 'audio-rest', 'transcript-done', 'audio-done'],
-  },
-  {
-    name: 'transcript done before audio done',
-    steps: ['audio-small', 'text-a', 'audio-rest', 'text-b', 'state-tool', 'board-tool', 'transcript-done', 'audio-done'],
-  },
-  {
-    name: 'audio done before transcript done',
-    steps: ['audio-small', 'text-a', 'audio-rest', 'text-b', 'state-tool', 'board-tool', 'audio-done', 'transcript-done'],
+    name: 'tools interleaved mid-transcript',
+    steps: ['text-a', 'board-tool', 'text-b', 'state-tool', 'transcript-done'],
   },
 ];
 
 afterEach(() => vi.unstubAllGlobals());
 
-describe('raw Realtime proxy to heard-sample session integration', () => {
-  it.each(orderings)('$name releases every cue only at its derived heard-sample boundary', async ({ steps }) => {
+describe('raw Realtime sideband to playback-bound session integration', () => {
+  it.each(orderings)('$name streams captions live and binds visuals/state/task to the playback boundary', async ({ steps }) => {
     const harness = await createHarness();
+    harness.voice.emitBoundary('started', 'response-matrix');
     emitResponse(harness.upstream, 'response-matrix', steps);
-    await flushProxy();
-    harness.deliverProxyEnvelopes();
+    await harness.pump();
 
+    // Every playback-bound cue is tagged with the provider response so the
+    // client can bind it to the audible call; nothing carries sample offsets.
     const cueEnvelopes = harness.client.sent.filter((event) =>
       ['transcript_delta', 'transcript_done', 'board_ops', 'lesson_state'].includes(event.type));
-    const deltas = cueEnvelopes.filter((event) => event.type === 'transcript_delta');
-    expect(deltas).toHaveLength(2);
-    const firstBoundary = deltas[0].audioSampleOffsets?.end ?? 0;
-    expect(firstBoundary).toBeGreaterThan(480);
-    expect(deltas[1].audioSampleOffsets?.end).toBe(24_000);
-    for (const event of cueEnvelopes.filter((candidate) => candidate.type !== 'transcript_delta')) {
-      expect(event.audioSampleOffsets?.end).toBe(24_000);
+    expect(cueEnvelopes.length).toBeGreaterThanOrEqual(4);
+    for (const envelope of cueEnvelopes) {
+      expect(envelope.providerResponseId).toBe('response-matrix');
+      expect('audioSampleOffsets' in envelope).toBe(false);
     }
 
-    harness.setPlayed('response-matrix', 480);
-    harness.release();
-    expect(harness.session.getSnapshot().captions).toEqual([]);
+    // Captions are live on transcript arrival; visuals and semantic state
+    // wait for the child to finish hearing the response.
+    expect(harness.session.getSnapshot().captions.map((caption) => caption.text)).toEqual(['Repeated phrase.']);
     expect(harness.session.getSnapshot().lessonState).toEqual({});
     expect(harness.boardReleases).toEqual([]);
 
-    harness.setPlayed('response-matrix', firstBoundary - 1);
-    harness.release();
-    expect(harness.session.getSnapshot().captions).toEqual([]);
-
-    harness.setPlayed('response-matrix', firstBoundary);
-    harness.release();
-    expect(harness.session.getSnapshot().captions.map((caption) => caption.text)).toEqual(['Repeated phrase.']);
-
-    harness.setPlayed('response-matrix', 23_999);
-    harness.release();
-    expect(harness.boardReleases).toEqual([]);
-    expect(harness.session.getSnapshot().lessonState).toEqual({});
-    expect(harness.session.getSnapshot().captions.map((caption) => caption.text)).toEqual(['Repeated phrase.']);
-
-    harness.setPlayed('response-matrix', 24_000);
-    harness.release();
+    harness.voice.emitBoundary('stopped', 'response-matrix', 1_500);
     await vi.waitFor(() => expect(harness.boardReleases).toHaveLength(1));
     expect(harness.session.getSnapshot().lessonState).toMatchObject({
       activeConcept: 'fraction comparison',
@@ -130,72 +101,84 @@ describe('raw Realtime proxy to heard-sample session integration', () => {
       'Repeated phrase.',
       'Repeated phrase later?',
     ]);
+
+    // The client relayed the heard duration for the server's audio telemetry.
+    await harness.pump();
+    const boundaries = harness.clientToServerMessages().filter((event) => event.type === 'playback_boundary');
+    expect(boundaries.map((event) => event.payload)).toEqual([
+      { response_id: 'response-matrix', boundary: 'stopped', playedMs: 1_500 },
+    ]);
     harness.session.end();
   });
 
-  it('drops raw cancelled responses and completed old-identity cues after interruption', async () => {
+  it('drops late events for a cancelled response and everything from an interrupted identity', async () => {
     const cancelled = await createHarness();
-    emitResponse(cancelled.upstream, 'cancelled-response', ['text-a', 'audio-small', 'audio-rest', 'board-tool', 'state-tool'], 'cancelled');
-    await flushProxy();
-    cancelled.deliverProxyEnvelopes();
-    cancelled.setPlayed('cancelled-response', 24_000);
-    cancelled.release();
-    expect(cancelled.client.sent.filter((event) => ['transcript_delta', 'transcript_done', 'board_ops', 'lesson_state'].includes(event.type))).toEqual([]);
+    cancelled.upstream.emit({ type: 'response.created', response: { id: 'cancelled-response' } });
+    cancelled.upstream.emit({ type: 'response.done', response: { id: 'cancelled-response', status: 'cancelled', output: [] } });
+    for (const step of ['text-a', 'text-b', 'transcript-done'] as RawStep[]) {
+      emitStep(cancelled.upstream, 'cancelled-response', step);
+    }
+    await cancelled.pump();
+    expect(cancelled.client.sent.filter((event) =>
+      ['transcript_delta', 'transcript_done'].includes(event.type))).toEqual([]);
     expect(cancelled.session.getSnapshot().captions).toEqual([]);
-    expect(cancelled.boardReleases).toEqual([]);
     cancelled.session.end();
 
     const interrupted = await createHarness();
+    interrupted.voice.emitBoundary('started', 'old-response');
+    interrupted.voice.advancePlayback(900);
     interrupted.upstream.emit({ type: 'response.created', response: { id: 'old-response' } });
-    for (const step of ['text-a', 'text-b', 'audio-small', 'audio-rest', 'board-tool', 'state-tool'] as RawStep[]) {
-      emitStep(interrupted.upstream, 'old-response', step);
-    }
-    await flushProxy();
-    interrupted.deliverProxyEnvelopes();
+    emitStep(interrupted.upstream, 'old-response', 'text-a');
+    await interrupted.pump();
+    expect(interrupted.session.getSnapshot().captions.map((caption) => caption.text)).toEqual(['Repeated phrase.']);
     const oldIdentity = interrupted.session.getIdentity();
+
+    // Dual-confirmed barge-in: provider speech start plus sustained local energy.
     interrupted.upstream.emit({ type: 'input_audio_buffer.speech_started' });
-    await flushProxy();
-    interrupted.deliverProxyEnvelopes();
+    await interrupted.pump();
     for (let frame = 0; frame < 7; frame += 1) internalsFor(interrupted.session).handleMicEnergy(0.09);
     expect(interrupted.session.getIdentity()).not.toEqual(oldIdentity);
+    expect(interrupted.voice.playbackClears).toBe(1);
 
-    for (const step of ['transcript-done', 'audio-done'] as RawStep[]) emitStep(interrupted.upstream, 'old-response', step);
-    interrupted.upstream.emit({ type: 'response.done', response: { id: 'old-response', status: 'completed', output: [{ type: 'function_call' }] } });
-    await flushProxy();
-    interrupted.deliverProxyEnvelopes();
-    interrupted.setPlayed('old-response', 24_000);
-    interrupted.release();
-    expect(interrupted.session.getSnapshot().captions).toEqual([]);
+    // Whatever straggles in for the interrupted response reaches nobody:
+    // the server has cancelled it and the client identity has moved on.
+    for (const step of ['text-b', 'board-tool', 'state-tool', 'transcript-done'] as RawStep[]) {
+      emitStep(interrupted.upstream, 'old-response', step);
+    }
+    interrupted.upstream.emit({ type: 'response.done', response: { id: 'old-response', status: 'cancelled', output: [] } });
+    await interrupted.pump();
+    interrupted.voice.emitBoundary('stopped', 'old-response', 900);
+    expect(interrupted.session.getSnapshot().captions.map((caption) => caption.text)).toEqual(['Repeated phrase.']);
     expect(interrupted.session.getSnapshot().lessonState).toEqual({});
     expect(interrupted.boardReleases).toEqual([]);
     interrupted.session.end();
   });
 
-  it('rejects pending and replayed stale envelopes after reconnect identity replacement and navigation', async () => {
+  it('rejects stale envelopes after reconnect identity replacement and stays inert after end', async () => {
     const harness = await createHarness();
+    harness.voice.emitBoundary('started', 'before-reconnect');
     emitResponse(harness.upstream, 'before-reconnect', orderings[0].steps);
     await flushProxy();
-    harness.deliverProxyEnvelopes();
     const staleEnvelopes = harness.client.sent.slice();
+    harness.markDelivered();
 
     harness.replaceForReconnect();
     await flushProxy();
-    harness.setPlayed('before-reconnect', 24_000);
-    harness.release();
     for (const envelope of staleEnvelopes) harness.deliverDirect(envelope);
-    harness.release();
+    harness.voice.emitBoundary('stopped', 'before-reconnect', 1_000);
     expect(harness.session.getSnapshot().captions).toEqual([]);
     expect(harness.session.getSnapshot().lessonState).toEqual({});
     expect(harness.boardReleases).toEqual([]);
 
-    emitResponse(harness.upstream, 'before-navigation', orderings[2].steps);
-    await flushProxy();
-    harness.deliverProxyEnvelopes();
+    // The reconnected identity keeps working over the same voice call.
+    harness.voice.emitBoundary('started', 'after-reconnect');
+    emitResponse(harness.upstream, 'after-reconnect', orderings[0].steps);
+    await harness.pump();
+    expect(harness.session.getSnapshot().captions.map((caption) => caption.text)).toEqual(['Repeated phrase.']);
+
     harness.session.end();
-    harness.setPlayed('before-navigation', 24_000);
-    harness.release();
+    harness.voice.emitBoundary('stopped', 'after-reconnect', 500);
     expect(harness.session.getSnapshot().phase).toBe('ended');
-    expect(harness.session.getSnapshot().captions).toEqual([]);
     expect(harness.boardReleases).toEqual([]);
   });
 });
@@ -205,20 +188,17 @@ async function createHarness() {
   const repo = new Repo(openTestDb());
   const child = repo.createChild('Maya', 10);
   const storedSession = repo.createSession(child.id, 'fractions');
+  window.sessionStorage.setItem(`noura.lessonCapability.${storedSession.id}`, 'offline-capability');
   const client = new FakeClient();
-  const session = new RealtimeSession(storedSession.id);
+  let voice!: FakeVoiceTransport;
+  const session = new RealtimeSession(storedSession.id, (input) => {
+    voice = new FakeVoiceTransport(input.handlers);
+    return voice;
+  });
   const internals = session as unknown as SessionInternals;
-  const played = new Map<string, number>();
+  void internals.connectVoice();
   const boardReleases: string[] = [];
   let delivered = 0;
-  internals.audioOut = {
-    speaking: true,
-    append: () => {},
-    currentEnergy: () => 0,
-    playedSamples: (responseId) => played.get(responseId) ?? 0,
-    stop: () => [],
-    close: async () => {},
-  };
   session.onBoardOps = async (_ops, _animate, _identity, cue) => {
     boardReleases.push(cue?.semanticObjectId ?? 'board');
     return true;
@@ -227,25 +207,48 @@ async function createHarness() {
     apiKey: 'offline-fixture', model: 'gpt-realtime-2.1', repo, sessionId: storedSession.id,
     createUpstream: () => new FakeUpstream() as never,
   });
-  client.emit('message', JSON.stringify(createRuntimeEvent(session.getIdentity(), 0, 'hello', {})));
+  // The session's outbound envelope path loops straight into the proxy, so
+  // ops_shown acknowledgements and playback boundaries reach the server.
+  const sentToServer: Array<{ type: string; payload: Record<string, unknown> }> = [];
+  internals.ws = {
+    readyState: 1,
+    send: (raw) => {
+      sentToServer.push(JSON.parse(raw) as { type: string; payload: Record<string, unknown> });
+      void client.emit('message', raw);
+    },
+    close: () => {},
+  };
+  internals.send('hello', {});
+
+  function deliverProxyEnvelopes(): void {
+    for (const envelope of client.sent.slice(delivered)) internals.handleServer(envelope);
+    delivered = client.sent.length;
+  }
 
   return {
     client,
     session,
+    voice,
     upstream: FakeUpstream.latest,
     boardReleases,
-    setPlayed(responseId: string, samples: number) { played.set(responseId, samples); },
-    release() { internals.releasePending(); },
     deliverDirect(envelope: RuntimeEventEnvelope<Record<string, unknown>>) { internals.handleServer(envelope); },
-    deliverProxyEnvelopes() {
-      for (const envelope of client.sent.slice(delivered)) internals.handleServer(envelope);
-      delivered = client.sent.length;
+    markDelivered() { delivered = client.sent.length; },
+    /** Runs the client↔server loop until both sides go quiet. */
+    async pump(): Promise<void> {
+      for (let round = 0; round < 6; round += 1) {
+        await flushProxy();
+        deliverProxyEnvelopes();
+      }
+    },
+    /** Envelopes the browser sent to the server (parsed off the loop). */
+    clientToServerMessages(): Array<{ type: string; payload: Record<string, unknown> }> {
+      return sentToServer;
     },
     replaceForReconnect() {
       internals.cancelGeneration('transport closed');
       internals.connectionEpoch += 1;
       internals.activateScope(false);
-      client.emit('message', JSON.stringify(createRuntimeEvent(session.getIdentity(), 0, 'hello', {})));
+      internals.send('hello', {});
     },
   };
 }
@@ -266,14 +269,6 @@ function emitResponse(upstream: FakeUpstream, responseId: string, steps: RawStep
 
 function emitStep(upstream: FakeUpstream, responseId: string, step: RawStep) {
   const itemId = `item-${responseId}`;
-  if (step === 'audio-small') upstream.emit({
-    type: 'response.output_audio.delta', response_id: responseId, item_id: itemId,
-    delta: Buffer.alloc(480 * 2).toString('base64'),
-  });
-  if (step === 'audio-rest') upstream.emit({
-    type: 'response.output_audio.delta', response_id: responseId, item_id: itemId,
-    delta: Buffer.alloc(23_520 * 2).toString('base64'),
-  });
   if (step === 'text-a') upstream.emit({
     type: 'response.output_audio_transcript.delta', response_id: responseId, item_id: itemId, delta: 'Repeated phrase. ',
   });
@@ -284,7 +279,6 @@ function emitStep(upstream: FakeUpstream, responseId: string, step: RawStep) {
     type: 'response.output_audio_transcript.done', response_id: responseId,
     transcript: 'Repeated phrase. Repeated phrase later?',
   });
-  if (step === 'audio-done') upstream.emit({ type: 'response.output_audio.done', response_id: responseId });
   if (step === 'board-tool') upstream.emit({
     type: 'response.function_call_arguments.done', response_id: responseId, call_id: `board-${responseId}`,
     name: 'board_ops', arguments: JSON.stringify({

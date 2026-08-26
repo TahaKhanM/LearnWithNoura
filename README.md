@@ -19,7 +19,7 @@ Do not use real child details, recordings or transcripts in the current build. N
 
 The application runtime baseline remains unchanged:
 
-- `gpt-realtime-2.1` over the existing server-proxied Realtime WebSocket for speech-to-speech;
+- `gpt-realtime-2.1` for speech-to-speech, carried on a direct browser ↔ provider WebRTC call whose control lives on a server-owned sideband WebSocket to the same call;
 - `gpt-4o-mini-transcribe` for input transcription;
 - `gpt-5.6-terra` through the existing Chat Completions path for captions-only fallback and parent summaries.
 
@@ -30,11 +30,11 @@ GPT-5.6 Sol was the Codex implementation agent used for this repository work. It
 The active path is:
 
 1. Parent setup creates or explicitly selects a learner and a goal.
-2. The child taps **Begin**, which owns AudioContext unlock and microphone permission.
-3. A versioned event envelope carries session, connection epoch, turn, generation, sequence, provider, audio, visual and idempotency identity.
+2. The child taps **Begin**, which owns microphone permission and bootstraps the voice call: the browser posts its WebRTC SDP offer to the server, which creates the provider call with the API key, attaches its control sideband, applies the full session configuration and returns only the SDP answer. Tutor audio arrives as a remote media track; no PCM transits the server.
+3. A versioned event envelope (browser ↔ server WebSocket, control only: never audio) carries session, connection epoch, turn, generation, sequence, provider, visual and idempotency identity.
 4. A deterministic lesson reducer owns legal transitions and forbids waiting without a delivered question or task.
-5. One `GenerationScope` owns audio, provisional captions, transient visuals, character tasks, timers, reconnect work and fallback cancellation.
-6. The PCM sample clock releases phrase captions, semantic visual cues, the pen and character attention.
+5. One `GenerationScope` owns playback binding, provisional captions, transient visuals, character tasks, timers, reconnect work and fallback cancellation.
+6. Captions release on transcript arrival with phrase smoothing; board reveals, semantic state, task delivery and truncation bind to the provider's real playback boundaries (`output_audio_buffer.started/stopped/cleared` on the WebRTC data channel).
 7. Visual Plan 2.0 decides whether a visual is essential/supportive/unnecessary and whether to create, reuse, replace or skip a named board section.
 8. Semantic intent is adapted into exact BoardOps; sections isolate topics, annotations are placed against real geometry and a deterministic quality budget accepts or rejects the checkpoint.
 9. Heard, accepted visual checkpoints become the in-memory board immediately; completed draw-on animation acknowledges them for durable replay and agent state.
@@ -65,8 +65,9 @@ object identifiers.
 
 The Phase 0 timing boundaries are deliberately narrow:
 
-- “First audio” ends when the browser handles the first accepted tutor audio delta for the current response. It is a browser-received boundary, not speaker onset or acoustic evidence.
-- `board_reveal_to_narration` is `first scheduled audible sample − first committed board paint` on one browser monotonic clock. Positive means the board appeared first; negative means scheduled narration came first. It is not animation-completion time.
+- “First audio” ends when the browser handles the provider’s `output_audio_buffer.started` playback boundary for the current response on the WebRTC data channel. It is a browser-received boundary, not speaker onset or acoustic evidence.
+- `board_reveal_to_narration` is `playback-start boundary − first committed board paint` on one browser monotonic clock. Positive means the board appeared first; negative means narration started first. It is not animation-completion time.
+- Tutor audio duration is the browser-reported heard duration relayed as a `playback_boundary` envelope event, recorded once per response.
 
 These offline and browser-observer definitions prevent lifecycle regressions.
 One authorized synthetic Preview session produced provider usage and duration
@@ -176,8 +177,8 @@ The browser suites use synthetic learner fixtures. Paid live-provider runs are n
 - Character attention is generation-scoped, bounded, damped, reduced-motion aware and subordinate to the board.
 - Camera-responsive behavior is **not implemented**. No lesson needs camera permission. Noura performs no face recognition, biometric processing, emotion inference, attention scoring, engagement scoring or facial comprehension inference.
 - Raw audio, pointer trails and camera data are not persisted.
-- Realtime audio and transient character/visual work are cancelled locally before provider confirmation; target-hardware acoustic silence remains **UNVERIFIED**.
-- Voice interruption requires sustained adaptive microphone energy plus independent server speech-start confirmation. Short noises and server VAD alone do not cancel Noura.
+- On barge-in the remote tutor track is muted and the provider’s buffered audio is cleared locally before provider confirmation; target-hardware acoustic silence remains **UNVERIFIED**.
+- Voice interruption requires sustained adaptive microphone energy (a WebAudio analyser on the live mic stream) plus independent server speech-start confirmation. Short noises and server VAD alone do not cancel Noura.
 - Confirmed voice interruption temporarily raises semantic endpointing eagerness for that one turn, then restores the normal child-friendly setting. Speech-end-to-response and speech-end-to-audio intervals are recorded separately.
 - Released tutor checkpoints finish and remain visible across re-renders and turn changes, then acknowledge durable replay even if interruption happened mid-animation. Learner strokes are committed as learner-owned BoardOps, replay after refresh and send a compressed transient board image to Realtime so Noura can inspect and respond to a board-only turn.
 - The server mirrors only released tutor checkpoints and committed learner marks into the agent’s current-board instructions. Teaching-move and drawing tool results return reusable object IDs; exact raw redraws and mostly equivalent semantic scenes are suppressed so questions adapt the visible diagram in place.
@@ -185,7 +186,7 @@ The browser suites use synthetic learner fixtures. Paid live-provider runs are n
 - Learner marks send deterministic vector features (shape, closure, direction, bounds, nearest/touched objects) plus one transient composite showing the full section and an enlarged detail. These features are spatial hints, never unverified semantic claims.
 - Exact subject templates and general relationship, worked-step, comparison and proportional part–whole grammars all pass through the same geometry solver, crossing checks and section quality budget.
 - A single atomic Board status and synchronized item-level signaling orient the learner without moving focus or duplicating the spoken explanation.
-- Captions use PCM-timed phrase cues and final transcript correction. The app does not claim provider word timestamps or exact word synchronization.
+- Captions release on transcript arrival with phrase smoothing and final transcript correction. The app does not claim provider word timestamps or exact word synchronization.
 
 ## Known blockers
 

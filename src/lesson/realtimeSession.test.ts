@@ -1,18 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRuntimeEvent, type GenerationIdentity, type RuntimeEventEnvelope } from '../../shared/runtimeProtocol';
-import { ResponseSegmentAnnotator } from '../../server/realtime/segmentAnnotator';
 import type { MetricInput } from '../../shared/sessionTelemetry';
+import { FakeVoiceTransport } from './fakeVoiceTransport';
 import { RealtimeSession } from './realtimeSession';
 
 interface SessionHarness {
-  audioOut: {
-    speaking: boolean;
-    append(): { playbackStartsInMs: number } | null;
-    currentEnergy(): number;
-    playedSamples(): number;
-    stop(): never[];
-    close(): Promise<void>;
-  };
+  voice: FakeVoiceTransport | null;
   handleServer(raw: unknown): void;
   handleMicEnergy(rms: number): void;
   releasePending(): void;
@@ -28,9 +21,39 @@ interface MetricQueueHarness extends SessionHarness {
 beforeEach(() => window.sessionStorage.clear());
 afterEach(() => vi.restoreAllMocks());
 
-function envelope(identity: GenerationIdentity, sequence: number, cue: { payload: Record<string, unknown>; optional: Record<string, unknown> }) {
-  const { type, ...payload } = cue.payload;
-  return createRuntimeEvent(identity, sequence, String(type), payload, cue.optional);
+/** The browser↔server envelope socket, capturable per instance. */
+class FakeEnvelopeSocket {
+  static instances: FakeEnvelopeSocket[] = [];
+  static CONNECTING = 0;
+  static OPEN = 1;
+  readyState = FakeEnvelopeSocket.CONNECTING;
+  onopen: (() => void) | null = null;
+  onmessage: ((event: { data: unknown }) => void) | null = null;
+  onclose: (() => void) | null = null;
+  onerror: (() => void) | null = null;
+  sent: string[] = [];
+  url: string;
+  protocols?: string[];
+  constructor(url: string, protocols?: string[]) {
+    this.url = url;
+    this.protocols = protocols;
+    FakeEnvelopeSocket.instances.push(this);
+  }
+  send(raw: string): void { this.sent.push(raw); }
+  close(): void { this.readyState = 3; }
+}
+
+/** A session driven by a deterministic fake voice transport. */
+function sessionWithVoice(): { session: RealtimeSession; harness: SessionHarness; voice: FakeVoiceTransport } {
+  window.sessionStorage.setItem('noura.lessonCapability.session', 'capability');
+  let voice!: FakeVoiceTransport;
+  const session = new RealtimeSession('session', (input) => {
+    voice = new FakeVoiceTransport(input.handlers);
+    return voice;
+  });
+  const harness = session as unknown as SessionHarness & { connectVoice(): Promise<void> };
+  void harness.connectVoice();
+  return { session, harness, voice };
 }
 
 describe('RealtimeSession connecting metric queue', () => {
@@ -129,52 +152,82 @@ describe('RealtimeSession connecting metric queue', () => {
   });
 });
 
-describe('RealtimeSession sealed response release', () => {
-  it('does not release future caption, board, pen/character state, or final text before heard PCM', async () => {
-    const session = new RealtimeSession('session');
-    const harness = session as unknown as SessionHarness;
-    let played = 480;
-    harness.audioOut = {
-      speaking: true, append: () => null, currentEnergy: () => 0, playedSamples: () => played,
-      stop: () => [], close: async () => {},
-    };
+describe('RealtimeSession playback-bound release', () => {
+  it('releases captions on transcript arrival but holds visuals and lesson state while the response plays', async () => {
+    const { session, harness, voice } = sessionWithVoice();
     const board = vi.fn(async () => true);
     session.onBoardOps = board;
     const identity = session.getIdentity();
     harness.handleServer(createRuntimeEvent(identity, 0, 'response_started', { response_id: 'response' }));
+    voice.emitBoundary('started', 'response');
 
-    const annotator = new ResponseSegmentAnnotator();
-    annotator.addTranscriptDelta('First phrase. ');
-    annotator.addTranscriptDelta('Future phrase?');
-    annotator.addSemanticCue({ type: 'board_ops', response_id: 'response', event_id: 12, ops: [] }, { visualCueId: 'cue', semanticObjectId: 'fraction-scale' });
-    annotator.addSemanticCue({ type: 'lesson_state', response_id: 'response', state: { activeConcept: 'future concept', characterAttentionTarget: 'semantic_object' } }, { semanticObjectId: 'fraction-scale' });
-    annotator.addAudioSamples(480);
-    annotator.addAudioSamples(23_520);
-    annotator.setFinalTranscript('First phrase. Future phrase?');
-    const cues = annotator.seal();
-    cues.forEach((cue, index) => harness.handleServer(envelope(identity, index + 1, cue as { payload: Record<string, unknown>; optional: Record<string, unknown> })));
+    harness.handleServer(createRuntimeEvent(identity, 1, 'transcript_delta', { response_id: 'response', delta: 'First phrase. ' }, { providerResponseId: 'response' }));
+    harness.handleServer(createRuntimeEvent(identity, 2, 'board_ops', {
+      response_id: 'response', event_id: 12, ops: [],
+    }, { providerResponseId: 'response', visualCueId: 'cue', semanticObjectId: 'fraction-scale' }));
+    harness.handleServer(createRuntimeEvent(identity, 3, 'lesson_state', {
+      response_id: 'response', state: { activeConcept: 'future concept', characterAttentionTarget: 'semantic_object' },
+    }, { providerResponseId: 'response', semanticObjectId: 'fraction-scale' }));
 
-    harness.releasePending();
-    expect(session.getSnapshot().captions).toEqual([]);
+    // Captions are live on arrival; playback-bound cues wait.
+    expect(session.getSnapshot().captions.map((caption) => caption.text)).toEqual(['First phrase.']);
     expect(session.getSnapshot().lessonState).toEqual({});
     expect(board).not.toHaveBeenCalled();
 
-    played = 24_000;
-    harness.releasePending();
+    voice.emitBoundary('stopped', 'response', 4_000);
     await vi.waitFor(() => expect(board).toHaveBeenCalledTimes(1));
-    expect(session.getSnapshot().captions.map((caption) => caption.text)).toEqual(['First phrase.', 'Future phrase?']);
     expect(session.getSnapshot().lessonState).toMatchObject({ activeConcept: 'future concept', characterAttentionTarget: 'semantic_object' });
   });
 
-  it('does not interrupt on server VAD or a short local noise burst alone', () => {
-    const session = new RealtimeSession('session');
-    const harness = session as unknown as SessionHarness;
-    harness.audioOut = {
-      speaking: true, append: () => null, currentEnergy: () => 0, playedSamples: () => 0,
-      stop: () => [], close: async () => {},
+  it('releases visuals immediately when their response is not audibly playing', async () => {
+    const { session, harness } = sessionWithVoice();
+    const board = vi.fn(async () => true);
+    session.onBoardOps = board;
+    const identity = session.getIdentity();
+    harness.handleServer(createRuntimeEvent(identity, 0, 'response_started', { response_id: 'tool-first' }));
+    // A staged plan arrives before any audio: the visibility barrier depends
+    // on rendering now so the tool result can return and speech can begin.
+    harness.handleServer(createRuntimeEvent(identity, 1, 'board_ops', {
+      response_id: 'tool-first', event_id: 5, ops: [],
+    }, { providerResponseId: 'tool-first' }));
+    await vi.waitFor(() => expect(board).toHaveBeenCalledTimes(1));
+  });
+
+  it('sends interrupt with heard playback duration and relays the stop boundary for telemetry', () => {
+    const now = vi.spyOn(performance, 'now');
+    const { session, harness, voice } = sessionWithVoice();
+    const sent: RuntimeEventEnvelope<Record<string, unknown>>[] = [];
+    harness.ws = {
+      readyState: 1,
+      send: (raw) => sent.push(JSON.parse(raw) as RuntimeEventEnvelope<Record<string, unknown>>),
     };
     const identity = session.getIdentity();
+    harness.handleServer(createRuntimeEvent(identity, 0, 'response_started', { response_id: 'response-1' }));
+    voice.emitBoundary('started', 'response-1');
+    voice.advancePlayback(1_234);
+    now.mockReturnValue(80);
+    harness.handleServer(createRuntimeEvent(identity, 1, 'speech_started', {}));
+    for (let frame = 1; frame <= 7; frame += 1) {
+      now.mockReturnValue(80 + frame * 40);
+      harness.handleMicEnergy(0.09);
+    }
+
+    expect(sent.filter((event) => event.type === 'interrupt').map((event) => event.payload))
+      .toEqual([{ reason: 'voice', heardMs: 1_234 }]);
+    expect(sent.filter((event) => event.type === 'playback_boundary').map((event) => event.payload))
+      .toEqual([{ response_id: 'response-1', boundary: 'stopped', playedMs: 1_234 }]);
+    expect(voice.playbackClears).toBe(1);
+    expect(session.getIdentity()).toMatchObject({
+      turnId: 'turn-1',
+      generationId: 'generation-1',
+    });
+  });
+
+  it('does not interrupt on server VAD or a short local noise burst alone', () => {
+    const { session, harness, voice } = sessionWithVoice();
+    const identity = session.getIdentity();
     harness.handleServer(createRuntimeEvent(identity, 0, 'response_started', { response_id: 'response' }));
+    voice.emitBoundary('started', 'response');
     harness.handleServer(createRuntimeEvent(identity, 1, 'speech_started', {}));
     for (let frame = 0; frame < 3; frame += 1) harness.handleMicEnergy(0.12);
     expect(session.getIdentity()).toEqual(identity);
@@ -182,21 +235,12 @@ describe('RealtimeSession sealed response release', () => {
 
   it('emits typed speech and ask timing metrics with identity only in the envelope', () => {
     const now = vi.spyOn(performance, 'now');
-    const session = new RealtimeSession('session');
-    const harness = session as unknown as SessionHarness;
+    const { session, harness, voice } = sessionWithVoice();
     const sent: RuntimeEventEnvelope<Record<string, unknown>>[] = [];
     harness.ws = {
       readyState: 1,
       send: (raw) => sent.push(JSON.parse(raw) as RuntimeEventEnvelope<Record<string, unknown>>),
       close: () => {},
-    };
-    harness.audioOut = {
-      speaking: false,
-      append: () => ({ playbackStartsInMs: 50 }),
-      currentEnergy: () => 0,
-      playedSamples: () => 0,
-      stop: () => [],
-      close: async () => {},
     };
     let identity = session.getIdentity();
 
@@ -205,18 +249,14 @@ describe('RealtimeSession sealed response release', () => {
     now.mockReturnValue(1_180);
     harness.handleServer(createRuntimeEvent(identity, 1, 'response_started', { response_id: 'voice-reply' }));
     now.mockReturnValue(1_450);
-    harness.handleServer(createRuntimeEvent(identity, 2, 'audio', {
-      response_id: 'voice-reply', item_id: 'item-voice', delta: btoa('\0\0'),
-    }));
+    voice.emitBoundary('started', 'voice-reply');
 
     now.mockReturnValue(2_000);
     session.sendText('What is one half?');
     identity = session.getIdentity();
     now.mockReturnValue(2_300);
     harness.handleServer(createRuntimeEvent(identity, 0, 'response_started', { response_id: 'text-reply' }));
-    harness.handleServer(createRuntimeEvent(identity, 1, 'audio', {
-      response_id: 'text-reply', item_id: 'item-text', delta: btoa('\0\0'),
-    }));
+    voice.emitBoundary('started', 'text-reply');
 
     const metrics = sent.filter((event) => event.type === 'metric');
     expect(metrics.map((event) => event.payload)).toEqual([
@@ -257,18 +297,15 @@ describe('RealtimeSession sealed response release', () => {
 
   it('emits rejected local-only and provider-only gate observations', () => {
     const now = vi.spyOn(performance, 'now');
-    const session = new RealtimeSession('session');
-    const harness = session as unknown as SessionHarness;
+    const { harness, voice } = sessionWithVoice();
     const sent: RuntimeEventEnvelope<Record<string, unknown>>[] = [];
     harness.ws = {
       readyState: 1,
       send: (raw) => sent.push(JSON.parse(raw) as RuntimeEventEnvelope<Record<string, unknown>>),
     };
-    harness.audioOut = {
-      speaking: true, append: () => null, currentEnergy: () => 0, playedSamples: () => 0,
-      stop: () => [], close: async () => {},
-    };
+    const session = (harness as unknown as { getIdentity(): GenerationIdentity; });
     const identity = session.getIdentity();
+    voice.emitBoundary('started', 'response');
 
     now.mockReturnValue(0);
     harness.handleServer(createRuntimeEvent(identity, 0, 'speech_started', {}));
@@ -301,64 +338,18 @@ describe('RealtimeSession sealed response release', () => {
     expect(metrics.every((event) => event.providerResponseId === undefined)).toBe(true);
   });
 
-  it('keeps confirmed voice interruption ownership and generation advancement unchanged', () => {
+  it('correlates playback start with a current board reveal in the envelope', () => {
     const now = vi.spyOn(performance, 'now');
-    const session = new RealtimeSession('session');
-    const harness = session as unknown as SessionHarness;
+    const { session, harness, voice } = sessionWithVoice();
     const sent: RuntimeEventEnvelope<Record<string, unknown>>[] = [];
     harness.ws = {
       readyState: 1,
       send: (raw) => sent.push(JSON.parse(raw) as RuntimeEventEnvelope<Record<string, unknown>>),
     };
-    harness.audioOut = {
-      speaking: true, append: () => null, currentEnergy: () => 0, playedSamples: () => 0,
-      stop: () => [], close: async () => {},
-    };
     const identity = session.getIdentity();
     harness.handleServer(createRuntimeEvent(identity, 0, 'response_started', { response_id: 'response-1' }));
-    now.mockReturnValue(80);
-    harness.handleServer(createRuntimeEvent(identity, 1, 'speech_started', {}));
-    for (let frame = 1; frame <= 7; frame += 1) {
-      now.mockReturnValue(80 + frame * 40);
-      harness.handleMicEnergy(0.09);
-    }
-
-    expect(sent.filter((event) => event.type === 'interrupt').map((event) => event.payload))
-      .toEqual([{ reason: 'voice' }]);
-    expect(session.getIdentity()).toMatchObject({
-      turnId: 'turn-1',
-      generationId: 'generation-1',
-    });
-  });
-
-  it('correlates first-audio scheduling with a current board reveal in the envelope', () => {
-    const now = vi.spyOn(performance, 'now');
-    const session = new RealtimeSession('session');
-    const harness = session as unknown as SessionHarness;
-    const sent: RuntimeEventEnvelope<Record<string, unknown>>[] = [];
-    harness.ws = {
-      readyState: 1,
-      send: (raw) => sent.push(JSON.parse(raw) as RuntimeEventEnvelope<Record<string, unknown>>),
-    };
-    let firstChunk = true;
-    harness.audioOut = {
-      speaking: true,
-      append: () => {
-        if (!firstChunk) return null;
-        firstChunk = false;
-        return { playbackStartsInMs: 50 };
-      },
-      currentEnergy: () => 0,
-      playedSamples: () => 0,
-      stop: () => [],
-      close: async () => {},
-    };
-    const identity = session.getIdentity();
-    harness.handleServer(createRuntimeEvent(identity, 0, 'response_started', { response_id: 'response-1' }));
-    now.mockReturnValue(1_000);
-    harness.handleServer(createRuntimeEvent(identity, 1, 'audio', {
-      response_id: 'response-1', item_id: 'item-1', delta: btoa('\0\0'),
-    }));
+    now.mockReturnValue(1_050);
+    voice.emitBoundary('started', 'response-1');
     now.mockReturnValue(1_820);
     session.noteBoardReveal(identity, {
       responseId: 'response-1',
@@ -392,12 +383,7 @@ describe('RealtimeSession sealed response release', () => {
 
   it('moves from speech end to thinking and measures the actual reply gap', () => {
     const now = vi.spyOn(performance, 'now');
-    const session = new RealtimeSession('session');
-    const harness = session as unknown as SessionHarness;
-    harness.audioOut = {
-      speaking: false, append: () => null, currentEnergy: () => 0, playedSamples: () => 0,
-      stop: () => [], close: async () => {},
-    };
+    const { session, harness, voice } = sessionWithVoice();
     const identity = session.getIdentity();
 
     now.mockReturnValue(1_000);
@@ -409,9 +395,7 @@ describe('RealtimeSession sealed response release', () => {
     expect(session.getSnapshot().metrics.speechEndToResponseStartedMs).toBe(180);
 
     now.mockReturnValue(1_450);
-    harness.handleServer(createRuntimeEvent(identity, 2, 'audio', {
-      response_id: 'reply', item_id: 'item-reply', delta: btoa('\0\0'),
-    }));
+    voice.emitBoundary('started', 'reply');
     expect(session.getSnapshot().metrics.speechEndToFirstAudioMs).toBe(450);
     expect(session.getSnapshot().phase).toBe('speaking');
     now.mockRestore();
@@ -482,25 +466,19 @@ describe('RealtimeSession sealed response release', () => {
     }
   });
 
-  it('shows the delivered task only after its audio boundary is heard', async () => {
-    const session = new RealtimeSession('session');
-    const harness = session as unknown as SessionHarness;
-    let played = 0;
-    harness.audioOut = {
-      speaking: true, append: () => null, currentEnergy: () => 0, playedSamples: () => played,
-      stop: () => [], close: async () => {},
-    };
+  it('shows the delivered task only after its response playback stops', () => {
+    const { session, harness, voice } = sessionWithVoice();
     const identity = session.getIdentity();
     harness.handleServer(createRuntimeEvent(identity, 0, 'response_started', { response_id: 'task-response' }));
+    voice.emitBoundary('started', 'task-response');
     const task = {
       taskId: 'circle-acute', prompt: 'Circle the acute angle.', responseMode: 'draw', submitPolicy: 'explicit',
       targetObjectIds: [], boardRevision: 0, allowVoiceWhileDrawing: true,
     };
-    harness.handleServer(createRuntimeEvent(identity, 1, 'learner_task', { task, response_id: 'task-response' }, { audioSampleOffsets: { start: 24_000, end: 24_000 } }));
+    harness.handleServer(createRuntimeEvent(identity, 1, 'learner_task', { task, response_id: 'task-response' }, { providerResponseId: 'task-response' }));
     harness.releasePending();
     expect(session.getSnapshot().task).toBeNull();
-    played = 24_000;
-    harness.releasePending();
+    voice.emitBoundary('stopped', 'task-response', 5_000);
     expect(session.getSnapshot().task).toMatchObject({ taskId: 'circle-acute', responseMode: 'draw', submitPolicy: 'explicit' });
   });
 
@@ -531,34 +509,64 @@ describe('RealtimeSession sealed response release', () => {
     const harness = session as unknown as SessionHarness;
     const sent: Array<{ type: string; payload: Record<string, unknown> }> = [];
     harness.ws = { readyState: 1, send: (raw) => sent.push(JSON.parse(raw) as { type: string; payload: Record<string, unknown> }) };
-    harness.audioOut = {
-      speaking: false, append: () => null, currentEnergy: () => 0, playedSamples: () => 0,
-      stop: () => [], close: async () => {},
-    };
     session.onBoardOps = async () => false;
     const identity = session.getIdentity();
     harness.handleServer(createRuntimeEvent(identity, 0, 'board_ops', {
       response_id: 'quality-response', event_id: 77,
       ops: [{ op: 'add', id: 'too-dense', spec: { kind: 'text', at: [100, 100], text: 'too dense' } }],
-    }, { audioSampleOffsets: { start: 0, end: 0 }, semanticObjectId: 'quality-group' }));
+    }, { providerResponseId: 'quality-response', semanticObjectId: 'quality-group' }));
     harness.releasePending();
     await vi.waitFor(() => expect(sent.some((event) => event.type === 'ops_rejected')).toBe(true));
     expect(sent.find((event) => event.type === 'ops_rejected')?.payload).toMatchObject({ event_id: 77, response_id: 'quality-response' });
   });
 
-  it('rejects late sealed cues after interruption, reconnect identity replacement, and navigation cleanup', () => {
-    const session = new RealtimeSession('session');
-    const harness = session as unknown as SessionHarness;
-    harness.audioOut = {
-      speaking: true, append: () => null, currentEnergy: () => 0, playedSamples: () => 24_000,
-      stop: () => [], close: async () => {},
-    };
+  it('keeps voice playback alive across a sideband envelope reconnect', async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('WebSocket', FakeEnvelopeSocket);
+    FakeEnvelopeSocket.instances = [];
+    try {
+      window.sessionStorage.setItem('noura.lessonCapability.session', 'capability');
+      let voice!: FakeVoiceTransport;
+      const session = new RealtimeSession('session', (input) => {
+        voice = new FakeVoiceTransport(input.handlers);
+        return voice;
+      });
+      const harness = session as unknown as SessionHarness;
+      await session.start();
+      const first = FakeEnvelopeSocket.instances.at(-1);
+      expect(first).toBeDefined();
+      first!.readyState = 1;
+      first!.onopen?.();
+      harness.handleServer(createRuntimeEvent(session.getIdentity(), 0, 'ready', {}));
+      voice.emitBoundary('started', 'mid-lesson-response');
+      expect(session.getSnapshot().phase).toBe('speaking');
+
+      // Vercel recycles the envelope connection mid-response: the WebRTC
+      // audio plane must keep playing while the control plane reconnects.
+      first!.onclose?.();
+      expect(session.getSnapshot().phase).toBe('reconnecting');
+      expect(voice.playbackClears).toBe(0);
+      expect(voice.playingResponseId()).toBe('mid-lesson-response');
+      expect(voice.state).toBe('connected');
+
+      vi.advanceTimersByTime(600);
+      expect(FakeEnvelopeSocket.instances).toHaveLength(2);
+      session.end();
+    } finally {
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('rejects late cues after interruption, reconnect identity replacement, and navigation cleanup', () => {
+    const { session, harness, voice } = sessionWithVoice();
     const oldIdentity = session.getIdentity();
     harness.handleServer(createRuntimeEvent(oldIdentity, 0, 'response_started', { response_id: 'old' }));
+    voice.emitBoundary('started', 'old');
     harness.handleServer(createRuntimeEvent(oldIdentity, 1, 'speech_started', {}));
     for (let frame = 0; frame < 7; frame += 1) harness.handleMicEnergy(0.09);
     expect(session.getIdentity()).not.toEqual(oldIdentity);
-    const stale = createRuntimeEvent(oldIdentity, 2, 'transcript_delta', { response_id: 'old', delta: 'stale future' }, { audioSampleOffsets: { start: 0, end: 24_000 } });
+    const stale = createRuntimeEvent(oldIdentity, 2, 'transcript_delta', { response_id: 'old', delta: 'stale future. ' }, { providerResponseId: 'old' });
     harness.handleServer(stale as RuntimeEventEnvelope<Record<string, unknown>>);
     harness.releasePending();
     expect(session.getSnapshot().captions).toEqual([]);

@@ -1,8 +1,8 @@
 # Noura runtime architecture and decision record
 
-Date: 2026-08-23. Status: active, with a full-product public-v0 boundary and explicit real-user Production blockers.
+Date: 2026-08-23; updated 2026-08-26 for the Phase 1 voice-transport overhaul. Status: active, with a full-product public-v0 boundary and explicit real-user Production blockers.
 
-This ADR supersedes the historical live-tutor ADR in `docs/legacy/`. It preserves the semantic BoardOp DSL, exact compiler, safe expression parser, browser PCM clock, released-only replay, owner metadata, dry-erase identity, server-side provider key, and provider replaceability.
+This ADR supersedes the historical live-tutor ADR in `docs/legacy/`. It preserves the semantic BoardOp DSL, exact compiler, safe expression parser, released-only replay, owner metadata, dry-erase identity, server-side provider key, and provider replaceability. Phase 1 replaced the browser PCM clock with provider playback boundaries; see “Voice transport: WebRTC media plane plus server sideband”.
 
 ## Implementation-agent and runtime-model decision
 
@@ -10,7 +10,7 @@ GPT-5.6 Sol was used by Codex to implement this repository change. That fact is 
 
 | Path | Before | After | Decision |
 | --- | --- | --- | --- |
-| Live speech | Realtime WebSocket, `gpt-realtime-2.1` | unchanged | No independent defect justified a provider/model/transport migration. |
+| Live speech | Realtime, `gpt-realtime-2.1` | model unchanged; transport moved to browser↔provider WebRTC with a server sideband (Phase 1, 2026-08-26) | The approved overhaul fixes structural voice latency and false interruptions; the model identifier did not change. |
 | Input transcription | `gpt-4o-mini-transcribe` | unchanged | Existing Realtime configuration retained. |
 | Fallback and summary | Chat Completions, `gpt-5.6-terra` | unchanged | Structured validation was added locally without endpoint migration. |
 | Reasoning effort | Realtime default, fallback `none`, summary `low` | Realtime `low`; fallback `none`; summary `low` | Low Realtime reasoning improves visual/tool decisions while preserving voice latency; model/provider/endpoint remain unchanged. |
@@ -19,11 +19,11 @@ Rollback: the runtime identifiers remain environment-configurable. No new OpenAI
 
 ## Protocol and generation ownership
 
-`shared/runtimeProtocol.ts` defines schema `1.0.0`. Every browser/server event carries event ID, session, connection epoch, turn, generation, monotonic sequence, type and payload; provider IDs, sample offsets, visual/semantic IDs and idempotency keys are optional typed fields.
+`shared/runtimeProtocol.ts` defines schema `1.0.0`. Every browser/server event carries event ID, session, connection epoch, turn, generation, monotonic sequence, type and payload; provider IDs, visual/semantic IDs and idempotency keys are optional typed fields. (Phase 1 removed the sample-offset field with the PCM clock.)
 
 The browser rejects malformed, duplicated, non-monotonic or stale identity. The server maps each provider response ID to the generation active when the response was created, so late provider deltas retain their old identity and are rejected after interruption.
 
-`GenerationScope` owns its `AbortController`, provider response IDs, PCM/caption/visual/character identifiers, timers, animation frames and cleanups. Interrupt, transport replacement, reconnect, navigation and end cancel the whole scope.
+`GenerationScope` owns its `AbortController`, provider response IDs, caption/visual/character identifiers, timers, animation frames and cleanups. Interrupt, transport replacement, reconnect, navigation and end cancel the whole scope.
 
 ## Phase 0 telemetry path
 
@@ -49,8 +49,9 @@ observations remain FIFO. Fixed per-reason gap counters preserve completeness
 totals without claiming chronological position under saturation.
 Provider terminal observations are deduplicated by a bounded response-ID set.
 Provider-side observers read token categories from
-`response.done.response.usage`, derive tutor-audio duration from that response’s
-decoded PCM sample total, and use the same released metric event boundary. No
+`response.done.response.usage`; tutor-audio duration is the browser-reported
+heard duration from the relayed `playback_boundary` envelope event (Phase 1),
+recorded once per response through the same released metric event boundary. No
 observer owns response creation, lesson transitions, board mutation,
 interruption thresholds, retry behavior, or durable release decisions.
 
@@ -72,9 +73,21 @@ on the next accepted `ready`. A connection that never recovers, and a final
 fallback/failed transport phase, can still lose browser observations before a
 gap reaches the server, so those runs cannot prove complete telemetry delivery.
 
-The first-audio duration ends when the browser handles the first accepted tutor audio delta. It is browser-received timing, not acoustic onset. The signed board metric is `first scheduled audible sample − first committed board paint`: positive means board first and negative means scheduled narration first. It is not animation-completion time. These deterministic boundaries make no live latency or target-hardware claim.
+The first-audio duration ends when the browser handles the provider’s `output_audio_buffer.started` playback boundary for the accepted response (Phase 1; formerly the first tutor audio delta). It is browser-received timing, not acoustic onset. The signed board metric is `playback-start boundary − first committed board paint`: positive means board first and negative means narration first. It is not animation-completion time. These deterministic boundaries make no live latency or target-hardware claim.
 
-This milestone preserves WebSocket plus browser-owned PCM and the runtime models above. It does not implement or imply WebRTC, a sideband transport, or later blueprint phases.
+Phase 0 was built on WebSocket plus browser-owned PCM; Phase 1 (below) moved the audio plane to WebRTC while preserving every Phase 0 metric name, envelope trust check, pseudonymization step, and gap-accounting behavior.
+
+## Voice transport: WebRTC media plane plus server sideband (Phase 1, 2026-08-26)
+
+The server-proxied audio path was replaced at its structural root:
+
+- **Bootstrap.** `POST /api/webrtc-call?session=…` (same-origin guard, lesson capability, per-parent/IP rate limit) accepts the browser’s SDP offer, calls the provider’s `/v1/realtime/calls` with the server-held API key, persists the returned `call_id` as a released `voice_call` event in the session log, opens the control sideband `wss://…/v1/realtime?call_id=…`, applies the full session configuration (semantic VAD `medium`, `create_response:false`/`interrupt_response:false`, near-field noise reduction, `gpt-4o-mini-transcribe`, voice `marin`, reasoning `low`, tools) before answering, and returns only the SDP answer. The API key never reaches the browser.
+- **Media plane.** The browser’s `WebRtcVoiceTransport` owns the microphone track (echo cancellation, noise suppression, auto gain), plays the tutor’s remote audio track natively, and reads mic/voice energy from WebAudio analysers. The provider’s data channel delivers `output_audio_buffer.started/stopped/cleared` — the real playback boundaries. No PCM transits the server or the envelope.
+- **Control plane.** The existing `/ws/lesson` envelope carries board, lesson, caption, task, telemetry, and typed-turn events only. The server sideband owns everything the proxy owned: sole `response.create` ownership, tool handling, board staging/preflight/visibility, orchestrator integration, evidence, blueprint restore, and telemetry. A sideband (re)connection reattaches by the persisted `call_id`; a bootstrap-moment socket is adopted from an in-process registry with buffered-frame replay, and reattachment reapplies the session configuration idempotently.
+- **Cue binding.** Captions release on transcript-delta arrival with phrase smoothing and final-transcript correction. Board reveals, semantic lesson state, task delivery, and truncation bind to playback boundaries: cues for the audibly playing response wait for its `stopped`/`cleared`; cues for a response that is not playing (tool-first plans, no-audio responses) release immediately, which keeps the fail-closed visibility barrier live. The client relays stop boundaries (with heard milliseconds) over the envelope for the server’s audio-duration telemetry and truthful `conversation.item.truncate`.
+- **Interruption.** Dual confirmation is unchanged in meaning: sustained local energy above the adaptive noise floor (WebAudio analyser) plus an independent provider `speech_started`. Confirmed barge-in mutes the remote track, sends `output_audio_buffer.clear` on the data channel, cancels the response on the sideband, truncates the spoken item at the heard duration, and raises semantic eagerness to `high` for that turn only. A delivered task expecting a short voice answer also raises eagerness to `high`; drawing tasks and ordinary turns keep `medium`.
+- **Reconnect.** An envelope/sideband reconnect never stops WebRTC playback; the call, floor state, blueprint, and board ledger are restored from persistence against the same `call_id`. Only the terminal captions-only fallback transition silences residual audio. A failed peer connection degrades to captions (sideband transcripts keep flowing) — never a silent hang; ICE restart/renegotiation is deliberately deferred.
+- **Testing.** The offline provider harness still feeds raw upstream permutations through the coordinator; the client has a deterministic `FakeVoiceTransport` for vitest and a page-injected fake for Playwright. All suites run fully offline. Real latency/AEC improvements require an authorized live run; see the [Phase 1 handoff](2026-08-26-phase-1-webrtc-sideband-handoff.md).
 
 ## Deterministic lesson orchestration
 
@@ -84,7 +97,7 @@ The model proposes a validated `TeachingMove`. It owns classification rationale,
 
 ## Audio, captions and cancellation
 
-WebSocket plus browser-owned PCM remains the selected transport. The proxy counts decoded PCM16 samples per provider response. Audio chunks receive exact cumulative offsets immediately. Transcript deltas and semantic visual/lesson-state cues are buffered until the response segment is sealed; ordered transcript deltas are distributed by Unicode-character weight across the complete PCM segment, while visual, pen and character semantic cues use the segment boundary. `ResponseCueTimeline` releases them from the browser's heard-sample playhead. A compositional offline harness now feeds raw upstream order permutations through the proxy and then delivers its real runtime envelopes into `RealtimeSession` under a fake heard-sample clock, including interruption and identity replacement. This conservative contract is invariant to audio/transcript/tool network interleaving, never squeezes multiple early deltas into the first tiny audio chunk, and makes no claim of provider word timestamps. Final transcript correction remains held until the complete segment is heard.
+The audio plane is the Phase 1 WebRTC call above; the server never decodes or counts audio. Transcript deltas stream to the browser immediately, tagged with their provider response, and captions release on arrival with phrase smoothing. `ResponseCueTimeline` holds visual, semantic-state, task, and final-transcript cues for the audibly playing response and releases them at its playback boundary; cues for a response that is not playing release immediately. The compositional offline harness feeds raw upstream order permutations through the sideband coordinator and delivers its real runtime envelopes into `RealtimeSession` under a fake playback-boundary transport, including interruption and identity replacement. This contract is invariant to transcript/tool network interleaving and makes no claim of provider word timestamps. Final transcript correction is applied when the response finishes playing.
 
 Interruption records detector-to-stop-scheduled and provider-confirmation intervals separately. The browser also records provider speech-end-to-response-start and speech-end-to-first-audio, and moves the visible phase to `thinking` as soon as an accepted speech turn stops. Acoustic silence is not inferred from function return. Target-hardware onset-to-silence remains UNVERIFIED.
 
@@ -126,7 +139,7 @@ The repository contract now has two implementations: synchronous SQLite for loca
 
 ## Vercel topology
 
-Vite builds to static output. `api/[...path].ts` exports the Express/REST server and `api/ws.ts` exports the native Node WebSocket server. The WebSocket Function duration is 300 seconds, matching the inspected Hobby maximum. Reconnect is mandatory. No in-memory state is considered durable.
+Vite builds to static output. `api/[...path].ts` exports the Express/REST server (including the `POST /api/webrtc-call` bootstrap) and `api/ws.ts` exports the native Node WebSocket server for the control envelope. The WebSocket Function duration is 300 seconds, matching the inspected Hobby maximum. Envelope/sideband reconnect is mandatory and must not interrupt the WebRTC audio plane; the `call_id` is persisted so any instance can reattach. No in-memory state is considered durable (the sideband adoption registry is a same-instance fast path only).
 
 Native Vercel WebSockets are a 2026 public beta. Preview can run synthetic, ephemeral evaluation only; `/healthz` reports degraded durable storage there. `production-v0` may start only with the provider, managed Postgres adapter and lesson signing configured, and remains synthetic-only with guest identity. Full `production` additionally requires external parent identity, privacy/safety configuration and relevant account evidence.
 

@@ -17,10 +17,10 @@ describe('runtime event protocol', () => {
     expect(gate.accept(createRuntimeEvent(identity, 1, 'caption.cue', {}))).toBe(true);
   });
 
-  it('rejects malformed envelopes and invalid audio offsets', () => {
+  it('rejects malformed envelopes and invalid correlation fields', () => {
     const gate = new RuntimeEventGate(identity);
     expect(gate.accept({ type: 'caption.cue' })).toBe(false);
-    expect(() => createRuntimeEvent(identity, 0, 'audio.delta', {}, { audioSampleOffsets: { start: 5, end: 2 } })).toThrow();
+    expect(() => createRuntimeEvent(identity, 0, 'caption.cue', {}, { providerResponseId: '' })).toThrow();
   });
 
   it('has zero stale mutations across at least 1,000 reordered event sequences', () => {

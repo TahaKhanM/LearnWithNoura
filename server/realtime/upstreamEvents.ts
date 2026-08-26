@@ -1,18 +1,37 @@
 import { DeliveredTaskSchema, type DeliveredTask } from '../../shared/lessonTurn.js';
 import { reduceLesson, responseHandoff } from '../lesson/orchestrator.js';
-import { ResponseSegmentAnnotator } from './segmentAnnotator.js';
 import type { CoordinatorContext } from './coordinatorContext.js';
-import { flushResponseSegment, identityForResponse, responseSegment } from './responseRegistry.js';
-import { pcmSampleCount, recordTerminalResponseTelemetry } from './telemetryGlue.js';
+import { identityForResponse } from './responseRegistry.js';
+import { recordTerminalResponseTelemetry } from './telemetryGlue.js';
 import { handleToolCall } from './toolHandling.js';
 import { requestModelResponse, setEndpointingEagerness } from './turnFloor.js';
 import { replayBoard } from './sessionRestore.js';
 
-/** Dispatches one upstream provider event into the coordinator. */
+/**
+ * Dispatches one sideband provider event into the coordinator. Audio itself
+ * never appears here: it flows browser ↔ provider on the WebRTC media plane.
+ * The sideband carries transcripts, VAD, tool calls, and response lifecycle.
+ */
 
 export interface UpstreamEvent {
   type: string;
   [key: string]: unknown;
+}
+
+async function deliverTask(ctx: CoordinatorContext, responseId: string, task: DeliveredTask): Promise<void> {
+  const { state } = ctx;
+  ctx.sendClient({ type: 'learner_task', task, response_id: responseId }, identityForResponse(ctx, responseId), {
+    ...(task.semanticGroupId ? { semanticObjectId: task.semanticGroupId } : {}),
+  });
+  await ctx.repo.addEvent(ctx.sessionId, 'learner_task', { task });
+  try {
+    state.lessonState = reduceLesson(state.lessonState, {
+      type: 'QUESTION_DELIVERED', taskId: task.taskId, text: task.prompt, responseMode: task.responseMode,
+    });
+  } catch { /* the next deterministic decision will recover */ }
+  // A short spoken answer should endpoint eagerly; drawing and typing turns
+  // keep patient endpointing so the child can pause and think aloud.
+  setEndpointingEagerness(ctx, task.responseMode === 'voice' ? 'high' : 'medium');
 }
 
 export async function handleUpstreamEvent(ctx: CoordinatorContext, event: UpstreamEvent): Promise<void> {
@@ -31,44 +50,36 @@ export async function handleUpstreamEvent(ctx: CoordinatorContext, event: Upstre
       // Responses are only created by the deterministic coordinator
       // (requestModelResponse / finishTool), which already owns the floor.
       // A response starting therefore never *changes* floor ownership here.
-      // High eagerness is a one-turn barge-in accelerator. Ordinary turns
-      // retain medium semantic endpointing so a child can pause and think.
+      // High eagerness is a one-turn accelerator (barge-in or a delivered
+      // voice question). Ordinary turns retain medium semantic endpointing
+      // so a child can pause and think.
       setEndpointingEagerness(ctx, 'medium');
       const response = event.response as { id?: string } | undefined;
       if (response?.id && state.clientIdentity) {
         state.activeResponseId = response.id;
         state.responseIdentities.set(response.id, { ...state.clientIdentity });
-        state.responseSegments.set(response.id, new ResponseSegmentAnnotator());
       }
       ctx.sendClient({ type: 'response_started', response_id: response?.id }, identityForResponse(ctx, response?.id));
-      break;
-    }
-
-    case 'response.output_audio.delta': {
-      const responseId = String(event.response_id ?? '');
-      if (!responseId || state.cancelledResponses.has(responseId) || typeof event.delta !== 'string') break;
-      const offsets = responseSegment(ctx, responseId).addAudioSamples(pcmSampleCount(event.delta));
-      ctx.sendClient({
-        type: 'audio',
-        delta: event.delta,
-        response_id: event.response_id,
-        item_id: event.item_id,
-      }, identityForResponse(ctx, responseId), { audioSampleOffsets: offsets });
-      break;
-    }
-
-    case 'response.output_audio.done': {
-      const responseId = String(event.response_id ?? '');
-      if (state.cancelledResponses.has(responseId)) break;
-      const total = responseSegment(ctx, responseId).totalSamples();
-      ctx.sendClient({ type: 'audio_done', response_id: responseId }, identityForResponse(ctx, responseId), { audioSampleOffsets: { start: 0, end: total } });
       break;
     }
 
     case 'response.output_audio_transcript.delta': {
       const responseId = String(event.response_id ?? '');
       if (!responseId || state.cancelledResponses.has(responseId) || typeof event.delta !== 'string') break;
-      responseSegment(ctx, responseId).addTranscriptDelta(event.delta, typeof event.item_id === 'string' ? event.item_id : undefined);
+      if (typeof event.item_id === 'string' && event.item_id) {
+        state.responseItems.set(responseId, event.item_id);
+        if (state.responseItems.size > 64) {
+          state.responseItems.delete(state.responseItems.keys().next().value as string);
+        }
+      }
+      // Captions release on arrival in the client, paced against the actual
+      // playback boundaries the browser observes on its data channel.
+      ctx.sendClient({
+        type: 'transcript_delta',
+        delta: event.delta,
+        response_id: responseId,
+        item_id: event.item_id,
+      }, identityForResponse(ctx, responseId));
       break;
     }
 
@@ -78,7 +89,9 @@ export async function handleUpstreamEvent(ctx: CoordinatorContext, event: Upstre
       if (state.cancelledResponses.has(responseId)) break;
       if (text.trim()) await ctx.repo.addEvent(ctx.sessionId, 'tutor_said', { text });
       if (typeof event.response_id === 'string') state.responseTranscript.set(event.response_id, text);
-      responseSegment(ctx, responseId).setFinalTranscript(text);
+      if (text.trim()) {
+        ctx.sendClient({ type: 'transcript_done', text, response_id: responseId }, identityForResponse(ctx, responseId));
+      }
       break;
     }
 
@@ -136,21 +149,13 @@ export async function handleUpstreamEvent(ctx: CoordinatorContext, event: Upstre
       const delivered = response?.id ? (state.responseTranscript.get(response.id) ?? '') : '';
       // Explicit handoff: a task proposed via propose_teaching_move is
       // delivered once the model finishes speaking it — question mark or
-      // imperative alike. The heard-audio cue below shows the task banner
-      // exactly when the child has heard the whole response.
+      // imperative alike. The client shows the task banner when playback of
+      // this response actually finishes.
       if (status === 'completed' && response?.id && !state.cancelledResponses.has(response.id) &&
           state.pendingDeliveredTask && (delivered.trim() || !hasFunctionCall)) {
         const task = state.pendingDeliveredTask;
         state.pendingDeliveredTask = null;
-        responseSegment(ctx, response.id).addSemanticCue({ type: 'learner_task', task, response_id: response.id }, {
-          ...(task.semanticGroupId ? { semanticObjectId: task.semanticGroupId } : {}),
-        });
-        await ctx.repo.addEvent(ctx.sessionId, 'learner_task', { task });
-        try {
-          state.lessonState = reduceLesson(state.lessonState, {
-            type: 'QUESTION_DELIVERED', taskId: task.taskId, text: task.prompt, responseMode: task.responseMode,
-          });
-        } catch { /* the next deterministic decision will recover */ }
+        await deliverTask(ctx, response.id, task);
       } else if (status === 'completed' && response?.id && !hasFunctionCall && !state.cancelledResponses.has(response.id)) {
         if (/[?？]\s*$/.test(delivered.trim())) {
           // A spoken question without a structured move still yields the
@@ -161,13 +166,7 @@ export async function handleUpstreamEvent(ctx: CoordinatorContext, event: Upstre
             responseMode: 'voice',
             submitPolicy: 'vad',
           });
-          responseSegment(ctx, response.id).addSemanticCue({ type: 'learner_task', task, response_id: response.id });
-          await ctx.repo.addEvent(ctx.sessionId, 'learner_task', { task });
-          try {
-            state.lessonState = reduceLesson(state.lessonState, {
-              type: 'QUESTION_DELIVERED', taskId: task.taskId, text: task.prompt,
-            });
-          } catch { /* the next deterministic decision will recover */ }
+          await deliverTask(ctx, response.id, task);
         } else if (responseHandoff(state.lessonState, delivered) === 'bounded_continuation' && !state.childHoldsFloor) {
           // Only a promised-but-undelivered question move continues.
           // Explanations are allowed to end without an injected question.
@@ -187,7 +186,6 @@ export async function handleUpstreamEvent(ctx: CoordinatorContext, event: Upstre
           ctx.sendUpstream({ type: 'response.create' });
         }
       }
-      if (response?.id) flushResponseSegment(ctx, response.id, status === 'completed');
       ctx.sendClient({ type: 'response_done', response_id: response?.id, status }, responseIdentity);
       if (response?.id === state.activeResponseId) state.activeResponseId = null;
       if (state.retryCreateOnDone) {

@@ -2,11 +2,6 @@ import { z } from 'zod';
 
 export const EVENT_SCHEMA_VERSION = '1.0.0' as const;
 
-export const AudioSampleOffsetsSchema = z.object({
-  start: z.number().int().nonnegative(),
-  end: z.number().int().nonnegative(),
-}).refine((value) => value.end >= value.start, 'audio sample end must follow start');
-
 export const RuntimeEventEnvelopeSchema = z.object({
   eventId: z.string().min(8).max(160),
   schemaVersion: z.literal(EVENT_SCHEMA_VERSION),
@@ -19,7 +14,6 @@ export const RuntimeEventEnvelopeSchema = z.object({
   payload: z.unknown(),
   providerResponseId: z.string().min(1).max(200).optional(),
   providerItemId: z.string().min(1).max(200).optional(),
-  audioSampleOffsets: AudioSampleOffsetsSchema.optional(),
   visualCueId: z.string().min(1).max(160).optional(),
   semanticObjectId: z.string().min(1).max(160).optional(),
   idempotencyKey: z.string().min(8).max(200).optional(),
@@ -43,7 +37,7 @@ export function createRuntimeEvent<TPayload>(
   type: string,
   payload: TPayload,
   optional: Partial<Pick<RuntimeEventEnvelope,
-    'providerResponseId' | 'providerItemId' | 'audioSampleOffsets' | 'visualCueId' |
+    'providerResponseId' | 'providerItemId' | 'visualCueId' |
     'semanticObjectId' | 'idempotencyKey'>> = {},
 ): RuntimeEventEnvelope<TPayload> {
   return RuntimeEventEnvelopeSchema.parse({
