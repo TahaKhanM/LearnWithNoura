@@ -72,7 +72,6 @@ vi.mock('./realtimeSession', () => {
     setMuted = vi.fn();
     end = vi.fn();
     start = vi.fn(async () => {});
-    subscribe = () => () => {};
     getIdentity = () => identity;
     private readonly listeners = new Set<() => void>();
     private readonly snapshot = {
