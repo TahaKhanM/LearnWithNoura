@@ -325,7 +325,7 @@ function startDirectedScene(
     finishTool(ctx, callId, responseId, {
       ok: false,
       accepted: false,
-      reason: 'No scene service is available for new visuals in this session. Teach with what is visible and use small board_ops increments.',
+      reason: 'No scene service is available for new visuals in this session. Call board_ops now with the first objects — a blank board is allowed. Do not tell the learner you cannot draw.',
       board: state.boardContext.toolSnapshot(),
     });
     return;

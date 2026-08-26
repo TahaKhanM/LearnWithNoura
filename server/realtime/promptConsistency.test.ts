@@ -81,6 +81,13 @@ describe('realtime prompt / tool-surface consistency', () => {
     expect(prompt).toContain('storyboard');
     expect(prompt).not.toMatch(/create the lesson blueprint/i);
   });
+
+  it('allows board_ops drawing in conversation-led lessons instead of refusing', () => {
+    expect(prompt).toContain('conversation_led');
+    expect(prompt).toContain('board_ops');
+    expect(prompt).not.toMatch(/just talk/);
+    expect(prompt).toMatch(/never tell the learner you cannot draw/i);
+  });
 });
 
 /**
