@@ -306,7 +306,7 @@ async function runLiveJourney(url, { textOnly, wavPath }, vercelProtectionBypass
 
     await page.goto(new URL('/', url).href, { waitUntil: 'domcontentloaded' });
     await page.waitForSelector(
-      '[data-testid=goal-input], input[aria-label="New learner name"]',
+      '[data-testid=goal-input], .home__add',
       { timeout: 15_000 },
     );
     const navigatedOrigin = new URL(page.url()).origin;
@@ -315,8 +315,8 @@ async function runLiveJourney(url, { textOnly, wavPath }, vercelProtectionBypass
 
     const hasChild = await page.locator('.home__child').count();
     if (hasChild === 0) {
-      await page.fill('input[aria-label="New learner name"]', 'Maya');
-      await page.fill('input[aria-label="Age"]', '10');
+      await page.fill('#learner-name', 'Maya');
+      await page.fill('#learner-age', '10');
       await page.click('.home__add button');
       await page.waitForSelector('.home__child');
       mark('synthetic_learner_created');
