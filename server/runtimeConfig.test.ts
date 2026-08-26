@@ -31,6 +31,20 @@ describe('runtime configuration', () => {
     );
   });
 
+  it('refuses to serve production with the fixture lesson compiler', () => {
+    const env = {
+      NOURA_DEPLOYMENT_MODE: 'production-v0',
+      DATABASE_URL: 'postgres://fixture',
+      OPENAI_API_KEY: 'fixture',
+      NOURA_STORAGE_ADAPTER: 'postgres',
+      NOURA_LESSON_CAPABILITY_SECRET: 'test-secret-at-least-32-characters',
+      NOURA_LESSON_COMPILER: 'fixture',
+    };
+    expect(productionReadinessErrors(readRuntimeConfig(env), env)).toContain(
+      'the fixture lesson compiler cannot serve production',
+    );
+  });
+
   it('keeps unverified database TLS outside the full Production boundary', () => {
     const env = {
       NOURA_DEPLOYMENT_MODE: 'production',

@@ -41,9 +41,12 @@ const openai = runtimeConfig.providerConfigured
   : null;
 
 // Production readiness (above) refuses to start without a configured
-// provider, so the deterministic fixture compiler only ever serves
-// offline development and automated tests.
-const compilation: LessonCompilationService = openai
+// provider and refuses NOURA_LESSON_COMPILER=fixture outright, so the
+// deterministic fixture compiler only ever serves offline development and
+// automated tests — hermetic test runs set the flag explicitly so a locally
+// configured key never triggers live compilation calls.
+const fixtureCompilerForced = process.env.NOURA_LESSON_COMPILER === 'fixture';
+const compilation: LessonCompilationService = openai && !fixtureCompilerForced
   ? createLiveCompilationService({
       repo,
       client: openai,

@@ -65,6 +65,7 @@ export function productionReadinessErrors(config: RuntimeConfig, env: NodeJS.Pro
   if (!config.durableStorageConfigured) errors.push('durable managed storage is not configured');
   if (!config.providerConfigured) errors.push('the tutor provider is not configured');
   if (env.NOURA_STORAGE_ADAPTER !== 'postgres') errors.push('Production must use the Postgres storage adapter');
+  if (env.NOURA_LESSON_COMPILER === 'fixture') errors.push('the fixture lesson compiler cannot serve production');
   if (!env.NOURA_LESSON_CAPABILITY_SECRET && !env.NOURA_AUTH_SECRET) errors.push('the lesson capability secret is not configured');
   if (config.v0) return errors;
   if (env.NOURA_DATABASE_SSL_REJECT_UNAUTHORIZED === 'false') errors.push('full Production requires verified database TLS');
