@@ -65,6 +65,15 @@ export interface SessionSnapshot {
   task: DeliveredTask | null;
   /** Progress of the learner's current board submission, if any. */
   submission: SubmissionProgress | null;
+  /** Transient illustration preparation; never a persisted board op. */
+  illustration: IllustrationStatus | null;
+}
+
+export interface IllustrationStatus {
+  status: 'preparing' | 'partial' | 'ready' | 'failed';
+  alt?: string;
+  /** Transient preview; never written to the event log. */
+  partialDataUrl?: string;
 }
 
 interface QueuedAsk { text: string; idempotencyKey: string; identity: GenerationIdentity }
@@ -148,7 +157,7 @@ export class RealtimeSession {
     this.snapshot = {
       phase: 'connecting', identity, micAvailable: WebRtcVoiceTransport.supported(), micDenied: false, muted: false,
       captions: [], lessonState: {}, evidenceCount: 0, lastEvidence: null,
-      micEnergy: 0, voiceEnergy: 0, error: null, metrics: {}, task: null, submission: null,
+      micEnergy: 0, voiceEnergy: 0, error: null, metrics: {}, task: null, submission: null, illustration: null,
     };
   }
 
@@ -860,6 +869,29 @@ export class RealtimeSession {
         const text = String(message.text ?? '').trim();
         if (text) for (const phrase of segmentPhrases(text)) this.appendCaption({ role: 'tutor', text: phrase, live: false, responseId: String(message.response_id ?? '') || undefined });
         this.update({ phase: 'fallback' });
+        break;
+      }
+      case 'illustration_status': {
+        const status = message.status;
+        if (status === 'ready' || status === 'failed') {
+          this.update({ illustration: status === 'failed' ? { status: 'failed' } : null });
+          if (status === 'failed') {
+            this.scope.timeout(() => {
+              if (this.snapshot.illustration?.status === 'failed') this.update({ illustration: null });
+            }, 4000);
+          }
+          break;
+        }
+        if (status !== 'preparing' && status !== 'partial') break;
+        this.update({
+          illustration: {
+            status,
+            ...(typeof message.alt === 'string' ? { alt: message.alt } : {}),
+            ...(status === 'partial' && typeof message.partialDataUrl === 'string'
+              ? { partialDataUrl: message.partialDataUrl }
+              : {}),
+          },
+        });
         break;
       }
       case 'error': {

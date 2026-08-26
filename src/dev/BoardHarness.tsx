@@ -101,6 +101,12 @@ const SCENES: Record<string, BoardOp[]> = {
     { op: 'add', id: 'smooth-curve', spec: { kind: 'curve', points: [[120, 420], [280, 180], [620, 500], [860, 220]] }, color: 'violet' },
     { op: 'add', id: 'arc-label', spec: { kind: 'text', at: [300, 120], text: 'smooth path' } },
   ],
+  illustration: [
+    { op: 'add', id: 'pond', spec: { kind: 'image', assetId: 'img-a1b2c3d4e5f67890', at: [80, 60], w: 840, h: 400, alt: 'A pond habitat with reeds and a frog' } },
+    { op: 'add', id: 'frog-label', spec: { kind: 'text', at: [220, 540], text: 'frog' } },
+    { op: 'add', id: 'reed-label', spec: { kind: 'text', at: [720, 540], text: 'reeds' } },
+    { op: 'add', id: 'arrow', spec: { kind: 'line', from: [220, 520], to: [260, 360], arrow: 'end' }, color: 'amber' },
+  ],
 };
 
 const GROUPED_SCENES: Record<string, { groups: Array<{ id: string; ops: BoardOp[] }>; camera: string }> = {
@@ -131,6 +137,7 @@ const SCENE_GROUPS: Record<string, string> = {
   handwritten: 'group-handwritten',
   assets: 'group-assets',
   'arc-curve': 'group-arc-curve',
+  illustration: 'group-illustration',
   'two-regions': 'region-two',
 };
 
@@ -159,7 +166,7 @@ export function BoardHarness() {
         for (const group of grouped.groups) next = applyOps(next, group.ops, 'tutor', group.id).scene;
         return next;
       }
-      return applyOps(next, ops, 'tutor', ['handwritten', 'assets', 'arc-curve'].includes(name) ? SCENE_GROUPS[name] : undefined).scene;
+      return applyOps(next, ops, 'tutor', ['handwritten', 'assets', 'arc-curve', 'illustration'].includes(name) ? SCENE_GROUPS[name] : undefined).scene;
     });
   }, []);
 
@@ -187,7 +194,7 @@ export function BoardHarness() {
 
   // The extra adversarial/canonical scene is addressable by URL for visual
   // tests without perturbing every established fixture screenshot.
-  const buttons = useMemo(() => Object.keys(SCENES).filter((name) => !['triangle-angles', 'relationship-map', 'worked-steps', 'comparison', 'part-whole', 'handwritten', 'assets', 'arc-curve'].includes(name)), []);
+  const buttons = useMemo(() => Object.keys(SCENES).filter((name) => !['triangle-angles', 'relationship-map', 'worked-steps', 'comparison', 'part-whole', 'handwritten', 'assets', 'arc-curve', 'illustration'].includes(name)), []);
   const activeGroup = SCENE_GROUPS[active];
   const viewCount = deriveSemanticViewports(scene, activeGroup, highlights.map((highlight) => highlight.id)).length;
   return (

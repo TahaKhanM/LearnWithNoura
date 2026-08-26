@@ -20,6 +20,7 @@ import { evaluateManipulativeCheck } from '../../shared/manipulativeCheck';
 import type { ManipulativeFeedback } from '../board/ManipulativeLayer';
 import type { UpdateOp } from '../../shared/boardOps';
 import { RealtimeSession } from './realtimeSession';
+import { IllustrationPartialPreview, IllustrationStatusBanner } from './IllustrationStatusBanner';
 import { LearnerDraftController } from './learnerDraft';
 import { Avatar } from './Avatar';
 import { attentionPriority, CharacterAttentionController, type AttentionTargetType } from './characterAttention';
@@ -723,7 +724,9 @@ export function LessonPage({ sessionId }: LessonPageProps) {
             )}
           </div>
         )}
+        {started && <IllustrationStatusBanner illustration={snap.illustration} />}
         <div className={`lesson__surface${boardOverview ? ' lesson__surface--overview' : ''}`}>
+          <IllustrationPartialPreview illustration={snap.illustration} />
           <BoardCanvas
             scene={scene}
             highlights={highlights}

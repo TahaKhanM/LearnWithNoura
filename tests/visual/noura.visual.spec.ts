@@ -108,6 +108,24 @@ test('arc and curve scene', async ({ page }) => {
   await expect(page).toHaveScreenshot('scene-arc-curve.png', { animations: 'disabled' });
 });
 
+test('illustration with exact overlay labels', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.route('**/api/board-assets/img-a1b2c3d4e5f67890', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'image/svg+xml',
+      body: '<svg xmlns="http://www.w3.org/2000/svg" width="840" height="400"><rect width="840" height="400" fill="#d8eef2"/><ellipse cx="420" cy="250" rx="310" ry="90" fill="#6db3c4"/><ellipse cx="300" cy="230" rx="46" ry="16" fill="#3d8a4a"/><circle cx="560" cy="210" r="22" fill="#2f8a3e"/></svg>',
+    });
+  });
+  await page.goto('/dev/board?scene=illustration');
+  await expect(page.locator('[data-active-scene]')).toContainText('illustration');
+  await expect(page.locator('[data-item="pond"]')).toHaveCount(1);
+  await expect(page.locator('[data-required-text="frog"]')).toBeVisible();
+  await expect(page.locator('[data-required-text="reeds"]')).toBeVisible();
+  await expect(page).toHaveScreenshot('scene-illustration-overlays.png', { animations: 'disabled' });
+});
+
 test('two-region board with camera on region 1 showing the gutter hint', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.emulateMedia({ reducedMotion: 'reduce' });
