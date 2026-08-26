@@ -655,11 +655,11 @@ describe('the storyboard runner', () => {
     let gateArmed = false;
     const harness = await connectBoardLed({
       wrapRepo: (repo) => {
-        const wrapped = Object.create(repo) as Repo;
-        wrapped.addEvent = (async (sessionId: string, type: string, payload: unknown, released?: boolean) => {
+        const wrapped = Object.create(repo) as ProxyOptions['repo'];
+        wrapped.addEvent = async (sessionId, type, payload, released) => {
           if (type === 'storyboard_progress' && gateArmed) { gateArmed = false; await writeGate; }
           return repo.addEvent(sessionId, type, payload, released);
-        }) as Repo['addEvent'];
+        };
         return wrapped;
       },
     });
@@ -684,11 +684,11 @@ describe('the storyboard runner', () => {
     let gateArmed = false;
     const harness = await connectBoardLed({
       wrapRepo: (repo) => {
-        const wrapped = Object.create(repo) as Repo;
-        wrapped.addEvent = (async (sessionId: string, type: string, payload: unknown, released?: boolean) => {
+        const wrapped = Object.create(repo) as ProxyOptions['repo'];
+        wrapped.addEvent = async (sessionId, type, payload, released) => {
           if (type === 'storyboard_progress' && gateArmed) { gateArmed = false; await writeGate; }
           return repo.addEvent(sessionId, type, payload, released);
-        }) as Repo['addEvent'];
+        };
         return wrapped;
       },
     });
