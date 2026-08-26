@@ -494,3 +494,13 @@ in-process callback as a sufficient asynchronous repository boundary:
   Upgrade authorization is rechecked immediately before WebSocket acceptance,
   and connection setup plus late lifecycle registration drain repeatedly to
   empty under the one shutdown deadline.
+- Deadline expiry force-terminalizes every remaining proxy and writer before
+  repository close and returns a `forced` disposition. Failed terminalization
+  returns `fatal` and skips graceful repository closure.
+- Force success additionally requires the admission-sealed client/upstream
+  side-effect chains to be settled. Unsettled chains invoke the injectable
+  fatal process path; only history-only telemetry continuations may be
+  terminalized by disabling their writer authority.
+- Detached semantic staging is registered in one side-effect task set.
+  Graceful close drains it repeatedly before telemetry; force requires it to be
+  empty, so unresolved preflight/staging fails fatal without repository close.

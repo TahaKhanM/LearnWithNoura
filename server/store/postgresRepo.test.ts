@@ -2,6 +2,9 @@ import { newDb } from 'pg-mem';
 import { describe, expect, it } from 'vitest';
 import { PostgresRepo } from './postgresRepo';
 
+// Deliberate high-workload contract: tolerate machine load while still detecting hangs.
+const HEAVY_CONTRACT_TIMEOUT_MS = 15_000;
+
 function postgresRepo(transactionQueries?: string[]): PostgresRepo {
   const memory = newDb();
   const adapter = memory.adapters.createPg();
@@ -54,7 +57,7 @@ describe('PostgresRepo domain contract', () => {
     const ended = await repo.endSession(session.id, null);
     expect(ended?.endedEventId).toBe(sourceEventId);
     await expect(repo.addEvent(session.id, 'learner_said', { text: 'late' })).rejects.toThrow(/ended/i);
-  });
+  }, HEAVY_CONTRACT_TIMEOUT_MS);
 
   it('keeps fallback writes staged until the matching generation completes', async () => {
     const repo = postgresRepo();

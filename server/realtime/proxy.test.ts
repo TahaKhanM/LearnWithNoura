@@ -7,6 +7,10 @@ import { openTestDb } from '../store/db';
 import type { DomainRepository } from '../store/domain';
 import { Repo } from '../store/repo';
 import { connectRealtimeProxy, type ProxyLifecycle } from './proxy';
+import {
+  ProxyLifecycleRegistry,
+  runQuiescentShutdown,
+} from './lifecycle';
 
 class FakeUpstream {
   static OPEN = 1;
@@ -464,6 +468,170 @@ describe('realtime proxy response annotation', () => {
     await new Promise((resolve) => setTimeout(resolve, 220));
     expect(toolOutput(upstream, 'plan-call-2')).toMatchObject({ ok: false, accepted: false, reason: expect.stringContaining('preflight') });
     expect(repo.listEventsForInternalAudit(session.id).filter((event) => event.type === 'semantic_scene')).toEqual([]);
+  });
+
+  it('takes fatal shutdown while semantic preflight staging is unresolved', async () => {
+    vi.stubGlobal('WebSocket', FakeUpstream);
+    const repo = new Repo(openTestDb());
+    const child = repo.createChild('Maya', 10);
+    const session = repo.createSession(child.id, 'fractions');
+    const client = new FakeClient();
+    const registry = new ProxyLifecycleRegistry();
+    let lifecycle: ProxyLifecycle | null = null;
+    await connectRealtimeProxy(client as never, {
+      apiKey: 'offline-fixture',
+      model: 'gpt-realtime-2.1',
+      repo,
+      sessionId: session.id,
+      createUpstream: () => new FakeUpstream() as never,
+      preflightTimeoutMs: 60_000,
+      onLifecycle: (value) => {
+        lifecycle = value;
+        registry.register(value);
+      },
+    });
+    const active = { ...identity, sessionId: session.id };
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 0, 'hello', {})));
+    const upstream = FakeUpstream.latest;
+    createBlueprint(upstream, 'shutdown-stage');
+    await flushProxy();
+    vi.useFakeTimers({ toFake: ['setTimeout'] });
+    upstream.emit({ type: 'response.created', response: { id: 'shutdown-plan-response' } });
+    upstream.emit({
+      type: 'response.function_call_arguments.done',
+      response_id: 'shutdown-plan-response',
+      call_id: 'shutdown-plan-call',
+      name: 'semantic_visual_plan',
+      arguments: JSON.stringify({
+        schemaVersion: '2.0.0',
+        planId: 'shutdown-plan',
+        intent: {
+          objective: 'Compare fractions',
+          domain: 'quantitative',
+          relevance: 'essential',
+          questionAnswered: 'Which is larger?',
+          rationale: 'One scale.',
+          action: 'establish',
+          density: 'minimal',
+        },
+        groups: [{
+          id: 'fraction-scale',
+          label: 'Fraction number line',
+          revealOrder: ['outline'],
+          template: 'fraction_comparison',
+          parameters: { values: [0.5], labels: ['1/2'] },
+        }],
+      }),
+    });
+    await flushProxy();
+    const preflight = client.sent.find((event) => event.type === 'visual_preflight');
+    expect(preflight).toBeDefined();
+    const preflightId = (preflight!.payload as { preflight_id?: unknown }).preflight_id;
+    expect(preflightId).toEqual(expect.stringMatching(/^preflight-/));
+    expect(toolOutput(upstream, 'shutdown-plan-call')).toEqual({});
+    expect(repo.listEventsForInternalAudit(session.id)
+      .filter((event) => event.type === 'semantic_scene')).toEqual([]);
+
+    const repositoryClose = vi.fn(async () => {});
+    const fatal = vi.fn();
+    const shutdown = runQuiescentShutdown({
+      stopAccepting: () => {},
+      closeClients: () => {},
+      closeProxies: () => registry.shutdown(5),
+      closeRepository: repositoryClose,
+      log: () => {},
+      fatal,
+    });
+    await vi.advanceTimersByTimeAsync(6);
+    const result = await shutdown;
+    expect(result).toBe('fatal');
+    expect(repositoryClose).not.toHaveBeenCalled();
+    expect(fatal).toHaveBeenCalledWith(expect.any(Error));
+    expect(repo.listEventsForInternalAudit(session.id)
+      .filter((event) => event.type === 'semantic_scene')).toEqual([]);
+
+    client.emit('message', JSON.stringify(createRuntimeEvent(
+      active,
+      1,
+      'visual_preflight_result',
+      {
+        preflight_id: preflightId,
+        accepted: false,
+        reasons: ['shutdown test cleanup'],
+      },
+    )));
+    await vi.advanceTimersByTimeAsync(60_000);
+    await expect(lifecycle!.completion).resolves.toBeUndefined();
+    vi.useRealTimers();
+  });
+
+  it('gracefully drains settled semantic staging', async () => {
+    vi.stubGlobal('WebSocket', FakeUpstream);
+    const repo = new Repo(openTestDb());
+    const child = repo.createChild('Maya', 10);
+    const session = repo.createSession(child.id, 'fractions');
+    const client = new FakeClient();
+    const registry = new ProxyLifecycleRegistry();
+    await connectRealtimeProxy(client as never, {
+      apiKey: 'offline-fixture',
+      model: 'gpt-realtime-2.1',
+      repo,
+      sessionId: session.id,
+      createUpstream: () => new FakeUpstream() as never,
+      preflightTimeoutMs: 100,
+      onLifecycle: (value) => registry.register(value),
+    });
+    const active = { ...identity, sessionId: session.id };
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 0, 'hello', {})));
+    const upstream = FakeUpstream.latest;
+    createBlueprint(upstream, 'graceful-stage');
+    await flushProxy();
+    upstream.emit({ type: 'response.created', response: { id: 'graceful-plan-response' } });
+    upstream.emit({
+      type: 'response.function_call_arguments.done',
+      response_id: 'graceful-plan-response',
+      call_id: 'graceful-plan-call',
+      name: 'semantic_visual_plan',
+      arguments: JSON.stringify({
+        schemaVersion: '2.0.0',
+        planId: 'graceful-plan',
+        intent: {
+          objective: 'Compare fractions',
+          domain: 'quantitative',
+          relevance: 'essential',
+          questionAnswered: 'Which is larger?',
+          rationale: 'One scale.',
+          action: 'establish',
+          density: 'minimal',
+        },
+        groups: [{
+          id: 'fraction-scale',
+          label: 'Fraction number line',
+          revealOrder: ['outline'],
+          template: 'fraction_comparison',
+          parameters: { values: [0.5], labels: ['1/2'] },
+        }],
+      }),
+    });
+    await flushProxy();
+    const preflight = client.sent.find((event) => event.type === 'visual_preflight');
+    client.emit('message', JSON.stringify(createRuntimeEvent(
+      active,
+      1,
+      'visual_preflight_result',
+      {
+        preflight_id: (preflight!.payload as { preflight_id?: string }).preflight_id,
+        accepted: false,
+        reasons: ['test rejection'],
+      },
+    )));
+    await flushProxy();
+    await flushProxy();
+    expect(toolOutput(upstream, 'graceful-plan-call')).toMatchObject({
+      ok: false,
+      accepted: false,
+    });
+    await expect(registry.shutdown(100)).resolves.toBe('graceful');
   });
 
   it('rejects every live replace request: visible tutor work never disappears', async () => {
@@ -1418,6 +1586,7 @@ describe('realtime proxy telemetry', () => {
     const session = repo.createSession(child.id, 'fractions');
     let resolveHistory!: (value: boolean) => void;
     const history = new Promise<boolean>((resolve) => { resolveHistory = resolve; });
+    const historyStarted = deferred<void>();
     const metrics: MetricObservation[] = [];
     let lifecycle: ProxyLifecycle | null = null;
     const client = new FakeClient();
@@ -1430,7 +1599,10 @@ describe('realtime proxy telemetry', () => {
           metrics.push(observation);
           return metrics.length;
         },
-        hasPriorReleasedSessionStart: () => history,
+        hasPriorReleasedSessionStart: () => {
+          historyStarted.resolve();
+          return history;
+        },
       },
       sessionId: session.id,
       createUpstream: () => new FakeUpstream() as never,
@@ -1442,6 +1614,7 @@ describe('realtime proxy telemetry', () => {
       turnId: 'turn-first',
       generationId: 'generation-first',
     }, 0, 'start', {})));
+    await historyStarted.promise;
     const closing = lifecycle!.close();
     client.emit('message', JSON.stringify(createRuntimeEvent({
       sessionId: session.id,
@@ -1467,6 +1640,107 @@ describe('realtime proxy telemetry', () => {
     ]);
     expect(repo.listEvents(session.id).filter((event) =>
       event.type === 'learner_said')).toEqual([]);
+  });
+
+  it('force-terminalizes unresolved history without late telemetry submission', async () => {
+    vi.stubGlobal('WebSocket', FakeUpstream);
+    const repo = new Repo(openTestDb());
+    const child = repo.createChild('Maya', 10);
+    const session = repo.createSession(child.id, 'fractions');
+    let resolveHistory!: (value: boolean) => void;
+    const history = new Promise<boolean>((resolve) => { resolveHistory = resolve; });
+    const historyForceStarted = deferred<void>();
+    const metrics: MetricObservation[] = [];
+    let lifecycle: ProxyLifecycle | null = null;
+    const client = new FakeClient();
+    await connectRealtimeProxy(client as never, {
+      apiKey: 'offline-fixture',
+      model: 'gpt-realtime-2.1',
+      repo,
+      telemetryRepo: {
+        async appendMetric(_sessionId, observation) {
+          metrics.push(observation);
+          return metrics.length;
+        },
+        hasPriorReleasedSessionStart: () => {
+          historyForceStarted.resolve();
+          return history;
+        },
+      },
+      sessionId: session.id,
+      createUpstream: () => new FakeUpstream() as never,
+      onLifecycle: (value) => { lifecycle = value; },
+    });
+    client.emit('message', JSON.stringify(createRuntimeEvent({
+      sessionId: session.id,
+      connectionEpoch: 1,
+      turnId: 'turn-first',
+      generationId: 'generation-first',
+    }, 0, 'start', {})));
+    await historyForceStarted.promise;
+    await flushProxy();
+    const closing = lifecycle!.close();
+    await lifecycle!.forceTerminal();
+    await expect(lifecycle!.completion).resolves.toBeUndefined();
+    resolveHistory(true);
+    await flushProxy();
+    expect(metrics).toEqual([]);
+    await expect(closing).resolves.toBeUndefined();
+  });
+
+  it('fails forced shutdown when a sealed client producer is still unsettled', async () => {
+    vi.stubGlobal('WebSocket', FakeUpstream);
+    const repo = new Repo(openTestDb());
+    const child = repo.createChild('Maya', 10);
+    const session = repo.createSession(child.id, 'fractions');
+    const originalListEvents = repo.listEvents.bind(repo);
+    const blockedEvents = deferred<ReturnType<typeof repo.listEvents>>();
+    const producerEntered = deferred<void>();
+    const registry = new ProxyLifecycleRegistry();
+    const client = new FakeClient();
+    let lifecycle: ProxyLifecycle | null = null;
+    await connectRealtimeProxy(client as never, {
+      apiKey: 'offline-fixture',
+      model: 'gpt-realtime-2.1',
+      repo,
+      sessionId: session.id,
+      createUpstream: () => new FakeUpstream() as never,
+      onLifecycle: (value) => {
+        lifecycle = value;
+        registry.register(value);
+      },
+    });
+    const listEvents = vi.spyOn(repo, 'listEvents').mockImplementation(
+      () => {
+        producerEntered.resolve();
+        return blockedEvents.promise as never;
+      },
+    );
+    client.emit('message', JSON.stringify(createRuntimeEvent({
+      sessionId: session.id,
+      connectionEpoch: 1,
+      turnId: 'turn-first',
+      generationId: 'generation-first',
+    }, 0, 'start', {})));
+    await producerEntered.promise;
+
+    const repositoryClose = vi.fn(async () => {});
+    const fatal = vi.fn();
+    const result = await runQuiescentShutdown({
+      stopAccepting: () => {},
+      closeClients: () => {},
+      closeProxies: () => registry.shutdown(5),
+      closeRepository: repositoryClose,
+      log: () => {},
+      fatal,
+    });
+    expect(result).toBe('fatal');
+    expect(repositoryClose).not.toHaveBeenCalled();
+    expect(fatal).toHaveBeenCalledWith(expect.any(Error));
+
+    blockedEvents.resolve(originalListEvents(session.id, 2_000));
+    await expect(lifecycle!.completion).resolves.toBeUndefined();
+    listEvents.mockRestore();
   });
 
   it('flushes response cues and sends response_done when telemetry persistence fails', async () => {

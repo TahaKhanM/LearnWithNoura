@@ -203,3 +203,35 @@ also tracks connection setup promises and repeatedly drains connections plus
 late lifecycle registrations until empty under the original shutdown deadline.
 Repository shutdown therefore cannot overtake an authorized upgrade or proxy
 producer that was already in flight when shutdown began.
+
+## Timeout terminalization
+
+A quiescence deadline is not permission to close storage under live producers.
+Every registered proxy exposes a force-terminal operation. On timeout it seals
+frame admission, force-terminalizes and unregisters the writer, clears queued
+telemetry state, and makes later history/in-flight callbacks unable to submit
+follow-up telemetry. The registry awaits successful terminalization and only
+then allows normal ordered repository closure, reporting a `forced` shutdown.
+
+If any producer cannot be force-terminalized, shutdown reports explicit
+`fatal`, logs the failure, and skips graceful repository closure. This avoids
+both a false graceful claim and closing storage while a producer remains
+capable of submission.
+
+Force-terminal success is limited to proxies whose sealed client and upstream
+side-effect chains are already settled. Admission is sealed before checking
+the tracked pending counts, so the check cannot race a later chain extension.
+An unsettled domain-write/state/socket continuation makes force-terminal fail;
+the registry reports `fatal`, leaves repository/worker graceful close unused,
+and invokes the production fatal process-exit hook. Tests inject that hook so
+the process path is verified without exiting the test runner. History-only
+telemetry work may still force successfully because writer terminalization
+makes its eventual callback unable to submit.
+
+Detached semantic-plan staging is also lifecycle-owned. Every detached proxy
+task capable of repository writes, board/runtime mutation, or socket sends is
+registered in `sideEffectTasks`. Graceful teardown seals admission, awaits the
+sealed client/upstream chains, repeatedly drains side effects to stability,
+then drains telemetry/history and closes the writer. Force succeeds only when
+the sealed chains and side-effect set are empty; unresolved preflight/staging
+therefore takes the same fatal, no-repository-close path.

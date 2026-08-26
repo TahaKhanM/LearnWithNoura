@@ -348,4 +348,28 @@ describe('SessionTelemetryWriter', () => {
       entry.name === 'telemetry_gap' ? entry.dimensions.reason : entry.name))
       .toEqual(['client_queue_overflow', 'server_queue_overflow']);
   });
+
+  it('force-terminalizes without allowing in-flight failure follow-up', async () => {
+    const write = deferred<number>();
+    const started = deferred<void>();
+    let registered = true;
+    const appendMetric = vi.fn(() => {
+      started.resolve();
+      return write.promise;
+    });
+    const writer = new SessionTelemetryWriter({
+      appendMetric,
+      hasPriorReleasedSessionStart: async () => false,
+      registerWriter: () => () => { registered = false; },
+    }, 'session-1');
+    writer.submit(metric(10), context);
+    await started.promise;
+
+    writer.forceTerminal();
+    expect(registered).toBe(false);
+    expect(writer.submit(metric(20), context)).toBe(false);
+    write.reject(new Error('late repository failure'));
+    await expect(writer.flush()).resolves.toBeUndefined();
+    expect(appendMetric).toHaveBeenCalledTimes(1);
+  });
 });

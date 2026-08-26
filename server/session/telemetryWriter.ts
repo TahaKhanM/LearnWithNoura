@@ -47,6 +47,7 @@ export class SessionTelemetryWriter {
   private drainPromise: Promise<void> | null = null;
   private unregister: (() => void) | null = null;
   private accepting = true;
+  private forcedTerminal = false;
 
   constructor(
     private readonly repo: SessionTelemetryRepository,
@@ -83,6 +84,18 @@ export class SessionTelemetryWriter {
   async close(): Promise<void> {
     this.accepting = false;
     await this.flush();
+    this.unregister?.();
+    this.unregister = null;
+  }
+
+  forceTerminal(): void {
+    this.accepting = false;
+    this.forcedTerminal = true;
+    this.queue.length = 0;
+    for (const reason of GAP_REASONS) {
+      this.gaps[reason].value = 0;
+      this.gaps[reason].context = null;
+    }
     this.unregister?.();
     this.unregister = null;
   }
@@ -150,14 +163,17 @@ export class SessionTelemetryWriter {
   }
 
   private async drain(): Promise<boolean> {
+    if (this.forcedTerminal) return true;
     while (this.queue.length > 0) {
       const entry = this.queue.shift();
       if (!entry) break;
       try {
         await this.repo.appendMetric(this.sessionId, entry.observation);
       } catch {
+        if (this.forcedTerminal) return true;
         this.addGap('server_persistence_failure', 1, entry.context);
       }
+      if (this.forcedTerminal) return true;
     }
     while (this.hasPendingGap()) {
       let progressed = false;
@@ -175,10 +191,12 @@ export class SessionTelemetryWriter {
         if (!observation) return false;
         try {
           await this.repo.appendMetric(this.sessionId, observation);
+          if (this.forcedTerminal) return true;
           counter.value -= attemptedValue;
           if (counter.value === 0) counter.context = null;
           progressed = true;
         } catch {
+          if (this.forcedTerminal) return true;
           return false;
         }
       }

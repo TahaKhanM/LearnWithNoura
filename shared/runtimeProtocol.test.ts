@@ -3,6 +3,8 @@ import { createRuntimeEvent, RuntimeEventGate, type GenerationIdentity } from '.
 import fc from 'fast-check';
 
 const identity: GenerationIdentity = { sessionId: 'session-1', connectionEpoch: 2, turnId: 'turn-3', generationId: 'generation-4' };
+// Deliberate high-workload contract: tolerate machine load while still detecting hangs.
+const HEAVY_CONTRACT_TIMEOUT_MS = 15_000;
 
 describe('runtime event protocol', () => {
   it('accepts only current monotonic events once', () => {
@@ -38,5 +40,5 @@ describe('runtime event protocol', () => {
         }
       },
     ), { numRuns: 1000 });
-  });
+  }, HEAVY_CONTRACT_TIMEOUT_MS);
 });

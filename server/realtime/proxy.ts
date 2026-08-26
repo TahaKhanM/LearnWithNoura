@@ -93,6 +93,7 @@ export interface ProxyOptions {
 export interface ProxyLifecycle {
   completion: Promise<void>;
   close(): Promise<void>;
+  forceTerminal(): Promise<void>;
 }
 
 export async function connectRealtimeProxy(client: ClientSocket, options: ProxyOptions): Promise<void> {
@@ -129,6 +130,7 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
 
   let upstreamReady = false;
   let teardownPromise: Promise<void> | null = null;
+  let forceTerminalPromise: Promise<void> | null = null;
   let resolveCompletion!: () => void;
   let rejectCompletion!: (error: unknown) => void;
   const lifecycleCompletion = new Promise<void>((resolve, reject) => {
@@ -139,6 +141,7 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
     // App lifecycle tracking observes this promise; this guard also covers
     // direct test callers that intentionally do not install a tracker.
   });
+  const sideEffectTasks = new Set<Promise<void>>();
   const backgroundTelemetry = new Set<Promise<void>>();
   let toolContinues = 0;
   /** response ids we know were cancelled by barge-in. */
@@ -173,6 +176,8 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
   let lastLearnerEventId: number | null = null;
   let upstreamWork = Promise.resolve();
   let clientWork = Promise.resolve();
+  let upstreamWorkPending = 0;
+  let clientWorkPending = 0;
   let acceptingFrames = true;
   /** The learner is composing a drawing; nothing may auto-create a response. */
   let draftOpen = false;
@@ -366,7 +371,7 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
     // Captured synchronously: staging may finish after this response seals,
     // in which case cues are delivered directly at its final audio boundary.
     const planSegment = responseSegment(responseId);
-    void (async () => {
+    const stagingTask = (async () => {
       if (!input.skipPreflight && input.ops.length > 0 && groupId) {
         const preflight = await preflightWithClient({ ops: input.ops, semanticGroupId: groupId, groupLabel });
         if (!preflight.accepted) {
@@ -450,6 +455,7 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
       log(`session ${sessionId}: semantic plan staging error ${String(error).slice(0, 200)}`);
       finishTool(callId, responseId, { ok: false, accepted: false, error: String(error).slice(0, 260) });
     });
+    trackSideEffect(stagingTask);
   }
 
   /** The server, not the model, decides which section a plan builds. */
@@ -501,11 +507,20 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
     void task.finally(() => backgroundTelemetry.delete(task)).catch(() => {});
   }
 
-  function beginTeardown(reason: string): Promise<void> {
-    if (teardownPromise) return teardownPromise;
+  function trackSideEffect(task: Promise<void>): void {
+    sideEffectTasks.add(task);
+    void task.finally(() => sideEffectTasks.delete(task)).catch(() => {});
+  }
+
+  function sealAdmission(): void {
     acceptingFrames = false;
     upstream.onmessage = null;
     client.off('message', handleClientMessage);
+  }
+
+  function beginTeardown(reason: string): Promise<void> {
+    if (teardownPromise) return teardownPromise;
+    sealAdmission();
     const sealedClientWork = clientWork;
     const sealedUpstreamWork = upstreamWork;
     log(`session ${sessionId}: closed (${reason})`);
@@ -523,6 +538,9 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
       sealedClientWork,
       sealedUpstreamWork,
     ]).then(async () => {
+      while (sideEffectTasks.size > 0) {
+        await Promise.allSettled([...sideEffectTasks]);
+      }
       while (backgroundTelemetry.size > 0) {
         await Promise.allSettled([...backgroundTelemetry]);
       }
@@ -535,6 +553,37 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
     return teardownPromise;
   }
 
+  function forceTerminal(): Promise<void> {
+    if (forceTerminalPromise) return forceTerminalPromise;
+    sealAdmission();
+    telemetryWriter.forceTerminal();
+    backgroundTelemetry.clear();
+    try {
+      upstream.close();
+    } catch {
+      /* already closed */
+    }
+    try {
+      client.close();
+    } catch {
+      /* already closed */
+    }
+    if (
+      clientWorkPending > 0 ||
+      upstreamWorkPending > 0 ||
+      sideEffectTasks.size > 0
+    ) {
+      forceTerminalPromise = Promise.reject(
+        new Error('Proxy side-effect producer chains remain unsettled.'),
+      );
+      void forceTerminalPromise.catch(() => {});
+      return forceTerminalPromise;
+    }
+    resolveCompletion();
+    forceTerminalPromise = Promise.resolve();
+    return forceTerminalPromise;
+  }
+
   function teardown(reason: string): void {
     void beginTeardown(reason).catch((error: unknown) => {
       log(`session ${sessionId}: telemetry close error ${String(error).slice(0, 160)}`);
@@ -544,6 +593,7 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
   options.onLifecycle?.({
     completion: lifecycleCompletion,
     close: () => beginTeardown('server shutdown'),
+    forceTerminal,
   });
 
   upstream.onopen = () => {
@@ -576,11 +626,15 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
     } catch {
       return;
     }
+    upstreamWorkPending += 1;
     upstreamWork = upstreamWork
       .then(() => handleUpstream(event))
       .catch((error) => {
         log(`session ${sessionId}: upstream processing error ${String(error).slice(0, 240)}`);
         sendClient({ type: 'error', message: 'Noura hit a snag — it will recover in a moment.' });
+      })
+      .finally(() => {
+        upstreamWorkPending -= 1;
       });
   }
 
@@ -1390,6 +1444,7 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
 
   function handleClientMessage(raw: unknown): void {
     if (!acceptingFrames) return;
+    clientWorkPending += 1;
     clientWork = clientWork.then(async () => {
       let decoded: unknown;
       try { decoded = JSON.parse(String(raw)); }
@@ -1425,6 +1480,8 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
     }).catch((error) => {
       log(`session ${sessionId}: client processing error ${String(error).slice(0, 240)}`);
       sendClient({ type: 'error', message: 'Noura could not save that turn. Please try again.' });
+    }).finally(() => {
+      clientWorkPending -= 1;
     });
   }
 
