@@ -320,6 +320,9 @@ async function runLiveJourney(url, { textOnly, wavPath }, vercelProtectionBypass
       await page.click('.home__add button');
       await page.waitForSelector('.home__child');
       mark('synthetic_learner_created');
+    } else if (await page.locator('[data-testid=goal-input]').count() === 0) {
+      await page.locator('.home__child').first().click();
+      await page.waitForSelector('[data-testid=goal-input]', { timeout: 10_000 });
     }
 
     await page.fill(
