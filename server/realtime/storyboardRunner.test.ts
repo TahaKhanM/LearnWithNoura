@@ -649,6 +649,35 @@ describe('the storyboard runner', () => {
     expect(harness.progressEvents().at(-1)).toMatchObject({ status: 'completed' });
   });
 
+  it('does not complete a handoff on provider failed; retries on the next quiet floor', async () => {
+    const harness = await connectBoardLed();
+    await harness.establish();
+    harness.upstream.emit({ type: 'response.done', response: { id: 'anchor-response', status: 'completed', output: [{ type: 'function_call' }] } });
+    for (let step = 0; step < 3; step += 1) {
+      harness.showStep(step);
+      await flushProxy();
+      harness.upstream.emit({ type: 'response.created', response: { id: `beat-${step}` } });
+      await flushProxy();
+      harness.upstream.emit({ type: 'response.done', response: { id: `beat-${step}`, status: 'completed', output: [] } });
+      await flushProxy();
+    }
+    harness.upstream.emit({ type: 'response.created', response: { id: 'handoff-1' } });
+    await flushProxy();
+    harness.upstream.emit({ type: 'response.done', response: { id: 'handoff-1', status: 'failed', output: [] } });
+    await flushProxy();
+    expect(harness.progressEvents().every((event) => event.status !== 'completed')).toBe(true);
+
+    harness.upstream.emit({ type: 'response.created', response: { id: 'quiet-response' } });
+    harness.upstream.emit({ type: 'response.done', response: { id: 'quiet-response', status: 'completed', output: [] } });
+    await flushProxy();
+    const handoffs = harness.scopedCreates().filter((event) => event.response?.instructions?.includes('Which mark is farther right?'));
+    expect(handoffs.length).toBeGreaterThanOrEqual(2);
+    harness.upstream.emit({ type: 'response.created', response: { id: 'handoff-2' } });
+    harness.upstream.emit({ type: 'response.done', response: { id: 'handoff-2', status: 'completed', output: [{ type: 'function_call' }] } });
+    await flushProxy();
+    expect(harness.progressEvents().at(-1)).toMatchObject({ status: 'completed' });
+  });
+
   it('advances past a confirmed step only after its progress write is durable', async () => {
     let releaseWrite!: () => void;
     const writeGate = new Promise<void>((resolve) => { releaseWrite = resolve; });
@@ -764,6 +793,36 @@ describe('visual request scoping across turns', () => {
     expect(harness.metrics.filter((metric) => metric.name === 'storyboard_outcome')).toEqual([
       expect.objectContaining({ dimensions: expect.objectContaining({ outcome: 'abandoned', source: 'anchor', revealedSteps: 0 }) }),
     ]);
+  });
+
+  it('abandons an anchor preflight that completes between speech_started and speech_stopped', async () => {
+    const harness = await connectBoardLed({ preflightTimeoutMs: 5_000 });
+    harness.upstream.emit({ type: 'response.created', response: { id: 'anchor-response' } });
+    harness.upstream.emit({
+      type: 'response.function_call_arguments.done', response_id: 'anchor-response', call_id: 'anchor-call', name: 'request_visual',
+      arguments: JSON.stringify({
+        schemaVersion: '3.0.0', requestId: 'anchor-request', action: 'establish',
+        purpose: 'Anchor the comparison', idea: 'Both fractions on one shared number line', density: 'minimal',
+      }),
+    });
+    await flushProxy();
+    const preflight = [...harness.client.sent].reverse().find((event) => event.type === 'visual_preflight');
+    expect(preflight).toBeDefined();
+
+    harness.upstream.emit({ type: 'input_audio_buffer.speech_started' });
+    await flushProxy();
+
+    harness.emitClient('visual_preflight_result', {
+      preflight_id: (preflight!.payload as { preflight_id?: string }).preflight_id,
+      accepted: true,
+      reasons: [],
+    });
+    await flushProxy();
+    await flushProxy();
+    expect(harness.boardCues()).toEqual([]);
+    expect(harness.toolOutput('anchor-call')).toMatchObject({
+      ok: false, accepted: false, reason: expect.stringContaining('moved on'),
+    });
   });
 
   it('abandons a superseded Director completion explicitly and builds only the newest request', async () => {

@@ -27,6 +27,7 @@ export interface IllustrationPrepareOk {
   ok: true;
   spec: ImageSpec;
   objectId: string;
+  record: IllustrationRecord;
   cacheHit: boolean;
   latencyMs: number;
   imageCount: number;
@@ -90,6 +91,10 @@ export async function prepareIllustration(
   const cacheKey = illustrationCacheKey(brief);
   const cached = await deps.store.getByCacheKey(cacheKey);
   if (cached) {
+    const cachedVision = await inspectCachedRecord(deps, brief, cached);
+    if (!cachedVision.ok) {
+      return fail(cachedVision.reasons, { cacheHit: true, latencyMs: elapsed() });
+    }
     return ok(cached, brief, alt, { cacheHit: true, latencyMs: elapsed(), imageCount: 0, totalTokens: 0 });
   }
 
@@ -128,7 +133,6 @@ export async function prepareIllustration(
       bytes: generated.bytes,
       createdAt: (deps.now ?? Date.now)(),
     };
-    await deps.store.put(record);
     return ok(record, brief, alt, { cacheHit: false, latencyMs: elapsed(), imageCount, totalTokens });
   }
 
@@ -156,8 +160,21 @@ function ok(
       alt,
     },
     objectId: `illust-${record.id.slice(4, 12)}`,
+    record,
     ...stats,
   };
+}
+
+export async function persistIllustrationRecord(
+  store: IllustrationStore,
+  result: IllustrationPrepareOk,
+  owner?: { parentId?: string; sessionId?: string },
+): Promise<void> {
+  await store.put({
+    ...result.record,
+    ...(owner?.parentId ? { parentId: owner.parentId } : {}),
+    ...(owner?.sessionId ? { sessionId: owner.sessionId } : {}),
+  });
 }
 
 function fail(
@@ -173,6 +190,21 @@ function fail(
     totalTokens: extras.totalTokens ?? 0,
     refused: extras.refused ?? false,
   };
+}
+
+async function inspectCachedRecord(
+  deps: PrepareIllustrationDeps,
+  brief: IllustrationBrief,
+  record: IllustrationRecord,
+): Promise<{ ok: true } | { ok: false; reasons: string[] }> {
+  if (!record.bytes?.length) {
+    return { ok: false, reasons: ['The cached illustration has no stored bytes to inspect.'] };
+  }
+  const visionReply = await deps.vision.inspect({
+    prompt: visionUserText(brief),
+    imageDataUrl: toDataUrl(record.bytes, record.mime),
+  });
+  return parseVision(visionReply);
 }
 
 function visionUserText(brief: IllustrationBrief): string {

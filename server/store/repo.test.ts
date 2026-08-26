@@ -160,10 +160,14 @@ describe('Repo', () => {
       mime: 'image/png',
       bytes,
       createdAt: 1,
+      parentId: 'parent-a',
+      sessionId: 'session-a',
     });
     expect(r.getBoardAsset('img-a1b2c3d4e5f67890')).toMatchObject({
       id: 'img-a1b2c3d4e5f67890',
       mime: 'image/png',
+      parentId: 'parent-a',
+      sessionId: 'session-a',
     });
     expect(Array.from(r.getBoardAsset('img-a1b2c3d4e5f67890')?.bytes ?? [])).toEqual([137, 80, 78, 71]);
     expect(r.getBoardAssetByCacheKey('abc'.repeat(16).slice(0, 64))?.id).toBe('img-a1b2c3d4e5f67890');

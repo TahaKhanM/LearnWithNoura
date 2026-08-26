@@ -1,0 +1,26 @@
+{
+  "schemaVersion": "1.0.0",
+  "label": "dual-gate isolation — pinned confirmed, unlabelled, and completed counts",
+  "expectPass": true,
+  "expectedConfirmedThenCancelled": 2,
+  "expectedUnlabelledCancellations": 0,
+  "expectedProviderCompletedAfterConfirmed": 1,
+  "expectedProviderFailed": 0,
+  "traces": [
+    {
+      "gateOutcome": "confirmed",
+      "providerResponseId": "resp-a",
+      "cancelOutcome": "provider_cancelled"
+    },
+    {
+      "gateOutcome": "confirmed",
+      "providerResponseId": "resp-b",
+      "cancelOutcome": "provider_cancelled"
+    },
+    {
+      "gateOutcome": "confirmed",
+      "providerResponseId": "resp-c",
+      "cancelOutcome": "provider_completed"
+    }
+  ]
+}

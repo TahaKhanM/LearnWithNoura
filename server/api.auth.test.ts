@@ -124,6 +124,8 @@ describe('REST object authorization', () => {
       mime: 'image/png',
       bytes: Uint8Array.from([137, 80, 78, 71]),
       createdAt: 1,
+      parentId: 'parent-a',
+      sessionId: 'session-a',
     });
     const app = express();
     app.use(express.json());
@@ -141,6 +143,62 @@ describe('REST object authorization', () => {
     expect(ok.headers['content-type']).toMatch(/image\/png/);
     expect(ok.body).toBeInstanceOf(Buffer);
     expect(Array.from(ok.body as Buffer).slice(0, 4)).toEqual([137, 80, 78, 71]);
+  });
+
+  it('refuses parent B a GET of parent A’s illustration asset', async () => {
+    const repo = new Repo(openTestDb());
+    repo.putBoardAsset({
+      id: 'img-a1b2c3d4e5f67890',
+      cacheKey: 'b'.repeat(64),
+      mime: 'image/png',
+      bytes: Uint8Array.from([137, 80, 78, 71]),
+      createdAt: 1,
+      parentId: 'parent-a',
+      sessionId: 'session-a',
+    });
+    const app = express();
+    app.use(express.json());
+    app.use('/api', createApi(repo, null, 'gpt-5.6-terra', {
+      parentId: (req) => typeof req.headers['x-test-parent'] === 'string' ? req.headers['x-test-parent'] : null,
+    }));
+
+    const crossParent = await request(app).get('/api/board-assets/img-a1b2c3d4e5f67890').set('x-test-parent', 'parent-b');
+    expect(crossParent.status).toBe(404);
+  });
+
+  it('serves a session-owned asset to a lesson capability without a parent cookie', async () => {
+    const repo = new Repo(openTestDb());
+    repo.putBoardAsset({
+      id: 'img-a1b2c3d4e5f67890',
+      cacheKey: 'c'.repeat(64),
+      mime: 'image/png',
+      bytes: Uint8Array.from([137, 80, 78, 71]),
+      createdAt: 1,
+      parentId: 'parent-a',
+      sessionId: 'session-a',
+    });
+    const app = express();
+    app.use(express.json());
+    app.use('/api', createApi(repo, null, 'gpt-5.6-terra', {
+      parentId: () => null,
+      verifyLessonCapability: (token, sessionId) => (
+        token === 'lesson-cap-a' && sessionId === 'session-a'
+          ? { aud: 'lesson', sub: sessionId, parentId: 'parent-a' }
+          : null
+      ),
+    }));
+
+    const withCap = await request(app)
+      .get('/api/board-assets/img-a1b2c3d4e5f67890')
+      .set('Authorization', 'Lesson lesson-cap-a');
+    const queryCap = await request(app).get('/api/board-assets/img-a1b2c3d4e5f67890?cap=lesson-cap-a');
+    const randomId = await request(app)
+      .get('/api/board-assets/img-ffffffffffffffff')
+      .set('Authorization', 'Lesson lesson-cap-a');
+
+    expect(withCap.status).toBe(200);
+    expect(queryCap.status).toBe(200);
+    expect(randomId.status).toBe(404);
   });
 
   it('sets no-store before handled repository failures', async () => {

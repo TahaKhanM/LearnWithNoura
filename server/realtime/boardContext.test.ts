@@ -85,6 +85,29 @@ describe('released board context', () => {
     expect(marker?.spec.kind === 'draggable' ? marker.spec.at : null).toEqual([685, 300]);
   });
 
+  it('applies a live fast-tier point update of at and refuses authored image mutation', () => {
+    const board = new BoardContextTracker();
+    board.apply([
+      { op: 'add', id: 'p1', spec: { kind: 'point', at: [10, 20] } },
+      { op: 'add', id: 'pond', spec: { kind: 'image', assetId: 'img-a1b2c3d4e5f67890', at: [80, 60], w: 840, h: 420, alt: 'A pond' } },
+    ], 'tutor', 'scene', 'Scene', { tier: 'authored' });
+    board.apply([{ op: 'update', id: 'p1', props: { at: [120, 80] } }], 'tutor');
+    board.apply([{ op: 'update', id: 'pond', props: { at: [100, 80] } }], 'tutor');
+    const items = board.manipulativeSceneItems();
+    expect(items.find((item) => item.id === 'p1')?.spec).toMatchObject({ kind: 'point', at: [120, 80] });
+    expect(items.find((item) => item.id === 'pond')?.spec).toMatchObject({ kind: 'image', at: [80, 60] });
+  });
+
+  it('honors op.semanticGroupId on add when apply is not given a group', () => {
+    const board = new BoardContextTracker();
+    board.apply([
+      { op: 'add', id: 'op-grouped', spec: { kind: 'box', at: [500, 300], text: 'one' }, semanticGroupId: 'from-op' },
+    ], 'tutor');
+    expect(board.visibleOps()).toEqual([
+      expect.objectContaining({ id: 'op-grouped', semanticGroupId: 'from-op' }),
+    ]);
+  });
+
   it('emits visible ops that preserve region membership for the current-board raster', () => {
     const board = new BoardContextTracker();
     board.apply([{ op: 'add', id: 'one-box', spec: { kind: 'box', at: [500, 300], text: 'one' } }], 'tutor', 'region-one');

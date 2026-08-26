@@ -66,7 +66,7 @@ export class PostgresStore implements PortableDurableStore {
       this.pool.query('SELECT * FROM noura.events ORDER BY id'),
       this.pool.query('SELECT * FROM noura.evidence ORDER BY id'),
       this.pool.query('SELECT * FROM noura.compiled_lessons ORDER BY session_id'),
-      this.pool.query('SELECT id, cache_key, mime, bytes, created_at FROM noura.board_assets ORDER BY id'),
+      this.pool.query('SELECT id, cache_key, mime, bytes, created_at, parent_id, session_id FROM noura.board_assets ORDER BY id'),
     ]);
     return {
       schemaVersion: 1,
@@ -84,6 +84,8 @@ export class PostgresStore implements PortableDurableStore {
           ? row.bytes
           : Buffer.from(row.bytes ?? []).toString('base64'),
         created_at: row.created_at,
+        parent_id: row.parent_id ?? null,
+        session_id: row.session_id ?? null,
       })),
     };
   }
@@ -151,9 +153,9 @@ async function insertBoardAsset(client: PoolClient, row: Record<string, unknown>
     ? row.bytes_b64
     : Buffer.from(row.bytes as Buffer | Uint8Array | string ?? []).toString('base64');
   await client.query(
-    `INSERT INTO noura.board_assets (id, cache_key, mime, bytes, created_at)
-     VALUES ($1, $2, $3, $4, $5) ON CONFLICT (id) DO NOTHING`,
-    [row.id, row.cache_key, row.mime, bytesB64, row.created_at],
+    `INSERT INTO noura.board_assets (id, cache_key, mime, bytes, created_at, parent_id, session_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT (id) DO NOTHING`,
+    [row.id, row.cache_key, row.mime, bytesB64, row.created_at, row.parent_id ?? null, row.session_id ?? null],
   );
 }
 

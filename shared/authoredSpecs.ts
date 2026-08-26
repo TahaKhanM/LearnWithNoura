@@ -216,8 +216,8 @@ export function isAuthoredOnlySpec(spec: { kind: string; style?: string }): bool
     || (spec.kind === 'text' && spec.style === 'handwritten');
 }
 
-const MANIPULATIVE_AUTHORED_PROPS = new Set([
-  'at', 'selected', 'from', 'to', 'handle', 'tolerance', 'shape', 'numberlineId', 'w', 'h', 'r', 'size', 'label',
+const FAST_TIER_AUTHORED_UPDATE_PROPS = new Set([
+  'handle', 'selected', 'tolerance', 'numberlineId', 'shape',
   'assetId', 'alt', 'crop',
 ]);
 
@@ -225,7 +225,7 @@ const MANIPULATIVE_AUTHORED_PROPS = new Set([
 export function updatePropsYieldAuthored(props: Record<string, unknown>): boolean {
   if (props.style === 'handwritten') return true;
   if (typeof props.kind === 'string' && (AUTHORED_ONLY_KINDS as readonly string[]).includes(props.kind)) return true;
-  return Object.keys(props).some((key) => MANIPULATIVE_AUTHORED_PROPS.has(key));
+  return Object.keys(props).some((key) => FAST_TIER_AUTHORED_UPDATE_PROPS.has(key));
 }
 
 export function authoredRejectionReason(kind: unknown, raw: Record<string, unknown>): string {

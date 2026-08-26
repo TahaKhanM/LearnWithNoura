@@ -1,0 +1,20 @@
+{
+  "schemaVersion": "1.0.0",
+  "label": "Phase 0 duration metrics — sufficient samples for percentiles",
+  "expectPass": true,
+  "minSamplesForPercentile": 5,
+  "metrics": [
+    { "name": "speech_end_to_response_started", "valueMs": 180 },
+    { "name": "speech_end_to_response_started", "valueMs": 210 },
+    { "name": "speech_end_to_response_started", "valueMs": 195 },
+    { "name": "speech_end_to_response_started", "valueMs": 240 },
+    { "name": "speech_end_to_response_started", "valueMs": 205 },
+    { "name": "speech_end_to_response_started", "valueMs": 190 },
+    { "name": "speech_end_to_first_audio", "valueMs": 320 },
+    { "name": "speech_end_to_first_audio", "valueMs": 360 },
+    { "name": "speech_end_to_first_audio", "valueMs": 340 },
+    { "name": "speech_end_to_first_audio", "valueMs": 410 },
+    { "name": "speech_end_to_first_audio", "valueMs": 355 },
+    { "name": "speech_end_to_first_audio", "valueMs": 330 }
+  ]
+}

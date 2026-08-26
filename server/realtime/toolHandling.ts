@@ -52,21 +52,21 @@ export async function handleToolCall(ctx: CoordinatorContext, name: string, rawA
       // Board-led diagnostic questions must be answerable by inspecting or
       // manipulating named visible objects — never by speech alone.
       const stageBefore = currentStage(state.lessonState);
+      const responseMode = parsed.data.responseMode ?? 'voice';
+      const stageCheck = stageBefore?.checks?.find((check) => check.id === parsed.data.taskId);
+      if (responseMode === 'manipulate' && !stageCheck?.manipulativeCheck) {
+        finishTool(ctx, callId, responseId, {
+          ok: false,
+          error: 'A manipulate teaching move requires a compiled manipulativeCheck on the stage check. Use the stage check taskId.',
+          board: state.boardContext.toolSnapshot(),
+        });
+        break;
+      }
       if (state.lessonState.blueprint?.mode === 'board_led' && stageBefore &&
           ['guided_check', 'independent_check'].includes(stageBefore.kind) && parsed.data.questionOrTask) {
-        const responseMode = parsed.data.responseMode ?? 'voice';
         const visibleTargets = (parsed.data.targetObjectIds ?? []).filter((id) => state.boardContext.hasObject(id));
-        const stageCheck = stageBefore.checks?.find((check) => check.id === parsed.data.taskId);
         const manipTarget = stageCheck?.manipulativeCheck?.targetId;
         const hasManipulativeTarget = manipTarget ? state.boardContext.hasObject(manipTarget) : false;
-        if (responseMode === 'manipulate' && !stageCheck?.manipulativeCheck) {
-          finishTool(ctx, callId, responseId, {
-            ok: false,
-            error: 'A manipulate teaching move requires a compiled manipulativeCheck on the stage check. Use the stage check taskId.',
-            board: state.boardContext.toolSnapshot(),
-          });
-          break;
-        }
         if (visibleTargets.length === 0 && !hasManipulativeTarget && responseMode !== 'manipulate') {
           finishTool(ctx, callId, responseId, {
             ok: false,
@@ -112,7 +112,7 @@ export async function handleToolCall(ctx: CoordinatorContext, name: string, rawA
     }
 
     case 'board_ops': {
-      const validated = validateOps(args.ops);
+      const validated = validateOps(args.ops, { tier: 'fast' });
       // Raw destructive clears are not available to the model: visible
       // tutor work never disappears during the ordinary lesson flow.
       const clears = validated.ops.filter((op) => op.op === 'clear');

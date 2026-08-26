@@ -151,4 +151,19 @@ describe('applyUpdate', () => {
     const tappable = { kind: 'tappable' as const, at: [400, 300] as [number, number], shape: 'circle' as const };
     expect(applyUpdate(tappable, { selected: true }, { tier: 'fast' })).toEqual(tappable);
   });
+
+  it('applies a fast-tier geometry update to a point and refuses authored mutations', () => {
+    const point = { kind: 'point' as const, at: [10, 20] as [number, number], label: 'A' };
+    expect(applyUpdate(point, { at: [120, 80] }, { tier: 'fast' })).toMatchObject({ kind: 'point', at: [120, 80] });
+
+    const image = {
+      kind: 'image' as const,
+      assetId: 'img-a1b2c3d4e5f67890',
+      at: [80, 60] as [number, number],
+      w: 840,
+      h: 420,
+      alt: 'A pond',
+    };
+    expect(applyUpdate(image, { at: [100, 80] }, { tier: 'fast' })).toEqual(image);
+  });
 });

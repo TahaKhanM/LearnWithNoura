@@ -45,8 +45,19 @@ describe('applyOps', () => {
       { op: 'add', id: 'note', kind: 'text', at: [80, 80], text: 'typeset' },
       { op: 'update', id: 'note', props: { style: 'handwritten' } },
     ], { tier: 'authored' });
-    const authoredScene = applyOps(emptyScene, authored.ops, 'tutor').scene;
+    const authoredScene = applyOps(emptyScene, authored.ops, 'tutor', undefined, { tier: 'authored' }).scene;
     expect(authoredScene.items[0].spec).toMatchObject({ kind: 'text', style: 'handwritten' });
+  });
+
+  it('applies a live fast-tier point update of at and refuses authored mutations', () => {
+    const base = applyOps(emptyScene, [
+      { op: 'add', id: 'p1', spec: { kind: 'point', at: [10, 20] } },
+      { op: 'add', id: 'pond', spec: { kind: 'image', assetId: 'img-a1b2c3d4e5f67890', at: [80, 60], w: 840, h: 420, alt: 'A pond' } },
+    ], 'tutor', undefined, { tier: 'authored' }).scene;
+    const moved = applyOps(base, [{ op: 'update', id: 'p1', props: { at: [120, 80] } }], 'tutor', undefined, { tier: 'fast' });
+    expect(moved.scene.items[0].spec).toMatchObject({ kind: 'point', at: [120, 80] });
+    const imageStay = applyOps(moved.scene, [{ op: 'update', id: 'pond', props: { at: [100, 80] } }], 'tutor', undefined, { tier: 'fast' });
+    expect(imageStay.scene.items[1].spec).toMatchObject({ kind: 'image', at: [80, 60] });
   });
 
   it('erase removes dependents (labels, plots, connectors)', () => {

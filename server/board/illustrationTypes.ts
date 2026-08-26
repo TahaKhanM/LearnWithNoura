@@ -18,6 +18,8 @@ export interface IllustrationRecord {
   mime: IllustrationMime;
   bytes: Uint8Array;
   createdAt: number;
+  parentId?: string;
+  sessionId?: string;
 }
 
 export interface IllustrationStore {

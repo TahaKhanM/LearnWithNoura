@@ -14,6 +14,8 @@ export interface BoardAssetRecord {
   mime: 'image/png' | 'image/jpeg' | 'image/webp';
   bytes: Uint8Array;
   createdAt: number;
+  parentId?: string;
+  sessionId?: string;
 }
 
 export interface Child {
@@ -312,22 +314,31 @@ export class Repo {
 
   putBoardAsset(record: BoardAssetRecord): void {
     this.db.prepare(
-      `INSERT INTO board_assets (id, cache_key, mime, bytes, created_at)
-       VALUES (?, ?, ?, ?, ?)
+      `INSERT INTO board_assets (id, cache_key, mime, bytes, created_at, parent_id, session_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
-         cache_key = excluded.cache_key, mime = excluded.mime, bytes = excluded.bytes`,
-    ).run(record.id, record.cacheKey, record.mime, Buffer.from(record.bytes), record.createdAt);
+         cache_key = excluded.cache_key, mime = excluded.mime, bytes = excluded.bytes,
+         parent_id = excluded.parent_id, session_id = excluded.session_id`,
+    ).run(
+      record.id,
+      record.cacheKey,
+      record.mime,
+      Buffer.from(record.bytes),
+      record.createdAt,
+      record.parentId ?? null,
+      record.sessionId ?? null,
+    );
   }
 
   getBoardAsset(id: string): BoardAssetRecord | null {
     return mapBoardAsset(this.db.prepare(
-      'SELECT id, cache_key, mime, bytes, created_at FROM board_assets WHERE id = ?',
+      'SELECT id, cache_key, mime, bytes, created_at, parent_id, session_id FROM board_assets WHERE id = ?',
     ).get(id));
   }
 
   getBoardAssetByCacheKey(cacheKey: string): BoardAssetRecord | null {
     return mapBoardAsset(this.db.prepare(
-      'SELECT id, cache_key, mime, bytes, created_at FROM board_assets WHERE cache_key = ?',
+      'SELECT id, cache_key, mime, bytes, created_at, parent_id, session_id FROM board_assets WHERE cache_key = ?',
     ).get(cacheKey));
   }
 
@@ -726,7 +737,15 @@ function taxonomyFromVerdict(verdict: Verdict): ResponseTaxonomy {
 
 function mapBoardAsset(row: unknown): BoardAssetRecord | null {
   if (!row || typeof row !== 'object') return null;
-  const record = row as { id: string; cache_key: string; mime: string; bytes: Uint8Array | Buffer; created_at: number };
+  const record = row as {
+    id: string;
+    cache_key: string;
+    mime: string;
+    bytes: Uint8Array | Buffer;
+    created_at: number;
+    parent_id?: string | null;
+    session_id?: string | null;
+  };
   const mime = record.mime === 'image/jpeg' || record.mime === 'image/webp' ? record.mime : 'image/png';
   return {
     id: String(record.id),
@@ -734,6 +753,8 @@ function mapBoardAsset(row: unknown): BoardAssetRecord | null {
     mime,
     bytes: record.bytes instanceof Uint8Array ? record.bytes : Uint8Array.from(record.bytes ?? []),
     createdAt: Number(record.created_at),
+    ...(record.parent_id ? { parentId: String(record.parent_id) } : {}),
+    ...(record.session_id ? { sessionId: String(record.session_id) } : {}),
   };
 }
 

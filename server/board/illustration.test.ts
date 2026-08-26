@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { illustrationCacheKey } from './illustrationCache';
-import { prepareIllustration, type PrepareIllustrationDeps } from './illustration';
+import { persistIllustrationRecord, prepareIllustration, type PrepareIllustrationDeps } from './illustration';
 import { MemoryIllustrationStore } from './memoryIllustrationStore';
 import type { IllustrationBrief, IllustrationGenerateResult } from './illustrationTypes';
 
@@ -83,15 +83,18 @@ describe('prepareIllustration', () => {
     expect(result.spec.assetId.startsWith('data:')).toBe(false);
     expect(prepared.generateCalls).toHaveLength(1);
     expect(prepared.generateCalls[0].prompt).toMatch(/Do not draw any letters/);
+    expect(result.record.bytes).toEqual(PNG);
     const stored = await prepared.store.getById(result.spec.assetId);
-    expect(stored?.bytes).toEqual(PNG);
+    expect(stored).toBeNull();
   });
 
   it('returns a cache hit and skips generation on a normalized brief', async () => {
     const store = new MemoryIllustrationStore();
     const first = await prepareIllustration(deps({ store }), brief());
     expect(first.ok).toBe(true);
-    const second = await prepareIllustration(deps({ store }), brief({
+    if (first.ok) await persistIllustrationRecord(store, first);
+    const secondDeps = deps({ store });
+    const second = await prepareIllustration(secondDeps, brief({
       purpose: 'SHOW A POND HABITAT so the child can name living things',
     }));
     expect(second.ok).toBe(true);
@@ -99,6 +102,30 @@ describe('prepareIllustration', () => {
     expect(second.cacheHit).toBe(true);
     expect(second.imageCount).toBe(0);
     expect(second.spec.assetId).toBe(first.spec.assetId);
+    expect(secondDeps.visionCalls).toBeGreaterThan(0);
+  });
+
+  it('does not return a cache hit as accepted when stored bytes fail vision', async () => {
+    const store = new MemoryIllustrationStore();
+    const first = await prepareIllustration(deps({ store }), brief());
+    expect(first.ok).toBe(true);
+    if (first.ok) await persistIllustrationRecord(store, first);
+    const result = await prepareIllustration(deps({
+      store,
+      vision: {
+        inspect: async () => JSON.stringify({
+          approved: false,
+          issues: ['unsafe photoreal child'],
+          hasEmbeddedText: false,
+          unsafe: true,
+          missingRequired: [],
+        }),
+      },
+    }), brief());
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.cacheHit).toBe(true);
+    expect(result.reasons.some((reason) => /unsafe|safety|child/i.test(reason))).toBe(true);
   });
 
   it('retries after a vision rejection and fails closed after two retries', async () => {
@@ -168,7 +195,7 @@ describe('prepareIllustration', () => {
     const store = new MemoryIllustrationStore();
     const preparing: string[] = [];
     const partials: string[] = [];
-    await prepareIllustration(deps({
+    const result = await prepareIllustration(deps({
       store,
       generate: {
         generate: async ({ onPartial }) => {
@@ -182,6 +209,8 @@ describe('prepareIllustration', () => {
     });
     expect(preparing.length).toBe(1);
     expect(partials).toEqual(['data:image/png;base64,partial']);
+    expect(await store.getByCacheKey(illustrationCacheKey(brief()))).toBeNull();
+    if (result.ok) await persistIllustrationRecord(store, result);
     const cached = await store.getByCacheKey(illustrationCacheKey(brief()));
     expect(cached?.bytes).toEqual(PNG);
     expect(Buffer.from(cached?.bytes ?? []).toString('base64')).not.toBe('partial');

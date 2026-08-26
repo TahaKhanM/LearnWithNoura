@@ -1,0 +1,48 @@
+{
+  "schemaVersion": "1.0.0",
+  "label": "numberline anchor — consecutive reveals without narration (negative control)",
+  "expectPass": false,
+  "storyboard": [
+    {
+      "id": "reveal-line",
+      "reveal": "outline",
+      "objectIds": ["lesson-anchor-line"],
+      "narration": "Here is one number line from zero to one."
+    },
+    {
+      "id": "reveal-marks",
+      "reveal": "relation",
+      "objectIds": ["lesson-anchor-prompt"],
+      "narration": "One-half and three-quarters are marked for you."
+    }
+  ],
+  "anchorScene": {
+    "ops": [
+      { "op": "add", "id": "lesson-anchor-line", "spec": { "kind": "numberline", "at": [130, 300], "w": 740, "min": 0, "max": 1 } },
+      { "op": "add", "id": "lesson-anchor-prompt", "spec": { "kind": "text", "at": [130, 250], "text": "Compare the marks" } }
+    ],
+    "storyboard": [
+      {
+        "id": "reveal-line",
+        "reveal": "outline",
+        "objectIds": ["lesson-anchor-line"],
+        "narration": "Here is one number line from zero to one."
+      },
+      {
+        "id": "reveal-marks",
+        "reveal": "relation",
+        "objectIds": ["lesson-anchor-prompt"],
+        "narration": "One-half and three-quarters are marked for you."
+      }
+    ]
+  },
+  "timeline": [
+    { "kind": "reveal", "stepId": "reveal-line", "objectIds": ["lesson-anchor-line"] },
+    { "kind": "reveal", "stepId": "reveal-marks", "objectIds": ["lesson-anchor-prompt"] },
+    {
+      "kind": "narration",
+      "stepId": "reveal-marks",
+      "narrationText": "One-half and three-quarters are marked for you."
+    }
+  ]
+}

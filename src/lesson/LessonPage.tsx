@@ -78,7 +78,7 @@ export function LessonPage({ sessionId }: LessonPageProps) {
   const activeVisualGroupRef = useRef<string | undefined>(undefined);
   const visualGroupsRef = useRef<Array<{ id: string; label: string }>>([]);
   const pendingNavigationRef = useRef<AnnouncedBoardNavigation | null>(null);
-  const queuedDraftNavigationRef = useRef<{ groupId: string; cause: NavigationCause } | null>(null);
+  const queuedDraftNavigationRef = useRef<Array<{ groupId: string; cause: NavigationCause }>>([]);
   const pendingReplacementIdsRef = useRef<string[] | null>(null);
   const renderedTutorObjectTracker = useRef(new RenderedTutorObjectTracker());
 
@@ -144,7 +144,7 @@ export function LessonPage({ sessionId }: LessonPageProps) {
 
   const openSection = useCallback((groupId: string, cause: NavigationCause) => {
     if (draftRef.current.isOpen && cause !== 'draft_restore') {
-      queuedDraftNavigationRef.current = { groupId, cause };
+      queuedDraftNavigationRef.current.push({ groupId, cause });
       return;
     }
     const previousGroupId = activeVisualGroupRef.current ?? null;
@@ -168,10 +168,11 @@ export function LessonPage({ sessionId }: LessonPageProps) {
 
   const flushQueuedDraftNavigation = useCallback(() => {
     const pending = queuedDraftNavigationRef.current;
-    queuedDraftNavigationRef.current = null;
-    if (!pending) return;
-    if (!visualGroupsRef.current.some((group) => group.id === pending.groupId)) return;
-    openSection(pending.groupId, pending.cause);
+    queuedDraftNavigationRef.current = [];
+    for (const navigation of pending) {
+      if (!visualGroupsRef.current.some((group) => group.id === navigation.groupId)) continue;
+      openSection(navigation.groupId, navigation.cause);
+    }
   }, [openSection]);
 
   const registerVisualGroup = useCallback((cue?: VisualCueMetadata) => {

@@ -1,7 +1,7 @@
 import type { RuntimeEventEnvelope } from '../../shared/runtimeProtocol.js';
 import { MetricInputSchema, TELEMETRY_SCHEMA_VERSION } from '../../shared/sessionTelemetry.js';
 import { BoardSubmissionSchema } from '../../shared/lessonTurn.js';
-import { evaluateManipulativeCheck } from '../../shared/manipulativeCheck.js';
+import { evaluateBoardSubmissionCheck } from './manipulativeSubmission.js';
 import { reduceLesson } from '../lesson/orchestrator.js';
 import { metricContextFromIdentity } from '../session/telemetryRecorder.js';
 import { loadReleasedBoardContext } from './boardContext.js';
@@ -193,13 +193,24 @@ export async function handleClientEvent(
       });
       const imageDataUrl = safeBoardImage(submission.imageDataUrl);
       const analysis = submission.analysis ?? null;
-      const manipulativeCheck = submission.manipulativeCheck ?? null;
       state.boardContext.apply(ops, 'learner', submission.semanticGroupId, submission.semanticGroupLabel);
-      const manipulativeResult = manipulativeCheck
-        ? evaluateManipulativeCheck({
-          check: manipulativeCheck,
-          items: state.boardContext.manipulativeSceneItems(),
-        })
+      const evaluated = evaluateBoardSubmissionCheck({
+        taskId: submission.taskId,
+        clientCheck: submission.manipulativeCheck,
+        lessonState: state.lessonState,
+        pendingTask: state.pendingDeliveredTask,
+        items: state.boardContext.manipulativeSceneItems(),
+      });
+      const manipulativeCheck = evaluated?.check ?? null;
+      const manipulativeResult = evaluated
+        ? {
+          predicate: evaluated.predicate,
+          targetId: evaluated.targetId,
+          passed: evaluated.passed,
+          summary: evaluated.summary,
+          ...(evaluated.distancePx !== undefined ? { distancePx: evaluated.distancePx } : {}),
+          ...(evaluated.selected !== undefined ? { selected: evaluated.selected } : {}),
+        }
         : null;
       if (!description && ops.length === 0 && !manipulativeResult) {
         ctx.sendClient({ type: 'board_submission_ack', submissionId: submission.submissionId, empty: true });

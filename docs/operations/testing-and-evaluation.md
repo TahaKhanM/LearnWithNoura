@@ -21,6 +21,45 @@ configuration.
 
 Browser suites use a dedicated synthetic SQLite directory and separate ports. Visual baselines cover Noura Home at 1440×900, 834×1112, 390×844 and 844×390 plus every canonical semantic scene at desktop, tablet and mobile-focus widths.
 
+## Offline lesson evaluation (Phase 5)
+
+`npm run test:lesson-eval` reads checked-in fixtures under
+`server/lesson/eval/fixtures/`, scores five dimensions through production
+modules, writes `artifacts/evaluation/lesson-eval-report.json`, and exits
+nonzero on gate failure. This is the default synthetic lesson gate: it makes
+no provider call, claims no live latency or acoustic evidence, and never
+labels a single duration observation as a percentile.
+
+Scoring dimensions (all deterministic offline):
+
+1. **Reveal–narration coherence** — scripted storyboard timelines must
+   narrate each reveal before the next reveal; referenced object ids are
+   derived from each storyboard step’s `objectIds`. When `anchorScene` is
+   present, reveal ops are bound to production `storyboardRunSteps`. Includes
+   passing, narration-before-reveal failing, and consecutive-reveal failing
+   fixtures.
+2. **Object permanence** — production `BoardOp` batches replayed through
+   `applyOps` and scored with `RenderedTutorObjectTracker`; tutor erase,
+   clear, and same-id overwrite outside announced section navigation fail.
+   Includes one passing log and two failing logs (erase and overwrite).
+3. **Turn-latency percentiles** — Phase 0 fixtures of
+   `speech_end_to_response_started` and `speech_end_to_first_audio` compute
+   p50/p95 only when n ≥ 5 (hard floor); otherwise the report states
+   `insufficient_n`.
+4. **False barge-ins** — dual-gate traces count confirmed-then-cancelled,
+   `provider_completed` after confirmed, `provider_failed`, and unlabelled
+   cancellations separately. Scorer pass matches pinned expected counts only.
+   Includes fixtures that pin all four expected counts.
+5. **Blueprint quality** — fixed rubric at
+   `server/lesson/eval/blueprint-quality-rubric.json` (`passThreshold: 0.7`);
+   default offline path uses structural scoring for known-good and known-weak
+   compiled-lesson fixtures. Live strong-model judging is **not implemented**;
+   the default script refuses live invocation.
+
+The blueprint rubric, fixtures, and scorer modules compose with — and do not
+replace — `npm run test:av`, `npm run test:smoke-report`, and the existing
+Vitest/proxy interruption rows.
+
 Voice-interruption unit/integration rows cover short loud noise plus server VAD,
 sustained local energy without server confirmation, adaptive room-noise
 calibration, sustained speech with both detectors, one-turn high-eagerness

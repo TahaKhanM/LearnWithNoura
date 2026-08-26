@@ -28,6 +28,7 @@ export class SecurityBoundary {
     return {
       parentId: (request) => this.parentId(request),
       issueLessonCapability: (sessionId, childId, parentId) => this.sign({ aud: 'lesson', sub: sessionId, childId, parentId, exp: Date.now() + 2 * 60 * 60 * 1000, nonce: randomBytes(12).toString('base64url') }),
+      verifyLessonCapability: (token, sessionId) => this.verifyLessonCapability(token, sessionId),
     };
   }
 
