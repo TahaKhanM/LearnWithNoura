@@ -61,6 +61,7 @@ export class ResponseCueTimeline {
       const removed = this.pending;
       for (const cue of removed) this.rememberCancelled(cue.identity);
       this.pending = [];
+      this.forget(removed);
       return removed;
     }
     this.rememberCancelled(identity);
@@ -70,11 +71,19 @@ export class ResponseCueTimeline {
       if (matches) removed.push(cue);
       return !matches;
     });
+    this.forget(removed);
     return removed;
   }
 
   pendingCount(kind?: ResponseCue['kind']): number {
     return kind ? this.pending.filter((cue) => cue.kind === kind).length : this.pending.length;
+  }
+
+  /** A cancelled cue never applied, so its (stable) cue id must be free to
+   * re-enqueue when the server legitimately re-sends the same board event
+   * under the next generation identity. */
+  private forget(removed: ResponseCue[]): void {
+    for (const cue of removed) this.seen.delete(cue.cueId);
   }
 
   private rememberCancelled(identity: GenerationIdentity): void {
