@@ -704,7 +704,9 @@ export class RealtimeSession {
       case 'transcript_delta': {
         // Captions release on arrival: the transcript is the fastest honest
         // signal that Noura is answering, and phrase smoothing keeps the
-        // reading pace natural. Playback boundaries own visuals and tasks.
+        // reading pace natural. Ordinary board draws also apply on arrival
+        // so the picture is visible while she talks; lesson state and
+        // storyboard reveals still wait on playback boundaries.
         if (typeof message.delta !== 'string') break;
         const responseId = String(message.response_id ?? '');
         if (this.deadResponses.has(responseId)) break;

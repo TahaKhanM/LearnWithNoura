@@ -18,26 +18,27 @@ function final(id: string, sequence: number, responseId = 'response', active = i
 }
 
 describe('response cue timeline (playback-bound)', () => {
-  it('holds cues while their response is audibly playing and releases them in sequence order on stop', () => {
+  it('releases ordinary visuals immediately and holds lesson state until speech ends', () => {
     const timeline = new ResponseCueTimeline();
     timeline.enqueue(visual('visual-2', 4));
     timeline.enqueue(semantic('semantic-1', 1));
     timeline.enqueue(visual('visual-1', 3));
     timeline.enqueue(final('final-1', 5));
-    expect(timeline.drain((responseId) => responseId === 'response' ? 'playing' : 'finished')).toEqual([]);
-    expect(timeline.pendingCount()).toBe(4);
+    expect(timeline.drain((responseId) => responseId === 'response' ? 'playing' : 'finished').map((cue) => cue.cueId))
+      .toEqual(['visual-1', 'visual-2']);
+    expect(timeline.pendingCount()).toBe(2);
     expect(timeline.drain(() => 'finished').map((cue) => cue.cueId))
-      .toEqual(['semantic-1', 'visual-1', 'visual-2', 'final-1']);
+      .toEqual(['semantic-1', 'final-1']);
     expect(timeline.pendingCount()).toBe(0);
   });
 
-  it('releases cues for a response that is not playing while holding the playing one', () => {
+  it('releases ordinary visuals even while their response is still speaking', () => {
     const timeline = new ResponseCueTimeline();
     timeline.enqueue(visual('tool-first-plan', 1, 'tool-first'));
     timeline.enqueue(visual('spoken-plan', 2, 'spoken'));
     const released = timeline.drain((responseId) => responseId === 'spoken' ? 'playing' : 'pending');
-    expect(released.map((cue) => cue.cueId)).toEqual(['tool-first-plan']);
-    expect(timeline.pendingCount('visual')).toBe(1);
+    expect(released.map((cue) => cue.cueId)).toEqual(['tool-first-plan', 'spoken-plan']);
+    expect(timeline.pendingCount('visual')).toBe(0);
   });
 
   it('rejects repeated cue IDs so replays and retries stay idempotent', () => {

@@ -30,7 +30,11 @@ export interface CharacterAttentionFrame {
   y: number;
   targetType: AttentionTargetType;
   semanticObjectId?: string;
+  boardCoordinates?: [number, number];
 }
+
+/** Board-space point under the bottom-right dock avatar, not the board center. */
+export const AVATAR_BOARD_ORIGIN: [number, number] = [880, 560];
 
 const EXPECTED_PRIORITY: Record<AttentionTargetType, number> = {
   interruption: 100,
@@ -105,12 +109,18 @@ export class CharacterAttentionController {
       permittedInReducedMotion: true,
     };
     const destination = target.boardCoordinates
-      ? [clamp((target.boardCoordinates[0] - 500) / 500), clamp((target.boardCoordinates[1] - 300) / 300)] as const
+      ? gazeToward(target.boardCoordinates)
       : [0, target.targetType === 'caption_question' ? 0.32 : 0] as const;
     const alpha = this.reducedMotion ? 1 : ALPHA[target.smoothingProfile];
     this.x = clamp(this.x + (destination[0] - this.x) * alpha);
     this.y = clamp(this.y + (destination[1] - this.y) * alpha);
-    return { x: this.x, y: this.y, targetType: target.targetType, ...(target.semanticObjectId ? { semanticObjectId: target.semanticObjectId } : {}) };
+    return {
+      x: this.x,
+      y: this.y,
+      targetType: target.targetType,
+      ...(target.semanticObjectId ? { semanticObjectId: target.semanticObjectId } : {}),
+      ...(target.boardCoordinates ? { boardCoordinates: target.boardCoordinates } : {}),
+    };
   }
 
   private isCurrent(target: CharacterAttentionTarget): boolean {
@@ -123,4 +133,26 @@ export class CharacterAttentionController {
 }
 
 export function attentionPriority(targetType: AttentionTargetType): number { return EXPECTED_PRIORITY[targetType]; }
+
+/** Gaze direction from the dock avatar toward a board-space point. */
+export function gazeToward(
+  target: [number, number],
+  origin: [number, number] = AVATAR_BOARD_ORIGIN,
+  range: [number, number] = [500, 300],
+): [number, number] {
+  return [clamp((target[0] - origin[0]) / range[0]), clamp((target[1] - origin[1]) / range[1])];
+}
+
+/** Gaze from the avatar's on-screen center toward a screen-space target. */
+export function gazeTowardScreen(
+  targetClient: [number, number],
+  originClient: [number, number],
+  rangePx: [number, number],
+): [number, number] {
+  return [
+    clamp((targetClient[0] - originClient[0]) / Math.max(80, rangePx[0])),
+    clamp((targetClient[1] - originClient[1]) / Math.max(80, rangePx[1])),
+  ];
+}
+
 function clamp(value: number): number { return Math.max(-0.78, Math.min(0.78, value)); }
