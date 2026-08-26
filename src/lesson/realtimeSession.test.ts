@@ -21,6 +21,24 @@ interface MetricQueueHarness extends SessionHarness {
 beforeEach(() => window.sessionStorage.clear());
 afterEach(() => vi.restoreAllMocks());
 
+/** The browser↔server envelope socket, capturable per instance. */
+class FakeEnvelopeSocket {
+  static instances: FakeEnvelopeSocket[] = [];
+  static CONNECTING = 0;
+  static OPEN = 1;
+  readyState = FakeEnvelopeSocket.CONNECTING;
+  onopen: (() => void) | null = null;
+  onmessage: ((event: { data: unknown }) => void) | null = null;
+  onclose: (() => void) | null = null;
+  onerror: (() => void) | null = null;
+  sent: string[] = [];
+  constructor(public url: string, public protocols?: string[]) {
+    FakeEnvelopeSocket.instances.push(this);
+  }
+  send(raw: string): void { this.sent.push(raw); }
+  close(): void { this.readyState = 3; }
+}
+
 /** A session driven by a deterministic fake voice transport. */
 function sessionWithVoice(): { session: RealtimeSession; harness: SessionHarness; voice: FakeVoiceTransport } {
   window.sessionStorage.setItem('noura.lessonCapability.session', 'capability');
@@ -496,6 +514,44 @@ describe('RealtimeSession playback-bound release', () => {
     harness.releasePending();
     await vi.waitFor(() => expect(sent.some((event) => event.type === 'ops_rejected')).toBe(true));
     expect(sent.find((event) => event.type === 'ops_rejected')?.payload).toMatchObject({ event_id: 77, response_id: 'quality-response' });
+  });
+
+  it('keeps voice playback alive across a sideband envelope reconnect', async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('WebSocket', FakeEnvelopeSocket);
+    FakeEnvelopeSocket.instances = [];
+    try {
+      window.sessionStorage.setItem('noura.lessonCapability.session', 'capability');
+      let voice!: FakeVoiceTransport;
+      const session = new RealtimeSession('session', (input) => {
+        voice = new FakeVoiceTransport(input.handlers);
+        return voice;
+      });
+      const harness = session as unknown as SessionHarness;
+      await session.start();
+      const first = FakeEnvelopeSocket.instances.at(-1);
+      expect(first).toBeDefined();
+      first!.readyState = 1;
+      first!.onopen?.();
+      harness.handleServer(createRuntimeEvent(session.getIdentity(), 0, 'ready', {}));
+      voice.emitBoundary('started', 'mid-lesson-response');
+      expect(session.getSnapshot().phase).toBe('speaking');
+
+      // Vercel recycles the envelope connection mid-response: the WebRTC
+      // audio plane must keep playing while the control plane reconnects.
+      first!.onclose?.();
+      expect(session.getSnapshot().phase).toBe('reconnecting');
+      expect(voice.playbackClears).toBe(0);
+      expect(voice.playingResponseId()).toBe('mid-lesson-response');
+      expect(voice.state).toBe('connected');
+
+      vi.advanceTimersByTime(600);
+      expect(FakeEnvelopeSocket.instances).toHaveLength(2);
+      session.end();
+    } finally {
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+    }
   });
 
   it('rejects late cues after interruption, reconnect identity replacement, and navigation cleanup', () => {

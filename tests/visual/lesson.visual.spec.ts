@@ -25,7 +25,7 @@ for (const viewport of [
       socket.emit('board_ops', {
         response_id: 'visual-response', groupLabel: 'Fraction model',
         ops: [{ op: 'add', id: 'fraction-model-scale', spec: { kind: 'numberline', at: [130, 300], w: 740, min: 0, max: 1, marks: [{ value: 0.5, label: '1/2', color: 'blue' }, { value: 0.75, label: '3/4', color: 'red' }] } }],
-      }, { audioSampleOffsets: { start: 0, end: 0 }, semanticObjectId: 'fraction-model', providerResponseId: 'visual-response' });
+      }, { semanticObjectId: 'fraction-model', providerResponseId: 'visual-response' });
     });
     await expect(page.getByRole('status')).toContainText('Fraction model');
     await page.waitForTimeout(1_700);

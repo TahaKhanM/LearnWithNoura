@@ -37,14 +37,10 @@ test('released AI drawing survives normal re-renders, animation, and learner dra
   await page.evaluate(() => {
     const socket = (window as typeof window & { __nouraFakeSocket: { emit(type: string, payload: Record<string, unknown>, optional?: Record<string, unknown>): void } }).__nouraFakeSocket;
     socket.emit('response_started', { response_id: 'drawing-response' });
-    socket.emit('audio', {
-      response_id: 'drawing-response', item_id: 'drawing-item',
-      delta: btoa(String.fromCharCode(...new Uint8Array(48_000))),
-    }, { audioSampleOffsets: { start: 0, end: 24_000 }, providerResponseId: 'drawing-response', providerItemId: 'drawing-item' });
     socket.emit('board_ops', {
       response_id: 'drawing-response', event_id: 701,
       ops: [{ op: 'add', id: 'durable-tutor-line', spec: { kind: 'line', from: [100, 280], to: [900, 280], width: 5 } }],
-    }, { audioSampleOffsets: { start: 0, end: 0 }, visualCueId: 'durable-line-cue', semanticObjectId: 'durable-line', providerResponseId: 'drawing-response' });
+    }, { visualCueId: 'durable-line-cue', semanticObjectId: 'durable-line', providerResponseId: 'drawing-response' });
   });
 
   const tutorLine = page.locator('[data-item="durable-tutor-line"]');
@@ -247,11 +243,11 @@ test('back-to-back drawing checkpoints stay ordered and never remount', async ({
     socket.emit('board_ops', {
       response_id: 'queued-response', event_id: 901,
       ops: [{ op: 'add', id: 'queued-line-one', spec: { kind: 'line', from: [140, 210], to: [860, 210], width: 5 } }],
-    }, { audioSampleOffsets: { start: 0, end: 0 }, semanticObjectId: 'queued-section', providerResponseId: 'queued-response' });
+    }, { semanticObjectId: 'queued-section', providerResponseId: 'queued-response' });
     socket.emit('board_ops', {
       response_id: 'queued-response', event_id: 902,
       ops: [{ op: 'add', id: 'queued-line-two', spec: { kind: 'line', from: [140, 360], to: [860, 360], width: 5 } }],
-    }, { audioSampleOffsets: { start: 0, end: 0 }, semanticObjectId: 'queued-section', providerResponseId: 'queued-response' });
+    }, { semanticObjectId: 'queued-section', providerResponseId: 'queued-response' });
   });
 
   for (const id of ['queued-line-one', 'queued-line-two']) {
@@ -292,9 +288,9 @@ test('speech stop immediately exposes a thinking state before reply audio', asyn
   await page.evaluate(() => {
     const socket = (window as typeof window & { __nouraFakeSocket: { emit(type: string, payload: Record<string, unknown>, optional?: Record<string, unknown>): void } }).__nouraFakeSocket;
     socket.emit('response_started', { response_id: 'spoken-reply' });
-    socket.emit('audio', {
-      response_id: 'spoken-reply', item_id: 'spoken-item', delta: btoa('\0\0'),
-    }, { audioSampleOffsets: { start: 0, end: 1 }, providerResponseId: 'spoken-reply', providerItemId: 'spoken-item' });
+    // Speaking begins when the provider reports real playback on the call.
+    const voice = (window as typeof window & { __nouraFakeVoice: { emitBoundary(boundary: string, responseId: string | null, playedMs?: number): void } }).__nouraFakeVoice;
+    voice.emitBoundary('started', 'spoken-reply');
   });
   await expect(page.getByText('Speaking')).toBeVisible();
 });
@@ -319,7 +315,7 @@ test('raw explanatory text is moved away from triangle strokes instead of accept
         { op: 'add', id: 'overlap-half-turn', spec: { kind: 'text', at: [510, 250], text: 'Half-turn = 180°' } },
         { op: 'add', id: 'overlap-straight-angle', spec: { kind: 'text', at: [410, 315], text: 'Straight angle' } },
       ],
-    }, { audioSampleOffsets: { start: 0, end: 0 }, providerResponseId: 'overlap-response' });
+    }, { providerResponseId: 'overlap-response' });
   });
 
   const halfTurn = page.locator('[data-item="overlap-half-turn"] text');
@@ -358,11 +354,11 @@ test('a new tutor section never hides the current board: it is announced and rea
     socket.emit('board_ops', {
       response_id: 'section-response', groupLabel: 'First idea',
       ops: [{ op: 'add', id: 'group-one-box', spec: { kind: 'box', at: [500, 300], text: 'First idea' } }],
-    }, { audioSampleOffsets: { start: 0, end: 0 }, semanticObjectId: 'group-one', providerResponseId: 'section-response' });
+    }, { semanticObjectId: 'group-one', providerResponseId: 'section-response' });
     socket.emit('board_ops', {
       response_id: 'section-response', groupLabel: 'Second idea',
       ops: [{ op: 'add', id: 'group-two-box', spec: { kind: 'box', at: [500, 300], text: 'Second idea' } }],
-    }, { audioSampleOffsets: { start: 0, end: 0 }, semanticObjectId: 'group-two', providerResponseId: 'section-response' });
+    }, { semanticObjectId: 'group-two', providerResponseId: 'section-response' });
   });
 
   // The first anchor section takes the view; the second one must NOT steal
@@ -401,7 +397,7 @@ test('a new tutor section never hides the current board: it is announced and rea
     socket.emit('board_ops', {
       response_id: 'section-response', groupLabel: 'Third idea',
       ops: [{ op: 'add', id: 'group-three-box', spec: { kind: 'box', at: [500, 300], text: 'Third idea' } }],
-    }, { audioSampleOffsets: { start: 0, end: 0 }, semanticObjectId: 'group-three', providerResponseId: 'section-response' });
+    }, { semanticObjectId: 'group-three', providerResponseId: 'section-response' });
   });
   await expect(picker).toHaveValue('group-one');
   await expect(page.locator('[data-item^="sketch-"]')).toHaveCount(1);

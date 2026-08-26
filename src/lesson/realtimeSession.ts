@@ -217,7 +217,11 @@ export class RealtimeSession {
    */
   private async connectVoice(): Promise<void> {
     if (!this.lessonCapability) return;
-    if (!this.injectedVoiceTransport && !WebRtcVoiceTransport.supported()) return;
+    // Playwright installs a page-level fake transport so E2E suites run
+    // fully offline; vitest injects one through the constructor.
+    const pageFactory = (window as Window & { __nouraVoiceTransport?: VoiceTransportFactory }).__nouraVoiceTransport ?? null;
+    const injected = this.injectedVoiceTransport ?? pageFactory;
+    if (!injected && !WebRtcVoiceTransport.supported()) return;
     const handlers: VoiceTransportHandlers = {
       onPlaybackBoundary: (boundary, responseId, playedMs) => this.handlePlaybackBoundary(boundary, responseId, playedMs),
       onStateChange: (state) => {
@@ -226,7 +230,7 @@ export class RealtimeSession {
         }
       },
     };
-    const factory = this.injectedVoiceTransport ?? ((input) => new WebRtcVoiceTransport(input));
+    const factory = injected ?? ((input) => new WebRtcVoiceTransport(input));
     const voice = factory({
       sessionId: this.sessionId,
       lessonCapability: this.lessonCapability,
@@ -272,7 +276,9 @@ export class RealtimeSession {
     ws.onclose = () => {
       if (this.closedByUs || this.ws !== ws) return;
       this.cancelGeneration('transport closed');
-      this.voice?.stopPlayback();
+      // The envelope is control-plane only: the WebRTC voice call keeps
+      // playing through a reconnect (Vercel recycles the function around
+      // 300 s), so a sideband blip never cuts Noura off mid-sentence.
       if (this.reconnectAttempts < MAX_RECONNECTS) {
         this.reconnectAttempts += 1;
         this.connectionEpoch += 1;
@@ -281,6 +287,9 @@ export class RealtimeSession {
         this.update({ phase: 'reconnecting' });
         this.scope.timeout(() => this.connect(), 600 * this.reconnectAttempts);
       } else {
+        // Terminal degradation to captions-only: silence any residual voice
+        // buffered on the call so REST answers do not overlap stale audio.
+        this.voice?.stopPlayback();
         this.generationCounter += 1;
         this.activateScope(false);
         this.update({ phase: 'fallback', error: 'Voice connection lost — continuing in captions-only text mode.' });
