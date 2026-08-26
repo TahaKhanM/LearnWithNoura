@@ -231,6 +231,19 @@ function migrate(database: DatabaseSync): void {
 
     INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (2, unixepoch() * 1000);
   `);
+
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS board_assets (
+      id TEXT PRIMARY KEY,
+      cache_key TEXT NOT NULL UNIQUE,
+      mime TEXT NOT NULL,
+      bytes BLOB NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_board_assets_cache ON board_assets(cache_key);
+
+    INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (3, unixepoch() * 1000);
+  `);
 }
 
 function addColumn(database: DatabaseSync, table: string, definition: string): void {

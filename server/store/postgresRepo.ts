@@ -16,6 +16,7 @@ import type {
   EvidenceRow,
   FallbackTurnClaim,
   FallbackTurnIdentity,
+  BoardAssetRecord,
   Session,
   SessionSummary,
   Verdict,
@@ -175,6 +176,35 @@ export class PostgresRepo implements DomainRepository, ManagedDomainRepository {
       if (!stored) throw new Error('Compiled lesson write failed.');
       return stored;
     });
+  }
+
+  async putBoardAsset(record: BoardAssetRecord): Promise<void> {
+    await this.initialize();
+    await this.pool.query(
+      `INSERT INTO noura.board_assets (id, cache_key, mime, bytes, created_at)
+       VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (id) DO UPDATE SET
+         cache_key = EXCLUDED.cache_key, mime = EXCLUDED.mime, bytes = EXCLUDED.bytes`,
+      [record.id, record.cacheKey, record.mime, Buffer.from(record.bytes).toString('base64'), record.createdAt],
+    );
+  }
+
+  async getBoardAsset(id: string): Promise<BoardAssetRecord | null> {
+    await this.initialize();
+    const result = await this.pool.query(
+      'SELECT id, cache_key, mime, bytes, created_at FROM noura.board_assets WHERE id = $1',
+      [id],
+    );
+    return result.rows[0] ? mapBoardAsset(result.rows[0]) : null;
+  }
+
+  async getBoardAssetByCacheKey(cacheKey: string): Promise<BoardAssetRecord | null> {
+    await this.initialize();
+    const result = await this.pool.query(
+      'SELECT id, cache_key, mime, bytes, created_at FROM noura.board_assets WHERE cache_key = $1',
+      [cacheKey],
+    );
+    return result.rows[0] ? mapBoardAsset(result.rows[0]) : null;
   }
 
   async getCompiledLesson(sessionId: string): Promise<CompiledLessonRecord | null> {
@@ -500,14 +530,24 @@ export class PostgresRepo implements DomainRepository, ManagedDomainRepository {
       ON CONFLICT (version) DO NOTHING;
       INSERT INTO noura.schema_migrations (version, applied_at) VALUES (2, ${Date.now()})
       ON CONFLICT (version) DO NOTHING;
+      CREATE TABLE IF NOT EXISTS noura.board_assets (
+        id TEXT PRIMARY KEY,
+        cache_key TEXT NOT NULL UNIQUE,
+        mime TEXT NOT NULL,
+        bytes TEXT NOT NULL,
+        created_at BIGINT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_noura_board_assets_cache ON noura.board_assets(cache_key);
+      INSERT INTO noura.schema_migrations (version, applied_at) VALUES (3, ${Date.now()})
+      ON CONFLICT (version) DO NOTHING;
     `);
   }
 
   private async verifySchema(): Promise<void> {
     const result = await this.pool.query(
-      'SELECT version FROM noura.schema_migrations WHERE version IN (1, 2)',
+      'SELECT version FROM noura.schema_migrations WHERE version IN (1, 2, 3)',
     );
-    if (result.rowCount !== 2) throw new Error('Noura Postgres schema migrations 1 and 2 are not both applied.');
+    if (result.rowCount !== 3) throw new Error('Noura Postgres schema migrations 1, 2, and 3 are not all applied.');
   }
 
   private async getChildWith(queryable: Queryable, id: string): Promise<Child | null> {
@@ -654,6 +694,23 @@ export class PostgresRepo implements DomainRepository, ManagedDomainRepository {
 
 function identityValues(identity: FallbackTurnIdentity): [string, string, number, string, string] {
   return [identity.sessionId, identity.idempotencyKey, identity.connectionEpoch, identity.turnId, identity.generationId];
+}
+
+function mapBoardAsset(row: QueryResultRow): BoardAssetRecord {
+  const mime = row.mime === 'image/jpeg' || row.mime === 'image/webp' ? row.mime : 'image/png';
+  const raw = row.bytes;
+  const bytes = raw instanceof Uint8Array
+    ? raw
+    : typeof raw === 'string'
+      ? Buffer.from(raw, 'base64')
+      : Buffer.from(raw ?? []);
+  return {
+    id: String(row.id),
+    cacheKey: String(row.cache_key),
+    mime,
+    bytes: bytes instanceof Uint8Array ? bytes : Uint8Array.from(bytes),
+    createdAt: Number(row.created_at),
+  };
 }
 
 function mapChild(row: QueryResultRow): Child {
