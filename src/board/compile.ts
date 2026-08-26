@@ -9,6 +9,7 @@ import { BOARD_W, BOARD_H, PALETTE, type Vec, type ShapeSpec, type AxesSpec } fr
 import { compileExpression } from '../../shared/expr';
 import { compileArc, compileCurve } from './compileCurves';
 import { compileAsset } from './compileAssets';
+import { compileImage, imageLabelBands, type ImageNode } from './compileImages';
 import { compileDraggable, compileSnapZone, compileTappable } from './compileManipulatives';
 import { measureText, wrapText, TEXT_SIZES } from './measure';
 import type { SceneItem } from './scene';
@@ -56,7 +57,7 @@ export interface KatexNode {
   h: number;
 }
 
-export type RenderNode = PathNode | TextNode | KatexNode;
+export type RenderNode = PathNode | TextNode | KatexNode | ImageNode;
 
 export interface BBox {
   x: number;
@@ -182,6 +183,9 @@ export function nodeBBox(node: RenderNode): BBox {
       w: Math.min(BOARD_W - node.x, node.w * 1.6 + 40),
       h: node.h * 1.6 + 20,
     };
+  }
+  if (node.type === 'image') {
+    return { x: node.x, y: node.y, w: node.w, h: node.h };
   }
   if (node.bbox) return node.bbox;
   // Parse coordinates out of the path data for a conservative bound.
@@ -1002,6 +1006,10 @@ function compileSpec(
       nodes.push(...compileAsset(spec, color));
       break;
 
+    case 'image':
+      nodes.push(compileImage(spec));
+      break;
+
     case 'draggable':
       nodes.push(...compileDraggable(spec, color).nodes);
       break;
@@ -1043,6 +1051,7 @@ function defaultColor(spec: ShapeSpec): string {
     case 'label':
       return INK_SOFT;
     case 'asset':
+    case 'image':
       return PALETTE.blue;
     case 'draggable':
     case 'tappable':
@@ -1172,7 +1181,8 @@ export function compileScene(items: SceneItem[]): CompiledItem[] {
     }
     // Solid/container geometry participates in node-label and edge-label
     // spacing. Stroke-only diagrams remain available for nearby annotations.
-    if (['box', 'table', 'bars', 'asset'].includes(item.spec.kind)) ctx.occupied.push(bbox);
+    if (['box', 'table', 'bars', 'asset', 'image'].includes(item.spec.kind)) ctx.occupied.push(bbox);
+    if (item.spec.kind === 'image') ctx.occupied.push(...imageLabelBands(item.spec));
     compiled.push({ id: item.id, owner: item.owner, revision: item.revision, nodes, bbox });
   }
   return compiled;

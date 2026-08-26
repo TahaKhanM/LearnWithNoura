@@ -151,6 +151,24 @@ describe('Repo', () => {
     expect(reloaded?.lesson?.objective).toBe(lesson.objective);
   });
 
+  it('stores generated illustration bytes by id and cache key', () => {
+    const r = repo();
+    const bytes = Uint8Array.from([137, 80, 78, 71]);
+    r.putBoardAsset({
+      id: 'img-a1b2c3d4e5f67890',
+      cacheKey: 'abc'.repeat(16).slice(0, 64),
+      mime: 'image/png',
+      bytes,
+      createdAt: 1,
+    });
+    expect(r.getBoardAsset('img-a1b2c3d4e5f67890')).toMatchObject({
+      id: 'img-a1b2c3d4e5f67890',
+      mime: 'image/png',
+    });
+    expect(Array.from(r.getBoardAsset('img-a1b2c3d4e5f67890')?.bytes ?? [])).toEqual([137, 80, 78, 71]);
+    expect(r.getBoardAssetByCacheKey('abc'.repeat(16).slice(0, 64))?.id).toBe('img-a1b2c3d4e5f67890');
+  });
+
   it('records compilation failures and refuses a ready record without a lesson', () => {
     const r = repo();
     const child = r.createChild('Iman', 9);

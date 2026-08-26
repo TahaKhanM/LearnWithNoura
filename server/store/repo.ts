@@ -8,6 +8,14 @@ import {
 } from '../../shared/compiledLesson.js';
 import type { EvidenceOpportunityKind, ResponseTaxonomy } from '../../shared/pedagogy.js';
 
+export interface BoardAssetRecord {
+  id: string;
+  cacheKey: string;
+  mime: 'image/png' | 'image/jpeg' | 'image/webp';
+  bytes: Uint8Array;
+  createdAt: number;
+}
+
 export interface Child {
   id: string;
   parentId: string;
@@ -300,6 +308,27 @@ export class Repo {
       createdAt: Number(row.created_at),
       updatedAt: Number(row.updated_at),
     };
+  }
+
+  putBoardAsset(record: BoardAssetRecord): void {
+    this.db.prepare(
+      `INSERT INTO board_assets (id, cache_key, mime, bytes, created_at)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         cache_key = excluded.cache_key, mime = excluded.mime, bytes = excluded.bytes`,
+    ).run(record.id, record.cacheKey, record.mime, Buffer.from(record.bytes), record.createdAt);
+  }
+
+  getBoardAsset(id: string): BoardAssetRecord | null {
+    return mapBoardAsset(this.db.prepare(
+      'SELECT id, cache_key, mime, bytes, created_at FROM board_assets WHERE id = ?',
+    ).get(id));
+  }
+
+  getBoardAssetByCacheKey(cacheKey: string): BoardAssetRecord | null {
+    return mapBoardAsset(this.db.prepare(
+      'SELECT id, cache_key, mime, bytes, created_at FROM board_assets WHERE cache_key = ?',
+    ).get(cacheKey));
   }
 
   /**
@@ -693,6 +722,19 @@ function taxonomyFromVerdict(verdict: Verdict): ResponseTaxonomy {
   if (verdict === 'misconception') return 'confident_misconception';
   if (verdict === 'struggling') return 'incorrect';
   return 'correct';
+}
+
+function mapBoardAsset(row: unknown): BoardAssetRecord | null {
+  if (!row || typeof row !== 'object') return null;
+  const record = row as { id: string; cache_key: string; mime: string; bytes: Uint8Array | Buffer; created_at: number };
+  const mime = record.mime === 'image/jpeg' || record.mime === 'image/webp' ? record.mime : 'image/png';
+  return {
+    id: String(record.id),
+    cacheKey: String(record.cache_key),
+    mime,
+    bytes: record.bytes instanceof Uint8Array ? record.bytes : Uint8Array.from(record.bytes ?? []),
+    createdAt: Number(record.created_at),
+  };
 }
 
 function parseArray<T>(value: unknown, fallback: T[] = []): T[] {

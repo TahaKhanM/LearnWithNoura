@@ -96,6 +96,7 @@ vi.mock('./realtimeSession', () => {
         semanticGroupId: string;
       },
       submission: null,
+      illustration: null,
     };
     getSnapshot = () => this.snapshot;
     subscribe = (listener: () => void) => {

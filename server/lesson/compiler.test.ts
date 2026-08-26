@@ -159,6 +159,35 @@ describe('compileLesson', () => {
     expect(built.validated).toHaveLength(0);
   });
 
+  it('rejects compiler-invented image ops and falls back to conversation-led', async () => {
+    const imageDraft = authoredDraft({
+      anchor: {
+        kind: 'raw',
+        domain: 'process',
+        groupLabel: 'Pond habitat',
+        instructionalQuestion: 'What lives in a pond?',
+        narrations,
+        ops: [{
+          op: 'add',
+          id: 'pond',
+          spec: { kind: 'image', assetId: 'img-a1b2c3d4e5f67890', at: [80, 60], w: 840, h: 400, alt: 'A pond' },
+        }],
+        storyboard: [{
+          id: 'show-pond',
+          reveal: 'outline',
+          narration: 'Here is a pond.',
+          objectIds: ['pond'],
+        }],
+      },
+    });
+    const scripted = scriptedClient([imageDraft, imageDraft, imageDraft]);
+    const built = deps(scripted.client, [{ ok: true }]);
+    const lesson = await compileLesson(built.deps, { ...input, goal: 'ponds', objective: 'Name pond animals' });
+    expect(lesson.blueprint.mode).toBe('conversation_led');
+    expect(lesson.anchorScene).toBeNull();
+    expect(built.validated).toHaveLength(0);
+  });
+
   it('compiles a conversation-led lesson without any scene validation', async () => {
     const scripted = scriptedClient([authoredDraft({
       mode: 'conversation_led',

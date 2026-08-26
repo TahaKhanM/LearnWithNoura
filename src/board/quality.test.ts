@@ -25,6 +25,22 @@ describe('board quality budget', () => {
     });
   });
 
+  it('counts an illustration toward the item budget and rejects a second one in the same section', () => {
+    const one = applyOps(emptyScene, [
+      { op: 'add', id: 'pond', spec: { kind: 'image', assetId: 'img-a1b2c3d4e5f67890', at: [80, 60], w: 840, h: 420, alt: 'A pond' } },
+      { op: 'add', id: 'frog-label', spec: { kind: 'text', at: [200, 540], text: 'frog' } },
+    ], 'tutor', 'habitat').scene;
+    expect(evaluateBoardQuality(one)).toMatchObject({ accepted: true, itemCount: 2 });
+
+    const two = applyOps(one, [
+      { op: 'add', id: 'pond-2', spec: { kind: 'image', assetId: 'img-b1b2c3d4e5f67890', at: [80, 60], w: 400, h: 200, alt: 'Another pond' } },
+    ], 'tutor', 'habitat').scene;
+    expect(evaluateBoardQuality(two)).toMatchObject({
+      accepted: false,
+      reasons: expect.arrayContaining([expect.stringContaining('illustration_density')]),
+    });
+  });
+
   it('rejects a section that accumulates too many independent objects', () => {
     const ops = Array.from({ length: 31 }, (_, index) => ({
       op: 'add' as const, id: `item-${index}`, spec: { kind: 'line' as const, from: [30 + index, 100] as [number, number], to: [30 + index, 300] as [number, number] },

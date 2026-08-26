@@ -8,6 +8,17 @@ describe('runtime configuration', () => {
     expect(config.textModel).toBe('gpt-5.6-terra');
     expect(config.directorModel).toBe('gpt-5.6-terra');
     expect(config.directorReasoningEffort).toBe('medium');
+    expect(config.illustrationModel).toBe('gpt-image-1.5');
+    expect(config.illustrationsEnabled).toBe(true);
+  });
+
+  it('disables illustrations when NOURA_ILLUSTRATIONS=off and reads the image model', () => {
+    const config = readRuntimeConfig({
+      NOURA_ILLUSTRATIONS: 'off',
+      NOURA_ILLUSTRATION_MODEL: 'gpt-image-2',
+    });
+    expect(config.illustrationsEnabled).toBe(false);
+    expect(config.illustrationModel).toBe('gpt-image-2');
   });
 
   it('reads the Board Director model and effort from the environment', () => {

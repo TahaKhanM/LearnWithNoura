@@ -116,6 +116,33 @@ describe('REST object authorization', () => {
     expect(listEvents).not.toHaveBeenCalled();
   });
 
+  it('serves illustration bytes only to an authenticated parent', async () => {
+    const repo = new Repo(openTestDb());
+    repo.putBoardAsset({
+      id: 'img-a1b2c3d4e5f67890',
+      cacheKey: 'a'.repeat(64),
+      mime: 'image/png',
+      bytes: Uint8Array.from([137, 80, 78, 71]),
+      createdAt: 1,
+    });
+    const app = express();
+    app.use(express.json());
+    app.use('/api', createApi(repo, null, 'gpt-5.6-terra', {
+      parentId: (req) => typeof req.headers['x-test-parent'] === 'string' ? req.headers['x-test-parent'] : null,
+    }));
+
+    const unauthenticated = await request(app).get('/api/board-assets/img-a1b2c3d4e5f67890');
+    const unknownId = await request(app).get('/api/board-assets/not-an-id').set('x-test-parent', 'parent-a');
+    const ok = await request(app).get('/api/board-assets/img-a1b2c3d4e5f67890').set('x-test-parent', 'parent-a');
+
+    expect(unauthenticated.status).toBe(401);
+    expect(unknownId.status).toBe(404);
+    expect(ok.status).toBe(200);
+    expect(ok.headers['content-type']).toMatch(/image\/png/);
+    expect(ok.body).toBeInstanceOf(Buffer);
+    expect(Array.from(ok.body as Buffer).slice(0, 4)).toEqual([137, 80, 78, 71]);
+  });
+
   it('sets no-store before handled repository failures', async () => {
     const repo = new Repo(openTestDb());
     vi.spyOn(repo, 'getSessionForParent').mockRejectedValue(

@@ -5,6 +5,8 @@ import OpenAI from 'openai';
 import { WebSocketServer } from 'ws';
 import { createApi } from './api.js';
 import { createLiveBoardDirector } from './board/directorService.js';
+import { createLiveIllustrationService } from './board/illustrationService.js';
+import { illustrationStoreFromRepo } from './board/repoIllustrationStore.js';
 import { fallbackTurns } from './fallbackTutor.js';
 import { createHeadlessSceneValidator, type HeadlessSceneValidatorHandle } from './lesson/headlessSceneValidator.js';
 import { connectRealtimeProxy } from './realtime/proxy.js';
@@ -70,12 +72,23 @@ const compilation: LessonCompilationService = openai && !fixtureCompilerForced
 const directorHarness: HeadlessSceneValidatorHandle | null = openai && !fixtureCompilerForced && boardHarnessUrl
   ? createHeadlessSceneValidator({ harnessUrl: boardHarnessUrl })
   : null;
+const illustrationService = openai && runtimeConfig.illustrationsEnabled
+  ? createLiveIllustrationService({
+      client: openai,
+      imageModel: runtimeConfig.illustrationModel,
+      visionModel: runtimeConfig.directorModel,
+      visionEffort: runtimeConfig.directorReasoningEffort,
+      store: illustrationStoreFromRepo(repo),
+      enabled: true,
+    })
+  : null;
 const boardDirector = openai && directorHarness
   ? createLiveBoardDirector({
       client: openai,
       model: runtimeConfig.directorModel,
       reasoningEffort: runtimeConfig.directorReasoningEffort,
       harness: directorHarness,
+      illustrations: illustrationService,
     })
   : null;
 

@@ -13,7 +13,7 @@ const BOARD_W = 1000;
 const BOARD_H = 600;
 type Vec = [number, number];
 
-export const AUTHORED_ONLY_KINDS = ['arc', 'curve', 'asset', 'draggable', 'snapZone', 'tappable'] as const;
+export const AUTHORED_ONLY_KINDS = ['arc', 'curve', 'asset', 'draggable', 'snapZone', 'tappable', 'image'] as const;
 export type AuthoredOnlyKind = (typeof AUTHORED_ONLY_KINDS)[number];
 
 export type { DraggableSpec, SnapZoneSpec, TappableSpec } from './manipulativeSpecs';
@@ -49,8 +49,28 @@ export interface AssetSpec {
   label?: string;
 }
 
+/** Generated illustration background. assetId is server-issued, never a data-URL. */
+export interface ImageCrop {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+export interface ImageSpec {
+  kind: 'image';
+  assetId: string;
+  at: Vec;
+  w: number;
+  h: number;
+  crop?: ImageCrop;
+  alt: string;
+}
+
 const MAX_CURVE_POINTS = 31;
 const MAX_ASSET_LABEL = 40;
+const MAX_IMAGE_ALT = 200;
+const IMAGE_ASSET_ID = /^img-[a-z0-9]{8,40}$/;
 
 function num(v: unknown): number | null {
   return typeof v === 'number' && Number.isFinite(v) ? v : null;
@@ -138,9 +158,43 @@ export function validateAssetSpec(raw: Record<string, unknown>): AssetSpec | nul
   };
 }
 
+export function validateImageSpec(raw: Record<string, unknown>): ImageSpec | null {
+  const assetId = str(raw.assetId, 48);
+  const at = vec(raw.at);
+  const w = num(raw.w);
+  const h = num(raw.h);
+  const alt = str(raw.alt, MAX_IMAGE_ALT);
+  if (!assetId || !at || w === null || h === null || !alt) return null;
+  if (!IMAGE_ASSET_ID.test(assetId)) return null;
+  const spec: ImageSpec = {
+    kind: 'image',
+    assetId,
+    at,
+    w: clamp(w, 80, BOARD_W),
+    h: clamp(h, 40, BOARD_H),
+    alt,
+  };
+  if (raw.crop && typeof raw.crop === 'object') {
+    const cropRaw = raw.crop as Record<string, unknown>;
+    const cx = num(cropRaw.x);
+    const cy = num(cropRaw.y);
+    const cw = num(cropRaw.w);
+    const ch = num(cropRaw.h);
+    if (cx !== null && cy !== null && cw !== null && ch !== null && cw > 0 && ch > 0) {
+      spec.crop = {
+        x: clamp(cx, 0, BOARD_W),
+        y: clamp(cy, 0, BOARD_H),
+        w: clamp(cw, 8, BOARD_W),
+        h: clamp(ch, 8, BOARD_H),
+      };
+    }
+  }
+  return spec;
+}
+
 export function validateAuthoredKind(
   raw: Record<string, unknown>,
-): ArcSpec | CurveSpec | AssetSpec | DraggableSpec | SnapZoneSpec | TappableSpec | null {
+): ArcSpec | CurveSpec | AssetSpec | ImageSpec | DraggableSpec | SnapZoneSpec | TappableSpec | null {
   const manipulative = validateManipulativeKind(raw);
   if (manipulative) return manipulative;
   switch (raw.kind) {
@@ -150,6 +204,8 @@ export function validateAuthoredKind(
       return validateCurveSpec(raw);
     case 'asset':
       return validateAssetSpec(raw);
+    case 'image':
+      return validateImageSpec(raw);
     default:
       return null;
   }
@@ -162,6 +218,7 @@ export function isAuthoredOnlySpec(spec: { kind: string; style?: string }): bool
 
 const MANIPULATIVE_AUTHORED_PROPS = new Set([
   'at', 'selected', 'from', 'to', 'handle', 'tolerance', 'shape', 'numberlineId', 'w', 'h', 'r', 'size', 'label',
+  'assetId', 'alt', 'crop',
 ]);
 
 /** Fast-tier update props that would introduce authored-only vocabulary. */
@@ -175,6 +232,13 @@ export function authoredRejectionReason(kind: unknown, raw: Record<string, unkno
   if (kind === 'arc' && raw.from && raw.through && raw.to) return 'invalid or collinear three-point arc';
   if (kind === 'asset' && typeof raw.assetId === 'string' && !isBoardAssetId(raw.assetId)) {
     return `unknown asset "${raw.assetId}"`;
+  }
+  if (kind === 'image') {
+    if (typeof raw.assetId === 'string' && !IMAGE_ASSET_ID.test(raw.assetId.trim())) {
+      return 'image assetId must be a server-issued img-… id, never a URL or data-URL';
+    }
+    if (typeof raw.alt !== 'string' || !raw.alt.trim()) return 'image requires a non-empty alt description';
+    return 'invalid image spec';
   }
   return `invalid or unsupported spec for kind "${String(kind)}"`;
 }
