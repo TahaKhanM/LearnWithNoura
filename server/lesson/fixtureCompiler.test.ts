@@ -19,15 +19,16 @@ describe('fixture compiler', () => {
     expect(lesson.anchorScene?.storyboard.length).toBeGreaterThan(1);
   });
 
-  it('selects the conversation-led fixture and builds a generic one otherwise', () => {
+  it('selects the fraction number-line fixture for fraction goals', () => {
     const brave = compileFixtureLesson({ lessonKey: 'session-3', goal: 'talking about being brave' });
     expect(brave.blueprint.mode).toBe('conversation_led');
     expect(brave.anchorScene).toBeNull();
 
-    const generic = compileFixtureLesson({ lessonKey: 'session-4', goal: 'Fractions on a number line' });
-    expect(generic.blueprint.mode).toBe('conversation_led');
-    expect(generic.objective).toContain('Fractions');
-    expect(CompiledLessonSchema.parse(generic)).toBeTruthy();
+    const fractions = compileFixtureLesson({ lessonKey: 'session-4', goal: 'Fractions on a number line' });
+    expect(fractions.blueprint.mode).toBe('board_led');
+    expect(fractions.anchorScene?.ops.some((op) => op.op === 'add' && op.id === 'lesson-anchor-marker')).toBe(true);
+    expect(fractions.blueprint.stages.find((stage) => stage.checks?.[0]?.responseMode === 'manipulate')).toBeTruthy();
+    expect(CompiledLessonSchema.parse(fractions)).toBeTruthy();
   });
 
   it('is deterministic for the same inputs', () => {
