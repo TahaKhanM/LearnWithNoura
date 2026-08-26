@@ -228,13 +228,13 @@ test('package scripts keep deterministic reporting separate from live authorizat
 test('live journey readiness accepts an existing learner with no selection', () => {
   const script = readFileSync(scriptPath, 'utf8');
   const readySelector = script.match(
-    /await page\.waitForSelector\(\s*'([^']+)'/,
+    /page\.goto\(new URL\('\/', url\)\.href, \{ waitUntil: 'domcontentloaded' \}\);\s*await page\.waitForSelector\(\s*'([^']+)'/,
   )?.[1];
 
   assert.ok(readySelector, 'expected a home readiness selector');
   assert.ok(
-    readySelector.split(',').map((selector) => selector.trim()).includes('.home__children'),
-    'expected the always-visible learner list to mark the home as ready',
+    readySelector.split(',').map((selector) => selector.trim()).includes('.home__child'),
+    'expected a visible learner button to mark the existing-learner home as ready',
   );
 });
 

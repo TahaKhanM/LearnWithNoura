@@ -306,7 +306,7 @@ async function runLiveJourney(url, { textOnly, wavPath }, vercelProtectionBypass
 
     await page.goto(new URL('/', url).href, { waitUntil: 'domcontentloaded' });
     await page.waitForSelector(
-      '[data-testid=goal-input], .home__children, .home__add',
+      '[data-testid=goal-input], .home__child, .home__add',
       { timeout: 15_000 },
     );
     const navigatedOrigin = new URL(page.url()).origin;
