@@ -445,8 +445,12 @@ export class PostgresRepo implements DomainRepository, ManagedDomainRepository {
 
   private async initializeSchema(): Promise<void> {
     const appliedAt = Date.now();
+    try {
+      await this.pool.query('CREATE SCHEMA IF NOT EXISTS noura');
+    } catch {
+      // The role may already own `noura` without CREATE privilege on the database.
+    }
     const statements = [
-      'CREATE SCHEMA IF NOT EXISTS noura',
       `CREATE TABLE IF NOT EXISTS noura.schema_migrations (
         version INTEGER PRIMARY KEY,
         applied_at BIGINT NOT NULL
