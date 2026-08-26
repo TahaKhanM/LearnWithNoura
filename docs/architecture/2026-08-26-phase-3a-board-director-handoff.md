@@ -389,6 +389,7 @@ exactly once and leaves nothing pending.
 - `e40f4cb` — High 1 + High 2 (visual-request epoch + explicit abandonment).
 - `eddc82a` — Medium 3 + Low 6 + Low 8 (playback grace window + stable cue identity).
 - `f656545` — Low 7 (schema drift check).
+- `48483d3` — test-only typing fix (gated repo wrapper vs `DomainRepository`).
 
 All fourteen completion gates re-ran green at the final HEAD (exact
 results in the rework report).
