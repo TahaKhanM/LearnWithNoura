@@ -304,7 +304,8 @@ async function runLiveJourney(url, { textOnly, wavPath }, vercelProtectionBypass
       browserConsoleErrorCount += 1;
     });
 
-    await page.goto(new URL('/', url).href, { waitUntil: 'networkidle' });
+    await page.goto(new URL('/', url).href, { waitUntil: 'domcontentloaded' });
+    await page.waitForSelector('[data-testid=goal-input]', { timeout: 15_000 });
     const navigatedOrigin = new URL(page.url()).origin;
     mark('home_loaded');
     await page.screenshot({ path: `${shots}/e2e-home.png` });
