@@ -5,67 +5,72 @@ import { ResponseCueTimeline, type ResponseCue } from './responseTimeline';
 const identity: GenerationIdentity = { sessionId: 'session', connectionEpoch: 1, turnId: 'turn-1', generationId: 'generation-1' };
 const nextIdentity: GenerationIdentity = { ...identity, connectionEpoch: 2, turnId: 'turn-2', generationId: 'generation-2' };
 
-function caption(id: string, endSample: number, sequence: number, active = identity): ResponseCue {
-  return { kind: 'caption', cueId: id, responseId: 'response', startSample: Math.max(0, endSample - 100), endSample, sequence, identity: active, delta: id };
+function visual(id: string, sequence: number, responseId = 'response', active = identity): ResponseCue {
+  return { kind: 'visual', cueId: id, responseId, sequence, identity: active, ops: [], eventId: 1, semanticObjectId: 'fraction-scale', visualCueId: id };
 }
 
-function visual(id: string, endSample: number, sequence: number, active = identity): ResponseCue {
-  return { kind: 'visual', cueId: id, responseId: 'response', startSample: endSample, endSample, sequence, identity: active, ops: [], eventId: 1, semanticObjectId: 'fraction-scale', visualCueId: id };
+function semantic(id: string, sequence: number, responseId = 'response', active = identity): ResponseCue {
+  return { kind: 'semantic', cueId: id, responseId, sequence, identity: active, state: { activeConcept: id } };
 }
 
-describe('response sample timeline', () => {
-  it('releases normal and jittered caption/visual cues in heard-sample order', () => {
+function final(id: string, sequence: number, responseId = 'response', active = identity): ResponseCue {
+  return { kind: 'final', cueId: id, responseId, sequence, identity: active, text: 'Heard phrase.' };
+}
+
+describe('response cue timeline (playback-bound)', () => {
+  it('holds cues while their response is audibly playing and releases them in sequence order on stop', () => {
     const timeline = new ResponseCueTimeline();
-    timeline.enqueue(visual('visual-2', 400, 4));
-    timeline.enqueue(caption('caption-1', 100, 1));
-    timeline.enqueue(visual('visual-1', 200, 3));
-    timeline.enqueue(caption('caption-2', 200, 2));
-    expect(timeline.drain(() => 199).map((cue) => cue.cueId)).toEqual(['caption-1']);
-    expect(timeline.drain(() => 200).map((cue) => cue.cueId)).toEqual(['caption-2', 'visual-1']);
-    expect(timeline.drain(() => 400).map((cue) => cue.cueId)).toEqual(['visual-2']);
+    timeline.enqueue(visual('visual-2', 4));
+    timeline.enqueue(semantic('semantic-1', 1));
+    timeline.enqueue(visual('visual-1', 3));
+    timeline.enqueue(final('final-1', 5));
+    expect(timeline.drain((responseId) => responseId === 'response')).toEqual([]);
+    expect(timeline.pendingCount()).toBe(4);
+    expect(timeline.drain(() => false).map((cue) => cue.cueId))
+      .toEqual(['semantic-1', 'visual-1', 'visual-2', 'final-1']);
+    expect(timeline.pendingCount()).toBe(0);
   });
 
-  it('does not reveal during a thinking gap and rejects repeated cue IDs', () => {
+  it('releases cues for a response that is not playing while holding the playing one', () => {
     const timeline = new ResponseCueTimeline();
-    expect(timeline.enqueue(caption('phrase', 2_400, 1))).toBe(true);
-    expect(timeline.enqueue(caption('phrase', 2_400, 1))).toBe(false);
-    expect(timeline.drain(() => 0)).toEqual([]);
+    timeline.enqueue(visual('tool-first-plan', 1, 'tool-first'));
+    timeline.enqueue(visual('spoken-plan', 2, 'spoken'));
+    const released = timeline.drain((responseId) => responseId === 'spoken');
+    expect(released.map((cue) => cue.cueId)).toEqual(['tool-first-plan']);
+    expect(timeline.pendingCount('visual')).toBe(1);
+  });
+
+  it('rejects repeated cue IDs so replays and retries stay idempotent', () => {
+    const timeline = new ResponseCueTimeline();
+    expect(timeline.enqueue(visual('once', 1))).toBe(true);
+    expect(timeline.enqueue(visual('once', 1))).toBe(false);
     expect(timeline.pendingCount()).toBe(1);
   });
 
-  it('queues transcript_done until the final PCM sample has played', () => {
+  it('clears unreached visual, semantic, and final state synchronously on repeated interruption', () => {
     const timeline = new ResponseCueTimeline();
-    timeline.enqueue(caption('heard-phrase', 4_000, 1));
-    timeline.enqueue({ kind: 'final', cueId: 'final', responseId: 'response', startSample: 0, endSample: 24_000, sequence: 2, identity, text: 'Heard phrase. Future phrase.' });
-    expect(timeline.drain(() => 4_000).map((cue) => cue.kind)).toEqual(['caption']);
-    expect(timeline.drain(() => 23_999)).toEqual([]);
-    expect(timeline.drain(() => 24_000).map((cue) => cue.kind)).toEqual(['final']);
-  });
-
-  it('clears unreached drawing, caption, visual, and final state synchronously on repeated interruption', () => {
-    const timeline = new ResponseCueTimeline();
-    timeline.enqueue(caption('late-caption', 5_000, 1));
-    timeline.enqueue(visual('late-drawing', 6_000, 2));
-    timeline.enqueue({ kind: 'final', cueId: 'late-final', responseId: 'response', startSample: 0, endSample: 8_000, sequence: 3, identity, text: 'future' });
+    timeline.enqueue(semantic('late-state', 1));
+    timeline.enqueue(visual('late-drawing', 2));
+    timeline.enqueue(final('late-final', 3));
     expect(timeline.cancel(identity)).toHaveLength(3);
     expect(timeline.cancel(identity)).toEqual([]);
     expect(timeline.pendingCount()).toBe(0);
-    expect(timeline.enqueue(caption('stale-delta', 7_000, 4))).toBe(false);
+    expect(timeline.enqueue(visual('stale-cue', 4))).toBe(false);
   });
 
   it('rejects stale reconnect events while accepting the new generation', () => {
     const timeline = new ResponseCueTimeline();
-    timeline.enqueue(caption('old', 100, 1));
+    timeline.enqueue(visual('old', 1));
     timeline.cancel(identity);
-    expect(timeline.enqueue(caption('old-late', 200, 2))).toBe(false);
-    expect(timeline.enqueue(caption('new', 100, 1, nextIdentity))).toBe(true);
-    expect(timeline.drain(() => 100).map((cue) => cue.cueId)).toEqual(['new']);
+    expect(timeline.enqueue(visual('old-late', 2))).toBe(false);
+    expect(timeline.enqueue(visual('new', 1, 'response', nextIdentity))).toBe(true);
+    expect(timeline.drain(() => false).map((cue) => cue.cueId)).toEqual(['new']);
   });
 
   it('navigation cleanup removes every pending cue', () => {
     const timeline = new ResponseCueTimeline();
-    timeline.enqueue(caption('caption', 100, 1));
-    timeline.enqueue(visual('visual', 100, 2));
+    timeline.enqueue(semantic('state', 1));
+    timeline.enqueue(visual('visual', 2));
     expect(timeline.cancel()).toHaveLength(2);
     expect(timeline.pendingCount()).toBe(0);
   });

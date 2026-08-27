@@ -8,7 +8,7 @@ import type { CoordinatorContext } from './coordinatorContext.js';
 import { addBounded, identityForResponse } from './responseRegistry.js';
 import { refreshBoardInstructions } from './sessionConfig.js';
 import { conversationContext, learnerBoardOps, safeBoardImage } from './sessionRestore.js';
-import { isAllowedClientMetric, MAX_PENDING_VOICE_BARGE_INS, trustedClientResponseId } from './telemetryGlue.js';
+import { isAllowedClientMetric, MAX_PENDING_VOICE_BARGE_INS, recordClientPlaybackStop, trustedClientResponseId } from './telemetryGlue.js';
 import { requestModelResponse, setEndpointingEagerness } from './turnFloor.js';
 
 /** Dispatches one accepted browser envelope into the coordinator. */
@@ -25,13 +25,6 @@ export async function handleClientEvent(
 ): Promise<void> {
   const { state } = ctx;
   switch (message.type) {
-    case 'input_audio': {
-      if (typeof message.audio === 'string' && message.audio.length < 400_000) {
-        ctx.sendUpstream({ type: 'input_audio_buffer.append', audio: message.audio });
-      }
-      break;
-    }
-
     case 'start': {
       if (state.started) break;
       state.started = true;
@@ -98,8 +91,9 @@ export async function handleClientEvent(
     }
 
     case 'interrupt': {
-      // The client already stopped local audio; make the model stop too,
-      // and keep tool chains from restarting it while the child speaks.
+      // The client already stopped local playback (data-channel clear plus
+      // muting the remote track); make the model stop too, and keep tool
+      // chains from restarting it while the child speaks.
       const interruptedResponseId = state.activeResponseId;
       const interruptedIdentity = interruptedResponseId
         ? identityForResponse(ctx, interruptedResponseId)
@@ -120,6 +114,24 @@ export async function handleClientEvent(
       state.lessonState = reduceLesson(state.lessonState, { type: 'INTERRUPTED' });
       if (message.reason === 'voice') setEndpointingEagerness(ctx, 'high');
       ctx.sendUpstream({ type: 'response.cancel' });
+      // Truthful truncation: the browser reports how much it actually played
+      // before stopping; the conversation item is looked up server-side so
+      // the model's memory matches what the child heard.
+      const heardMs = typeof message.heardMs === 'number' && Number.isFinite(message.heardMs)
+        ? Math.max(0, Math.floor(message.heardMs))
+        : null;
+      const interruptedItemId = interruptedResponseId
+        ? state.responseItems.get(interruptedResponseId)
+        : undefined;
+      if (heardMs !== null && interruptedItemId) {
+        ctx.sendUpstream({
+          type: 'conversation.item.truncate',
+          item_id: interruptedItemId,
+          content_index: 0,
+          audio_end_ms: heardMs,
+        });
+        await ctx.repo.addEvent(ctx.sessionId, 'interrupted', { audio_end_ms: heardMs });
+      }
       if (recordVoiceGate) {
         ctx.telemetryWriter.submit({
           schemaVersion: TELEMETRY_SCHEMA_VERSION,
@@ -132,16 +144,10 @@ export async function handleClientEvent(
       break;
     }
 
-    case 'truncate': {
-      if (typeof message.item_id === 'string' && typeof message.audio_end_ms === 'number') {
-        ctx.sendUpstream({
-          type: 'conversation.item.truncate',
-          item_id: message.item_id,
-          content_index: 0,
-          audio_end_ms: Math.max(0, Math.floor(message.audio_end_ms)),
-        });
-        await ctx.repo.addEvent(ctx.sessionId, 'interrupted', { audio_end_ms: message.audio_end_ms });
-      }
+    case 'playback_boundary': {
+      // The browser relays output_audio_buffer boundaries from its WebRTC
+      // data channel; `stopped` carries the played duration for telemetry.
+      if (message.boundary === 'stopped') recordClientPlaybackStop(ctx, message);
       break;
     }
 

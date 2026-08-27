@@ -927,38 +927,7 @@ describe('realtime proxy response annotation', () => {
     expect(repo.listEvents(session.id)).toEqual([expect.objectContaining({ type: 'board_rejected' })]);
   });
 
-  it('maps raw transcript-before-audio events across the complete PCM segment', async () => {
-    vi.stubGlobal('WebSocket', FakeUpstream);
-    const repo = new Repo(openTestDb());
-    const child = repo.createChild('Maya', 10);
-    const session = repo.createSession(child.id, 'fractions');
-    const client = new FakeClient();
-    await connectRealtimeProxy(client as never, { apiKey: 'offline-fixture', model: 'gpt-realtime-2.1', repo, sessionId: session.id, createUpstream: () => new FakeUpstream() as never });
-    const active = { ...identity, sessionId: session.id };
-    client.emit('message', JSON.stringify(createRuntimeEvent(active, 0, 'hello', {})));
-
-    const upstream = FakeUpstream.latest;
-    upstream.emit({ type: 'response.created', response: { id: 'response-1' } });
-    upstream.emit({ type: 'response.output_audio_transcript.delta', response_id: 'response-1', item_id: 'item-1', delta: 'First phrase. ' });
-    upstream.emit({ type: 'response.output_audio_transcript.delta', response_id: 'response-1', item_id: 'item-1', delta: 'Future phrase?' });
-    upstream.emit({ type: 'response.output_audio.delta', response_id: 'response-1', item_id: 'item-1', delta: Buffer.alloc(480 * 2).toString('base64') });
-    await flushProxy();
-    expect(client.sent.filter((event) => event.type === 'transcript_delta')).toEqual([]);
-    upstream.emit({ type: 'response.output_audio.delta', response_id: 'response-1', item_id: 'item-1', delta: Buffer.alloc(23_520 * 2).toString('base64') });
-    upstream.emit({ type: 'response.output_audio.done', response_id: 'response-1' });
-    upstream.emit({ type: 'response.output_audio_transcript.done', response_id: 'response-1', transcript: 'First phrase. Future phrase?' });
-    upstream.emit({ type: 'response.done', response: { id: 'response-1', status: 'completed', output: [] } });
-    await flushProxy();
-
-    const deltas = client.sent.filter((event) => event.type === 'transcript_delta');
-    expect(deltas).toHaveLength(2);
-    expect(deltas[0].audioSampleOffsets?.end).toBeGreaterThan(480);
-    expect(deltas[1].audioSampleOffsets?.end).toBe(24_000);
-    const final = client.sent.find((event) => event.type === 'transcript_done');
-    expect(final?.audioSampleOffsets).toEqual({ start: 0, end: 24_000 });
-  });
-
-  it('drops sealed cues for an interrupted/cancelled response identity', async () => {
+  it('drops late transcript events for a cancelled response', async () => {
     vi.stubGlobal('WebSocket', FakeUpstream);
     const repo = new Repo(openTestDb());
     const child = repo.createChild('Maya', 10);
@@ -968,14 +937,15 @@ describe('realtime proxy response annotation', () => {
     client.emit('message', JSON.stringify(createRuntimeEvent({ ...identity, sessionId: session.id }, 0, 'hello', {})));
     const upstream = FakeUpstream.latest;
     upstream.emit({ type: 'response.created', response: { id: 'cancelled' } });
-    upstream.emit({ type: 'response.output_audio_transcript.delta', response_id: 'cancelled', delta: 'Never heard.' });
-    upstream.emit({ type: 'response.output_audio.delta', response_id: 'cancelled', item_id: 'item', delta: Buffer.alloc(2_400 * 2).toString('base64') });
     upstream.emit({ type: 'response.done', response: { id: 'cancelled', status: 'cancelled', output: [] } });
+    upstream.emit({ type: 'response.output_audio_transcript.delta', response_id: 'cancelled', item_id: 'item', delta: 'Never heard.' });
+    upstream.emit({ type: 'response.output_audio_transcript.done', response_id: 'cancelled', transcript: 'Never heard.' });
     await flushProxy();
     expect(client.sent.filter((event) => ['transcript_delta', 'transcript_done', 'board_ops', 'lesson_state'].includes(event.type))).toEqual([]);
+    expect(repo.listEvents(session.id).some((event) => event.type === 'tutor_said')).toBe(false);
   });
 
-  it('holds character/lesson semantic cues to the segment boundary whether tools arrive before or after audio', async () => {
+  it('sends lesson-state semantic cues immediately, tagged with their response for playback binding', async () => {
     vi.stubGlobal('WebSocket', FakeUpstream);
     const repo = new Repo(openTestDb());
     const child = repo.createChild('Maya', 10);
@@ -988,29 +958,14 @@ describe('realtime proxy response annotation', () => {
       rationale: 'fixture', microObjective: 'fraction comparison', strategy: 'shared scale', childFacingText: 'Compare the marks.',
       questionOrTask: 'Which is farther right?', taskId: 'task', proposedAction: 'question', semanticObjectId: 'fraction-scale',
     });
-    let currentResponse = 'tool-first';
-    const audio = () => upstream.emit({ type: 'response.output_audio.delta', response_id: currentResponse, item_id: 'item', delta: Buffer.alloc(2_400 * 2).toString('base64') });
-    upstream.emit({ type: 'response.created', response: { id: currentResponse } });
-    upstream.emit({ type: 'response.function_call_arguments.done', response_id: currentResponse, call_id: 'call-1', name: 'propose_teaching_move', arguments: move });
-    await flushProxy();
-    expect(client.sent.filter((event) => event.type === 'lesson_state')).toEqual([]);
-    audio();
-    upstream.emit({ type: 'response.done', response: { id: currentResponse, status: 'completed', output: [{ type: 'function_call' }] } });
-    await flushProxy();
-
-    currentResponse = 'audio-first';
-    upstream.emit({ type: 'response.created', response: { id: currentResponse } });
-    audio();
-    upstream.emit({ type: 'response.function_call_arguments.done', response_id: currentResponse, call_id: 'call-2', name: 'propose_teaching_move', arguments: move });
-    upstream.emit({ type: 'response.done', response: { id: currentResponse, status: 'completed', output: [{ type: 'function_call' }] } });
+    upstream.emit({ type: 'response.created', response: { id: 'move-response' } });
+    upstream.emit({ type: 'response.function_call_arguments.done', response_id: 'move-response', call_id: 'call-1', name: 'propose_teaching_move', arguments: move });
     await flushProxy();
 
     const states = client.sent.filter((event) => event.type === 'lesson_state');
-    expect(states).toHaveLength(2);
-    expect(states.map((event) => event.audioSampleOffsets)).toEqual([
-      { start: 2_400, end: 2_400 },
-      { start: 2_400, end: 2_400 },
-    ]);
+    expect(states).toHaveLength(1);
+    expect(states[0].providerResponseId).toBe('move-response');
+    expect('audioSampleOffsets' in states[0]).toBe(false);
   });
 });
 
@@ -1924,12 +1879,6 @@ describe('realtime proxy telemetry', () => {
     const upstream = FakeUpstream.latest;
     upstream.emit({ type: 'response.created', response: { id: 'response-usage' } });
     upstream.emit({
-      type: 'response.output_audio.delta',
-      response_id: 'response-usage',
-      item_id: 'item-usage',
-      delta: Buffer.alloc(12_000 * 2).toString('base64'),
-    });
-    upstream.emit({
       type: 'response.done',
       response: {
         id: 'response-usage',
@@ -1952,6 +1901,11 @@ describe('realtime proxy telemetry', () => {
         },
       },
     });
+    await flushProxy();
+    // The browser reports how long the WebRTC track actually played.
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 1, 'playback_boundary', {
+      response_id: 'response-usage', boundary: 'stopped', playedMs: 500,
+    })));
     await flushProxy();
 
     const metrics = repo.listEvents(session.id).filter((event) => event.type === 'metric');
@@ -2001,20 +1955,10 @@ describe('realtime proxy telemetry', () => {
       sessionId: session.id,
       createUpstream: () => new FakeUpstream() as never,
     });
-    client.emit('message', JSON.stringify(createRuntimeEvent(
-      { ...identity, sessionId: session.id },
-      0,
-      'hello',
-      {},
-    )));
+    const active = { ...identity, sessionId: session.id };
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 0, 'hello', {})));
     const upstream = FakeUpstream.latest;
     upstream.emit({ type: 'response.created', response: { id: 'response-partial-usage' } });
-    upstream.emit({
-      type: 'response.output_audio.delta',
-      response_id: 'response-partial-usage',
-      item_id: 'item-partial-usage',
-      delta: Buffer.alloc(120 * 2).toString('base64'),
-    });
     upstream.emit({
       type: 'response.done',
       response: {
@@ -2027,6 +1971,10 @@ describe('realtime proxy telemetry', () => {
         },
       },
     });
+    await flushProxy();
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 1, 'playback_boundary', {
+      response_id: 'response-partial-usage', boundary: 'stopped', playedMs: 5,
+    })));
     await flushProxy();
 
     const metrics = repo.listEvents(session.id).filter((event) => event.type === 'metric');
@@ -2056,12 +2004,6 @@ describe('realtime proxy telemetry', () => {
     const active = { ...identity, sessionId: session.id };
     client.emit('message', JSON.stringify(createRuntimeEvent(active, 0, 'hello', {})));
     const upstream = FakeUpstream.latest;
-    upstream.emit({
-      type: 'response.output_audio.delta',
-      response_id: 'unknown-response',
-      item_id: 'unknown-item',
-      delta: Buffer.alloc(2_400 * 2).toString('base64'),
-    });
     upstream.emit({
       type: 'response.done',
       response: {
@@ -2136,12 +2078,12 @@ describe('realtime proxy telemetry', () => {
     expect(currentStart?.type).toBe('session_started');
     expect(boundedQueries).toEqual([(currentStart?.id ?? 0) - 1]);
 
-    client.emit('message', JSON.stringify(createRuntimeEvent(active, 1, 'input_audio', {
-      audio: Buffer.from('later-client-input').toString('base64'),
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 1, 'user_text', {
+      text: 'later client input', idempotencyKey: 'later-client-input',
     })));
     await flushProxy();
     expect(upstream.sent.map((raw) => JSON.parse(raw) as { type: string }))
-      .toContainEqual(expect.objectContaining({ type: 'input_audio_buffer.append' }));
+      .toContainEqual(expect.objectContaining({ type: 'conversation.item.create' }));
 
     history.resolve(baseRepo.listEvents(session.id, 5_000, (currentStart?.id ?? 1) - 1));
     await flushProxy();
@@ -2177,14 +2119,14 @@ describe('realtime proxy telemetry', () => {
     await flushProxy();
 
     client.emit('message', JSON.stringify(createRuntimeEvent(active, 1, 'interrupt', { reason: 'voice' })));
-    client.emit('message', JSON.stringify(createRuntimeEvent(active, 2, 'input_audio', {
-      audio: Buffer.from('later-after-cancel').toString('base64'),
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 2, 'user_text', {
+      text: 'later after cancel', idempotencyKey: 'later-after-cancel',
     })));
     await flushProxy();
 
     const sent = upstream.sent.map((raw) => JSON.parse(raw) as { type: string });
     expect(sent).toContainEqual(expect.objectContaining({ type: 'response.cancel' }));
-    expect(sent).toContainEqual(expect.objectContaining({ type: 'input_audio_buffer.append' }));
+    expect(sent).toContainEqual(expect.objectContaining({ type: 'conversation.item.create' }));
     metricWrite.resolve(1);
   });
 
@@ -2269,14 +2211,14 @@ describe('realtime proxy telemetry', () => {
     const upstream = FakeUpstream.latest;
     client.emit('message', JSON.stringify(createRuntimeEvent(active, 0, 'hello', {})));
     upstream.emit({ type: 'response.created', response: { id: 'response-duplicate-done' } });
-    upstream.emit({
-      type: 'response.output_audio.delta',
-      response_id: 'response-duplicate-done',
-      item_id: 'item-duplicate-done',
-      delta: Buffer.alloc(2_400 * 2).toString('base64'),
-    });
     await flushProxy();
     client.emit('message', JSON.stringify(createRuntimeEvent(active, 1, 'interrupt', { reason: 'voice' })));
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 2, 'playback_boundary', {
+      response_id: 'response-duplicate-done', boundary: 'stopped', playedMs: 100,
+    })));
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 3, 'playback_boundary', {
+      response_id: 'response-duplicate-done', boundary: 'stopped', playedMs: 100,
+    })));
     await flushProxy();
 
     const done = {

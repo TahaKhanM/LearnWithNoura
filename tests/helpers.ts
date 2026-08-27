@@ -67,5 +67,75 @@ export async function installFakeRealtime(page: Page) {
     }
     Object.defineProperty(window, 'WebSocket', { configurable: true, value: FakeRealtimeSocket });
     Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: { getUserMedia: async () => { throw new DOMException('Synthetic microphone denial', 'NotAllowedError'); } } });
+
+    // The voice plane's offline stand-in: no WebRTC, no provider. Tests drive
+    // playback boundaries explicitly to gate board reveals and task delivery.
+    type PlaybackBoundary = 'started' | 'stopped' | 'cleared';
+    interface VoiceHandlers {
+      onPlaybackBoundary(boundary: PlaybackBoundary, responseId: string | null, playedMs: number): void;
+      onStateChange(state: string): void;
+    }
+    class FakePageVoice {
+      state = 'new';
+      micMuted = false;
+      clears = 0;
+      private active: string | null = null;
+      private playedSoFarMs = 0;
+      constructor(private handlers: VoiceHandlers) {}
+      connect(): Promise<void> {
+        this.state = 'connected';
+        this.handlers.onStateChange('connected');
+        return Promise.resolve();
+      }
+      setMicMuted(muted: boolean): void { this.micMuted = muted; }
+      playingResponseId(): string | null { return this.active; }
+      playedMs(): number { return this.active ? this.playedSoFarMs : 0; }
+      stopPlayback(): number {
+        const heard = this.playedMs();
+        this.active = null;
+        this.playedSoFarMs = 0;
+        this.clears += 1;
+        return heard;
+      }
+      readMicEnergy(): number { return 0; }
+      readVoiceEnergy(): number { return this.active ? 0.4 : 0; }
+      close(): void {
+        this.state = 'closed';
+        this.handlers.onStateChange('closed');
+      }
+      emitBoundary(boundary: PlaybackBoundary, responseId: string | null, playedMs = 0): void {
+        if (boundary === 'started') {
+          this.active = responseId;
+          this.playedSoFarMs = 0;
+        } else {
+          this.active = null;
+          this.playedSoFarMs = 0;
+        }
+        this.handlers.onPlaybackBoundary(boundary, responseId, playedMs);
+      }
+    }
+    (window as typeof window & { __nouraVoiceTransport?: (input: { handlers: VoiceHandlers }) => FakePageVoice }).__nouraVoiceTransport = (input) => {
+      const voice = new FakePageVoice(input.handlers);
+      (window as typeof window & { __nouraFakeVoice?: FakePageVoice }).__nouraFakeVoice = voice;
+      return voice;
+    };
   });
+}
+
+/** Marks a response as audibly playing in the page's fake voice transport. */
+export async function startFakePlayback(page: Page, responseId: string) {
+  await page.evaluate((id) => {
+    const voice = (window as typeof window & { __nouraFakeVoice?: { emitBoundary(boundary: string, responseId: string | null, playedMs?: number): void } }).__nouraFakeVoice;
+    if (!voice) throw new Error('fake voice transport not installed');
+    voice.emitBoundary('started', id);
+  }, responseId);
+}
+
+/** Finishes fake playback, releasing the cues bound to that response. */
+export async function stopFakePlayback(page: Page, responseId: string, playedMs = 1_000) {
+  await page.evaluate(([id, played]) => {
+    const voice = (window as typeof window & { __nouraFakeVoice?: { emitBoundary(boundary: string, responseId: string | null, playedMs?: number): void } }).__nouraFakeVoice;
+    if (!voice) throw new Error('fake voice transport not installed');
+    voice.emitBoundary('stopped', id, Number(played));
+  }, [responseId, playedMs] as const);
 }

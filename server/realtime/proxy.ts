@@ -15,9 +15,10 @@ import {
 } from '../session/telemetryRepository.js';
 import type { ClientCueOptional, CoordinatorContext, CoordinatorState } from './coordinatorContext.js';
 import type { GenerationIdentity } from '../../shared/runtimeProtocol.js';
+import { latestVoiceCallId, type SidebandRegistry } from './callBootstrap.js';
 import { handleClientEvent } from './clientEvents.js';
 import { handleUpstreamEvent, type UpstreamEvent } from './upstreamEvents.js';
-import { initialSessionUpdate, REALTIME_URL } from './sessionConfig.js';
+import { initialSessionUpdate, realtimeCallUrl, REALTIME_URL } from './sessionConfig.js';
 
 /**
  * Bridges one browser lesson to one OpenAI Realtime session.
@@ -44,6 +45,8 @@ export interface ProxyOptions {
   sessionId: string;
   log?: (line: string) => void;
   createUpstream?: (url: string, apiKey: string) => NodeWebSocket;
+  /** Adopts the sideband a call bootstrap opened moments earlier. */
+  sidebandRegistry?: SidebandRegistry;
   /** How long to wait for the browser to compile-check a full visual plan. */
   preflightTimeoutMs?: number;
   /** How long to wait for the browser to confirm a staged plan is visible. */
@@ -74,9 +77,10 @@ function createCoordinatorState(goal: string): CoordinatorState {
     pendingClientPayloads: [],
     responseIdentities: new Map(),
     responseTranscript: new Map(),
-    responseSegments: new Map(),
+    responseItems: new Map(),
     pendingVoiceBargeInResponses: new Set(),
     terminalTelemetryResponses: new Set(),
+    reportedPlaybackResponses: new Set(),
     pendingBoardOps: new Map(),
     activeResponseId: null,
     speechInProgress: false,
@@ -126,8 +130,23 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
     goal: session.goal,
   });
 
-  const upstreamUrl = `${REALTIME_URL}?model=${encodeURIComponent(model)}`;
-  const upstream = options.createUpstream?.(upstreamUrl, apiKey) ?? new NodeWebSocket(upstreamUrl, {
+  // The audio plane is a browser ↔ provider WebRTC call created by the
+  // bootstrap endpoint; this connection is the control sideband attached to
+  // that same call. A bootstrap moments ago left its configured socket in
+  // the registry; otherwise (reconnect, another process) reattach by the
+  // persisted call id. The injectable createUpstream keeps a model-scoped
+  // URL available so the offline provider harness needs no call fixture.
+  const callId = await latestVoiceCallId(repo, sessionId);
+  const adopted = callId && options.sidebandRegistry
+    ? options.sidebandRegistry.adopt(sessionId, callId)
+    : null;
+  const upstreamUrl = callId
+    ? realtimeCallUrl(callId)
+    : `${REALTIME_URL}?model=${encodeURIComponent(model)}`;
+  if (!adopted && !options.createUpstream && !callId) {
+    throw new Error(`Session ${sessionId} has no bootstrapped voice call to attach.`);
+  }
+  const upstream = adopted?.socket ?? options.createUpstream?.(upstreamUrl, apiKey) ?? new NodeWebSocket(upstreamUrl, {
     headers: { Authorization: `Bearer ${apiKey}` },
   });
 
@@ -290,9 +309,13 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
     forceTerminal,
   });
 
-  upstream.onopen = () => {
-    ctx.sendUpstream(initialSessionUpdate(ctx));
-  };
+  // An adopted sideband was already configured by the bootstrap; a fresh
+  // (re)attachment applies the full session configuration idempotently.
+  if (!adopted) {
+    upstream.onopen = () => {
+      ctx.sendUpstream(initialSessionUpdate(ctx));
+    };
+  }
 
   function handleUpstreamMessage(raw: { data: unknown }): void {
     if (!acceptingFrames) return;
@@ -315,6 +338,11 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
   }
 
   upstream.onmessage = handleUpstreamMessage;
+  // Provider events that arrived between bootstrap and this connection were
+  // buffered by the registry; replay them in order before any live frame.
+  if (adopted) {
+    for (const raw of adopted.buffered) handleUpstreamMessage({ data: raw });
+  }
 
   upstream.onerror = () => {
     ctx.sendClient({ type: 'error', message: 'Lost the connection to the tutor voice service.' });

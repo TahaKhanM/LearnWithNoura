@@ -6,11 +6,10 @@ import {
   type GenerationIdentity,
   type RuntimeEventEnvelope,
 } from '../../shared/runtimeProtocol';
-import { AudioOut } from './audioOut';
-import { AudioIn } from './audioIn';
 import { GenerationScope } from './generationScope';
 import { ResponseCueTimeline, type ResponseCue } from './responseTimeline';
 import { VoiceInterruptionGate } from './voiceInterruption';
+import { WebRtcVoiceTransport, type PlaybackBoundary, type VoiceTransport, type VoiceTransportHandlers } from './voiceTransport';
 import type { LearnerBoardAnalysis } from '../../shared/learnerBoard';
 import { DeliveredTaskSchema, type DeliveredTask } from '../../shared/lessonTurn';
 import {
@@ -69,15 +68,22 @@ export interface SessionSnapshot {
 interface QueuedAsk { text: string; idempotencyKey: string; identity: GenerationIdentity }
 export interface VisualCueMetadata { responseId?: string; visualCueId?: string; semanticObjectId?: string; groupLabel?: string; checkpoint?: string; replacesGroup?: string }
 
+export type VoiceTransportFactory = (input: {
+  sessionId: string;
+  lessonCapability: string;
+  handlers: VoiceTransportHandlers;
+}) => VoiceTransport;
+
 type Listener = () => void;
 const CONNECT_TIMEOUT_MS = 8_000;
 const MAX_RECONNECTS = 2;
 const MAX_PENDING_UNCORRELATED_METRICS = 64;
+const MIC_ENERGY_POLL_MS = 40;
 
 export class RealtimeSession {
   private ws: WebSocket | null = null;
-  private audioOut = new AudioOut();
-  private audioIn: AudioIn | null = null;
+  private voice: VoiceTransport | null = null;
+  private readonly injectedVoiceTransport: VoiceTransportFactory | null;
   private readonly sessionId: string;
   private listeners = new Set<Listener>();
   private snapshot: SessionSnapshot;
@@ -121,14 +127,15 @@ export class RealtimeSession {
   onVisualPreflight: (ops: BoardOp[], semanticGroupId?: string, replacesGroup?: string) => Promise<{ accepted: boolean; reasons: string[] }> | { accepted: boolean; reasons: string[] } = () => ({ accepted: true, reasons: [] });
   onEnded: () => void = () => {};
 
-  constructor(sessionId: string) {
+  constructor(sessionId: string, injectedVoiceTransport?: VoiceTransportFactory) {
     this.sessionId = sessionId;
+    this.injectedVoiceTransport = injectedVoiceTransport ?? null;
     this.lessonCapability = window.sessionStorage.getItem(`noura.lessonCapability.${sessionId}`);
     const identity = this.makeIdentity();
     this.scope = new GenerationScope(identity);
     this.gate = new RuntimeEventGate(identity);
     this.snapshot = {
-      phase: 'connecting', identity, micAvailable: AudioIn.supported(), micDenied: false, muted: false,
+      phase: 'connecting', identity, micAvailable: WebRtcVoiceTransport.supported(), micDenied: false, muted: false,
       captions: [], lessonState: {}, evidenceCount: 0, lastEvidence: null,
       micEnergy: 0, voiceEnergy: 0, error: null, metrics: {}, task: null, submission: null,
     };
@@ -197,17 +204,49 @@ export class RealtimeSession {
     this.connectionEpoch += 1;
     this.activateScope(false);
     this.update({ phase: 'connecting' });
-    await this.audioOut.unlock();
-    this.audioOut.onPlaybackEnd = () => this.handlePlaybackEnd();
-    if (AudioIn.supported()) {
-      this.audioIn = new AudioIn({
-        onChunk: (audio) => this.send('input_audio', { audio }),
-        onEnergy: (rms) => this.handleMicEnergy(rms),
-      });
-      try { await this.audioIn.start(); }
-      catch { this.audioIn = null; this.update({ micDenied: true, micAvailable: false }); }
-    }
+    await this.connectVoice();
     this.connect();
+  }
+
+  /**
+   * The audio plane: a direct browser ↔ provider WebRTC call bootstrapped
+   * through the server (which holds the API key and attaches its control
+   * sideband before answering). Voice being unavailable — denied microphone,
+   * missing WebRTC, bootstrap failure — never blocks the lesson: the envelope
+   * still carries captions, board, and typed turns.
+   */
+  private async connectVoice(): Promise<void> {
+    if (!this.lessonCapability) return;
+    // Playwright installs a page-level fake transport so E2E suites run
+    // fully offline; vitest injects one through the constructor.
+    const pageFactory = (window as Window & { __nouraVoiceTransport?: VoiceTransportFactory }).__nouraVoiceTransport ?? null;
+    const injected = this.injectedVoiceTransport ?? pageFactory;
+    if (!injected && !WebRtcVoiceTransport.supported()) return;
+    const handlers: VoiceTransportHandlers = {
+      onPlaybackBoundary: (boundary, responseId, playedMs) => this.handlePlaybackBoundary(boundary, responseId, playedMs),
+      onStateChange: (state) => {
+        if (state === 'failed' && !this.closedByUs && this.snapshot.phase !== 'ended') {
+          this.update({ error: 'Noura’s voice connection was lost — captions continue below.' });
+        }
+      },
+    };
+    const factory = injected ?? ((input) => new WebRtcVoiceTransport(input));
+    const voice = factory({
+      sessionId: this.sessionId,
+      lessonCapability: this.lessonCapability,
+      handlers,
+    });
+    // Attach before negotiating so playback boundaries arriving during the
+    // handshake already bind cues; a failed connect detaches again.
+    this.voice = voice;
+    try {
+      await voice.connect();
+    } catch (error) {
+      this.voice = null;
+      voice.close();
+      const denied = error instanceof DOMException && error.name === 'NotAllowedError';
+      this.update(denied ? { micDenied: true, micAvailable: false } : { micAvailable: false });
+    }
   }
 
   private connect(): void {
@@ -237,7 +276,9 @@ export class RealtimeSession {
     ws.onclose = () => {
       if (this.closedByUs || this.ws !== ws) return;
       this.cancelGeneration('transport closed');
-      this.audioOut.stop();
+      // The envelope is control-plane only: the WebRTC voice call keeps
+      // playing through a reconnect (Vercel recycles the function around
+      // 300 s), so a sideband blip never cuts Noura off mid-sentence.
       if (this.reconnectAttempts < MAX_RECONNECTS) {
         this.reconnectAttempts += 1;
         this.connectionEpoch += 1;
@@ -246,6 +287,9 @@ export class RealtimeSession {
         this.update({ phase: 'reconnecting' });
         this.scope.timeout(() => this.connect(), 600 * this.reconnectAttempts);
       } else {
+        // Terminal degradation to captions-only: silence any residual voice
+        // buffered on the call so REST answers do not overlap stale audio.
+        this.voice?.stopPlayback();
         this.generationCounter += 1;
         this.activateScope(false);
         this.update({ phase: 'fallback', error: 'Voice connection lost — continuing in captions-only text mode.' });
@@ -263,9 +307,8 @@ export class RealtimeSession {
     this.pendingUncorrelatedMetrics = [];
     this.pendingClientMetricGapCount = 0;
     this.cancelGeneration('lesson ended');
-    this.audioIn?.stop();
-    this.audioIn = null;
-    void this.audioOut.close();
+    this.voice?.close();
+    this.voice = null;
     this.ws?.close();
     this.ws = null;
     this.update({ phase: 'ended' });
@@ -302,7 +345,7 @@ export class RealtimeSession {
   }
 
   setMuted(muted: boolean): void {
-    if (this.audioIn) this.audioIn.muted = muted;
+    this.voice?.setMicMuted(muted);
     if (muted) this.voiceInterruption.reset();
     this.update({ muted });
   }
@@ -408,6 +451,11 @@ export class RealtimeSession {
     }
   }
 
+  private pollMicEnergy(): void {
+    if (!this.voice) return;
+    this.handleMicEnergy(this.voice.readMicEnergy());
+  }
+
   private handleMicEnergy(rms: number): void {
     const nextEnergy = this.snapshot.micEnergy * 0.7 + rms * 0.3;
     if (Math.abs(nextEnergy - this.snapshot.micEnergy) > 0.002) this.update({ micEnergy: nextEnergy });
@@ -424,7 +472,8 @@ export class RealtimeSession {
   }
 
   private tutorTurnActive(): boolean {
-    return this.audioOut.speaking || ['speaking', 'thinking'].includes(this.snapshot.phase);
+    if (this.voice?.playingResponseId()) return true;
+    return ['speaking', 'thinking'].includes(this.snapshot.phase);
   }
 
   private confirmVoiceInterruption(): void {
@@ -442,23 +491,83 @@ export class RealtimeSession {
 
   private interruptLocally(reason: 'voice' | 'text' | 'server' | 'interaction'): void {
     const identity = this.scope.identity;
+    const interruptedResponseId = this.voice?.playingResponseId() ?? this.currentResponseId;
     this.markResponseDead(this.currentResponseId);
     const detectorAt = performance.now();
-    const heard = this.audioOut.stop();
+    const heardMs = this.voice?.stopPlayback() ?? 0;
     const detectorToStopScheduledMs = Math.max(0, performance.now() - detectorAt);
     this.timeline.cancel(identity);
     this.phraseBuffers.clear();
     this.voiceInterruption.reset();
     this.interruptionPending = true;
     this.cancelGeneration(`interrupted by ${reason}`);
-    for (const item of heard) {
-      if (!item.fullyPlayed) this.sendUsingIdentity(identity, 'truncate', { item_id: item.itemId, audio_end_ms: item.heardMs });
-    }
     if (reason !== 'server') {
       this.cancelRequestedAt = performance.now();
-      this.sendUsingIdentity(identity, 'interrupt', { reason });
+      // heardMs lets the server truncate the interrupted conversation item
+      // truthfully; the played duration also feeds the telemetry pipeline.
+      this.sendUsingIdentity(identity, 'interrupt', {
+        reason,
+        ...(heardMs > 0 ? { heardMs } : {}),
+      });
+      if (heardMs > 0 && interruptedResponseId) {
+        this.sendUsingIdentity(identity, 'playback_boundary', {
+          response_id: interruptedResponseId, boundary: 'stopped', playedMs: heardMs,
+        });
+      }
     }
     this.update({ phase: 'listening', metrics: { ...this.snapshot.metrics, detectorToStopScheduledMs } });
+  }
+
+  /**
+   * A real playback boundary from the provider's WebRTC data channel. This is
+   * the clock the cue timeline binds to, and — relayed over the envelope — the
+   * server's source for audio-duration telemetry.
+   */
+  private handlePlaybackBoundary(boundary: PlaybackBoundary, responseId: string | null, playedMs: number): void {
+    if (!this.scope.active || this.snapshot.phase === 'ended') return;
+    // Only stop boundaries are relayed: they carry the heard duration the
+    // server's audio-output telemetry needs. Starts are a local clock signal.
+    if (boundary !== 'started' && responseId && !this.deadResponses.has(responseId)) {
+      this.send('playback_boundary', {
+        response_id: responseId,
+        boundary: 'stopped',
+        ...(playedMs > 0 ? { playedMs } : {}),
+      });
+    }
+    if (boundary === 'started' && responseId && !this.deadResponses.has(responseId)) {
+      this.currentResponseId = responseId;
+      this.responseTiming.noteNarrationScheduled(responseId, performance.now());
+      if (this.speechStoppedAt > 0) {
+        const speechEndToFirstAudioMs = Math.max(0, Math.round(performance.now() - this.speechStoppedAt));
+        this.emitMetric({
+          schemaVersion: TELEMETRY_SCHEMA_VERSION,
+          name: 'speech_end_to_first_audio',
+          unit: 'ms',
+          value: speechEndToFirstAudioMs,
+        });
+        this.speechStoppedAt = 0;
+        this.update({ metrics: { ...this.snapshot.metrics, speechEndToFirstAudioMs } });
+      }
+      if (!this.firstAudioSeen && this.askAt > 0) {
+        this.firstAudioSeen = true;
+        const askToFirstAudioMs = Math.round(performance.now() - this.askAt);
+        this.askAt = 0;
+        this.emitMetric({
+          schemaVersion: TELEMETRY_SCHEMA_VERSION,
+          name: 'ask_to_first_audio',
+          unit: 'ms',
+          value: askToFirstAudioMs,
+        });
+        this.update({ metrics: { ...this.snapshot.metrics, askToFirstAudioMs } });
+      }
+      if (this.snapshot.phase !== 'speaking') this.update({ phase: 'speaking' });
+      return;
+    }
+    // stopped / cleared: the child has heard everything buffered for this
+    // response — release the cues that were waiting on it.
+    this.releasePending();
+    for (const pendingResponseId of this.phraseBuffers.keys()) this.flushPhrase(pendingResponseId, false);
+    if (this.snapshot.phase === 'speaking') this.update({ phase: 'listening', voiceEnergy: 0 });
   }
 
   private handleServer(raw: unknown): void {
@@ -531,87 +640,34 @@ export class RealtimeSession {
         }
         break;
       }
-      case 'audio': {
-        if (typeof message.delta !== 'string') break;
-        const responseId = String(message.response_id ?? '');
-        if (this.deadResponses.has(responseId)) break;
-        this.currentResponseId = responseId;
-        const itemId = typeof message.item_id === 'string' ? message.item_id : null;
-        if (this.speechStoppedAt > 0) {
-          const speechEndToFirstAudioMs = Math.max(0, Math.round(performance.now() - this.speechStoppedAt));
-          this.emitMetric({
-            schemaVersion: TELEMETRY_SCHEMA_VERSION,
-            name: 'speech_end_to_first_audio',
-            unit: 'ms',
-            value: speechEndToFirstAudioMs,
-          });
-          this.speechStoppedAt = 0;
-          this.update({ metrics: { ...this.snapshot.metrics, speechEndToFirstAudioMs } });
-        }
-        if (!this.firstAudioSeen && this.askAt > 0) {
-          this.firstAudioSeen = true;
-          const askToFirstAudioMs = Math.round(performance.now() - this.askAt);
-          this.askAt = 0;
-          this.emitMetric({
-            schemaVersion: TELEMETRY_SCHEMA_VERSION,
-            name: 'ask_to_first_audio',
-            unit: 'ms',
-            value: askToFirstAudioMs,
-          });
-          this.update({ metrics: { ...this.snapshot.metrics, askToFirstAudioMs } });
-        }
-        const receipt = this.audioOut.append(responseId, itemId, message.delta);
-        if (receipt) {
-          this.responseTiming.noteNarrationScheduled(
-            responseId,
-            performance.now() + receipt.playbackStartsInMs,
-          );
-        }
-        if (this.snapshot.phase !== 'speaking') this.update({ phase: 'speaking' });
-        break;
-      }
       case 'transcript_delta': {
+        // Captions release on arrival: the transcript is the fastest honest
+        // signal that Noura is answering, and phrase smoothing keeps the
+        // reading pace natural. Playback boundaries own visuals and tasks.
         if (typeof message.delta !== 'string') break;
         const responseId = String(message.response_id ?? '');
         if (this.deadResponses.has(responseId)) break;
-        if (!envelope.audioSampleOffsets) break;
-        this.timeline.enqueue({
-          kind: 'caption', cueId: envelope.eventId, responseId,
-          startSample: envelope.audioSampleOffsets.start, endSample: envelope.audioSampleOffsets.end,
-          sequence: envelope.sequence, identity: envelope, delta: message.delta,
-        });
+        this.pushTranscriptDelta(responseId, message.delta);
         break;
       }
       case 'transcript_done': {
         const responseId = String(message.response_id ?? '');
         const text = String(message.text ?? '').trim();
-        if (text && !this.deadResponses.has(responseId) && envelope.audioSampleOffsets) this.timeline.enqueue({
-          kind: 'final', cueId: envelope.eventId, responseId,
-          startSample: envelope.audioSampleOffsets.start, endSample: envelope.audioSampleOffsets.end,
-          sequence: envelope.sequence, identity: envelope, text,
-        });
+        if (text && !this.deadResponses.has(responseId)) {
+          this.timeline.enqueue({
+            kind: 'final', cueId: envelope.eventId, responseId,
+            sequence: envelope.sequence, identity: envelope, text,
+          });
+          this.releasePending();
+        }
         break;
       }
       case 'board_ops': {
         if (!Array.isArray(message.ops)) break;
         const responseId = String(message.response_id ?? '');
         if (this.deadResponses.has(responseId)) break;
-        if (!envelope.audioSampleOffsets) {
-          if (envelope.idempotencyKey) this.releaseOps({
-            kind: 'visual', cueId: envelope.eventId, responseId,
-            startSample: 0, endSample: 0, sequence: envelope.sequence, identity: envelope,
-            ops: message.ops as BoardOp[], eventId: typeof message.event_id === 'number' ? message.event_id : null,
-            visualCueId: envelope.visualCueId, semanticObjectId: envelope.semanticObjectId,
-            groupLabel: typeof message.groupLabel === 'string' ? message.groupLabel : undefined,
-            checkpoint: typeof message.checkpoint === 'string' ? message.checkpoint : undefined,
-            replacesGroup: typeof message.replacesGroup === 'string' ? message.replacesGroup : undefined,
-            idempotencyKey: envelope.idempotencyKey,
-          });
-          break;
-        }
         this.timeline.enqueue({
           kind: 'visual', cueId: envelope.eventId, responseId,
-          startSample: envelope.audioSampleOffsets.start, endSample: envelope.audioSampleOffsets.end,
           sequence: envelope.sequence, identity: envelope,
           ops: message.ops as BoardOp[], eventId: typeof message.event_id === 'number' ? message.event_id : null,
           visualCueId: envelope.visualCueId, semanticObjectId: envelope.semanticObjectId,
@@ -620,6 +676,7 @@ export class RealtimeSession {
           replacesGroup: typeof message.replacesGroup === 'string' ? message.replacesGroup : undefined,
           idempotencyKey: envelope.idempotencyKey,
         });
+        this.releasePending();
         break;
       }
       case 'user_transcript': {
@@ -665,13 +722,13 @@ export class RealtimeSession {
         const parsed = DeliveredTaskSchema.safeParse(message.task);
         if (!parsed.success) break;
         const responseId = String(message.response_id ?? '');
-        if (envelope.audioSampleOffsets && responseId && !this.deadResponses.has(responseId)) {
+        if (responseId && !this.deadResponses.has(responseId)) {
           this.timeline.enqueue({
             kind: 'task', cueId: envelope.eventId, responseId,
-            startSample: envelope.audioSampleOffsets.start, endSample: envelope.audioSampleOffsets.end,
             sequence: envelope.sequence, identity: envelope, task: parsed.data,
           });
-        } else this.update({ task: parsed.data });
+          this.releasePending();
+        } else if (!responseId) this.update({ task: parsed.data });
         break;
       }
       case 'board_submission_ack': {
@@ -702,14 +759,14 @@ export class RealtimeSession {
       case 'lesson_state': {
         const state = (message.state ?? {}) as LessonState;
         const responseId = String(message.response_id ?? envelope.providerResponseId ?? '');
-        if (envelope.audioSampleOffsets && responseId) {
+        if (responseId && !this.deadResponses.has(responseId)) {
           this.timeline.enqueue({
             kind: 'semantic', cueId: envelope.eventId, responseId,
-            startSample: envelope.audioSampleOffsets.start, endSample: envelope.audioSampleOffsets.end,
             sequence: envelope.sequence, identity: envelope, state: { ...state },
             semanticObjectId: envelope.semanticObjectId,
           });
-        } else this.update({ lessonState: { ...this.snapshot.lessonState, ...state } });
+          this.releasePending();
+        } else if (!responseId) this.update({ lessonState: { ...this.snapshot.lessonState, ...state } });
         break;
       }
       case 'evidence': {
@@ -723,7 +780,9 @@ export class RealtimeSession {
           this.update({ metrics: { ...this.snapshot.metrics, providerCancelConfirmationMs } });
           this.cancelRequestedAt = 0;
         }
-        if (!this.audioOut.speaking && this.timeline.pendingCount() === 0 && this.snapshot.phase === 'speaking') this.update({ phase: 'listening' });
+        this.releasePending();
+        const playing = this.voice?.playingResponseId() ?? null;
+        if (playing === null && this.timeline.pendingCount() === 0 && this.snapshot.phase === 'speaking') this.update({ phase: 'listening' });
         break;
       }
       case 'safe_question': {
@@ -751,15 +810,15 @@ export class RealtimeSession {
 
   private releasePending(): void {
     if (!this.scope.active) return;
-    const energy = this.audioOut.currentEnergy();
+    const energy = this.voice?.readVoiceEnergy() ?? 0;
     if (Math.abs(energy - this.snapshot.voiceEnergy) > 0.01) this.update({ voiceEnergy: energy });
-    for (const cue of this.timeline.drain((responseId) => this.audioOut.playedSamples(responseId))) this.releaseCue(cue);
+    const playing = this.voice?.playingResponseId() ?? null;
+    for (const cue of this.timeline.drain((responseId) => responseId === playing)) this.releaseCue(cue);
   }
 
   private releaseCue(cue: ResponseCue): void {
     if (!this.isCurrent(cue.identity) || this.deadResponses.has(cue.responseId)) return;
-    if (cue.kind === 'caption') this.pushTranscriptDelta(cue.responseId, cue.delta);
-    else if (cue.kind === 'visual') this.releaseOps(cue);
+    if (cue.kind === 'visual') this.releaseOps(cue);
     else if (cue.kind === 'semantic') this.update({ lessonState: { ...this.snapshot.lessonState, ...(cue.state as LessonState) } });
     else if (cue.kind === 'task') {
       this.update({ task: cue.task });
@@ -797,21 +856,13 @@ export class RealtimeSession {
             body: JSON.stringify({ eventId: item.eventId, idempotencyKey: item.idempotencyKey, ...item.identity }),
           }).catch(() => undefined);
         } else {
-          // Realtime cues reached this method only after their audio boundary
-          // was heard. If the learner interrupts during draw-on animation,
-          // finish and acknowledge the visible checkpoint using the new
-          // client identity so it remains replayable after refresh.
+          // The checkpoint is on screen. If the learner interrupts during the
+          // draw-on animation, finish and acknowledge the visible checkpoint
+          // using the new client identity so it stays replayable.
           this.send('ops_shown', { event_id: item.eventId });
         }
       }
     });
-  }
-
-  private handlePlaybackEnd(): void {
-    if (!this.scope.active) return;
-    this.releasePending();
-    for (const responseId of this.phraseBuffers.keys()) this.flushPhrase(responseId, false);
-    if (this.snapshot.phase === 'speaking') this.update({ phase: 'listening', voiceEnergy: 0 });
   }
 
   private pushTranscriptDelta(responseId: string, delta: string, force = false): void {
@@ -895,6 +946,7 @@ export class RealtimeSession {
     this.outboundSequence = 0;
     this.responseTiming.resetGeneration();
     this.scope.interval(() => this.releasePending(), 50);
+    this.scope.interval(() => this.pollMicEnergy(), MIC_ENERGY_POLL_MS);
     this.update?.({ identity });
     const activationReason = this.interruptionPending ? 'interruption' : 'ordinary';
     this.interruptionPending = false;

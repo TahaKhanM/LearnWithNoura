@@ -6,6 +6,7 @@ import { WebSocketServer } from 'ws';
 import { createApi } from './api.js';
 import { fallbackTurns } from './fallbackTutor.js';
 import { connectRealtimeProxy } from './realtime/proxy.js';
+import { bootstrapVoiceCall, SidebandRegistry } from './realtime/callBootstrap.js';
 import {
   ProxyLifecycleRegistry,
   ShutdownGate,
@@ -68,6 +69,51 @@ app.get(['/version', '/api/version'], (_req, res) => {
 });
 
 app.use('/api', createApi(repo, openai, runtimeConfig.textModel, security.apiSecurity(), runtimeConfig));
+
+const sidebandRegistry = new SidebandRegistry();
+
+app.post('/api/webrtc-call', express.text({ type: 'application/sdp', limit: '256kb' }), async (req, res) => {
+  // The browser's WebRTC SDP offer for the lesson's audio plane. The API key
+  // stays here: the server creates the provider call, configures its control
+  // sideband, and returns only the SDP answer.
+  if (!process.env.OPENAI_API_KEY) {
+    res.status(503).json({ error: 'Noura is not configured for tutor responses.' });
+    return;
+  }
+  const sessionId = typeof req.query.session === 'string' ? req.query.session : '';
+  const offerSdp = typeof req.body === 'string' ? req.body : '';
+  if (!sessionId || !offerSdp.startsWith('v=')) {
+    res.status(400).json({ error: 'A session id and an SDP offer are required.' });
+    return;
+  }
+  const session = await repo.getSession(sessionId);
+  if (!session) { res.status(404).json({ error: 'Unknown session.' }); return; }
+  if (session.status !== 'active') { res.status(409).json({ error: 'This lesson has ended and is read-only.' }); return; }
+  const authorization = req.headers.authorization ?? '';
+  const capability = authorization.startsWith('Lesson ') ? authorization.slice(7) : null;
+  const claim = security.verifyLessonCapability(capability, sessionId);
+  if (!claim || claim.childId !== session.childId) {
+    res.status(403).json({ error: 'Lesson capability is invalid or expired.' });
+    return;
+  }
+  const ip = req.socket.remoteAddress ?? 'unknown';
+  if (!security.allow(`webrtc:${claim.parentId}:${sessionId}:${ip}`, 10, 60_000)) {
+    res.status(429).json({ error: 'Too many voice call attempts. Try again shortly.' });
+    return;
+  }
+  const result = await bootstrapVoiceCall({
+    repo,
+    apiKey: process.env.OPENAI_API_KEY,
+    model: runtimeConfig.realtimeModel,
+    registry: sidebandRegistry,
+    log: (line) => console.log(`[realtime] ${line}`),
+  }, { sessionId, offerSdp });
+  if (!result.ok) {
+    res.status(result.status).json({ error: result.error });
+    return;
+  }
+  res.status(200).type('application/sdp').send(result.answerSdp);
+});
 
 app.post('/api/fallback-turn', async (req, res) => {
   if (!openai) {
@@ -312,6 +358,7 @@ server.on('upgrade', async (request, socket, head) => {
       repo,
       telemetryRepo: repository.telemetry,
       sessionId,
+      sidebandRegistry,
       log: (line) => console.log(`[realtime] ${line}`),
       onLifecycle: (lifecycle) => proxyLifecycles.register(lifecycle),
     }).catch(() => {

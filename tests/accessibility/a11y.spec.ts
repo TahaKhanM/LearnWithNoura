@@ -51,15 +51,17 @@ test('actual Lesson start, listening, thinking, speaking/visual, reduced-motion 
 
   await page.evaluate(() => {
     const socket = (window as typeof window & { __nouraFakeSocket: { emit(type: string, payload: Record<string, unknown>, optional?: Record<string, unknown>): void } }).__nouraFakeSocket;
-    const bytes = String.fromCharCode(...new Uint8Array(48_000));
-    socket.emit('audio', { response_id: 'fake-response', item_id: 'fake-item', delta: btoa(bytes) }, { audioSampleOffsets: { start: 0, end: 24_000 }, providerResponseId: 'fake-response', providerItemId: 'fake-item' });
-    socket.emit('transcript_delta', { response_id: 'fake-response', item_id: 'fake-item', delta: 'Which fraction is farther right?' }, { audioSampleOffsets: { start: 0, end: 2_400 }, providerResponseId: 'fake-response' });
+    // Cues arrive before playback starts (the tool-first flow), so they
+    // render immediately; the playback boundary then marks Speaking.
+    socket.emit('transcript_delta', { response_id: 'fake-response', item_id: 'fake-item', delta: 'Which fraction is farther right?' }, { providerResponseId: 'fake-response' });
     socket.emit('board_ops', {
       response_id: 'fake-response', groupLabel: 'Fraction number line', checkpoint: 'outline',
       ops: [{ op: 'add', id: 'fraction-scale-main', spec: { kind: 'numberline', at: [130, 300], w: 740, min: 0, max: 1, step: 0.1, marks: [{ value: 0.5, label: '1/2', color: 'blue' }, { value: 0.75, label: '3/4', color: 'red' }] } }],
-    }, { audioSampleOffsets: { start: 0, end: 0 }, visualCueId: 'fraction-outline', semanticObjectId: 'fraction-scale', providerResponseId: 'fake-response' });
-    socket.emit('lesson_state', { state: { activeConcept: 'fraction comparison', phase: 'VISUALIZE', activeSemanticObjectId: 'fraction-scale', characterAttentionTarget: 'semantic_object' } }, { audioSampleOffsets: { start: 0, end: 0 }, semanticObjectId: 'fraction-scale' });
-    socket.emit('transcript_done', { response_id: 'fake-response', text: 'Which fraction is farther right?' }, { audioSampleOffsets: { start: 0, end: 24_000 }, providerResponseId: 'fake-response' });
+    }, { visualCueId: 'fraction-outline', semanticObjectId: 'fraction-scale', providerResponseId: 'fake-response' });
+    socket.emit('lesson_state', { state: { activeConcept: 'fraction comparison', phase: 'VISUALIZE', activeSemanticObjectId: 'fraction-scale', characterAttentionTarget: 'semantic_object' } }, { semanticObjectId: 'fraction-scale' });
+    socket.emit('transcript_done', { response_id: 'fake-response', text: 'Which fraction is farther right?' }, { providerResponseId: 'fake-response' });
+    const voice = (window as typeof window & { __nouraFakeVoice: { emitBoundary(boundary: string, responseId: string | null, playedMs?: number): void } }).__nouraFakeVoice;
+    voice.emitBoundary('started', 'fake-response');
   });
   await expect(page.getByText('Speaking')).toBeVisible();
   await expect(page.locator('[data-item="fraction-scale-main"]')).toBeVisible();
@@ -76,18 +78,21 @@ test('actual Lesson start, listening, thinking, speaking/visual, reduced-motion 
   await assertNoSeriousAxe(page);
 
   await page.evaluate(() => {
+    // The narration finished: later cues for this response render on arrival.
+    const voice = (window as typeof window & { __nouraFakeVoice: { emitBoundary(boundary: string, responseId: string | null, playedMs?: number): void } }).__nouraFakeVoice;
+    voice.emitBoundary('stopped', 'fake-response', 2_000);
     const socket = (window as typeof window & { __nouraFakeSocket: { emit(type: string, payload: Record<string, unknown>, optional?: Record<string, unknown>): void } }).__nouraFakeSocket;
     socket.emit('board_ops', {
       response_id: 'fake-response', groupLabel: 'Fraction number line',
       ops: [{ op: 'add', id: 'fraction-context-note', spec: { kind: 'text', at: [380, 170], text: 'Compare on one scale' } }],
-    }, { audioSampleOffsets: { start: 0, end: 0 }, visualCueId: 'fraction-context', semanticObjectId: 'fraction-scale', providerResponseId: 'fake-response' });
+    }, { visualCueId: 'fraction-context', semanticObjectId: 'fraction-scale', providerResponseId: 'fake-response' });
   });
   await expect(page.locator('[data-item="fraction-context-note"]')).toBeVisible();
 
   const highlightOfferedAt = await page.evaluate(() => {
     const socket = (window as typeof window & { __nouraFakeSocket: { emit(type: string, payload: Record<string, unknown>, optional?: Record<string, unknown>): void } }).__nouraFakeSocket;
     const start = performance.now();
-    socket.emit('board_ops', { response_id: 'fake-response', ops: [{ op: 'highlight', id: 'fraction-scale-main' }] }, { audioSampleOffsets: { start: 0, end: 0 }, visualCueId: 'fraction-highlight', semanticObjectId: 'fraction-scale', providerResponseId: 'fake-response' });
+    socket.emit('board_ops', { response_id: 'fake-response', ops: [{ op: 'highlight', id: 'fraction-scale-main' }] }, { visualCueId: 'fraction-highlight', semanticObjectId: 'fraction-scale', providerResponseId: 'fake-response' });
     return start;
   });
   await expect(page.locator('.avatar[data-attention-target="focused_object"]')).toBeVisible();
@@ -95,8 +100,12 @@ test('actual Lesson start, listening, thinking, speaking/visual, reduced-motion 
   expect(await page.evaluate((start) => performance.now() - start, highlightOfferedAt)).toBeLessThanOrEqual(200);
 
   await page.evaluate(() => {
+    // A cue for a response that is still audibly playing waits for its
+    // playback boundary — the learner's interruption below must drop it.
+    const voice = (window as typeof window & { __nouraFakeVoice: { emitBoundary(boundary: string, responseId: string | null, playedMs?: number): void } }).__nouraFakeVoice;
+    voice.emitBoundary('started', 'fake-response');
     const socket = (window as typeof window & { __nouraFakeSocket: { emit(type: string, payload: Record<string, unknown>, optional?: Record<string, unknown>): void } }).__nouraFakeSocket;
-    socket.emit('board_ops', { response_id: 'fake-response', ops: [{ op: 'add', id: 'fraction-scale-future', spec: { kind: 'text', at: [500, 180], text: 'future label' } }] }, { audioSampleOffsets: { start: 20_000, end: 24_000 }, visualCueId: 'future-cue', semanticObjectId: 'fraction-scale', providerResponseId: 'fake-response' });
+    socket.emit('board_ops', { response_id: 'fake-response', ops: [{ op: 'add', id: 'fraction-scale-future', spec: { kind: 'text', at: [500, 180], text: 'future label' } }] }, { visualCueId: 'future-cue', semanticObjectId: 'fraction-scale', providerResponseId: 'fake-response' });
   });
   await page.getByRole('button', { name: 'Draw on the board' }).click();
   const boardBox = await page.locator('.board__svg').boundingBox();
