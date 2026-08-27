@@ -22,6 +22,7 @@ function runScript(args, env = {}) {
       ...process.env,
       NOURA_BASE_URL: 'https://smoke.example.test',
       NOURA_PROVIDER_REPORTED_COST_USD: '',
+      NOURA_VERCEL_PROTECTION_BYPASS: '',
       ...env,
     },
     timeout: 10_000,
@@ -38,6 +39,57 @@ function parseReport(result) {
   assert.equal(result.stderr, '', `expected no stderr or stack trace:\n${result.stderr}`);
   assert.notEqual(result.stdout, '', 'expected a structured JSON report');
   return JSON.parse(result.stdout);
+}
+
+function createFakeBrowserContext() {
+  const cookies = [];
+  return {
+    cookies,
+    routeCalls: 0,
+    async addCookies(values) {
+      cookies.push(...structuredClone(values));
+    },
+    async route() {
+      this.routeCalls += 1;
+      throw new Error('Browser routing must not be used for the bypass.');
+    },
+  };
+}
+
+function createFakeFetch(responses) {
+  const calls = [];
+  const fetchImpl = async (url, options) => {
+    calls.push({ options: structuredClone(options), url });
+    if (responses.length === 0) throw new Error('Unexpected fetch call.');
+    const response = responses.shift();
+    if (response instanceof Error) throw response;
+    return response;
+  };
+  fetchImpl.calls = calls;
+  return fetchImpl;
+}
+
+function fakeResponse(status, { location = null, setCookies = [] } = {}) {
+  return {
+    status,
+    headers: {
+      get(name) {
+        if (name.toLowerCase() === 'location') return location;
+        if (name.toLowerCase() === 'set-cookie') return setCookies[0] ?? null;
+        return null;
+      },
+      getSetCookie() {
+        return [...setCookies];
+      },
+    },
+  };
+}
+
+async function bootstrapBypass(context, baseUrl, bypass, fetchImpl) {
+  const { bootstrapVercelProtectionBypass } = await import(
+    './e2e-live-vercel-bypass.mjs'
+  );
+  await bootstrapVercelProtectionBypass(context, baseUrl, bypass, fetchImpl);
 }
 
 function assertStructuredFailure(result, expectedCode, expectedRequiredDurations = [
@@ -158,6 +210,7 @@ test('help is immediate offline success and documents explicit authorization', (
   assert.equal(result.status, 0, result.stdout || result.stderr);
   assert.equal(result.stderr, '');
   assert.match(result.stdout, /npm run e2e:live -- --authorized-live-run/);
+  assert.match(result.stdout, /NOURA_VERCEL_PROTECTION_BYPASS/);
   assert.match(result.stdout, /does not verify live provider evidence/i);
 });
 
@@ -172,6 +225,19 @@ test('package scripts keep deterministic reporting separate from live authorizat
   assert.doesNotMatch(packageJson.scripts['e2e:live'], /authorized-live-run/);
 });
 
+test('live journey readiness accepts an existing learner with no selection', () => {
+  const script = readFileSync(scriptPath, 'utf8');
+  const readySelector = script.match(
+    /page\.goto\(new URL\('\/', url\)\.href, \{ waitUntil: 'domcontentloaded' \}\);\s*await page\.waitForSelector\(\s*'([^']+)'/,
+  )?.[1];
+
+  assert.ok(readySelector, 'expected a home readiness selector');
+  assert.ok(
+    readySelector.split(',').map((selector) => selector.trim()).includes('.home__child'),
+    'expected a visible learner button to mark the existing-learner home as ready',
+  );
+});
+
 test('non-fixture execution fails closed without explicit authorization', () => {
   const result = runScript(['--text-only'], {
     NOURA_BASE_URL: 'http://127.0.0.1:1',
@@ -180,6 +246,16 @@ test('non-fixture execution fails closed without explicit authorization', () => 
   const report = assertStructuredFailure(result, 'authorization_required');
   assert.equal(report.preparationStatus, 'live_smoke_not_authorized');
   assert.equal(report.liveProviderEvidenceVerified, false);
+});
+
+test('authorization_required wins over an invalid ambient Vercel bypass', () => {
+  const result = runScript(['--text-only'], {
+    NOURA_BASE_URL: 'https://preview.vercel.app',
+    NOURA_VERCEL_PROTECTION_BYPASS: `${'S'.repeat(31)}!`,
+  });
+
+  const report = assertStructuredFailure(result, 'authorization_required');
+  assert.equal(report.preparationStatus, 'live_smoke_not_authorized');
 });
 
 test('offline fixture reports telemetry without claiming live provider verification', () => {
@@ -213,6 +289,19 @@ test('offline fixture reports telemetry without claiming live provider verificat
     report.requiresAuthorizedLiveVerification.map((entry) => entry.id),
     ['acoustic_onset_to_silence', 'target_hardware', 'live_provider_run'],
   );
+});
+
+test('offline fixture ignores an invalid ambient Vercel bypass', () => {
+  const secret = `${'S'.repeat(31)}!`;
+  const fixturePath = writeFixture('ambient-bypass-ignored', telemetryFixture());
+  const result = runScript(['--report-fixture', fixturePath, '--text-only'], {
+    NOURA_VERCEL_PROTECTION_BYPASS: secret,
+  });
+
+  assert.equal(result.status, 0, result.stdout || result.stderr);
+  const report = parseReport(result);
+  assert.equal(report.preparationStatus, 'offline_fixture');
+  assert.equal(result.stdout.includes(secret), false);
 });
 
 test('argument, URL, cost, and fixture errors use the structured failure report', async (t) => {
@@ -671,4 +760,338 @@ test('authorized WAV preparation validates the file before browser launch', () =
       'tutor_audio_output_duration',
     ],
   );
+});
+
+test('authorized live preparation rejects an invalid Vercel protection bypass', () => {
+  const result = runScript([
+    join(fixtureDirectory, 'missing-audio.wav'),
+    '--authorized-live-run',
+  ], {
+    NOURA_VERCEL_PROTECTION_BYPASS: 'A'.repeat(31),
+  });
+
+  const report = assertStructuredFailure(
+    result,
+    'invalid_vercel_protection_bypass',
+    [
+      'speech_end_to_response_started',
+      'speech_end_to_first_audio',
+      'tutor_audio_output_duration',
+    ],
+  );
+  assert.equal(
+    report.error.message,
+    'NOURA_VERCEL_PROTECTION_BYPASS must be exactly 32 ASCII alphanumeric characters.',
+  );
+});
+
+test('invalid Vercel protection bypass is never disclosed', () => {
+  const secret = `${'S'.repeat(31)}!`;
+  const result = runScript([
+    join(fixtureDirectory, 'missing-audio.wav'),
+    '--authorized-live-run',
+  ], {
+    NOURA_VERCEL_PROTECTION_BYPASS: secret,
+  });
+
+  const report = assertStructuredFailure(
+    result,
+    'invalid_vercel_protection_bypass',
+    [
+      'speech_end_to_response_started',
+      'speech_end_to_first_audio',
+      'tutor_audio_output_duration',
+    ],
+  );
+  assert.equal(
+    report.error.message,
+    'NOURA_VERCEL_PROTECTION_BYPASS must be exactly 32 ASCII alphanumeric characters.',
+  );
+  assert.equal(result.stdout.includes(secret), false);
+  assert.equal(result.stderr.includes(secret), false);
+  assert.equal(JSON.stringify(report).includes(secret), false);
+});
+
+test('valid Vercel protection bypass accepts exact and subdomain vercel.app targets', async (t) => {
+  const secret = `${'aB3'.repeat(10)}aB`;
+  for (const baseUrl of ['https://vercel.app', 'https://preview.vercel.app']) {
+    await t.test(baseUrl, () => {
+      const result = runScript([
+        join(fixtureDirectory, 'missing-audio.wav'),
+        '--authorized-live-run',
+      ], {
+        NOURA_BASE_URL: baseUrl,
+        NOURA_VERCEL_PROTECTION_BYPASS: secret,
+      });
+
+      assertStructuredFailure(
+        result,
+        'wav_file_unavailable',
+        [
+          'speech_end_to_response_started',
+          'speech_end_to_first_audio',
+          'tutor_audio_output_duration',
+        ],
+      );
+      assert.equal(result.stdout.includes(secret), false);
+      assert.equal(result.stderr.includes(secret), false);
+    });
+  }
+});
+
+test('33-character alphanumeric Vercel protection bypass is rejected', () => {
+  const result = runScript([
+    join(fixtureDirectory, 'missing-audio.wav'),
+    '--authorized-live-run',
+  ], {
+    NOURA_VERCEL_PROTECTION_BYPASS: 'A'.repeat(33),
+  });
+
+  assertStructuredFailure(
+    result,
+    'invalid_vercel_protection_bypass',
+    [
+      'speech_end_to_response_started',
+      'speech_end_to_first_audio',
+      'tutor_audio_output_duration',
+    ],
+  );
+});
+
+test('configured bypass requires an HTTPS vercel.app target', async (t) => {
+  const secret = `${'aB3'.repeat(10)}aB`;
+  const targets = [
+    'http://preview.vercel.app',
+    'https://preview.vercel.app.evil.test',
+    'https://evilvercel.app',
+  ];
+
+  for (const baseUrl of targets) {
+    await t.test(baseUrl, () => {
+      const result = runScript([
+        join(fixtureDirectory, 'missing-audio.wav'),
+        '--authorized-live-run',
+      ], {
+        NOURA_BASE_URL: baseUrl,
+        NOURA_VERCEL_PROTECTION_BYPASS: secret,
+      });
+      const report = assertStructuredFailure(
+        result,
+        'invalid_vercel_protection_target',
+        [
+          'speech_end_to_response_started',
+          'speech_end_to_first_audio',
+          'tutor_audio_output_duration',
+        ],
+      );
+      assert.equal(
+        report.error.message,
+        'NOURA_VERCEL_PROTECTION_BYPASS requires an HTTPS vercel.app deployment URL.',
+      );
+      assert.equal(result.stdout.includes(secret), false);
+    });
+  }
+});
+
+test('bypass bootstrap fetches the exact base URL and injects only the Vercel cookie', async () => {
+  const context = createFakeBrowserContext();
+  const baseUrl = new URL('https://preview.vercel.app');
+  const secret = `${'aB3'.repeat(10)}aB`;
+  const fetchImpl = createFakeFetch([
+    fakeResponse(200, {
+      setCookies: [
+        'unrelated=value; Path=/',
+        '_vercel_jwt=host-bound-token; Path=/; Secure; HttpOnly; SameSite=Lax',
+      ],
+    }),
+  ]);
+
+  await bootstrapBypass(context, baseUrl, secret, fetchImpl);
+
+  assert.deepEqual(fetchImpl.calls, [{
+    url: 'https://preview.vercel.app/',
+    options: {
+      headers: {
+        'x-vercel-protection-bypass': secret,
+        'x-vercel-set-bypass-cookie': 'true',
+      },
+      redirect: 'manual',
+    },
+  }]);
+  assert.deepEqual(context.cookies, [{
+    httpOnly: true,
+    name: '_vercel_jwt',
+    sameSite: 'Lax',
+    secure: true,
+    value: 'host-bound-token',
+    url: 'https://preview.vercel.app',
+  }]);
+  assert.equal(context.routeCalls, 0);
+});
+
+test('bypass bootstrap accepts a cookie from a self-redirect response', async () => {
+  const context = createFakeBrowserContext();
+  const baseUrl = new URL('https://preview.vercel.app');
+  const fetchImpl = createFakeFetch([
+    fakeResponse(302, {
+      location: '/',
+      setCookies: ['_vercel_jwt=self-redirect-token; Path=/; Secure; HttpOnly'],
+    }),
+  ]);
+
+  await bootstrapBypass(
+    context,
+    baseUrl,
+    `${'aB3'.repeat(10)}aB`,
+    fetchImpl,
+  );
+
+  assert.equal(fetchImpl.calls.length, 1);
+  assert.deepEqual(context.cookies, [{
+    httpOnly: true,
+    name: '_vercel_jwt',
+    sameSite: 'Lax',
+    secure: true,
+    value: 'self-redirect-token',
+    url: 'https://preview.vercel.app',
+  }]);
+  assert.equal(context.routeCalls, 0);
+});
+
+test('bypass bootstrap follows only bounded same-origin redirects', async () => {
+  const context = createFakeBrowserContext();
+  const baseUrl = new URL('https://preview.vercel.app');
+  const secret = `${'aB3'.repeat(10)}aB`;
+  const fetchImpl = createFakeFetch([
+    fakeResponse(307, { location: '/bootstrap-step' }),
+    fakeResponse(302, {
+      location: 'https://preview.vercel.app/ready',
+    }),
+    fakeResponse(204, {
+      setCookies: ['_vercel_jwt=redirect-token; Path=/; Secure; HttpOnly'],
+    }),
+  ]);
+
+  await bootstrapBypass(context, baseUrl, secret, fetchImpl);
+
+  assert.deepEqual(
+    fetchImpl.calls.map(({ url }) => url),
+    [
+      'https://preview.vercel.app/',
+      'https://preview.vercel.app/bootstrap-step',
+      'https://preview.vercel.app/ready',
+    ],
+  );
+  assert(
+    fetchImpl.calls.every(({ options }) =>
+      options.redirect === 'manual'
+      && options.headers['x-vercel-protection-bypass'] === secret
+      && options.headers['x-vercel-set-bypass-cookie'] === 'true'
+    ),
+  );
+  assert.deepEqual(context.cookies, [{
+    httpOnly: true,
+    name: '_vercel_jwt',
+    sameSite: 'Lax',
+    secure: true,
+    value: 'redirect-token',
+    url: 'https://preview.vercel.app',
+  }]);
+  assert.equal(context.routeCalls, 0);
+});
+
+test('bypass bootstrap never follows an off-origin redirect', async () => {
+  const context = createFakeBrowserContext();
+  const baseUrl = new URL('https://preview.vercel.app');
+  const secret = `${'aB3'.repeat(10)}aB`;
+  const fetchImpl = createFakeFetch([
+    fakeResponse(302, { location: 'https://attacker.example.test/capture' }),
+  ]);
+
+  await assert.rejects(
+    bootstrapBypass(context, baseUrl, secret, fetchImpl),
+    (error) => {
+      assert.equal(error.message, 'The Vercel protection bypass bootstrap failed.');
+      assert.equal(error.message.includes(secret), false);
+      return true;
+    },
+  );
+  assert.equal(fetchImpl.calls.length, 1);
+  assert.deepEqual(context.cookies, []);
+  assert.equal(context.routeCalls, 0);
+});
+
+test('bypass bootstrap fails closed without disclosing response data', async (t) => {
+  const secret = `${'aB3'.repeat(10)}aB`;
+  const cases = [
+    {
+      name: 'network error',
+      responses: [new Error(secret)],
+    },
+    {
+      name: 'missing cookie',
+      responses: [fakeResponse(200)],
+    },
+    {
+      name: 'malformed allowlisted cookie',
+      responses: [fakeResponse(200, {
+        setCookies: [`_vercel_jwt=${secret} invalid; Path=/`],
+      })],
+    },
+    {
+      name: 'non-success terminal response',
+      responses: [fakeResponse(403, {
+        setCookies: [`unrelated=${secret}; Path=/`],
+      })],
+    },
+    {
+      name: 'self-redirect without cookie',
+      responses: [fakeResponse(302, { location: '/' })],
+    },
+    {
+      name: 'redirect bound exceeded',
+      responses: [
+        fakeResponse(302, { location: '/one' }),
+        fakeResponse(302, { location: '/two' }),
+        fakeResponse(302, { location: '/three' }),
+        fakeResponse(302, { location: '/four' }),
+        fakeResponse(302, { location: '/five' }),
+      ],
+    },
+  ];
+
+  for (const row of cases) {
+    await t.test(row.name, async () => {
+      const context = createFakeBrowserContext();
+      const fetchImpl = createFakeFetch(row.responses);
+      await assert.rejects(
+        bootstrapBypass(
+          context,
+          new URL('https://preview.vercel.app'),
+          secret,
+          fetchImpl,
+        ),
+        (error) => {
+          assert.equal(error.message, 'The Vercel protection bypass bootstrap failed.');
+          assert.equal(error.message.includes(secret), false);
+          return true;
+        },
+      );
+      assert.deepEqual(context.cookies, []);
+      assert.equal(context.routeCalls, 0);
+    });
+  }
+});
+
+test('bypass bootstrap safely does nothing when bypass is absent', async () => {
+  const context = createFakeBrowserContext();
+  const baseUrl = new URL('https://preview.vercel.app');
+  const fetchImpl = createFakeFetch([]);
+
+  await bootstrapBypass(context, baseUrl, undefined, fetchImpl);
+  await bootstrapBypass(context, baseUrl, null, fetchImpl);
+
+  assert.deepEqual(fetchImpl.calls, []);
+  assert.deepEqual(context.cookies, []);
+  assert.equal(context.routeCalls, 0);
 });

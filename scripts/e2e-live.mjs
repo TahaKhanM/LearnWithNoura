@@ -3,6 +3,7 @@
 // --help and --report-fixture are offline-only and make no live evidence claim.
 import { mkdir, readFile, stat } from 'node:fs/promises';
 import { projectObservation } from './e2e-live-schema.mjs';
+import { bootstrapVercelProtectionBypass } from './e2e-live-vercel-bypass.mjs';
 
 const MAX_RETAINED_COUNT = 10_000;
 const MAX_RETAINED_MILESTONES = 32;
@@ -38,6 +39,7 @@ Environment:
   NOURA_BASE_URL                       Application origin (default: http://localhost:5173)
   NOURA_PROVIDER_REPORTED_COST_USD     Optional user-supplied USD amount copied from
                                        the provider billing surface
+  NOURA_VERCEL_PROTECTION_BYPASS       Optional 32-character bypass for HTTPS vercel.app targets
 
 Showing this help or using --report-fixture is offline preparation and does not verify live provider evidence.
 Normal journey execution opens the application, may call its configured provider, and must not run without
@@ -79,11 +81,18 @@ async function main(argv) {
       process.env.NOURA_PROVIDER_REPORTED_COST_USD,
     );
     context.providerReportedCostUsd = providerReportedCostUsd;
+    let vercelProtectionBypass = null;
     if (!options.reportFixturePath && !options.authorizedLiveRun) {
       throw new SmokeReportError(
         'authorization_required',
         'A non-fixture journey requires the explicit --authorized-live-run argument.',
       );
+    }
+    if (!options.reportFixturePath) {
+      vercelProtectionBypass = parseVercelProtectionBypass(
+        process.env.NOURA_VERCEL_PROTECTION_BYPASS,
+      );
+      validateVercelProtectionTarget(baseUrl, vercelProtectionBypass);
     }
 
     if (options.wavPath && !options.reportFixturePath) {
@@ -92,7 +101,7 @@ async function main(argv) {
 
     const observation = options.reportFixturePath
       ? await loadReportFixture(options.reportFixturePath)
-      : await runLiveJourney(baseUrl, options);
+      : await runLiveJourney(baseUrl, options, vercelProtectionBypass);
     const report = buildReport({
       baseUrl,
       providerReportedCostUsd,
@@ -195,6 +204,29 @@ function parseProviderReportedCost(value) {
   return costUsd;
 }
 
+function parseVercelProtectionBypass(value) {
+  if (value === undefined || value.trim() === '') return null;
+  if (!/^[A-Za-z0-9]{32}$/.test(value)) {
+    throw new SmokeReportError(
+      'invalid_vercel_protection_bypass',
+      'NOURA_VERCEL_PROTECTION_BYPASS must be exactly 32 ASCII alphanumeric characters.',
+    );
+  }
+  return value;
+}
+
+function validateVercelProtectionTarget(url, bypass) {
+  if (bypass === null) return;
+  const isVercelHostname = url.hostname === 'vercel.app'
+    || url.hostname.endsWith('.vercel.app');
+  if (url.protocol !== 'https:' || !isVercelHostname) {
+    throw new SmokeReportError(
+      'invalid_vercel_protection_target',
+      'NOURA_VERCEL_PROTECTION_BYPASS requires an HTTPS vercel.app deployment URL.',
+    );
+  }
+}
+
 async function loadReportFixture(path) {
   try {
     const fixture = JSON.parse(await readFile(path, 'utf8'));
@@ -232,7 +264,7 @@ async function validateWavFile(path) {
   }
 }
 
-async function runLiveJourney(url, { textOnly, wavPath }) {
+async function runLiveJourney(url, { textOnly, wavPath }, vercelProtectionBypass) {
   const startedAt = Date.now();
   const milestones = [];
   let browserConsoleErrorCount = 0;
@@ -256,6 +288,14 @@ async function runLiveJourney(url, { textOnly, wavPath }) {
       viewport: { width: 1440, height: 900 },
       permissions: textOnly ? [] : ['microphone'],
     });
+    try {
+      await bootstrapVercelProtectionBypass(context, url, vercelProtectionBypass);
+    } catch {
+      throw new SmokeReportError(
+        'vercel_protection_bypass_bootstrap_failed',
+        'The Vercel protection bypass bootstrap did not complete.',
+      );
+    }
     const page = await context.newPage();
     page.on('console', (message) => {
       if (message.type() === 'error') browserConsoleErrorCount += 1;
@@ -264,18 +304,25 @@ async function runLiveJourney(url, { textOnly, wavPath }) {
       browserConsoleErrorCount += 1;
     });
 
-    await page.goto(new URL('/', url).href, { waitUntil: 'networkidle' });
+    await page.goto(new URL('/', url).href, { waitUntil: 'domcontentloaded' });
+    await page.waitForSelector(
+      '[data-testid=goal-input], .home__child, .home__add',
+      { timeout: 15_000 },
+    );
     const navigatedOrigin = new URL(page.url()).origin;
     mark('home_loaded');
     await page.screenshot({ path: `${shots}/e2e-home.png` });
 
     const hasChild = await page.locator('.home__child').count();
     if (hasChild === 0) {
-      await page.fill('input[aria-label="New learner name"]', 'Maya');
-      await page.fill('input[aria-label="Age"]', '10');
+      await page.fill('#learner-name', 'Maya');
+      await page.fill('#learner-age', '10');
       await page.click('.home__add button');
       await page.waitForSelector('.home__child');
       mark('synthetic_learner_created');
+    } else if (await page.locator('[data-testid=goal-input]').count() === 0) {
+      await page.locator('.home__child').first().click();
+      await page.waitForSelector('[data-testid=goal-input]', { timeout: 10_000 });
     }
 
     await page.fill(
