@@ -81,7 +81,10 @@ function restoreStoryboardRun(ctx: CoordinatorContext, events: StoredEvents): vo
       if (typeof payload.runId === 'string' && scene.success) directedScenes.set(payload.runId, scene.data);
     }
   }
-  if (!progress || progress.status !== 'active' || progress.revealedSteps >= progress.totalSteps) return;
+  // An active run with every step revealed is a reconnect inside the
+  // closing-handoff window: it restores too, so the stage check that had
+  // not finished being handed off is recreated rather than lost.
+  if (!progress || progress.status !== 'active') return;
   const scene = progress.source === 'anchor'
     ? ctx.compiledLesson?.anchorScene ?? null
     : directedScenes.get(progress.runId) ?? null;

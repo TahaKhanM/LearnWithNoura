@@ -1,11 +1,14 @@
 import { z } from 'zod';
 import type { BoardOp } from '../../shared/boardOps.js';
 import type { AnchorScene } from '../../shared/compiledLesson.js';
+import { TELEMETRY_SCHEMA_VERSION } from '../../shared/sessionTelemetry.js';
 import { currentStage } from '../lesson/orchestrator.js';
+import { metricContextFromIdentity } from '../session/telemetryRecorder.js';
 import { anchorGroupId, preflightWithClient, stageAndConfirmPlan } from './boardStaging.js';
 import type { CoordinatorContext } from './coordinatorContext.js';
+import { addBounded } from './responseRegistry.js';
 import { refreshBoardInstructions } from './sessionConfig.js';
-import { startStoryboardRun, storyboardRunSteps } from './storyboardRunner.js';
+import { startStoryboardRun, storyboardRunSteps, type StoryboardSource } from './storyboardRunner.js';
 import { finishTool, sendResponseCreate, tutorFloorIsFree } from './turnFloor.js';
 
 /**
@@ -150,11 +153,63 @@ export async function handleVisualRequest(
     }
     const compiledAnchor = ctx.compiledLesson?.anchorScene;
     if (compiledAnchor && compiledAnchor.groupId === anchor) {
-      startAnchorStoryboard(ctx, callId, responseId, compiledAnchor);
+      startAnchorStoryboard(ctx, callId, responseId, request, compiledAnchor);
       return;
     }
   }
   startDirectedScene(ctx, callId, responseId, request, anchor);
+}
+
+/**
+ * True when async visual work that started under `epoch` no longer belongs
+ * to the current teaching moment: a genuine learner turn advanced the epoch,
+ * or another build took the board. Checked after EVERY await, before any
+ * state mutation or run start — stale completions are abandoned explicitly.
+ */
+function visualRequestIsStale(ctx: CoordinatorContext, epoch: number): boolean {
+  return ctx.state.visualRequestEpoch !== epoch || ctx.state.storyboardRun !== null;
+}
+
+/**
+ * Explicit scoped abandonment of a stale completion (High 1/High 2 of the
+ * Phase 3a review). Scoped to THAT request: the active turn's plan state and
+ * any running build are untouched, the honest note fires at most once per
+ * request, and no response is created — a conversation item cannot interrupt
+ * an active beat; the note simply contextualizes whatever speaks next.
+ */
+function abandonStaleVisualRequest(
+  ctx: CoordinatorContext,
+  requestId: string,
+  source: StoryboardSource,
+  totalSteps: number,
+  options: { injectNote: boolean },
+): void {
+  const { state } = ctx;
+  if (state.abandonedVisualRequests.has(requestId)) return;
+  addBounded(state.abandonedVisualRequests, requestId, 64);
+  ctx.log(`session ${ctx.sessionId}: stale ${source} visual request ${requestId} abandoned`);
+  const identity = state.clientIdentity;
+  if (identity) {
+    ctx.telemetryWriter.submit({
+      schemaVersion: TELEMETRY_SCHEMA_VERSION,
+      name: 'storyboard_outcome',
+      unit: 'count',
+      value: 1,
+      dimensions: { outcome: 'abandoned', source, revealedSteps: 0, totalSteps },
+    }, metricContextFromIdentity(identity));
+  }
+  if (!options.injectNote) return;
+  ctx.sendUpstream({
+    type: 'conversation.item.create',
+    item: {
+      type: 'message',
+      role: 'system',
+      content: [{
+        type: 'input_text',
+        text: '[The visual you asked for earlier could not be prepared in time and will not appear.] The lesson has moved on \u2014 keep teaching with what is visible now and do not mention that picture.',
+      }],
+    },
+  });
 }
 
 /**
@@ -164,11 +219,29 @@ export async function handleVisualRequest(
  * with a narration beat between reveals. The tool result deliberately does
  * NOT continue the response: the beats are the continuation.
  */
-function startAnchorStoryboard(ctx: CoordinatorContext, callId: string, responseId: string, scene: AnchorScene): void {
+function startAnchorStoryboard(
+  ctx: CoordinatorContext,
+  callId: string,
+  responseId: string,
+  request: VisualRequest,
+  scene: AnchorScene,
+): void {
   const { state } = ctx;
   state.planStagedThisTurn = true;
   state.planAttemptsThisTurn += 1;
   state.visualPlanState = 'preparing';
+  const epoch = state.visualRequestEpoch;
+  const staleAbandon = () => {
+    // A learner turn completed (or another build started) while the
+    // preflight was in flight: nothing may build mid-turn. The tool result
+    // is still pending, so IT is the honest channel — no system note.
+    abandonStaleVisualRequest(ctx, request.requestId, 'anchor', scene.storyboard.length, { injectNote: false });
+    finishTool(ctx, callId, responseId, {
+      ok: false,
+      accepted: false,
+      reason: 'The lesson moved on before the scene was ready; nothing was drawn. If the visual is still needed, request it again in your next teaching turn.',
+    }, { continueResponse: false });
+  };
   const addOps = scene.ops.filter((op) => op.op === 'add');
   const task = (async () => {
     const preflight = await preflightWithClient(ctx, {
@@ -176,6 +249,10 @@ function startAnchorStoryboard(ctx: CoordinatorContext, callId: string, response
       semanticGroupId: scene.groupId,
       groupLabel: scene.groupLabel,
     });
+    if (visualRequestIsStale(ctx, epoch)) {
+      staleAbandon();
+      return;
+    }
     if (!preflight.accepted) {
       state.visualPlanState = 'failed';
       state.boardContext.observeBoardRejection(preflight.reasons.join('; ').slice(0, 300) || 'Complete-plan preflight failed.');
@@ -198,18 +275,26 @@ function startAnchorStoryboard(ctx: CoordinatorContext, callId: string, response
       storyboard: steps.map((step) => ({ id: step.id, reveal: step.reveal, narration: step.narration })),
       guidance: 'The pre-validated scene now appears step by step. The application will prompt you to narrate each beat as its objects appear — do not describe the scene yet and do not call this tool again.',
     }, { continueResponse: false });
+    // An unconfirmed speech blip is not a learner turn (the epoch has not
+    // moved), but the first reveal must still not land mid-speech: with no
+    // safe boundary to bind to, it waits for a genuinely free floor.
+    const floorBusy = state.childHoldsFloor || state.speechInProgress || state.draftOpen;
     startStoryboardRun(ctx, {
       runId: `run-${responseId}`.slice(0, 120),
       source: 'anchor',
       groupId: scene.groupId,
       groupLabel: scene.groupLabel,
       steps,
-      revealAfterResponseId: responseId,
+      revealAfterResponseId: floorBusy ? null : responseId,
       handoff: anchorHandoff(ctx),
     });
   })().catch((error) => {
-    state.visualPlanState = 'failed';
     ctx.log(`session ${ctx.sessionId}: anchor storyboard staging error ${String(error).slice(0, 200)}`);
+    if (visualRequestIsStale(ctx, epoch)) {
+      staleAbandon();
+      return;
+    }
+    state.visualPlanState = 'failed';
     finishTool(ctx, callId, responseId, { ok: false, accepted: false, error: String(error).slice(0, 260) });
   });
   ctx.trackSideEffect(task);
@@ -254,6 +339,13 @@ function startDirectedScene(
     board: state.boardContext.toolSnapshot(),
   });
   const stage = currentStage(state.lessonState);
+  const epoch = state.visualRequestEpoch;
+  const staleAbandon = (totalSteps: number) => {
+    // The tutor was told "preparing", so honesty demands the "will not
+    // appear" bridge even when the completion is stale — scoped to THIS
+    // request, exactly once, never touching the active run's state.
+    abandonStaleVisualRequest(ctx, request.requestId, 'director', totalSteps, { injectNote: true });
+  };
   const task = (async () => {
     const result = await directVisual({
       purpose: request.purpose,
@@ -269,7 +361,10 @@ function startDirectedScene(
       stageBrief: stage ? `${stage.id} (${stage.kind}) — ${stage.objective}` : `Lesson goal: ${ctx.lessonGoal}`,
       learnerContext: `Lesson goal: ${ctx.lessonGoal}`,
     });
-    if (state.storyboardRun) return;
+    if (visualRequestIsStale(ctx, epoch)) {
+      staleAbandon(result.ok ? result.scene.storyboard.length : 0);
+      return;
+    }
     if (!result.ok) {
       failDirectedScene(ctx, result.reasons);
       return;
@@ -285,6 +380,10 @@ function startDirectedScene(
       semanticGroupId: scene.groupId,
       groupLabel: scene.groupLabel,
     });
+    if (visualRequestIsStale(ctx, epoch)) {
+      staleAbandon(scene.storyboard.length);
+      return;
+    }
     if (!preflight.accepted) {
       failDirectedScene(ctx, preflight.reasons.length > 0 ? preflight.reasons : ['The scene failed the deterministic layout preflight.']);
       return;
@@ -292,6 +391,12 @@ function startDirectedScene(
     // Persisted so a reconnect can rebuild and resume the run.
     const runId = `run-${request.requestId}`.slice(0, 120);
     await ctx.repo.addEvent(ctx.sessionId, 'directed_scene', { runId, scene });
+    if (visualRequestIsStale(ctx, epoch)) {
+      // The dangling directed_scene event is harmless: restores only
+      // follow an ACTIVE storyboard_progress run, which never started.
+      staleAbandon(scene.storyboard.length);
+      return;
+    }
     state.visualPlanState = 'rendering';
     const floorBusy = state.childHoldsFloor || state.speechInProgress || state.draftOpen;
     startStoryboardRun(ctx, {
@@ -308,6 +413,10 @@ function startDirectedScene(
     });
   })().catch((error) => {
     ctx.log(`session ${ctx.sessionId}: directed scene error ${String(error).slice(0, 200)}`);
+    if (visualRequestIsStale(ctx, epoch)) {
+      staleAbandon(0);
+      return;
+    }
     failDirectedScene(ctx, [String(error).slice(0, 260)]);
   });
   ctx.trackSideEffect(task);

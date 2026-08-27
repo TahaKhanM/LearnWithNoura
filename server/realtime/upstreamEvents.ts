@@ -211,7 +211,7 @@ export async function handleUpstreamEvent(ctx: CoordinatorContext, event: Upstre
         state.retryCreateOnDone = false;
         sendResponseCreate(ctx, state.lastCreateSource);
       }
-      noteStoryboardResponseDone(ctx);
+      noteStoryboardResponseDone(ctx, response?.id ?? null, status);
       break;
     }
 

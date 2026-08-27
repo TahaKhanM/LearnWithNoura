@@ -79,6 +79,9 @@ const CONNECT_TIMEOUT_MS = 8_000;
 const MAX_RECONNECTS = 2;
 const MAX_PENDING_UNCORRELATED_METRICS = 64;
 const MIC_ENERGY_POLL_MS = 40;
+/** How long a done-but-never-played response may still begin audio before
+ * it is treated as genuinely silent and its held cues are released. */
+const SILENT_RESPONSE_GRACE_MS = 2_500;
 
 export class RealtimeSession {
   private ws: WebSocket | null = null;
@@ -93,8 +96,10 @@ export class RealtimeSession {
   private deadResponses = new Set<string>();
   /** Responses whose audible playback has started (playback binds reveals). */
   private startedResponses = new Set<string>();
-  /** Responses whose generation finished, playing or not. */
-  private finishedResponses = new Set<string>();
+  /** When each response's generation finished (response_done), playing or
+   * not. A done response whose audio has NOT started yet only counts as
+   * finished after a grace window: audio may still be about to begin. */
+  private responseDoneAt = new Map<string, number>();
   private reconnectAttempts = 0;
   private closedByUs = false;
   private started = false;
@@ -511,15 +516,22 @@ export class RealtimeSession {
   /**
    * The playback truth a cue binds to. A storyboard reveal waits for its
    * tagged response to FINISH playing; "finished" also covers responses
-   * that will never play — retired ones, a done response whose audio never
-   * started, and sessions with no voice plane at all — so a build can never
-   * deadlock on silence.
+   * that will never play — retired ones and sessions with no voice plane —
+   * so a build can never deadlock on silence.
+   *
+   * A response that is done generating but has not started playing is NOT
+   * finished yet: `response.done` routinely arrives on the sideband before
+   * the data channel's `output_audio_buffer.started`, and releasing there
+   * would reveal the next step at generation-complete instead of playback
+   * end. Only after a bounded grace window with no audio is the response
+   * treated as genuinely silent and released.
    */
   private responsePlaybackStatus(responseId: string): ResponsePlaybackStatus {
     if (!this.voice || this.deadResponses.has(responseId)) return 'finished';
     if (this.voice.playingResponseId() === responseId) return 'playing';
     if (this.startedResponses.has(responseId)) return 'finished';
-    if (this.finishedResponses.has(responseId)) return 'finished';
+    const doneAt = this.responseDoneAt.get(responseId);
+    if (doneAt !== undefined && performance.now() - doneAt >= SILENT_RESPONSE_GRACE_MS) return 'finished';
     return 'pending';
   }
 
@@ -702,8 +714,13 @@ export class RealtimeSession {
         if (!Array.isArray(message.ops)) break;
         const responseId = String(message.response_id ?? '');
         if (this.deadResponses.has(responseId)) break;
+        // A persisted board event keeps ONE stable cue identity across
+        // server re-sends (each re-send is a fresh envelope): a duplicate
+        // re-send while the original cue is still pending must not enqueue
+        // — and so can never double-draw.
+        const cueId = typeof message.event_id === 'number' ? `board-event-${message.event_id}` : envelope.eventId;
         this.timeline.enqueue({
-          kind: 'visual', cueId: envelope.eventId, responseId,
+          kind: 'visual', cueId, responseId,
           sequence: envelope.sequence, identity: envelope,
           ops: message.ops as BoardOp[], eventId: typeof message.event_id === 'number' ? message.event_id : null,
           visualCueId: envelope.visualCueId, semanticObjectId: envelope.semanticObjectId,
@@ -813,7 +830,10 @@ export class RealtimeSession {
       }
       case 'response_done': {
         if (typeof message.response_id === 'string' && message.response_id) {
-          this.rememberBounded(this.finishedResponses, message.response_id);
+          this.responseDoneAt.set(message.response_id, performance.now());
+          if (this.responseDoneAt.size > 48) {
+            this.responseDoneAt.delete(this.responseDoneAt.keys().next().value as string);
+          }
         }
         if (message.status === 'cancelled' && this.cancelRequestedAt > 0) {
           const providerCancelConfirmationMs = Math.round(performance.now() - this.cancelRequestedAt);

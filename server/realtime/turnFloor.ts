@@ -58,7 +58,10 @@ export function requestModelResponse(
   state.childHoldsFloor = false;
   state.toolContinues = 0;
   // A genuine learner turn starts the next teaching turn: the one-plan
-  // visual budget and the erase guard reset here and nowhere else.
+  // visual budget and the erase guard reset here and nowhere else, and any
+  // in-flight asynchronous visual work becomes stale (its completion is
+  // abandoned explicitly rather than built mid-turn).
+  state.visualRequestEpoch += 1;
   state.planStagedThisTurn = false;
   state.planAttemptsThisTurn = 0;
   if (state.visualPlanState !== 'rendering') state.visualPlanState = 'none';

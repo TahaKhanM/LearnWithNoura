@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { BoardPurposeSchema, LessonStageKindSchema } from '../../shared/pedagogy';
 import { VisualTemplateSchema } from '../../shared/semanticScene';
 import { REALTIME_TOOLS } from './tools';
+import { VisualRequestSchema } from './visualRequests';
 
 /**
  * The prompt, the live tool schemas, and the shared validators must agree
@@ -69,5 +70,84 @@ describe('realtime prompt / tool-surface consistency', () => {
     expect(prompt).toContain('Current stage');
     expect(prompt).toContain('storyboard');
     expect(prompt).not.toMatch(/create the lesson blueprint/i);
+  });
+});
+
+/**
+ * The `request_visual` JSON schema advertised to the provider and the
+ * runtime `VisualRequestSchema` that validates the call must agree exactly:
+ * a payload the provider was told is legal must parse, and every advertised
+ * bound must actually be enforced. Drift fails here in CI, not at runtime.
+ */
+describe('request_visual tool schema ↔ VisualRequestSchema', () => {
+  interface JsonProperty {
+    type?: string;
+    enum?: readonly string[];
+    minLength?: number;
+    maxLength?: number;
+    maxItems?: number;
+    items?: { minLength?: number; maxLength?: number };
+  }
+  const tool = REALTIME_TOOLS.find((candidate) => candidate.name === 'request_visual') as unknown as {
+    parameters: { properties: Record<string, JsonProperty>; required: string[] };
+  };
+  const properties = tool.parameters.properties;
+  const required = new Set(tool.parameters.required);
+  const base: Record<string, unknown> = {
+    schemaVersion: '3.0.0',
+    requestId: 'drift-check',
+    action: 'establish',
+    purpose: 'Show the relation',
+    idea: 'Both fractions on one scale',
+    density: 'minimal',
+  };
+  const parses = (payload: Record<string, unknown>) => VisualRequestSchema.safeParse(payload).success;
+
+  it('exposes exactly the fields the runtime validator knows', () => {
+    expect(Object.keys(properties).sort()).toEqual(Object.keys(VisualRequestSchema.shape).sort());
+  });
+
+  it('agrees on which fields are required', () => {
+    expect(parses(base)).toBe(true);
+    for (const key of Object.keys(properties)) {
+      const payload = { ...base };
+      delete payload[key];
+      expect(parses(payload), `omitting ${key} must ${required.has(key) ? 'fail' : 'pass'} the runtime validator`)
+        .toBe(!required.has(key));
+    }
+  });
+
+  it('agrees on every advertised enum value and rejects values outside it', () => {
+    for (const [key, property] of Object.entries(properties)) {
+      if (!property.enum) continue;
+      for (const value of property.enum) {
+        expect(parses({ ...base, [key]: value }), `${key}=${value} is advertised and must parse`).toBe(true);
+      }
+      expect(parses({ ...base, [key]: 'not-a-real-value' }), `${key} must reject values outside the advertised enum`).toBe(false);
+    }
+    // Nothing the runtime accepts is missing from the advertisement.
+    expect([...VisualRequestSchema.shape.action.options].sort()).toEqual([...(properties.action.enum ?? [])].sort());
+    expect([...VisualRequestSchema.shape.density.options].sort()).toEqual([...(properties.density.enum ?? [])].sort());
+  });
+
+  it('agrees on advertised string and array bounds', () => {
+    for (const [key, property] of Object.entries(properties)) {
+      if (property.enum) continue;
+      if (property.type === 'string' && typeof property.maxLength === 'number') {
+        expect(parses({ ...base, [key]: 'x'.repeat(property.maxLength) }), `${key} at maxLength must parse`).toBe(true);
+        expect(parses({ ...base, [key]: 'x'.repeat(property.maxLength + 1) }), `${key} beyond maxLength must fail`).toBe(false);
+        if (property.minLength === 1) {
+          expect(parses({ ...base, [key]: '' }), `${key} advertises minLength 1 and must reject empty`).toBe(false);
+        }
+      }
+      if (property.type === 'array' && typeof property.maxItems === 'number') {
+        const item = 'x'.repeat(property.items?.maxLength ?? 1);
+        expect(parses({ ...base, [key]: Array.from({ length: property.maxItems }, () => item) }), `${key} at maxItems must parse`).toBe(true);
+        expect(parses({ ...base, [key]: Array.from({ length: property.maxItems + 1 }, () => item) }), `${key} beyond maxItems must fail`).toBe(false);
+        if (typeof property.items?.maxLength === 'number') {
+          expect(parses({ ...base, [key]: ['x'.repeat(property.items.maxLength + 1)] }), `${key} items beyond maxLength must fail`).toBe(false);
+        }
+      }
+    }
   });
 });
