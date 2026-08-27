@@ -21,47 +21,25 @@ export const REALTIME_TOOLS = [
   },
   {
     type: 'function' as const,
-    name: 'semantic_visual_plan',
+    name: 'request_visual',
     description:
-      'Stage the one board change for this teaching turn, before speaking about it. Actions are additive only — visible work never disappears: establish (reveal the pre-compiled anchor scene, once), extend (small additions belong in board_ops), emphasize (highlight named visible objects), compare (an announced side case; the learner view does not switch), none. Trigger: the current blueprint stage needs its board purpose fulfilled. Exception: never call this twice in one tutor turn. The application assigns sections, owns geometry and acceptance, and confirms visibility before you may describe the result.',
+      'Request the one board change for this teaching turn by INTENT — you never supply geometry. Actions are additive only, visible work never disappears: establish (build the lesson\u2019s anchor scene, once), extend (small additions belong in board_ops), emphasize (highlight named visible objects), compare (a new scene in an announced side section; the learner view does not switch), none. For establish and compare the application designs, validates, and reveals the scene step by step, prompting you to narrate each beat; while it prepares, keep teaching with what is visible. Exception: never call this twice in one tutor turn or while a build is in progress.',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
-        schemaVersion: { type: 'string', enum: ['2.0.0'] },
-        planId: { type: 'string', minLength: 1, maxLength: 120 },
-        intent: {
-          type: 'object', additionalProperties: false,
-          properties: {
-            objective: { type: 'string', minLength: 1, maxLength: 300 },
-            domain: { type: 'string', enum: ['geometry', 'quantitative', 'algebra', 'comparison', 'process', 'argument', 'history', 'grammar', 'table', 'timeline', 'none'] },
-            relevance: { type: 'string', enum: ['essential', 'none'], description: 'A visual is either essential to this stage or not drawn at all.' },
-            questionAnswered: { type: 'string', minLength: 1, maxLength: 300 },
-            rationale: { type: 'string', minLength: 1, maxLength: 400 },
-            action: { type: 'string', enum: ['establish', 'extend', 'emphasize', 'compare', 'none'] },
-            targetGroupId: { type: 'string', minLength: 1, maxLength: 160 },
-            targetObjectIds: { type: 'array', maxItems: 12, items: { type: 'string', minLength: 1, maxLength: 160 }, description: 'For emphasize: the visible object ids to highlight.' },
-            density: { type: 'string', enum: ['minimal', 'standard'] },
-            noBoardReason: { type: 'string', maxLength: 300 },
-          },
-          required: ['objective', 'domain', 'relevance', 'questionAnswered', 'rationale', 'action', 'density'],
-        },
-        groups: {
-          type: 'array', minItems: 0, maxItems: 1,
-          items: {
-            type: 'object', additionalProperties: false,
-            properties: {
-              id: { type: 'string', minLength: 1, maxLength: 80 },
-              label: { type: 'string', minLength: 1, maxLength: 160 },
-              revealOrder: { type: 'array', minItems: 1, items: { type: 'string', enum: ['outline', 'relation', 'label', 'connector', 'emphasis'] } },
-              template: { type: 'string', enum: ['pythagorean_area_proof', 'triangle_angle_sum', 'unit_circle_projection', 'fraction_comparison', 'slope_comparison', 'causal_cycle', 'argument_structure', 'cause_effect', 'grammar_structure', 'relationship_map', 'worked_steps', 'comparison', 'part_whole', 'table', 'timeline', 'no_board'] },
-              parameters: { type: 'object' },
-            },
-            required: ['id', 'label', 'revealOrder', 'template', 'parameters'],
-          },
-        },
+        schemaVersion: { type: 'string', enum: ['3.0.0'] },
+        requestId: { type: 'string', minLength: 1, maxLength: 120 },
+        action: { type: 'string', enum: ['establish', 'extend', 'emphasize', 'compare', 'none'] },
+        purpose: { type: 'string', minLength: 1, maxLength: 300, description: 'Why the current stage needs this visual right now.' },
+        idea: { type: 'string', minLength: 1, maxLength: 300, description: 'The one relationship or idea the picture must show, concretely.' },
+        constraints: { type: 'string', maxLength: 300, description: 'Optional requirements, e.g. "use a number line", "keep it very simple", "reuse the fractions already shown".' },
+        targetGroupId: { type: 'string', minLength: 1, maxLength: 160, description: 'For extend: the visible section to add to.' },
+        targetObjectIds: { type: 'array', maxItems: 12, items: { type: 'string', minLength: 1, maxLength: 160 }, description: 'For emphasize: the visible object ids to highlight. For establish/compare: visible objects the new picture relates to.' },
+        density: { type: 'string', enum: ['minimal', 'standard'] },
+        noBoardReason: { type: 'string', maxLength: 300 },
       },
-      required: ['schemaVersion', 'planId', 'intent', 'groups'],
+      required: ['schemaVersion', 'requestId', 'action', 'purpose', 'idea', 'density'],
     },
   },
   {
@@ -109,7 +87,7 @@ export const REALTIME_TOOLS = [
     type: 'function' as const,
     name: 'board_ops',
     description:
-      'Add one small increment to an existing shared-board visual. New diagrams should use semantic_visual_plan so code owns layout; use raw board_ops only when no semantic template fits. There is no clear operation: replacing a section is a semantic_visual_plan "replace" decision, and unrelated new ideas get a new section.',
+      'Add one small increment to an existing shared-board visual — the fast tier: highlight, update, or a handful of additions attached to visible objects. New scenes and representations go through request_visual so the application owns layout. There is no clear or replace operation: visible work persists.',
     parameters: {
       type: 'object',
       additionalProperties: false,

@@ -6,6 +6,17 @@ describe('runtime configuration', () => {
     const config = readRuntimeConfig({});
     expect(config.realtimeModel).toBe('gpt-realtime-2.1');
     expect(config.textModel).toBe('gpt-5.6-terra');
+    expect(config.directorModel).toBe('gpt-5.6-terra');
+    expect(config.directorReasoningEffort).toBe('medium');
+  });
+
+  it('reads the Board Director model and effort from the environment', () => {
+    const config = readRuntimeConfig({
+      NOURA_DIRECTOR_MODEL: 'custom-director-model',
+      NOURA_DIRECTOR_REASONING_EFFORT: 'high',
+    });
+    expect(config.directorModel).toBe('custom-director-model');
+    expect(config.directorReasoningEffort).toBe('high');
   });
 
   it('fails Production closed without durable storage, auth, privacy, and provider gates', () => {

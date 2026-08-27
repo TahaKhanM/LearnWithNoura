@@ -16,7 +16,7 @@ Make the board a pedagogical instrument rather than a stream of model-drawn SVG 
 
 ## Pipeline
 
-`Learner need → Visual Plan 2.0 relevance decision → inspect/reuse/replace/create → semantic grammar → section-scoped exact BoardOps → geometry layout → quality budget → heard checkpoint → visible section → replay acknowledgement → authoritative board ledger`
+Phase 3a made the drawing brain two-tier. Fast tier (voice model, sub-second): `Learner need → intent decision → small incremental BoardOps on visible objects → geometry layout → quality budget → heard checkpoint → visible section → replay acknowledgement → authoritative board ledger`. Slow tier (new scenes): `request_visual intent (purpose, idea, constraints — never geometry) → compiled anchor OR Board Director (board ledger + rendered board screenshot → add-only BoardOps + storyboard → real-pipeline headless validation → vision self-check, at most two corrections, fail closed) → whole-scene preflight → interleaved reveal-narrate: each step revealed at the previous response's playback boundary with a beat response narrating exactly that step → stage check via the delivered-task contract`.
 
 Learner marks follow a parallel path:
 
@@ -27,7 +27,7 @@ Learner marks follow a parallel path:
 1. Distinct semantic groups are pages/sections, never layers painted into the same coordinate plane.
 2. Learner marks belong to the active section and survive tutor replacement or clear operations.
 3. Only heard and acknowledged tutor checkpoints enter durable replay and agent board state.
-4. Visual Plan 2.0 states relevance, the concrete question answered, action, target section and density.
+4. A visual request states its purpose, the concrete idea shown, action and density; the application (compiler or Director) owns all geometry, sections and acceptance. The voice model is never offered template or geometry vocabulary.
 5. **Visible tutor work is permanent** (corrected by the Learner Turn Contract / Board Intelligence v3): live model actions are additive only — `establish | extend | emphasize | compare | none`. `replace` and raw `clear` are rejected outright, an object cannot be erased in the turn that created it, and a second representation is an announced side section that never auto-switches the learner's view. Legacy committed replace events remain replayable as historical visible truth only.
 6. Minimal sections contain at most 14 proposed operations; standard sections at most 30. The rendered section also has a 30-item, 720-character and crossing budget.
 7. A failed client quality check is reported to the agent; rejected marks are never described as visible.
@@ -36,14 +36,14 @@ Learner marks follow a parallel path:
 
 ## General visual grammar
 
-In addition to exact subject templates, Plan 2.0 provides:
+In addition to exact subject templates, the grammar provides:
 
 - `relationship_map`: flow, hierarchy or cycle with typed nodes/edges;
 - `worked_steps`: ordered derivation/procedure with routed continuation;
 - `comparison`: aligned two-column evidence;
 - `part_whole`: proportional strip plus exact total equation.
 
-The model specifies meaning and relationships. Code owns geometry, spacing, routing, density and acceptance.
+These templates serve the lesson compiler (and replay); the live voice model supplies meaning and intent only. Code — the compiler, the Director, and the exact scene compiler — owns geometry, spacing, routing, density and acceptance.
 
 ## Evaluation boundary
 

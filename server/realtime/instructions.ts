@@ -78,10 +78,10 @@ export function lessonExecutionContext(
     }
   }
   if (anchorScene && stage.allowedBoardMutation === 'establish') {
-    lines.push(`Anchor reveal storyboard for section ${anchorScene.groupId} (${anchorScene.groupLabel}) — when your establish plan is accepted, the pre-validated scene appears checkpoint by checkpoint; speak each beat as its objects appear:`);
-    for (const step of anchorScene.storyboard) {
-      lines.push(`- ${step.reveal} (${step.objectIds.join(', ')}): ${step.narration}`);
-    }
+    lines.push(
+      `Anchor scene for section ${anchorScene.groupId} (${anchorScene.groupLabel}): when your establish request is accepted, the pre-validated scene builds step by step and the application prompts you to narrate each beat as its objects appear.`,
+      'Do not describe or narrate parts of the scene before you are prompted, and never refer to objects that have not appeared yet.',
+    );
   }
   lines.push('Adapt freely inside this stage — rephrase, add examples, change tactics — but do not skip to another stage, change the anchor representation, or invent new check questions when a pre-authored one fits.');
   return lines.join('\n');

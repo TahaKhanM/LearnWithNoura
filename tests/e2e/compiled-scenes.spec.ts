@@ -75,6 +75,25 @@ test('the conversation-led fixture carries no forced visuals', async () => {
   expect(lesson.blueprint.stages.every((stage) => stage.boardPurpose === 'none' && stage.allowedBoardMutation === 'none')).toBe(true);
 });
 
+test('the harness rasters a scene into the canonical board JPEG for the Director', async ({ page }) => {
+  const lesson = fixture('triangle-angle-sum');
+  const anchor = lesson.anchorScene;
+  expect(anchor).not.toBeNull();
+  if (!anchor) return;
+  const image = await page.evaluate(
+    async (argument: { ops: BoardOp[]; groupId: string }) => {
+      const hook = (globalThis as {
+        nouraRenderScene?: (ops: BoardOp[], groupId?: string) => Promise<string | null>;
+      }).nouraRenderScene;
+      if (!hook) throw new Error('Render hook missing on harness page.');
+      return hook(argument.ops, argument.groupId);
+    },
+    { ops: anchor.ops, groupId: anchor.groupId },
+  );
+  expect(image).toMatch(/^data:image\/jpeg;base64,/);
+  expect(image?.length ?? 0).toBeLessThanOrEqual(300_000);
+});
+
 test('the preflight hook rejects an illegible scene instead of passing it', async ({ page }) => {
   // 34 tutor items exceed the section legibility budget (30), so the
   // quality gate must fail this scene deterministically.
