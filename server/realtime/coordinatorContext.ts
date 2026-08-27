@@ -1,6 +1,8 @@
 import type { BoardOp } from '../../shared/boardOps.js';
+import type { CompiledLesson } from '../../shared/compiledLesson.js';
 import type { GenerationIdentity, RuntimeEventEnvelope } from '../../shared/runtimeProtocol.js';
 import type { DeliveredTask } from '../../shared/lessonTurn.js';
+import type { LessonStage } from '../../shared/pedagogy.js';
 import type { LessonOrchestrationState } from '../lesson/orchestrator.js';
 import type { DomainRepository } from '../store/domain.js';
 import type { SessionTelemetryWriter } from '../session/telemetryWriter.js';
@@ -102,12 +104,19 @@ export interface CoordinatorContext {
   readonly repo: DomainRepository;
   readonly sessionId: string;
   readonly lessonGoal: string;
+  /** The pre-compiled, validated lesson this session executes; null only
+   * for legacy sessions recorded before the lesson compiler existed. */
+  readonly compiledLesson: CompiledLesson | null;
   readonly baseInstructions: string;
   readonly log: (line: string) => void;
   readonly telemetryWriter: SessionTelemetryWriter;
   readonly telemetryRepo: SessionTelemetryRepository;
   readonly preflightTimeoutMs: number;
   readonly visibilityTimeoutMs: number;
+  /** Compiler entry point that authors a bounded detour mini-plan; null
+   * when no compiler is wired (the simple detour then always stands). */
+  readonly planDetour: ((input: { objective: string; reason: string; returnStageObjective: string }) => Promise<LessonStage[]>) | null;
+  readonly detourPlanTimeoutMs: number;
   readonly state: CoordinatorState;
   sendClient(
     payload: Record<string, unknown>,

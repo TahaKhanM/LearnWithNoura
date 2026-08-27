@@ -1,5 +1,6 @@
 import { newDb } from 'pg-mem';
 import { describe, expect, it } from 'vitest';
+import { conversationCompiledLesson } from './compiledLessonFixture';
 import { PostgresRepo } from './postgresRepo';
 
 // Deliberate high-workload contract: tolerate machine load while still detecting hangs.
@@ -83,6 +84,28 @@ describe('PostgresRepo domain contract', () => {
       expect.objectContaining({ id: eventId, released: true }),
     ]);
   });
+
+  it('stores the compiled lesson lifecycle with the same contract as SQLite', async () => {
+    const repo = postgresRepo();
+    await repo.initialize();
+    const child = await repo.createChild('Synthetic Learner', 10);
+    const session = await repo.createSession(child.id, 'Water cycle');
+    await expect(repo.getCompiledLesson(session.id)).resolves.toBeNull();
+
+    const pending = await repo.upsertCompiledLesson(session.id, { status: 'pending' });
+    expect(pending).toMatchObject({ sessionId: session.id, status: 'pending', lesson: null, failureReason: null });
+
+    const lesson = conversationCompiledLesson();
+    const ready = await repo.upsertCompiledLesson(session.id, { status: 'ready', lesson });
+    expect(ready.status).toBe('ready');
+    expect(ready.lesson?.blueprint.blueprintId).toBe(lesson.blueprint.blueprintId);
+    expect(ready.createdAt).toBe(pending.createdAt);
+
+    await expect(repo.upsertCompiledLesson(session.id, { status: 'ready' })).rejects.toThrow(/lesson payload/i);
+    await expect(repo.upsertCompiledLesson('missing-session', { status: 'pending' })).rejects.toThrow(/unknown session/i);
+    const failed = await repo.upsertCompiledLesson(session.id, { status: 'failed', failureReason: 'validation exhausted retries' });
+    expect(failed).toMatchObject({ status: 'failed', failureReason: 'validation exhausted retries', lesson: null });
+  }, HEAVY_CONTRACT_TIMEOUT_MS);
 
   it('locks the session row before inserting an event transactionally', async () => {
     const queries: string[] = [];

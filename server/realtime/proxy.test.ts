@@ -1,6 +1,8 @@
 import { EventEmitter } from 'node:events';
 import { Buffer } from 'node:buffer';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { CompiledLessonSchema, COMPILED_LESSON_SCHEMA_VERSION } from '../../shared/compiledLesson';
+import type { LessonStage } from '../../shared/pedagogy';
 import { createRuntimeEvent, type GenerationIdentity, type RuntimeEventEnvelope } from '../../shared/runtimeProtocol';
 import type { MetricObservation } from '../../shared/sessionTelemetry';
 import { openTestDb } from '../store/db';
@@ -50,11 +52,48 @@ const blueprintArgs = {
   ],
 };
 
-function createBlueprint(upstream: FakeUpstream, suffix = 'default'): void {
-  upstream.emit({ type: 'response.created', response: { id: `blueprint-response-${suffix}` } });
-  upstream.emit({
-    type: 'response.function_call_arguments.done', response_id: `blueprint-response-${suffix}`,
-    call_id: `blueprint-call-${suffix}`, name: 'create_lesson_blueprint', arguments: JSON.stringify(blueprintArgs),
+/** Compiled lessons replaced live blueprint authorship; the proxy loads a
+ * ready record at connect. Conversation-led keeps the model-authored
+ * semantic-plan pipeline under test; board-led carries a pre-validated
+ * anchor scene that establish resolves to. */
+function seedCompiledLesson(repo: Repo, sessionId: string, mode: 'conversation_led' | 'board_led' = 'conversation_led'): void {
+  repo.upsertCompiledLesson(sessionId, {
+    status: 'ready',
+    lesson: CompiledLessonSchema.parse({
+      compiledLessonId: `compiled-${sessionId}`,
+      schemaVersion: COMPILED_LESSON_SCHEMA_VERSION,
+      goal: blueprintArgs.goal,
+      objective: blueprintArgs.goal,
+      blueprint: {
+        blueprintId: `blueprint-${sessionId}`,
+        goal: blueprintArgs.goal,
+        mode,
+        successCriteria: blueprintArgs.successCriteria,
+        anchor: mode === 'board_led'
+          ? { semanticGroupId: 'lesson-anchor', template: 'fraction_comparison', instructionalQuestion: 'Which fraction is larger?', invariantObjectIds: [] }
+          : null,
+        stages: blueprintArgs.stages,
+        currentStageIndex: 0,
+        detourStack: [],
+      },
+      anchorScene: mode === 'board_led'
+        ? {
+            groupId: 'lesson-anchor',
+            groupLabel: 'Fraction number line',
+            template: 'fraction_comparison',
+            ops: [
+              { op: 'add', id: 'anchor-scale', spec: { kind: 'numberline', at: [130, 300], w: 740, min: 0, max: 1 } },
+              { op: 'add', id: 'anchor-label', spec: { kind: 'text', at: [130, 250], text: 'One shared scale' } },
+            ],
+            storyboard: [
+              { id: 'reveal-outline', reveal: 'outline', narration: 'Here is one number line from zero to one.', objectIds: ['anchor-scale'] },
+              { id: 'reveal-label', reveal: 'label', narration: 'Both fractions will live on this same scale.', objectIds: ['anchor-label'] },
+            ],
+          }
+        : null,
+      compiledAt: 0,
+      compilerModel: 'test-double',
+    }),
   });
 }
 
@@ -83,6 +122,8 @@ describe('realtime proxy response annotation', () => {
     expect(update.session.audio.input.turn_detection.create_response).toBe(false);
     expect(update.session.reasoning?.effort).toBe('low');
     expect(update.session.tools?.some((tool) => tool.name === 'inspect_board')).toBe(true);
+    // Lesson authorship moved to the compiler; the live tutor executes.
+    expect(update.session.tools?.some((tool) => tool.name === 'create_lesson_blueprint')).toBe(false);
   });
 
   it('grounds the agent in released board state and suppresses exact raw redraws', async () => {
@@ -122,6 +163,7 @@ describe('realtime proxy response annotation', () => {
     const repo = new Repo(openTestDb());
     const child = repo.createChild('Maya', 10);
     const session = repo.createSession(child.id, 'geometry');
+    seedCompiledLesson(repo, session.id);
     repo.addEvent(session.id, 'board_ops', { semanticObjectId: 'existing-proof', ops: [{ op: 'add', id: 'existing-line', spec: { kind: 'line', from: [10, 10], to: [90, 90] } }] });
     const client = new FakeClient();
     await connectRealtimeProxy(client as never, { apiKey: 'offline-fixture', model: 'gpt-realtime-2.1', repo, sessionId: session.id, createUpstream: () => new FakeUpstream() as never });
@@ -135,8 +177,6 @@ describe('realtime proxy response annotation', () => {
       .find((event) => event.type === 'conversation.item.create' && event.item?.call_id === 'inspect-call');
     expect(JSON.parse(inspectOutput?.item?.output ?? '{}')).toMatchObject({ board: { visibleGroups: [{ id: 'existing-proof', objectCount: 1 }] } });
 
-    createBlueprint(upstream, 'density');
-    await flushProxy();
     upstream.emit({ type: 'response.created', response: { id: 'dense-response' } });
     upstream.emit({
       type: 'response.function_call_arguments.done', response_id: 'dense-response', call_id: 'dense-call', name: 'semantic_visual_plan',
@@ -418,6 +458,7 @@ describe('realtime proxy response annotation', () => {
     const repo = new Repo(openTestDb());
     const child = repo.createChild('Maya', 10);
     const session = repo.createSession(child.id, 'fractions');
+    seedCompiledLesson(repo, session.id);
     const client = new FakeClient();
     await connectRealtimeProxy(client as never, {
       apiKey: 'offline-fixture', model: 'gpt-realtime-2.1', repo, sessionId: session.id,
@@ -426,8 +467,6 @@ describe('realtime proxy response annotation', () => {
     const active = { ...identity, sessionId: session.id };
     client.emit('message', JSON.stringify(createRuntimeEvent(active, 0, 'hello', {})));
     const upstream = FakeUpstream.latest;
-    createBlueprint(upstream, 'preflight');
-    await flushProxy();
     upstream.emit({ type: 'response.created', response: { id: 'plan-response' } });
     upstream.emit({
       type: 'response.function_call_arguments.done', response_id: 'plan-response', call_id: 'plan-call', name: 'semantic_visual_plan',
@@ -475,6 +514,7 @@ describe('realtime proxy response annotation', () => {
     const repo = new Repo(openTestDb());
     const child = repo.createChild('Maya', 10);
     const session = repo.createSession(child.id, 'fractions');
+    seedCompiledLesson(repo, session.id);
     const client = new FakeClient();
     const registry = new ProxyLifecycleRegistry();
     let lifecycle: ProxyLifecycle | null = null;
@@ -493,8 +533,6 @@ describe('realtime proxy response annotation', () => {
     const active = { ...identity, sessionId: session.id };
     client.emit('message', JSON.stringify(createRuntimeEvent(active, 0, 'hello', {})));
     const upstream = FakeUpstream.latest;
-    createBlueprint(upstream, 'shutdown-stage');
-    await flushProxy();
     vi.useFakeTimers({ toFake: ['setTimeout'] });
     upstream.emit({ type: 'response.created', response: { id: 'shutdown-plan-response' } });
     upstream.emit({
@@ -570,6 +608,7 @@ describe('realtime proxy response annotation', () => {
     const repo = new Repo(openTestDb());
     const child = repo.createChild('Maya', 10);
     const session = repo.createSession(child.id, 'fractions');
+    seedCompiledLesson(repo, session.id);
     const client = new FakeClient();
     const registry = new ProxyLifecycleRegistry();
     await connectRealtimeProxy(client as never, {
@@ -584,8 +623,6 @@ describe('realtime proxy response annotation', () => {
     const active = { ...identity, sessionId: session.id };
     client.emit('message', JSON.stringify(createRuntimeEvent(active, 0, 'hello', {})));
     const upstream = FakeUpstream.latest;
-    createBlueprint(upstream, 'graceful-stage');
-    await flushProxy();
     upstream.emit({ type: 'response.created', response: { id: 'graceful-plan-response' } });
     upstream.emit({
       type: 'response.function_call_arguments.done',
@@ -673,6 +710,7 @@ describe('realtime proxy response annotation', () => {
     const repo = new Repo(openTestDb());
     const child = repo.createChild('Maya', 10);
     const session = repo.createSession(child.id, 'fractions');
+    seedCompiledLesson(repo, session.id);
     const client = new FakeClient();
     await connectRealtimeProxy(client as never, {
       apiKey: 'offline-fixture', model: 'gpt-realtime-2.1', repo, sessionId: session.id,
@@ -681,8 +719,6 @@ describe('realtime proxy response annotation', () => {
     const active = { ...identity, sessionId: session.id };
     client.emit('message', JSON.stringify(createRuntimeEvent(active, 0, 'hello', {})));
     const upstream = FakeUpstream.latest;
-    createBlueprint(upstream, 'barrier');
-    await flushProxy();
     upstream.emit({ type: 'response.created', response: { id: 'anchor-response' } });
     upstream.emit({
       type: 'response.function_call_arguments.done', response_id: 'anchor-response', call_id: 'anchor-call', name: 'semantic_visual_plan',
@@ -739,7 +775,9 @@ describe('realtime proxy response annotation', () => {
       ok: false,
       accepted: false,
       reason: expect.stringContaining('One visual plan per teaching turn'),
-      anchorGroupId: 'lesson-anchor',
+      // The compiled test lesson is conversation-led, so no blueprint
+      // anchor exists; the fallback anchor section still hosted the plan.
+      anchorGroupId: null,
     });
 
     // A learner turn resets the budget; the anchor itself can never be
@@ -759,6 +797,193 @@ describe('realtime proxy response annotation', () => {
     const comparePreflight = [...client.sent].reverse().find((event) => event.type === 'visual_preflight');
     // The comparison is additive, beside the anchor, in an announced section.
     expect(comparePreflight?.payload).toMatchObject({ semanticObjectId: 'lesson-anchor-alt1' });
+  });
+
+  it('resolves establish to the precompiled anchor scene and echoes its storyboard', async () => {
+    vi.stubGlobal('WebSocket', FakeUpstream);
+    const repo = new Repo(openTestDb());
+    const child = repo.createChild('Maya', 10);
+    const session = repo.createSession(child.id, 'fractions');
+    seedCompiledLesson(repo, session.id, 'board_led');
+    const client = new FakeClient();
+    await connectRealtimeProxy(client as never, {
+      apiKey: 'offline-fixture', model: 'gpt-realtime-2.1', repo, sessionId: session.id,
+      createUpstream: () => new FakeUpstream() as never, preflightTimeoutMs: 400, visibilityTimeoutMs: 800,
+    });
+    const active = { ...identity, sessionId: session.id };
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 0, 'hello', {})));
+    const upstream = FakeUpstream.latest;
+    upstream.onopen?.();
+    // The injected stage context carries the storyboard narration beats.
+    const initial = JSON.parse(upstream.sent[0]) as { session: { instructions: string } };
+    expect(initial.session.instructions).toContain('Anchor reveal storyboard');
+    expect(initial.session.instructions).toContain('Here is one number line from zero to one.');
+
+    // The voice model triggers establish; whatever geometry it proposes is
+    // ignored in favour of the pre-validated compiled anchor scene.
+    upstream.emit({ type: 'response.created', response: { id: 'compiled-anchor-response' } });
+    upstream.emit({
+      type: 'response.function_call_arguments.done', response_id: 'compiled-anchor-response', call_id: 'compiled-anchor-call', name: 'semantic_visual_plan',
+      arguments: JSON.stringify({
+        schemaVersion: '2.0.0', planId: 'model-invented-plan',
+        intent: { objective: 'Compare fractions', domain: 'quantitative', relevance: 'essential', questionAnswered: 'Which is larger?', rationale: 'One scale.', action: 'establish', density: 'minimal' },
+        groups: [{ id: 'anything', label: 'Model invention', revealOrder: ['outline'], template: 'worked_steps', parameters: { steps: ['Wrong', 'Geometry'] } }],
+      }),
+    });
+    await flushProxy();
+    const preflight = client.sent.find((event) => event.type === 'visual_preflight');
+    const preflightOps = ((preflight?.payload as { ops?: Array<{ id?: string }> } | undefined)?.ops) ?? [];
+    expect(preflight?.payload).toMatchObject({ semanticObjectId: 'lesson-anchor' });
+    expect(preflightOps.map((op) => op.id)).toEqual(['anchor-scale', 'anchor-label']);
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 1, 'visual_preflight_result', {
+      preflight_id: (preflight!.payload as { preflight_id?: string }).preflight_id,
+      accepted: true,
+      reasons: [],
+    })));
+    upstream.emit({ type: 'response.done', response: { id: 'compiled-anchor-response', status: 'completed', output: [{ type: 'function_call' }] } });
+    await flushProxy();
+    await flushProxy();
+
+    const staged = client.sent.filter((event) => event.type === 'board_ops');
+    expect(staged.map((cue) => (cue.payload as { checkpoint?: string }).checkpoint)).toEqual(['outline', 'label']);
+    let sequence = 2;
+    for (const cue of staged) {
+      client.emit('message', JSON.stringify(createRuntimeEvent(active, sequence++, 'ops_shown', { event_id: (cue.payload as { event_id?: number }).event_id })));
+    }
+    await flushProxy();
+    await flushProxy();
+    const output = toolOutput(upstream, 'compiled-anchor-call') as {
+      ok?: boolean; visible?: boolean; semanticGroupId?: string;
+      storyboard?: Array<{ reveal?: string; narration?: string }>;
+      board?: { visibleObjectIds?: string[] };
+    };
+    expect(output.ok).toBe(true);
+    expect(output.visible).toBe(true);
+    expect(output.semanticGroupId).toBe('lesson-anchor');
+    expect(output.storyboard?.map((step) => step.reveal)).toEqual(['outline', 'label']);
+    expect(output.board?.visibleObjectIds).toEqual(expect.arrayContaining(['anchor-scale', 'anchor-label']));
+  });
+
+  it('upgrades a prerequisite gap to a compiled detour mini-plan and returns to the recorded stage', async () => {
+    vi.stubGlobal('WebSocket', FakeUpstream);
+    const repo = new Repo(openTestDb());
+    const child = repo.createChild('Maya', 10);
+    const session = repo.createSession(child.id, 'fractions');
+    seedCompiledLesson(repo, session.id);
+    const detourStage: LessonStage = {
+      id: 'detour-prereq', kind: 'model', objective: 'Rebuild fraction meaning with one shaded strip',
+      boardPurpose: 'none', allowedBoardMutation: 'none',
+      learnerOpportunity: 'Shade one half of a strip and say what it shows', evidenceExpected: 'recall of fraction meaning',
+      checks: [{ id: 'detour-check', questionOrTask: 'What does the shaded part show?', responseMode: 'voice' }],
+    };
+    const client = new FakeClient();
+    await connectRealtimeProxy(client as never, {
+      apiKey: 'offline-fixture', model: 'gpt-realtime-2.1', repo, sessionId: session.id,
+      createUpstream: () => new FakeUpstream() as never,
+      planDetour: async () => [detourStage],
+    });
+    const active = { ...identity, sessionId: session.id };
+    const upstream = FakeUpstream.latest;
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 0, 'hello', {})));
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 1, 'user_text', { text: 'What is a fraction again?', idempotencyKey: 'detour-turn-0001' })));
+    await flushProxy();
+
+    upstream.emit({ type: 'response.created', response: { id: 'gap-response' } });
+    upstream.emit({
+      type: 'response.function_call_arguments.done', response_id: 'gap-response', call_id: 'gap-evidence-call', name: 'record_evidence',
+      arguments: JSON.stringify({
+        concept: 'fraction meaning', observation: 'Cannot say what the denominator counts.', verdict: 'struggling',
+        classification: 'missing_prerequisite', confidence: 'medium', confidence_basis: 'Direct question, no answer.',
+        task_id: 'orient-check', opportunity_kind: 'recall',
+      }),
+    });
+    await flushProxy();
+    await flushProxy();
+    expect(toolOutput(upstream, 'gap-evidence-call')).toMatchObject({ ok: true, detourDepth: 1 });
+
+    // The asynchronous compiled mini-plan upgraded the simple detour entry
+    // durably, and the injected stage context now teaches the detour stage.
+    const progress = repo.listEventsForInternalAudit(session.id).filter((event) => event.type === 'blueprint_progress');
+    const lastStack = (progress.at(-1)?.payload as { detourStack?: Array<{ plan?: { stages: Array<{ id: string }> } }> } | undefined)?.detourStack ?? [];
+    expect(lastStack[0]?.plan?.stages.map((stage) => stage.id)).toEqual(['detour-prereq']);
+    const instructions = upstream.sent.map((raw) => JSON.parse(raw) as { type: string; session?: { instructions?: string } })
+      .filter((event) => event.type === 'session.update').at(-1)?.session?.instructions ?? '';
+    expect(instructions).toContain('Rebuild fraction meaning with one shaded strip');
+    expect(instructions).toContain('prerequisite detour');
+
+    // A correct answer on the final detour stage pops it and returns to the
+    // recorded main stage.
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 2, 'user_text', { text: 'It shows one of two equal parts.', idempotencyKey: 'detour-turn-0002' })));
+    await flushProxy();
+    upstream.emit({ type: 'response.created', response: { id: 'resolve-response' } });
+    upstream.emit({
+      type: 'response.function_call_arguments.done', response_id: 'resolve-response', call_id: 'resolve-evidence-call', name: 'record_evidence',
+      arguments: JSON.stringify({
+        concept: 'fraction meaning', observation: 'Explained the shaded strip correctly.', verdict: 'progressing',
+        classification: 'correct', confidence: 'medium', confidence_basis: 'Clear explanation in own words.',
+        task_id: 'detour-check', opportunity_kind: 'explanation',
+      }),
+    });
+    await flushProxy();
+    await flushProxy();
+    expect(toolOutput(upstream, 'resolve-evidence-call')).toMatchObject({
+      ok: true,
+      detourDepth: 0,
+      currentStage: { id: 'orient' },
+    });
+  });
+
+  it('falls back to the simple detour when detour planning times out', async () => {
+    vi.stubGlobal('WebSocket', FakeUpstream);
+    const repo = new Repo(openTestDb());
+    const child = repo.createChild('Maya', 10);
+    const session = repo.createSession(child.id, 'fractions');
+    seedCompiledLesson(repo, session.id);
+    const client = new FakeClient();
+    await connectRealtimeProxy(client as never, {
+      apiKey: 'offline-fixture', model: 'gpt-realtime-2.1', repo, sessionId: session.id,
+      createUpstream: () => new FakeUpstream() as never,
+      planDetour: () => new Promise(() => {}),
+      detourPlanTimeoutMs: 30,
+    });
+    const active = { ...identity, sessionId: session.id };
+    const upstream = FakeUpstream.latest;
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 0, 'hello', {})));
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 1, 'user_text', { text: 'I do not know.', idempotencyKey: 'timeout-turn-0001' })));
+    await flushProxy();
+    upstream.emit({ type: 'response.created', response: { id: 'timeout-response' } });
+    upstream.emit({
+      type: 'response.function_call_arguments.done', response_id: 'timeout-response', call_id: 'timeout-evidence-call', name: 'record_evidence',
+      arguments: JSON.stringify({
+        concept: 'fraction meaning', observation: 'No usable definition offered.', verdict: 'struggling',
+        classification: 'missing_prerequisite', confidence: 'medium', confidence_basis: 'Direct question, no answer.',
+        task_id: 'orient-check', opportunity_kind: 'recall',
+      }),
+    });
+    await flushProxy();
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    await flushProxy();
+
+    // The simple detour recorded by the evidence classification stands; no
+    // compiled plan ever landed.
+    expect(toolOutput(upstream, 'timeout-evidence-call')).toMatchObject({ ok: true, detourDepth: 1 });
+    const progress = repo.listEventsForInternalAudit(session.id).filter((event) => event.type === 'blueprint_progress');
+    const stacks = progress.map((event) => (event.payload as { detourStack?: Array<{ plan?: unknown }> }).detourStack ?? []);
+    expect(stacks.length).toBeGreaterThan(0);
+    expect(stacks.every((stack) => stack.every((entry) => entry.plan === undefined))).toBe(true);
+  });
+
+  it('refuses to attach a session whose lesson compilation is not ready', async () => {
+    vi.stubGlobal('WebSocket', FakeUpstream);
+    const repo = new Repo(openTestDb());
+    const child = repo.createChild('Maya', 10);
+    const session = repo.createSession(child.id, 'fractions');
+    repo.upsertCompiledLesson(session.id, { status: 'pending' });
+    const client = new FakeClient();
+    await expect(connectRealtimeProxy(client as never, {
+      apiKey: 'offline-fixture', model: 'gpt-realtime-2.1', repo, sessionId: session.id,
+      createUpstream: () => new FakeUpstream() as never,
+    })).rejects.toThrow(/not compiled/);
   });
 
   it('erase is rejected in the turn that created the object; earlier work persists across later moves', async () => {
@@ -828,11 +1053,6 @@ describe('realtime proxy response annotation', () => {
     const upstream = FakeUpstream.latest;
     upstream.emit({ type: 'session.updated' });
     await flushProxy();
-
-    // A second blueprint cannot replace the restored one.
-    createBlueprint(upstream, 'duplicate');
-    await flushProxy();
-    expect(toolOutput(upstream, 'blueprint-call-duplicate')).toMatchObject({ ok: false, error: expect.stringContaining('already exists'), blueprintId: 'blueprint-restored' });
 
     // A stage jump against the restored current stage is rejected.
     upstream.emit({ type: 'response.created', response: { id: 'jump-response' } });

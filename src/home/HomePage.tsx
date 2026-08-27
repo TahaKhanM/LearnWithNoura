@@ -10,6 +10,12 @@ interface ChildRow {
   lastSession: { id: string; goal: string; startedAt: number; status: string } | null;
 }
 
+interface CandidateObjective {
+  id: string;
+  objective: string;
+  description: string;
+}
+
 interface AppConfig {
   realtime: boolean;
   lessonsAvailable: boolean;
@@ -43,6 +49,7 @@ export function HomePage() {
   const [ageError, setAgeError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [starting, setStarting] = useState(false);
+  const [candidates, setCandidates] = useState<CandidateObjective[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [config, setConfig] = useState<AppConfig | null>(null);
@@ -136,7 +143,7 @@ export function HomePage() {
     [creating, config?.lessonsAvailable, newAge, newName, refresh, chooseChild],
   );
 
-  const start = useCallback(async () => {
+  const start = useCallback(async (objective?: string) => {
     if (!selectedId || !goal.trim() || starting || !config?.lessonsAvailable) return;
     setStarting(true);
     setActionError(null);
@@ -144,9 +151,25 @@ export function HomePage() {
       const response = await fetch('/api/sessions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ childId: selectedId, goal: goal.trim() }),
+        body: JSON.stringify({
+          childId: selectedId,
+          goal: goal.trim(),
+          ...(objective ? { objective } : {}),
+        }),
       });
-      const body = (await response.json()) as { session?: { id: string }; lessonCapability?: string; error?: string };
+      const body = (await response.json()) as {
+        session?: { id: string };
+        candidates?: CandidateObjective[];
+        lessonCapability?: string;
+        error?: string;
+      };
+      if (response.ok && body.candidates) {
+        // The goal was too broad to compile directly: the parent picks one
+        // concrete objective, and only that second call creates the session.
+        setCandidates(body.candidates);
+        setStarting(false);
+        return;
+      }
       if (!response.ok || !body.session) throw new Error(body.error ?? 'failed');
       if (body.lessonCapability) window.sessionStorage.setItem(`noura.lessonCapability.${body.session.id}`, body.lessonCapability);
       navigate(`/lesson/${body.session.id}?selectedChildId=${encodeURIComponent(selectedId)}`);
@@ -155,6 +178,11 @@ export function HomePage() {
       setStarting(false);
     }
   }, [selectedId, goal, starting, config?.lessonsAvailable, navigate]);
+
+  const changeGoal = useCallback((value: string) => {
+    setGoal(value);
+    setCandidates(null);
+  }, []);
 
   const selected = children?.find((child) => child.id === selectedId) ?? null;
   const firstUse = children?.length === 0;
@@ -279,22 +307,40 @@ export function HomePage() {
                   id="lesson-goal"
                   className="home__goal"
                   value={goal}
-                  onChange={(event) => setGoal(event.target.value)}
+                  onChange={(event) => changeGoal(event.target.value)}
                   placeholder="A question, a topic, or something from school…"
                   maxLength={200}
                   data-testid="goal-input"
                 />
                 <div className="home__ideas" aria-label="Lesson goal suggestions">
                   {GOAL_IDEAS.map((idea) => (
-                    <button key={idea} className="home__idea" onClick={() => setGoal(idea)}>{idea}</button>
+                    <button key={idea} className="home__idea" onClick={() => changeGoal(idea)}>{idea}</button>
                   ))}
                 </div>
+                {candidates && (
+                  <div className="home__candidates" data-testid="objective-candidates" role="group" aria-labelledby="candidates-title">
+                    <p id="candidates-title" className="home__candidates-title">
+                      That goal covers a lot — pick today’s focus:
+                    </p>
+                    {candidates.map((candidate) => (
+                      <button
+                        key={candidate.id}
+                        className="home__candidate"
+                        disabled={starting}
+                        onClick={() => void start(candidate.objective)}
+                      >
+                        <strong>{candidate.objective}</strong>
+                        <span>{candidate.description}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
                 <div className="home__foot">
                   <p>Next, hand the device to {selected.name}. They’ll tap Begin to allow sound and choose microphone access.</p>
                   <button
                     className="home__start"
-                    onClick={start}
-                    disabled={!goal.trim() || starting || !config?.lessonsAvailable}
+                    onClick={() => void start()}
+                    disabled={!goal.trim() || starting || !config?.lessonsAvailable || candidates !== null}
                     data-testid="start-session"
                   >
                     {starting ? 'Preparing the board…' : `Hand to ${selected.name}`}

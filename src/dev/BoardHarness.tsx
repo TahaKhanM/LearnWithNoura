@@ -2,10 +2,34 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { BoardOp } from '../../shared/boardOps';
 import { adaptSemanticScene, VISUAL_PLAN_VERSION, type SemanticScenePlan } from '../../shared/semanticScene';
 import { BoardCanvas, type BoardHighlight } from '../board/BoardCanvas';
+import { registerKatexMeasurer } from '../board/compile';
+import { measureKatexInDom } from '../board/domKatexMeasurer';
 import { deriveSemanticViewports } from '../board/semanticViewport';
+import { BoardSceneCoordinator } from '../board/sceneCoordinator';
 import type { BoardAnimator } from '../board/animator';
 import { describeScene, applyOps, emptyScene, type SceneState } from '../board/scene';
 import './BoardHarness.css';
+
+export interface ScenePreflightVerdict { accepted: boolean; reasons: string[] }
+
+declare global {
+  interface Window {
+    /** Headless compiler validation entry point: runs the real client
+     * pipeline (compile, inspection, annotation layout, quality budget)
+     * with DOM-measured KaTeX bounds, against an empty board. */
+    nouraPreflightScene?: (ops: BoardOp[], semanticGroupId?: string) => Promise<ScenePreflightVerdict>;
+  }
+}
+
+async function preflightScene(ops: BoardOp[], semanticGroupId?: string): Promise<ScenePreflightVerdict> {
+  await document.fonts.ready;
+  registerKatexMeasurer(measureKatexInDom);
+  try {
+    return new BoardSceneCoordinator().preflightTutorOps(ops, semanticGroupId);
+  } finally {
+    registerKatexMeasurer(null);
+  }
+}
 
 function semantic(
   template: SemanticScenePlan['groups'][number]['template'],
@@ -90,6 +114,11 @@ export function BoardHarness() {
     const requested = new URLSearchParams(window.location.search).get('scene');
     if (requested && SCENES[requested]) load(requested);
   }, [load]);
+
+  useEffect(() => {
+    window.nouraPreflightScene = preflightScene;
+    return () => { delete window.nouraPreflightScene; };
+  }, []);
 
   const highlight = useCallback(() => {
     setScene((current) => {

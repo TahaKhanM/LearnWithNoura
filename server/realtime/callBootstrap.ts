@@ -1,6 +1,6 @@
 import { WebSocket as NodeWebSocket } from 'ws';
 import type { DomainRepository } from '../store/domain.js';
-import { buildInstructions } from './instructions.js';
+import { buildInstructions, lessonExecutionContext } from './instructions.js';
 import { loadReleasedBoardContext } from './boardContext.js';
 import { realtimeCallUrl, sessionUpdatePayload } from './sessionConfig.js';
 
@@ -179,6 +179,18 @@ export async function bootstrapVoiceCall(
   if (session.status !== 'active') {
     return { ok: false, status: 409, error: 'This lesson has ended and is read-only.' };
   }
+  // A voice call never starts on an uncompiled goal; legacy sessions
+  // without a compilation record replay their stored blueprint instead.
+  const compiled = await deps.repo.getCompiledLesson(input.sessionId);
+  if (compiled && compiled.status !== 'ready') {
+    return {
+      ok: false,
+      status: 409,
+      error: compiled.status === 'pending'
+        ? 'The lesson is still being prepared.'
+        : 'The lesson could not be prepared. Create the lesson again.',
+    };
+  }
 
   let call: RealtimeCallResult;
   try {
@@ -196,11 +208,17 @@ export async function bootstrapVoiceCall(
   await deps.repo.addEvent(input.sessionId, 'voice_call', { callId: call.callId });
 
   const boardContext = await loadReleasedBoardContext(deps.repo, input.sessionId);
-  const instructions = `${buildInstructions({
-    childName: child.name,
-    childAge: child.age,
-    goal: session.goal,
-  })}\n\n${boardContext.prompt()}`;
+  const blueprint = compiled?.lesson?.blueprint ?? null;
+  const stageContext = lessonExecutionContext(
+    blueprint,
+    blueprint ? blueprint.stages[Math.min(blueprint.currentStageIndex, blueprint.stages.length - 1)] : null,
+    compiled?.lesson?.anchorScene ?? null,
+  );
+  const instructions = [
+    buildInstructions({ childName: child.name, childAge: child.age, goal: session.goal }),
+    stageContext,
+    boardContext.prompt(),
+  ].filter(Boolean).join('\n\n');
   const url = realtimeCallUrl(call.callId);
   const socket = deps.createUpstream?.(url, deps.apiKey) ?? new NodeWebSocket(url, {
     headers: { Authorization: `Bearer ${deps.apiKey}` },

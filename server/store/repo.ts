@@ -1,5 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
+import {
+  CompiledLessonSchema,
+  type CompiledLessonRecord,
+  type CompiledLessonStatus,
+  type CompiledLessonUpdate,
+} from '../../shared/compiledLesson.js';
 import type { EvidenceOpportunityKind, ResponseTaxonomy } from '../../shared/pedagogy.js';
 
 export interface Child {
@@ -254,6 +260,46 @@ export class Repo {
     const session = this.getSession(id);
     if (!session || session.status !== 'ended') throw new Error('Only an ended session can continue.');
     return this.createSession(session.childId, session.goal, session.id);
+  }
+
+  /** Records compilation progress for a session; ready requires the lesson. */
+  upsertCompiledLesson(sessionId: string, update: CompiledLessonUpdate): CompiledLessonRecord {
+    if (!this.getSession(sessionId)) throw new Error('Unknown session.');
+    if (update.status === 'ready' && !update.lesson) throw new Error('A ready compiled lesson requires the lesson payload.');
+    const lesson = update.lesson ? CompiledLessonSchema.parse(update.lesson) : null;
+    const now = Date.now();
+    this.db.prepare(
+      `INSERT INTO compiled_lessons (session_id, status, lesson_json, failure_reason, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(session_id) DO UPDATE SET
+         status = excluded.status, lesson_json = excluded.lesson_json,
+         failure_reason = excluded.failure_reason, updated_at = excluded.updated_at`,
+    ).run(sessionId, update.status, lesson ? JSON.stringify(lesson) : null, update.failureReason ?? null, now, now);
+    const stored = this.getCompiledLesson(sessionId);
+    if (!stored) throw new Error('Compiled lesson write failed.');
+    return stored;
+  }
+
+  getCompiledLesson(sessionId: string): CompiledLessonRecord | null {
+    const row = this.db.prepare(
+      'SELECT session_id, status, lesson_json, failure_reason, created_at, updated_at FROM compiled_lessons WHERE session_id = ?',
+    ).get(sessionId) as {
+      session_id: string;
+      status: string;
+      lesson_json: string | null;
+      failure_reason: string | null;
+      created_at: number;
+      updated_at: number;
+    } | undefined;
+    if (!row) return null;
+    return {
+      sessionId: row.session_id,
+      status: row.status as CompiledLessonStatus,
+      lesson: row.lesson_json ? CompiledLessonSchema.parse(JSON.parse(row.lesson_json)) : null,
+      failureReason: row.failure_reason,
+      createdAt: Number(row.created_at),
+      updatedAt: Number(row.updated_at),
+    };
   }
 
   /**

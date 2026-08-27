@@ -15,6 +15,8 @@ export interface RuntimeConfig {
   privacyConfigured: boolean;
   realtimeModel: string;
   textModel: string;
+  compilerModel: string;
+  compilerReasoningEffort: 'low' | 'medium' | 'high';
   buildSha: string;
   environment: string;
 }
@@ -48,6 +50,10 @@ export function readRuntimeConfig(env: NodeJS.ProcessEnv = process.env): Runtime
     privacyConfigured: Boolean(env.NOURA_PRIVACY_POLICY_VERSION && env.NOURA_SAFETY_MODE),
     realtimeModel: env.OPENAI_REALTIME_MODEL || 'gpt-realtime-2.1',
     textModel: env.OPENAI_MODEL || 'gpt-5.6-terra',
+    compilerModel: env.NOURA_COMPILER_MODEL || env.OPENAI_MODEL || 'gpt-5.6-terra',
+    compilerReasoningEffort: env.NOURA_COMPILER_REASONING_EFFORT === 'low' || env.NOURA_COMPILER_REASONING_EFFORT === 'high'
+      ? env.NOURA_COMPILER_REASONING_EFFORT
+      : 'medium',
     buildSha: env.NOURA_BUILD_SHA || env.VERCEL_GIT_COMMIT_SHA || 'local-uncommitted',
     environment: env.VERCEL_ENV || deploymentMode,
   };
@@ -59,6 +65,7 @@ export function productionReadinessErrors(config: RuntimeConfig, env: NodeJS.Pro
   if (!config.durableStorageConfigured) errors.push('durable managed storage is not configured');
   if (!config.providerConfigured) errors.push('the tutor provider is not configured');
   if (env.NOURA_STORAGE_ADAPTER !== 'postgres') errors.push('Production must use the Postgres storage adapter');
+  if (env.NOURA_LESSON_COMPILER === 'fixture') errors.push('the fixture lesson compiler cannot serve production');
   if (!env.NOURA_LESSON_CAPABILITY_SECRET && !env.NOURA_AUTH_SECRET) errors.push('the lesson capability secret is not configured');
   if (config.v0) return errors;
   if (env.NOURA_DATABASE_SSL_REJECT_UNAUTHORIZED === 'false') errors.push('full Production requires verified database TLS');

@@ -37,6 +37,8 @@ interface LessonPageProps {
 interface SessionInfo {
   child: { id: string; name: string };
   session: { goal: string; status: string };
+  /** Null for legacy sessions created before compiled lessons existed. */
+  compilation: { status: 'pending' | 'ready' | 'failed'; objective: string | null; failureReason: string | null } | null;
 }
 
 export function LessonPage({ sessionId }: LessonPageProps) {
@@ -107,19 +109,30 @@ export function LessonPage({ sessionId }: LessonPageProps) {
 
   useEffect(() => {
     let cancelled = false;
-    fetch(`/api/sessions/${sessionId}`)
-      .then(async (r) => {
-        if (!r.ok) throw new Error((await r.json().catch(() => null))?.error ?? `HTTP ${r.status}`);
-        return r.json();
-      })
-      .then((body: SessionInfo) => {
-        if (!cancelled) setInfo(body);
-      })
-      .catch((err: Error) => {
-        if (!cancelled) setInfoError(err.message);
-      });
+    let timer: number | null = null;
+    const load = () => {
+      fetch(`/api/sessions/${sessionId}`)
+        .then(async (r) => {
+          if (!r.ok) throw new Error((await r.json().catch(() => null))?.error ?? `HTTP ${r.status}`);
+          return r.json();
+        })
+        .then((body: SessionInfo) => {
+          if (cancelled) return;
+          setInfo(body);
+          // The lesson is still being compiled; poll until it is ready or
+          // honestly failed. The lesson never starts on an uncompiled goal.
+          if (body.compilation?.status === 'pending') {
+            timer = window.setTimeout(load, 1_500);
+          }
+        })
+        .catch((err: Error) => {
+          if (!cancelled) setInfoError(err.message);
+        });
+    };
+    load();
     return () => {
       cancelled = true;
+      if (timer !== null) window.clearTimeout(timer);
     };
   }, [sessionId]);
 
@@ -308,8 +321,11 @@ export function LessonPage({ sessionId }: LessonPageProps) {
     else if (snap.phase === 'reconnecting' || snap.phase === 'failed') offerAttention(attention, snap.identity, 'neutral_learner');
   }, [attention, snap.identity, snap.phase, snap.lessonState.activeSemanticObjectId]);
 
+  // Legacy sessions carry no compilation record and behave as ready.
+  const compilationStatus = info ? (info.compilation?.status ?? 'ready') : null;
+
   const begin = useCallback(async () => {
-    if (!info || info.session.status !== 'active') return;
+    if (!info || info.session.status !== 'active' || (info.compilation && info.compilation.status !== 'ready')) return;
     setStarted(true);
     await session.start();
     // A reload never loses an unsubmitted drawing: restore the draft
@@ -622,13 +638,39 @@ export function LessonPage({ sessionId }: LessonPageProps) {
             focusIndex={focusIndex}
             overview={boardOverview}
           />
-          {!started && (
+          {!started && compilationStatus === 'failed' && info && (
+            <div className="lesson__start" data-testid="compilation-failed">
+              <Avatar phase="listening" voiceEnergy={0} micEnergy={0} attentionController={attention} />
+              <h1>Noura couldn’t prepare this lesson.</h1>
+              {info.compilation?.failureReason && (
+                <p className="lesson__start-goal">{info.compilation.failureReason}</p>
+              )}
+              <button className="lesson__button lesson__button--big" onClick={() => navigate(`/?selectedChildId=${encodeURIComponent(info.child.id)}`)}>
+                Choose another goal
+              </button>
+            </div>
+          )}
+          {!started && compilationStatus !== 'failed' && (
             <div className="lesson__start">
               <Avatar phase="listening" voiceEnergy={0} micEnergy={0} attentionController={attention} />
-              <h1>{info ? `Hi ${info.child.name} — tap Begin when you’re ready` : 'Preparing your lesson…'}</h1>
-              {info && <p className="lesson__start-goal">Today: {info.session.goal}</p>}
-              <button className="lesson__button lesson__button--big" onClick={begin} disabled={!info} data-testid="start-lesson">
-                Begin
+              {compilationStatus === 'pending' && info ? (
+                <>
+                  <h1 data-testid="preparing-lesson">Preparing {info.child.name}’s lesson…</h1>
+                  <p className="lesson__start-goal">
+                    Noura is writing and checking today’s plan for “{info.session.goal}”. This takes a moment.
+                  </p>
+                </>
+              ) : (
+                <h1>{info ? `Hi ${info.child.name} — tap Begin when you’re ready` : 'Preparing your lesson…'}</h1>
+              )}
+              {info && compilationStatus === 'ready' && <p className="lesson__start-goal">Today: {info.session.goal}</p>}
+              <button
+                className="lesson__button lesson__button--big"
+                onClick={begin}
+                disabled={!info || compilationStatus !== 'ready'}
+                data-testid="start-lesson"
+              >
+                {compilationStatus === 'pending' ? 'Preparing…' : 'Begin'}
               </button>
               <p className="lesson__hint">
                 This tap enables sound and asks for microphone permission. Noura can still teach by text if you choose not to use the microphone.

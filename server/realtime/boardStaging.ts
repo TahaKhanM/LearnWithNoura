@@ -87,6 +87,8 @@ export function stageAndConfirmPlan(ctx: CoordinatorContext, callId: string, res
   plan?: SemanticScenePlan;
   announcement?: string;
   skipPreflight?: boolean;
+  /** Pre-compiled reveal narration beats echoed back to the voice model. */
+  storyboard?: Array<{ id: string; reveal: string; narration: string }>;
 }): void {
   const { state } = ctx;
   const groupId = input.checkpoints[0]?.semanticObjectId ?? '';
@@ -173,6 +175,7 @@ export function stageAndConfirmPlan(ctx: CoordinatorContext, callId: string, res
       visibleObjectIds: input.ops.filter((op) => op.op === 'add').map((op) => op.id),
       ...(groupId ? { semanticGroupId: groupId } : {}),
       ...(input.announcement ? { announcement: input.announcement } : {}),
+      ...(input.storyboard ? { storyboard: input.storyboard } : {}),
       board: state.boardContext.toolSnapshot(),
     });
   })().catch((error) => {

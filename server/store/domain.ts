@@ -1,3 +1,4 @@
+import type { CompiledLessonRecord, CompiledLessonUpdate } from '../../shared/compiledLesson.js';
 import type {
   Child,
   EventRow,
@@ -28,6 +29,8 @@ export interface DomainRepository {
   endSession(id: string, summary: SessionSummary | null): Awaitable<Session | null>;
   setSessionSummary(id: string, summary: SessionSummary, version?: number): Awaitable<void>;
   createContinuation(id: string): Awaitable<Session>;
+  upsertCompiledLesson(sessionId: string, update: CompiledLessonUpdate): Awaitable<CompiledLessonRecord>;
+  getCompiledLesson(sessionId: string): Awaitable<CompiledLessonRecord | null>;
   claimFallbackTurn(identity: FallbackTurnIdentity): Awaitable<FallbackTurnClaim>;
   isFallbackTurnActive(identity: FallbackTurnIdentity): Awaitable<boolean>;
   addFallbackEvent(identity: FallbackTurnIdentity, type: string, payload: unknown, released?: boolean): Awaitable<number>;

@@ -27,6 +27,49 @@ export type BoardPurpose = z.infer<typeof BoardPurposeSchema>;
 export const BoardMutationSchema = z.enum(['establish', 'extend', 'emphasize', 'compare', 'none']);
 export type BoardMutation = z.infer<typeof BoardMutationSchema>;
 
+/** One anticipated wrong answer for a stage check, with the tactic to use. */
+export const MisconceptionBranchSchema = z.object({
+  anticipatedAnswer: z.string().min(1).max(240),
+  tactic: z.string().min(1).max(300),
+});
+export type MisconceptionBranch = z.infer<typeof MisconceptionBranchSchema>;
+
+/** A pre-authored check question the stage executor delivers verbatim. */
+export const StageCheckSchema = z.object({
+  id: z.string().min(1).max(80),
+  questionOrTask: z.string().min(1).max(500),
+  responseMode: ResponseModeSchema,
+  targetObjectIds: z.array(z.string().min(1).max(160)).max(12).optional(),
+  misconceptions: z.array(MisconceptionBranchSchema).max(4).optional(),
+});
+export type StageCheck = z.infer<typeof StageCheckSchema>;
+
+export const LessonStageSchema = z.object({
+  id: z.string().min(1).max(80),
+  kind: LessonStageKindSchema,
+  objective: z.string().min(1).max(240),
+  boardPurpose: BoardPurposeSchema,
+  allowedBoardMutation: BoardMutationSchema,
+  learnerOpportunity: z.string().min(1).max(300),
+  evidenceExpected: z.string().min(1).max(240),
+  /** Compiled lessons carry exact check wording; live-authored legacy
+   * blueprints predate this field, so it stays optional. */
+  checks: z.array(StageCheckSchema).max(3).optional(),
+});
+export type LessonStage = z.infer<typeof LessonStageSchema>;
+
+/** A compiled detour mini-plan: one or two prerequisite stages travelled in
+ * order before returning to the recorded main stage. */
+export const DetourPlanSchema = z.object({
+  stages: z.array(LessonStageSchema).min(1).max(2),
+  activeIndex: z.number().int().nonnegative(),
+}).superRefine((plan, context) => {
+  if (plan.activeIndex >= plan.stages.length) {
+    context.addIssue({ code: 'custom', path: ['activeIndex'], message: 'activeIndex is out of range.' });
+  }
+});
+export type DetourPlan = z.infer<typeof DetourPlanSchema>;
+
 /**
  * One durable plan for one small lesson goal. It is the coherence boundary:
  * adaptation changes the route through these stages, never the objective on
@@ -43,19 +86,13 @@ export const LessonBlueprintSchema = z.object({
     instructionalQuestion: z.string().min(1).max(300),
     invariantObjectIds: z.array(z.string().min(1).max(160)).max(24).default([]),
   }).nullable(),
-  stages: z.array(z.object({
-    id: z.string().min(1).max(80),
-    kind: LessonStageKindSchema,
-    objective: z.string().min(1).max(240),
-    boardPurpose: BoardPurposeSchema,
-    allowedBoardMutation: BoardMutationSchema,
-    learnerOpportunity: z.string().min(1).max(300),
-    evidenceExpected: z.string().min(1).max(240),
-  })).min(3).max(5),
+  stages: z.array(LessonStageSchema).min(3).max(5),
   currentStageIndex: z.number().int().nonnegative().default(0),
   detourStack: z.array(z.object({
     reason: z.string().min(1).max(240),
     returnStageIndex: z.number().int().nonnegative(),
+    /** Present when a compiled detour mini-plan upgraded this entry. */
+    plan: DetourPlanSchema.optional(),
   })).max(4).default([]),
 }).superRefine((blueprint, context) => {
   if (blueprint.mode === 'board_led' && !blueprint.anchor) {

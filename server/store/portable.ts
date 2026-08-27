@@ -8,9 +8,11 @@ export interface StorageSnapshot {
   sessions: Record<string, unknown>[];
   events: Record<string, unknown>[];
   evidence: Record<string, unknown>[];
+  /** Absent in snapshots exported before the lesson compiler existed. */
+  compiledLessons?: Record<string, unknown>[];
 }
 
-export interface StorageCounts { children: number; sessions: number; events: number; evidence: number }
+export interface StorageCounts { children: number; sessions: number; events: number; evidence: number; compiledLessons: number }
 
 export interface PortableDurableStore {
   initialize(): Promise<void>;
@@ -40,7 +42,8 @@ export class PostgresStore implements PortableDurableStore {
         (SELECT COUNT(*)::int FROM noura.children) AS children,
         (SELECT COUNT(*)::int FROM noura.sessions) AS sessions,
         (SELECT COUNT(*)::int FROM noura.events) AS events,
-        (SELECT COUNT(*)::int FROM noura.evidence) AS evidence
+        (SELECT COUNT(*)::int FROM noura.evidence) AS evidence,
+        (SELECT COUNT(*)::int FROM noura.compiled_lessons) AS compiled_lessons
     `);
     const row = result.rows[0] as Record<string, unknown>;
     return {
@@ -48,15 +51,17 @@ export class PostgresStore implements PortableDurableStore {
       sessions: Number(row.sessions),
       events: Number(row.events),
       evidence: Number(row.evidence),
+      compiledLessons: Number(row.compiled_lessons),
     };
   }
 
   async exportSnapshot(): Promise<StorageSnapshot> {
-    const [children, sessions, events, evidence] = await Promise.all([
+    const [children, sessions, events, evidence, compiledLessons] = await Promise.all([
       this.pool.query('SELECT * FROM noura.children ORDER BY id'),
       this.pool.query('SELECT * FROM noura.sessions ORDER BY id'),
       this.pool.query('SELECT * FROM noura.events ORDER BY id'),
       this.pool.query('SELECT * FROM noura.evidence ORDER BY id'),
+      this.pool.query('SELECT * FROM noura.compiled_lessons ORDER BY session_id'),
     ]);
     return {
       schemaVersion: 1,
@@ -65,6 +70,7 @@ export class PostgresStore implements PortableDurableStore {
       sessions: sessions.rows,
       events: events.rows,
       evidence: evidence.rows,
+      compiledLessons: compiledLessons.rows,
     };
   }
 
@@ -77,6 +83,7 @@ export class PostgresStore implements PortableDurableStore {
       for (const row of snapshot.sessions) await insertSession(client, row);
       for (const row of snapshot.events) await insertEvent(client, row);
       for (const row of snapshot.evidence) await insertEvidence(client, row);
+      for (const row of snapshot.compiledLessons ?? []) await insertCompiledLesson(client, row);
       await client.query("SELECT setval(pg_get_serial_sequence('noura.events', 'id'), GREATEST(COALESCE((SELECT MAX(id) FROM noura.events), 1), 1), EXISTS (SELECT 1 FROM noura.events))");
       await client.query("SELECT setval(pg_get_serial_sequence('noura.evidence', 'id'), GREATEST(COALESCE((SELECT MAX(id) FROM noura.evidence), 1), 1), EXISTS (SELECT 1 FROM noura.evidence))");
       await client.query('COMMIT');
@@ -92,6 +99,7 @@ export class PostgresStore implements PortableDurableStore {
       sessions: snapshot.sessions.length,
       events: snapshot.events.length,
       evidence: snapshot.evidence.length,
+      compiledLessons: snapshot.compiledLessons?.length ?? 0,
     };
     if (JSON.stringify(actual) !== JSON.stringify(expected)) throw new Error('Postgres import row-count verification failed.');
     return actual;
@@ -121,6 +129,13 @@ async function insertEvidence(client: PoolClient, row: Record<string, unknown>):
     json(row.domain_check_json),row.turn_id,row.generation_id,json(row.contradicts_json ?? []),json(row.supersedes_json ?? []),
     row.opportunity_kind ?? 'recall',row.retrieval_of ?? null,row.released !== false,row.idempotency_key ?? null,
   ]);
+}
+async function insertCompiledLesson(client: PoolClient, row: Record<string, unknown>): Promise<void> {
+  await client.query(
+    `INSERT INTO noura.compiled_lessons (session_id,status,lesson_json,failure_reason,created_at,updated_at)
+     VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (session_id) DO NOTHING`,
+    [row.session_id, row.status, json(row.lesson_json), row.failure_reason ?? null, row.created_at, row.updated_at],
+  );
 }
 function json(value: unknown): unknown {
   if (typeof value !== 'string') return value ?? null;
