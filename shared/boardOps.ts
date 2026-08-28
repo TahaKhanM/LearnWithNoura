@@ -21,11 +21,11 @@ import {
   type ImageSpec,
   type SnapZoneSpec,
   type TappableSpec,
-} from './authoredSpecs';
+} from './authoredSpecs.js';
 
-export type { ArcSpec, AssetSpec, CurveSpec, DraggableSpec, ImageSpec, SnapZoneSpec, TappableSpec } from './authoredSpecs';
-export { AUTHORED_ONLY_KINDS } from './authoredSpecs';
-export { MIN_MANIPULATIVE_HIT_PX } from './manipulativeSpecs';
+export type { ArcSpec, AssetSpec, CurveSpec, DraggableSpec, ImageSpec, SnapZoneSpec, TappableSpec } from './authoredSpecs.js';
+export { AUTHORED_ONLY_KINDS } from './authoredSpecs.js';
+export { MIN_MANIPULATIVE_HIT_PX } from './manipulativeSpecs.js';
 
 export const BOARD_W = 1000;
 export const BOARD_H = 600;

@@ -135,6 +135,19 @@ describe('compileLesson', () => {
     expect(scripted.calls[1].user).toContain('equation overlaps the triangle outline');
   });
 
+  it('falls back to conversation-led after one attempt when the board harness is unavailable', async () => {
+    const scripted = scriptedClient([authoredDraft(), authoredDraft(), authoredDraft()]);
+    const built = deps(scripted.client, [{
+      ok: false,
+      issues: ['No board harness URL is configured for scene validation.'],
+    }]);
+    const lesson = await compileLesson(built.deps, input);
+    expect(lesson.blueprint.mode).toBe('conversation_led');
+    expect(lesson.anchorScene).toBeNull();
+    expect(scripted.calls).toHaveLength(1);
+    expect(built.validated).toHaveLength(1);
+  });
+
   it('falls back to a validated conversation-led lesson when scenes keep failing', async () => {
     const scripted = scriptedClient([authoredDraft(), authoredDraft(), authoredDraft()]);
     const built = deps(scripted.client, [{ ok: false, issues: ['persistent overlap'] }]);

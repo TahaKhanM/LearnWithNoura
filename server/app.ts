@@ -1,5 +1,6 @@
 import { config as loadEnv } from 'dotenv';
 import { createServer } from 'node:http';
+import { waitUntil } from '@vercel/functions';
 import express from 'express';
 import OpenAI from 'openai';
 import { WebSocketServer } from 'ws';
@@ -61,6 +62,7 @@ const compilation: LessonCompilationService = openai && !fixtureCompilerForced
       harnessUrl: boardHarnessUrl,
       onCompileError: (sessionId, reasons) =>
         console.error(`[compiler] session ${sessionId} failed: ${reasons.join('; ').slice(0, 300)}`),
+      keepAlive: (work) => waitUntil(work),
     })
   : createFixtureCompilationService(repo);
 

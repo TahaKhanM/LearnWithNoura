@@ -150,6 +150,9 @@ export async function compileLesson(deps: LessonCompilerDeps, input: CompileLess
       return await assembleAndValidate(deps, input, draft);
     } catch (error) {
       feedback = reasonsOf(error);
+      if (feedback.some((reason) => reason.includes('No board harness URL')) && lastDraft) {
+        return assembleAndValidate(deps, input, conversationFallback(lastDraft));
+      }
     }
   }
 

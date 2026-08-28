@@ -133,6 +133,47 @@ describe('PostgresRepo domain contract', () => {
     });
   }, HEAVY_CONTRACT_TIMEOUT_MS);
 
+  it('keeps health and compiled lessons working when the role cannot CREATE in schema noura', async () => {
+    const memory = newDb();
+    const adapter = memory.adapters.createPg();
+    const setupPool = new adapter.Pool();
+    const setup = new PostgresRepo(setupPool);
+    await setup.initialize();
+    const child = await setup.createChild('Synthetic Learner', 10);
+    await setupPool.query('DROP TABLE noura.compiled_lessons');
+    await setupPool.query('DROP TABLE noura.board_assets');
+
+    const restrictedPool = new adapter.Pool();
+    const query = restrictedPool.query.bind(restrictedPool);
+    restrictedPool.query = ((text: unknown, values?: unknown[]) => {
+      const sql = String(text);
+      if (/^\s*(CREATE|ALTER)\b/i.test(sql)) {
+        return Promise.reject(new Error('must be owner of table children'));
+      }
+      return query(text as string, values);
+    }) as typeof restrictedPool.query;
+
+    const repo = new PostgresRepo(restrictedPool);
+    await expect(repo.health()).resolves.toBe(true);
+
+    const session = await repo.createSession(child.id, 'Water cycle');
+    const pending = await repo.upsertCompiledLesson(session.id, { status: 'pending' });
+    expect(pending).toMatchObject({ sessionId: session.id, status: 'pending', lesson: null });
+
+    const lesson = conversationCompiledLesson();
+    const ready = await repo.upsertCompiledLesson(session.id, { status: 'ready', lesson });
+    expect(ready.status).toBe('ready');
+    expect(ready.lesson?.blueprint.blueprintId).toBe(lesson.blueprint.blueprintId);
+    await expect(repo.getCompiledLesson(session.id)).resolves.toMatchObject({ status: 'ready' });
+
+    const visible = await repo.listEvents(session.id);
+    expect(visible).toEqual([]);
+    const audit = await repo.listEventsForInternalAudit(session.id);
+    expect(audit.every((event) => event.type !== 'noura.compiled_lesson')).toBe(true);
+
+    await expect(repo.getBoardAsset('missing')).resolves.toBeNull();
+  }, HEAVY_CONTRACT_TIMEOUT_MS);
+
   it('locks the session row before inserting an event transactionally', async () => {
     const queries: string[] = [];
     const repo = postgresRepo(queries);

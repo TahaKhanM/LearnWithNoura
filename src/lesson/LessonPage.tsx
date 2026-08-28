@@ -119,11 +119,15 @@ export function LessonPage({ sessionId }: LessonPageProps) {
     const load = () => {
       fetch(`/api/sessions/${sessionId}`)
         .then(async (r) => {
+          if (r.status === 429) {
+            if (!cancelled) timer = window.setTimeout(load, 3_000);
+            return null;
+          }
           if (!r.ok) throw new Error((await r.json().catch(() => null))?.error ?? `HTTP ${r.status}`);
           return r.json();
         })
-        .then((body: SessionInfo) => {
-          if (cancelled) return;
+        .then((body: SessionInfo | null) => {
+          if (cancelled || !body) return;
           setInfo(body);
           // The lesson is still being compiled; poll until it is ready or
           // honestly failed. The lesson never starts on an uncompiled goal.

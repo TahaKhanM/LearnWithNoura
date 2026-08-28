@@ -85,6 +85,8 @@ export interface LiveCompilationOptions {
   maxSceneRetries?: number;
   /** Observes background compilation failures (for logs); optional. */
   onCompileError?: (sessionId: string, reasons: string[]) => void;
+  /** Keeps a serverless isolate alive until background compile finishes. */
+  keepAlive?: (work: Promise<unknown>) => void;
 }
 
 /** Real compiler: Chat Completions authorship + headless scene validation. */
@@ -120,7 +122,7 @@ export function createLiveCompilationService(options: LiveCompilationOptions): L
     normalize: (input) => normalizeGoal(deps, input),
     start: async (input) => {
       const pending = await options.repo.upsertCompiledLesson(input.sessionId, { status: 'pending' });
-      void (async () => {
+      const work = (async () => {
         try {
           const lesson = await compileLesson(deps, {
             lessonKey: input.sessionId,
@@ -141,6 +143,7 @@ export function createLiveCompilationService(options: LiveCompilationOptions): L
           })).catch(() => {});
         }
       })();
+      options.keepAlive?.(work);
       return pending;
     },
     planDetour: (input) => compileDetourStages(deps, input),
