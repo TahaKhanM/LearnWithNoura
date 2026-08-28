@@ -1,11 +1,12 @@
 import { BOARD_H, BOARD_W, type ShapeSpec, type Vec } from '../../shared/boardOps';
+import { isCenterArc } from '../../shared/authoredSpecs';
 import { compileScene, nodeBBox, type BBox } from './compile';
 import { annotationGeometryCollisions } from './annotationLayout';
 import type { SceneItem, SceneState } from './scene';
 
 const SAFE = { x: 24, y: 24, w: BOARD_W - 48, h: BOARD_H - 48 };
 const TOOLBAR = { x: 780, y: 0, w: 220, h: 92 };
-const TEXT_BEARING = new Set<ShapeSpec['kind']>(['text', 'equation', 'label', 'point', 'angle', 'bars', 'numberline', 'box', 'table']);
+const TEXT_BEARING = new Set<ShapeSpec['kind']>(['text', 'equation', 'label', 'point', 'angle', 'bars', 'numberline', 'box', 'table', 'asset']);
 
 export interface SceneInspection {
   accepted: boolean;
@@ -106,6 +107,12 @@ function translateSpec(spec: ShapeSpec, dx: number, dy: number): ShapeSpec {
     case 'angle': return { ...spec, vertex: move(spec.vertex), from: move(spec.from), to: move(spec.to) };
     case 'connector': return { ...spec, ...(Array.isArray(spec.from) ? { from: move(spec.from) } : {}), ...(Array.isArray(spec.to) ? { to: move(spec.to) } : {}) };
     case 'path': return { ...spec, points: spec.points.map(move) };
+    case 'curve': return { ...spec, points: spec.points.map(move) };
+    case 'arc':
+      return isCenterArc(spec)
+        ? { ...spec, center: move(spec.center) }
+        : { ...spec, from: move(spec.from), through: move(spec.through), to: move(spec.to) };
+    case 'asset': return { ...spec, at: move(spec.at) };
     case 'label': case 'plot': return spec;
   }
 }

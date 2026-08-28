@@ -288,7 +288,7 @@ describe('realtime proxy response annotation', () => {
     expect(context?.item?.content?.map((part) => part.type)).toEqual(['input_text', 'input_image']);
     expect(context?.item?.content?.[0]?.text).toContain('pressed Done');
     expect(upstream.filter((event) => event.type === 'response.create')).toHaveLength(1);
-    expect(upstream.find((event) => event.type === 'session.update')?.session?.instructions).toContain('sketch-test [section fraction-scale] [learner]');
+    expect(upstream.find((event) => event.type === 'session.update')?.session?.instructions).toContain('sketch-test [region 1 of 1: fraction-scale] [learner]');
     expect(upstream.find((event) => event.type === 'session.update')?.session?.instructions).toContain('underline sketch-test');
     const stored = repo.listEvents(session.id);
     expect(stored).toEqual([

@@ -139,7 +139,7 @@ describe('session telemetry contract', () => {
       }).success).toBe(true);
     }
 
-    for (const cause of ['initial_anchor', 'notice_open', 'picker', 'draft_restore'] as const) {
+    for (const cause of ['initial_anchor', 'notice_open', 'picker', 'draft_restore', 'arrow', 'task_focus', 'tutor_announce'] as const) {
       expect(MetricInputSchema.safeParse({
         schemaVersion: '1.0.0',
         name: 'section_navigation',

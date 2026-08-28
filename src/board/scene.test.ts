@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { applyOps, emptyScene, describeScene } from './scene';
-import type { BoardOp } from '../../shared/boardOps';
+import { validateOps, type BoardOp } from '../../shared/boardOps';
 
 const add = (id: string, r = 20): BoardOp => ({
   op: 'add',
@@ -30,6 +30,23 @@ describe('applyOps', () => {
     expect((updated.scene.items[0].spec as { r: number }).r).toBe(60);
     const corrupt = applyOps(base.scene, [{ op: 'update', id: 'a', props: { r: 'x' } }], 'tutor');
     expect((corrupt.scene.items[0].spec as { r: number }).r).toBe(20);
+  });
+
+  it('leaves typeset text typeset when a fast-tier batch tries to update it to handwritten', () => {
+    const { ops } = validateOps([
+      { op: 'add', id: 'note', kind: 'text', at: [80, 80], text: 'typeset' },
+      { op: 'update', id: 'note', props: { style: 'handwritten' } },
+    ]);
+    const scene = applyOps(emptyScene, ops, 'tutor').scene;
+    expect(scene.items[0].spec).toMatchObject({ kind: 'text', text: 'typeset' });
+    expect((scene.items[0].spec as { style?: string }).style).toBeUndefined();
+
+    const authored = validateOps([
+      { op: 'add', id: 'note', kind: 'text', at: [80, 80], text: 'typeset' },
+      { op: 'update', id: 'note', props: { style: 'handwritten' } },
+    ], { tier: 'authored' });
+    const authoredScene = applyOps(emptyScene, authored.ops, 'tutor').scene;
+    expect(authoredScene.items[0].spec).toMatchObject({ kind: 'text', style: 'handwritten' });
   });
 
   it('erase removes dependents (labels, plots, connectors)', () => {

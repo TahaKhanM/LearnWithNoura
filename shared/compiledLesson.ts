@@ -50,7 +50,7 @@ export const AnchorSceneSchema = z.object({
   ops: AnchorOpsSchema,
   storyboard: z.array(StoryboardStepSchema).min(1).max(8),
 }).superRefine((anchor, context) => {
-  const validated = validateOps(anchor.ops);
+  const validated = validateOps(anchor.ops, { tier: 'authored' });
   if (validated.rejected.length > 0 || validated.ops.length !== anchor.ops.length || anchor.ops.length === 0) {
     context.addIssue({
       code: 'custom',

@@ -361,25 +361,28 @@ test('a new tutor section never hides the current board: it is announced and rea
     }, { semanticObjectId: 'group-two', providerResponseId: 'section-response' });
   });
 
-  // The first anchor section takes the view; the second one must NOT steal
-  // it — the drawing the learner is looking at stays exactly where it is.
+  // The first anchor region takes the camera; the second one must NOT steal
+  // it. Both drawings remain in the scene — a section is a spatial region
+  // now, not a visibility filter (v3.1-era announced-section E2E, adapted).
   const picker = page.getByLabel('Board section', { exact: true });
   await expect(page.locator('[data-item="group-one-box"]')).toBeVisible();
   await expect(picker).toHaveValue('group-one');
-  await expect(page.locator('[data-item="group-two-box"]')).toHaveCount(0);
+  await expect(page.locator('[data-item="group-two-box"]')).toHaveCount(1);
+  await expect(page.locator('[data-camera-region]')).toHaveAttribute('data-camera-region', 'group-one');
 
-  // The new section is announced and reachable, with an explicit control.
+  // The new region is announced and reachable, with an explicit control.
   const notice = page.getByTestId('section-notice');
   await expect(notice).toContainText('Second idea');
   await expect(page.locator('[data-item="group-one-box"]')).toBeVisible();
   await notice.getByRole('button', { name: 'Open it' }).click();
   await expect(picker).toHaveValue('group-two');
   await expect(page.locator('[data-item="group-two-box"]')).toBeVisible();
+  await expect(page.locator('[data-item="group-one-box"]')).toHaveCount(1);
 
-  // The first section remains reachable and intact — nothing disappeared.
+  // The first region remains reachable and intact — nothing disappeared.
   await picker.selectOption('group-one');
   await expect(page.locator('[data-item="group-one-box"]')).toBeVisible();
-  await expect(page.locator('[data-item="group-two-box"]')).toHaveCount(0);
+  await expect(page.locator('[data-item="group-two-box"]')).toHaveCount(1);
 
   await page.getByRole('button', { name: 'Draw on the board' }).click();
   const board = page.locator('.board__svg');
@@ -401,10 +404,25 @@ test('a new tutor section never hides the current board: it is announced and rea
   });
   await expect(picker).toHaveValue('group-one');
   await expect(page.locator('[data-item^="sketch-"]')).toHaveCount(1);
+  await expect(picker).toBeDisabled();
 
-  // Learner marks stay with their section across explicit navigation.
+  // Camera stays locked until the learner finishes the draft. After Done,
+  // marks inherit the region they were drawn in; panning away does not
+  // erase them — they remain in the scene for the pan back.
+  await page.getByTestId('draft-done').click();
+  const submissionId = await page.evaluate(() => {
+    const socket = (window as typeof window & { __nouraFakeSocket: { sent: Array<{ type: string; payload?: Record<string, unknown> }> } }).__nouraFakeSocket;
+    return String(socket.sent.find((event) => event.type === 'board_submission')?.payload?.submissionId ?? '');
+  });
+  await page.evaluate((id) => {
+    const socket = (window as typeof window & { __nouraFakeSocket: { emit(type: string, payload: Record<string, unknown>): void } }).__nouraFakeSocket;
+    socket.emit('board_submission_ack', { submissionId: id });
+  }, submissionId);
+  await expect(page.getByTestId('draft-done')).toHaveCount(0);
+  await expect(picker).toBeEnabled();
+
   await picker.selectOption('group-two');
-  await expect(page.locator('[data-item^="sketch-"]')).toHaveCount(0);
+  await expect(page.locator('[data-item^="sketch-"]')).toHaveCount(1);
   await picker.selectOption('group-one');
   await expect(page.locator('[data-item^="sketch-"]')).toHaveCount(1);
 });

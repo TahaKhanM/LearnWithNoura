@@ -41,6 +41,9 @@ const SectionNavigationCauseSchema = z.enum([
   'notice_open',
   'picker',
   'draft_restore',
+  'arrow',
+  'task_focus',
+  'tutor_announce',
 ]);
 
 const TutorObjectDisappearanceCauseSchema = z.enum(['scene_mutation', 'unknown']);

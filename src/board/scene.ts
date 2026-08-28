@@ -3,6 +3,7 @@ import {
   type BoardOp,
   type ShapeSpec,
 } from '../../shared/boardOps';
+import { isCenterArc } from '../../shared/authoredSpecs';
 
 export type Owner = 'tutor' | 'learner';
 
@@ -50,7 +51,9 @@ export function applyOps(scene: SceneState, ops: BoardOp[], owner: Owner, semant
           owner,
           spec: op.spec,
           revision: 0,
-          ...((semanticGroupId ?? previous?.semanticGroupId) ? { semanticGroupId: semanticGroupId ?? previous?.semanticGroupId } : {}),
+          ...((semanticGroupId ?? op.semanticGroupId ?? previous?.semanticGroupId)
+            ? { semanticGroupId: semanticGroupId ?? op.semanticGroupId ?? previous?.semanticGroupId }
+            : {}),
           ...(op.color ? { color: op.color } : {}),
         };
         if (index === -1) {
@@ -70,7 +73,7 @@ export function applyOps(scene: SceneState, ops: BoardOp[], owner: Owner, semant
           existing.id === op.id && existing.owner === owner
             ? {
                 ...existing,
-                spec: applyUpdate(existing.spec, op.props),
+                spec: applyUpdate(existing.spec, op.props, { tier: 'authored' }),
                 revision: existing.revision + 1,
               }
             : existing,
@@ -115,7 +118,7 @@ export function describeScene(scene: SceneState): string {
   const lines = scene.items.slice(-60).map((item) => {
     const s = item.spec;
     const who = item.owner === 'learner' ? ' (drawn by the learner)' : '';
-    const group = item.semanticGroupId ? ` [section ${item.semanticGroupId}]` : '';
+    const group = item.semanticGroupId ? ` [region ${item.semanticGroupId}]` : '';
     switch (s.kind) {
       case 'line':
         return `${item.id}${group}: line from (${s.from}) to (${s.to})${who}`;
@@ -151,6 +154,14 @@ export function describeScene(scene: SceneState): string {
         return `${item.id}${group}: table ${s.rows.length}x${s.rows[0]?.length ?? 0} at (${s.at})${who}`;
       case 'path':
         return `${item.id}${group}: freehand stroke, ${s.points.length} points${who}`;
+      case 'arc':
+        return isCenterArc(s)
+          ? `${item.id}${group}: arc center (${s.center}) r=${s.r}${who}`
+          : `${item.id}${group}: arc through (${s.from}) (${s.through}) (${s.to})${who}`;
+      case 'curve':
+        return `${item.id}${group}: curve, ${s.points.length} points${who}`;
+      case 'asset':
+        return `${item.id}${group}: icon ${s.assetId}${s.label ? ` "${s.label}"` : ''} at (${s.at})${who}`;
     }
   });
   return `Objects on the board now:\n${lines.join('\n')}`;

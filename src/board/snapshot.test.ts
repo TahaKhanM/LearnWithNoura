@@ -43,6 +43,21 @@ describe('canonical board snapshot', () => {
     expect(svg).toContain('#E14B3C');
   });
 
+  it('places two regions at identical local coordinates on distinct tiles', () => {
+    let two = applyOps(emptyScene, [
+      { op: 'add', id: 'one-box', spec: { kind: 'box', at: [500, 300], w: 160, h: 80, text: 'First' } },
+    ], 'tutor', 'region-one').scene;
+    two = applyOps(two, [
+      { op: 'add', id: 'two-box', spec: { kind: 'box', at: [500, 300], w: 160, h: 80, text: 'Second' } },
+    ], 'tutor', 'region-two').scene;
+    const svg = sceneToCanonicalSvg(two);
+    expect(svg).toContain('data-item="one-box"');
+    expect(svg).toContain('data-item="two-box"');
+    expect(svg).toMatch(/data-item="two-box"[^>]*transform="translate\(1080 0\)"/);
+    expect(svg).not.toMatch(/data-item="one-box"[^>]*transform=/);
+    expect(svg).toContain('viewBox="0 0 2080 600"');
+  });
+
   it('translates common LaTeX into deterministic readable text', () => {
     expect(latexToPlainText('c^2=a^2+b^2')).toBe('c^2=a^2+b^2');
     expect(latexToPlainText('A+B+C=180^\\circ')).toBe('A+B+C=180°');

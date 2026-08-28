@@ -1,4 +1,5 @@
 import { applyUpdate, normalizeColor, validateOps, validateSpec, type BoardOp, type ShapeSpec } from '../../shared/boardOps.js';
+import { isCenterArc } from '../../shared/authoredSpecs.js';
 import { LearnerBoardAnalysisSchema, type LearnerBoardAnalysis } from '../../shared/learnerBoard.js';
 import type { DomainRepository } from '../store/domain.js';
 
@@ -45,7 +46,7 @@ export class BoardContextTracker {
         else if (this.items[index].owner === owner) this.items[index] = next;
       } else if (op.op === 'update') {
         this.items = this.items.map((item) => item.id === op.id && item.owner === owner
-          ? { ...item, spec: applyUpdate(item.spec, op.props) }
+          ? { ...item, spec: applyUpdate(item.spec, op.props, { tier: 'authored' }) }
           : item);
       } else if (op.op === 'erase') {
         this.items = this.items.filter((item) => item.owner !== owner || (item.id !== op.id && !dependsOn(item.spec, op.id)));
@@ -104,6 +105,7 @@ export class BoardContextTracker {
       id: item.id,
       spec: item.spec,
       ...(item.color ? { color: item.color } : {}),
+      ...(item.semanticGroupId ? { semanticGroupId: item.semanticGroupId } : {}),
     }));
   }
 
@@ -185,8 +187,14 @@ export class BoardContextTracker {
 
   private summary(items: BoardContextItem[] = this.items): string {
     if (items.length === 0) return 'The board is empty.';
-    const lines = items.slice(-60).map((item) => `${item.id}${item.semanticGroupId ? ` [section ${item.semanticGroupId}]` : ''}${item.owner === 'learner' ? ' [learner]' : ''}: ${describeSpec(item.spec)}`);
-    return `Visible objects now:\n${lines.join('\n')}`.slice(0, 8_000);
+    const regionIds = [...new Set(items.map((item) => item.semanticGroupId).filter((id): id is string => Boolean(id)))];
+    const lines = items.slice(-60).map((item) => {
+      const region = item.semanticGroupId
+        ? ` [region ${regionIds.indexOf(item.semanticGroupId) + 1} of ${Math.max(1, regionIds.length)}: ${item.semanticGroupLabel ?? item.semanticGroupId}]`
+        : '';
+      return `${item.id}${region}${item.owner === 'learner' ? ' [learner]' : ''}: ${describeSpec(item.spec)}`;
+    });
+    return `Objects on the board now (every region remains present; the camera shows one at a time):\n${lines.join('\n')}`.slice(0, 8_000);
   }
 }
 
@@ -203,7 +211,7 @@ export async function loadReleasedBoardContext(repo: DomainRepository, sessionId
     const owner = event.type === 'learner_board' ? 'learner' : 'tutor';
     const payload = event.payload as { ops?: unknown; semanticObjectId?: unknown; groupLabel?: unknown; replacesGroup?: unknown; plan?: { groups?: Array<{ id?: unknown; label?: unknown }> } };
     const raw = payload.ops;
-    const ops = owner === 'learner' ? releasedLearnerOps(raw) : validateOps(raw).ops;
+    const ops = owner === 'learner' ? releasedLearnerOps(raw) : validateOps(raw, { tier: 'authored' }).ops;
     const semanticGroupId = typeof payload.semanticObjectId === 'string'
       ? payload.semanticObjectId
       : typeof payload.plan?.groups?.[0]?.id === 'string'
@@ -263,7 +271,7 @@ function describeSpec(spec: ShapeSpec): string {
     case 'ellipse': return `ellipse centred at (${spec.center})`;
     case 'point': return `point at (${spec.at})${spec.label ? ` labelled “${spec.label}”` : ''}`;
     case 'angle': return `angle at (${spec.vertex})${spec.label ? ` labelled “${spec.label}”` : ''}`;
-    case 'text': return `text “${spec.text}”`;
+    case 'text': return `text “${spec.text}”${spec.style === 'handwritten' ? ', handwritten' : ''}`;
     case 'equation': return `equation ${spec.latex}`;
     case 'label': return `label “${spec.text}” attached to ${spec.target}`;
     case 'axes': return `axes ${spec.xRange.join('..')} by ${spec.yRange.join('..')}`;
@@ -274,5 +282,10 @@ function describeSpec(spec: ShapeSpec): string {
     case 'connector': return `connector ${JSON.stringify(spec.from)} to ${JSON.stringify(spec.to)}${spec.label ? ` labelled “${spec.label}”` : ''}`;
     case 'table': return `table with ${spec.rows.length} rows`;
     case 'path': return `freehand stroke with ${spec.points.length} points`;
+    case 'arc': return isCenterArc(spec)
+      ? `arc centred at (${spec.center}), radius ${spec.r}`
+      : `arc through (${spec.from}) (${spec.through}) (${spec.to})`;
+    case 'curve': return `curve with ${spec.points.length} points`;
+    case 'asset': return `icon ${spec.assetId}${spec.label ? ` labelled “${spec.label}”` : ''}`;
   }
 }

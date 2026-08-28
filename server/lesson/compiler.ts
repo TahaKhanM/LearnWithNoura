@@ -222,7 +222,7 @@ async function assembleAndValidate(deps: LessonCompilerDeps, input: CompileLesso
 
 function buildAnchorScene(input: CompileLessonInput, anchor: NonNullable<AuthoredLesson['anchor']>): AnchorScene {
   if (anchor.kind === 'raw') {
-    const validated = validateOps(anchor.ops as BoardOp[]);
+    const validated = validateOps(anchor.ops as BoardOp[], { tier: 'authored' });
     if (validated.rejected.length > 0 || validated.ops.length !== anchor.ops.length) {
       throw new LessonCompileError('Raw anchor ops failed board validation.', validated.rejected.map((entry) => entry.reason));
     }
