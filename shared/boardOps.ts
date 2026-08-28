@@ -9,6 +9,7 @@
  */
 
 import {
+  AUTHORED_ONLY_KINDS,
   authoredRejectionReason,
   isAuthoredOnlySpec,
   updatePropsYieldAuthored,
@@ -16,10 +17,14 @@ import {
   type ArcSpec,
   type AssetSpec,
   type CurveSpec,
+  type DraggableSpec,
+  type SnapZoneSpec,
+  type TappableSpec,
 } from './authoredSpecs';
 
-export type { ArcSpec, AssetSpec, CurveSpec } from './authoredSpecs';
+export type { ArcSpec, AssetSpec, CurveSpec, DraggableSpec, SnapZoneSpec, TappableSpec } from './authoredSpecs';
 export { AUTHORED_ONLY_KINDS } from './authoredSpecs';
+export { MIN_MANIPULATIVE_HIT_PX } from './manipulativeSpecs';
 
 export const BOARD_W = 1000;
 export const BOARD_H = 600;
@@ -208,7 +213,10 @@ export type ShapeSpec =
   | PathSpec
   | ArcSpec
   | CurveSpec
-  | AssetSpec;
+  | AssetSpec
+  | DraggableSpec
+  | SnapZoneSpec
+  | TappableSpec;
 
 export type SpecKind = ShapeSpec['kind'];
 
@@ -689,7 +697,9 @@ export function validateOps(rawOps: unknown, options?: { tier?: OpsValidationTie
           out.rejected.push({
             reason: props.style === 'handwritten'
               ? 'handwritten style is director/compiler-only'
-              : `${String(props.kind)} is director/compiler-only`,
+              : typeof props.kind === 'string' && (AUTHORED_ONLY_KINDS as readonly string[]).includes(props.kind)
+                ? `${String(props.kind)} is director/compiler-only`
+                : 'manipulative or authored update props are director/compiler-only',
             raw,
           });
           break;
@@ -735,9 +745,10 @@ export function applyUpdate(
   props: Record<string, unknown>,
   options?: { tier?: OpsValidationTier },
 ): ShapeSpec {
+  const tier = options?.tier ?? 'fast';
+  if (tier === 'fast' && isAuthoredOnlySpec(spec)) return spec;
   const merged = { ...(spec as unknown as Record<string, unknown>), ...props, kind: spec.kind };
   const next = validateSpec(merged as RawOp) ?? spec;
-  const tier = options?.tier ?? 'fast';
   if (tier === 'fast' && isAuthoredOnlySpec(next) && !isAuthoredOnlySpec(spec)) return spec;
   return next;
 }

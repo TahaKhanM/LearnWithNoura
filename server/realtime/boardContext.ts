@@ -1,5 +1,8 @@
-import { applyUpdate, normalizeColor, validateOps, validateSpec, type BoardOp, type ShapeSpec } from '../../shared/boardOps.js';
+import { applyUpdate, validateOps, type BoardOp, type ShapeSpec } from '../../shared/boardOps.js';
 import { isCenterArc } from '../../shared/authoredSpecs.js';
+import { applyManipulativeProps, isManipulativeSpec, manipulativeLearnerProps } from '../../shared/manipulativeSpecs.js';
+import type { ManipulativeSceneItem } from '../../shared/manipulativeCheck.js';
+import { learnerBoardOps } from '../../shared/learnerSubmissionOps.js';
 import { LearnerBoardAnalysisSchema, type LearnerBoardAnalysis } from '../../shared/learnerBoard.js';
 import type { DomainRepository } from '../store/domain.js';
 
@@ -45,9 +48,14 @@ export class BoardContextTracker {
         if (index < 0) this.items.push(next);
         else if (this.items[index].owner === owner) this.items[index] = next;
       } else if (op.op === 'update') {
-        this.items = this.items.map((item) => item.id === op.id && item.owner === owner
-          ? { ...item, spec: applyUpdate(item.spec, op.props, { tier: 'authored' }) }
-          : item);
+        this.items = this.items.map((item) => {
+          if (item.id !== op.id) return item;
+          if (owner === 'learner' && isManipulativeSpec(item.spec) && manipulativeLearnerProps(op.props)) {
+            return { ...item, spec: applyManipulativeProps(item.spec, op.props) };
+          }
+          if (item.owner !== owner) return item;
+          return { ...item, spec: applyUpdate(item.spec, op.props, { tier: 'authored' }) };
+        });
       } else if (op.op === 'erase') {
         this.items = this.items.filter((item) => item.owner !== owner || (item.id !== op.id && !dependsOn(item.spec, op.id)));
       } else if (op.op === 'clear') {
@@ -124,6 +132,20 @@ export class BoardContextTracker {
 
   hasObject(id: string): boolean {
     return this.items.some((item) => item.id === id);
+  }
+
+  /** Draggable/tappable ids the learner may update on Done. */
+  learnerUpdatableManipulativeIds(): Set<string> {
+    return new Set(
+      this.items
+        .filter((item) => isManipulativeSpec(item.spec) && (item.spec.kind === 'draggable' || item.spec.kind === 'tappable'))
+        .map((item) => item.id),
+    );
+  }
+
+  /** Scene items for server-side manipulative check evaluation. */
+  manipulativeSceneItems(): ManipulativeSceneItem[] {
+    return this.items.map((item) => ({ id: item.id, spec: item.spec }));
   }
 
   groupOfObject(id: string): string | null {
@@ -211,7 +233,9 @@ export async function loadReleasedBoardContext(repo: DomainRepository, sessionId
     const owner = event.type === 'learner_board' ? 'learner' : 'tutor';
     const payload = event.payload as { ops?: unknown; semanticObjectId?: unknown; groupLabel?: unknown; replacesGroup?: unknown; plan?: { groups?: Array<{ id?: unknown; label?: unknown }> } };
     const raw = payload.ops;
-    const ops = owner === 'learner' ? releasedLearnerOps(raw) : validateOps(raw, { tier: 'authored' }).ops;
+    const ops = owner === 'learner'
+      ? learnerBoardOps(raw, { trustPersistedManipulativeUpdates: true })
+      : validateOps(raw, { tier: 'authored' }).ops;
     const semanticGroupId = typeof payload.semanticObjectId === 'string'
       ? payload.semanticObjectId
       : typeof payload.plan?.groups?.[0]?.id === 'string'
@@ -229,27 +253,6 @@ export async function loadReleasedBoardContext(repo: DomainRepository, sessionId
     }
   }
   return tracker;
-}
-
-function releasedLearnerOps(raw: unknown): BoardOp[] {
-  if (!Array.isArray(raw)) return [];
-  const ops: BoardOp[] = [];
-  for (const entry of raw.slice(0, 80)) {
-    if (typeof entry !== 'object' || entry === null) continue;
-    const candidate = entry as { op?: unknown; id?: unknown; spec?: unknown; color?: unknown };
-    const id = typeof candidate.id === 'string' && /^sketch-[\w-]{1,80}$/.test(candidate.id) ? candidate.id : null;
-    if (!id) continue;
-    if (candidate.op === 'erase') {
-      ops.push({ op: 'erase', id });
-      continue;
-    }
-    if (candidate.op !== 'add' || typeof candidate.spec !== 'object' || candidate.spec === null) continue;
-    const spec = validateSpec(candidate.spec as never);
-    if (spec?.kind !== 'path') continue;
-    const color = normalizeColor(candidate.color);
-    ops.push({ op: 'add', id, spec, ...(color ? { color } : {}) });
-  }
-  return ops;
 }
 
 function itemSignature(spec: ShapeSpec, color?: string): string {
@@ -287,5 +290,8 @@ function describeSpec(spec: ShapeSpec): string {
       : `arc through (${spec.from}) (${spec.through}) (${spec.to})`;
     case 'curve': return `curve with ${spec.points.length} points`;
     case 'asset': return `icon ${spec.assetId}${spec.label ? ` labelled “${spec.label}”` : ''}`;
+    case 'draggable': return `draggable ${spec.handle} at (${spec.at})${spec.label ? ` labelled “${spec.label}”` : ''}`;
+    case 'snapZone': return `snap zone ${spec.shape} at (${spec.at})`;
+    case 'tappable': return `tap target at (${spec.at})${spec.selected ? ' [selected]' : ''}${spec.label ? ` labelled “${spec.label}”` : ''}`;
   }
 }

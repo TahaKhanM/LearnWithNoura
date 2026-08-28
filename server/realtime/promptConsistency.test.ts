@@ -52,6 +52,9 @@ describe('realtime prompt / tool-surface consistency', () => {
     expect(prompt).not.toMatch(/kind":"arc"/);
     expect(prompt).not.toMatch(/kind":"curve"/);
     expect(prompt).not.toMatch(/kind":"asset"/);
+    expect(prompt).not.toMatch(/kind":"draggable"/);
+    expect(prompt).not.toMatch(/kind":"snapZone"/);
+    expect(prompt).not.toMatch(/kind":"tappable"/);
     expect(prompt).not.toContain('handwritten');
   });
 

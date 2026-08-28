@@ -9,6 +9,7 @@ import { BOARD_W, BOARD_H, PALETTE, type Vec, type ShapeSpec, type AxesSpec } fr
 import { compileExpression } from '../../shared/expr';
 import { compileArc, compileCurve } from './compileCurves';
 import { compileAsset } from './compileAssets';
+import { compileDraggable, compileSnapZone, compileTappable } from './compileManipulatives';
 import { measureText, wrapText, TEXT_SIZES } from './measure';
 import type { SceneItem } from './scene';
 
@@ -275,6 +276,7 @@ interface CompileContext {
   axes: Map<string, AxesMap>;
   /** All occupied boxes so far, for label collision avoidance. */
   occupied: BBox[];
+  items: SceneItem[];
 }
 
 const SIZE = (name: 'small' | 'normal' | 'big' | undefined) => TEXT_SIZES[name ?? 'normal'];
@@ -999,6 +1001,18 @@ function compileSpec(
     case 'asset':
       nodes.push(...compileAsset(spec, color));
       break;
+
+    case 'draggable':
+      nodes.push(...compileDraggable(spec, color).nodes);
+      break;
+
+    case 'snapZone':
+      nodes.push(...compileSnapZone(spec, ctx.items));
+      break;
+
+    case 'tappable':
+      nodes.push(...compileTappable(spec, color).nodes);
+      break;
   }
 
   return nodes;
@@ -1030,6 +1044,11 @@ function defaultColor(spec: ShapeSpec): string {
       return INK_SOFT;
     case 'asset':
       return PALETTE.blue;
+    case 'draggable':
+    case 'tappable':
+      return PALETTE.amber;
+    case 'snapZone':
+      return PALETTE.violet;
     default:
       return INK;
   }
@@ -1141,7 +1160,7 @@ function clampBox(box: BBox): BBox {
  * far (render-inspect-repair, done eagerly at compile time).
  */
 export function compileScene(items: SceneItem[]): CompiledItem[] {
-  const ctx: CompileContext = { bboxes: new Map(), axes: new Map(), occupied: [] };
+  const ctx: CompileContext = { bboxes: new Map(), axes: new Map(), occupied: [], items };
   const compiled: CompiledItem[] = [];
   for (const item of items) {
     const nodes = compileSpec(item, ctx);

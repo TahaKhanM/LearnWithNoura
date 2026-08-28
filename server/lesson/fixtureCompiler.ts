@@ -33,6 +33,7 @@ const VAGUE_GOAL = /\b(better at|help(?: \w+)? with|improve|catch up|struggl\w*|
 
 function fixtureNameFor(text: string): string | null {
   if (/\b(triangle|angle|geometr\w*|180)\b/i.test(text)) return 'triangle-angle-sum';
+  if (/\b(fraction|number line|numberline|three.?quarter|3\/4)\b/i.test(text)) return 'numberline-fractions';
   if (/\b(water|rain|evaporat\w*|condensat\w*|precipitat\w*|cycle)\b/i.test(text)) return 'water-cycle';
   if (/\b(brave|bravery|courage|feel\w*|confiden\w*)\b/i.test(text)) return 'being-brave';
   return null;

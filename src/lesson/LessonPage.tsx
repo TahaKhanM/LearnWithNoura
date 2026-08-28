@@ -16,6 +16,9 @@ import { groupItemCount, sceneForGroup } from '../board/sceneGroups';
 import { analyzeLearnerBoardChange, analysisFocusBox } from '../board/learnerSketch';
 import { deriveSemanticViewports } from '../board/semanticViewport';
 import { renderSceneImage } from '../board/snapshot';
+import { evaluateManipulativeCheck } from '../../shared/manipulativeCheck';
+import type { ManipulativeFeedback } from '../board/ManipulativeLayer';
+import type { UpdateOp } from '../../shared/boardOps';
 import { RealtimeSession } from './realtimeSession';
 import { LearnerDraftController } from './learnerDraft';
 import { Avatar } from './Avatar';
@@ -67,6 +70,7 @@ export function LessonPage({ sessionId }: LessonPageProps) {
   const highlightTimer = useRef<number | null>(null);
   const draftHintTimer = useRef<number | null>(null);
   const [draftHint, setDraftHint] = useState(false);
+  const [manipulativeFeedback, setManipulativeFeedback] = useState<ManipulativeFeedback>('idle');
   const [boardActivity, setBoardActivity] = useState<'idle' | 'noura' | 'learner'>('idle');
   const [sectionNotice, setSectionNotice] = useState<{ id: string; label: string } | null>(null);
   const sectionNoticeTimer = useRef<number | null>(null);
@@ -397,28 +401,66 @@ export function LessonPage({ sessionId }: LessonPageProps) {
 
   const applyDraftOps = useCallback((ops: BoardOp[]) => {
     if (ops.length === 0) return;
-    const result = boardState.current.applyLearner(ops, activeVisualGroupRef.current);
+    const hasManipulative = ops.some((op) => op.op === 'update');
+    const result = hasManipulative
+      ? boardState.current.applyManipulativeDraft(ops, activeVisualGroupRef.current)
+      : boardState.current.applyLearner(ops, activeVisualGroupRef.current);
     setScene(result.scene);
   }, []);
 
   const undoDraft = useCallback(() => {
     const op = draftRef.current.undo();
     if (op) applyDraftOps([op]);
+    setManipulativeFeedback('idle');
   }, [applyDraftOps]);
 
   const redoDraft = useCallback(() => {
     const op = draftRef.current.redo();
     if (op) applyDraftOps([op]);
+    setManipulativeFeedback('idle');
   }, [applyDraftOps]);
 
   const clearDraft = useCallback(() => {
     applyDraftOps(draftRef.current.clear());
+    setManipulativeFeedback('idle');
   }, [applyDraftOps]);
+
+  const applyManipulativeChange = useCallback((op: UpdateOp, inverse: UpdateOp, note: string) => {
+    session.beginLearnerActivity();
+    ensureDraftOpen();
+    const result = boardState.current.applyManipulativeDraft([op], activeVisualGroupRef.current);
+    setScene(result.scene);
+    draftRef.current.addManipulativeUpdate(op, inverse, note);
+    setManipulativeFeedback('idle');
+    signalBoardActivity('learner', 1_200);
+  }, [session, ensureDraftOpen, signalBoardActivity]);
+
+  const handleManipulativeDragPreview = useCallback((op: UpdateOp) => {
+    ensureDraftOpen();
+    const result = boardState.current.applyManipulativeDraft([op], activeVisualGroupRef.current);
+    setScene(result.scene);
+    signalBoardActivity('learner', 1_200);
+  }, [ensureDraftOpen, signalBoardActivity]);
+
+  const handleManipulativeMove = useCallback((op: UpdateOp, inverse: UpdateOp, note: string) => {
+    applyManipulativeChange(op, inverse, note);
+  }, [applyManipulativeChange]);
+
+  const handleManipulativeTap = useCallback((op: UpdateOp, inverse: UpdateOp, note: string) => {
+    applyManipulativeChange(op, inverse, note);
+    const task = session.getSnapshot().task;
+    if (task?.manipulativeCheck && task.responseMode === 'manipulate') {
+      const visible = sceneForGroup(boardState.current.current, activeVisualGroupRef.current);
+      const result = evaluateManipulativeCheck({ check: task.manipulativeCheck, items: visible.items });
+      setManipulativeFeedback(result.passed ? 'correct' : 'not-yet');
+    }
+  }, [applyManipulativeChange, session]);
 
   const cancelDraft = useCallback(() => {
     const controller = draftRef.current;
     const draftId = controller.getSnapshot().draftId;
     applyDraftOps(controller.cancel());
+    setManipulativeFeedback('idle');
     if (draftId) session.notifyDraftState(false, draftId);
     flushQueuedDraftNavigation();
   }, [applyDraftOps, session, flushQueuedDraftNavigation]);
@@ -430,28 +472,47 @@ export function LessonPage({ sessionId }: LessonPageProps) {
    */
   const submitDraft = useCallback(async () => {
     const controller = draftRef.current;
-    const frozen = controller.beginSubmit();
+    const task = session.getSnapshot().task;
+    const allowEmpty = task?.responseMode === 'manipulate';
+    const frozen = controller.beginSubmit({ allowEmpty });
     if (!frozen) return;
     const draftSnapshot = controller.getSnapshot();
     const semanticGroupId = draftSnapshot.semanticGroupId ?? activeVisualGroupRef.current;
     const submittedScene = boardState.current.current;
     const visible = sceneForGroup(submittedScene, semanticGroupId);
-    const analysis = analyzeLearnerBoardChange(visible, frozen.ops, semanticGroupId);
-    const imageDataUrl = await renderSceneImage(visible, { focusBox: analysisFocusBox(analysis) });
+    const manipulativeCheck = task?.manipulativeCheck;
+    const manipulativeResult = manipulativeCheck
+      ? evaluateManipulativeCheck({ check: manipulativeCheck, items: visible.items })
+      : undefined;
+    if (manipulativeResult) {
+      setManipulativeFeedback(manipulativeResult.passed ? 'correct' : 'try-again');
+    }
+    const analysis = frozen.ops.length > 0
+      ? analyzeLearnerBoardChange(visible, frozen.ops, semanticGroupId)
+      : undefined;
+    const imageDataUrl = manipulativeCheck || frozen.ops.length > 0
+      ? await renderSceneImage(visible, { focusBox: analysis ? analysisFocusBox(analysis) : undefined })
+      : undefined;
     const semanticGroupLabel = visualGroupsRef.current.find((group) => group.id === semanticGroupId)?.label;
     session.notifyDraftState(false, frozen.draftId);
     session.submitBoardSubmission({
       submissionId: frozen.submissionId,
       draftId: frozen.draftId,
-      description: `${frozen.notes.join('; ')}. ${describeScene(visible)}`,
+      description: [
+        frozen.notes.join('; '),
+        manipulativeResult?.summary ?? '',
+        describeScene(visible),
+      ].filter(Boolean).join('. '),
       ops: frozen.ops,
-      analysis,
-      imageDataUrl,
+      ...(analysis ? { analysis } : {}),
+      ...(imageDataUrl ? { imageDataUrl } : {}),
       baseBoardRevision: submittedScene.epoch,
       submittedBoardRevision: submittedScene.epoch,
       ...(draftSnapshot.taskId ? { taskId: draftSnapshot.taskId } : {}),
       ...(semanticGroupId ? { semanticGroupId } : {}),
       ...(semanticGroupLabel ? { semanticGroupLabel } : {}),
+      ...(manipulativeCheck ? { manipulativeCheck } : {}),
+      ...(manipulativeResult ? { manipulativeResult } : {}),
     });
   }, [session]);
 
@@ -530,6 +591,18 @@ export function LessonPage({ sessionId }: LessonPageProps) {
     if (!visualGroups.some((group) => group.id === target)) return;
     openSection(target, 'task_focus');
   }, [snap.task, draftActive, activeVisualGroupId, visualGroups, openSection]);
+
+  useEffect(() => {
+    if (!started || !snap.task || snap.task.responseMode !== 'manipulate') return;
+    if (draftRef.current.isOpen) return;
+    const draftId = draftRef.current.begin({
+      taskId: snap.task.taskId,
+      ...(snap.task.semanticGroupId ? { semanticGroupId: snap.task.semanticGroupId } : {}),
+    });
+    session.notifyDraftState(true, draftId);
+    setManipulativeFeedback('idle');
+  }, [started, snap.task, session]);
+
   const regionCount = visualGroups.length;
   const regionIndex = Math.max(0, visualGroups.findIndex((group) => group.id === activeVisualGroupId));
 
@@ -633,11 +706,18 @@ export function LessonPage({ sessionId }: LessonPageProps) {
             <strong>
               {snap.task.responseMode === 'draw'
                 ? 'Your turn — draw on the board'
-                : snap.task.responseMode === 'mixed'
-                  ? 'Your turn — draw and explain'
-                  : 'Your turn'}
+                : snap.task.responseMode === 'manipulate'
+                  ? 'Your turn — move or tap on the board'
+                  : snap.task.responseMode === 'mixed'
+                    ? 'Your turn — draw and explain'
+                    : 'Your turn'}
             </strong>
             <span className="lesson__task-prompt">{snap.task.prompt}</span>
+            {manipulativeFeedback !== 'idle' && snap.task.manipulativeCheck && (
+              <span className="lesson__task-feedback" data-testid="manipulative-feedback" role="status">
+                {manipulativeFeedback === 'correct' ? 'Looks right!' : manipulativeFeedback === 'try-again' ? 'Try again, then press Done.' : 'Keep going — press Done when ready.'}
+              </span>
+            )}
             {snap.task.submitPolicy === 'explicit' && (
               <span className="lesson__task-hint">Press Done when you finish.</span>
             )}
@@ -662,6 +742,12 @@ export function LessonPage({ sessionId }: LessonPageProps) {
             cameraRegionId={activeVisualGroupId}
             focusIndex={focusIndex}
             overview={boardOverview}
+            manipulativeEnabled={started && (snap.task?.responseMode === 'manipulate' || snap.task?.responseMode === 'mixed')}
+            manipulativeFeedback={manipulativeFeedback}
+            manipulativeCheckTargetId={snap.task?.manipulativeCheck?.targetId}
+            onManipulativeDragPreview={handleManipulativeDragPreview}
+            onManipulativeMove={handleManipulativeMove}
+            onManipulativeTap={handleManipulativeTap}
           />
           {!started && compilationStatus === 'failed' && info && (
             <div className="lesson__start" data-testid="compilation-failed">
@@ -846,7 +932,7 @@ export function LessonPage({ sessionId }: LessonPageProps) {
                 <button
                   className="lesson__done"
                   data-testid="draft-done"
-                  disabled={draftSnap.entryCount === 0 || draftSnap.status === 'submitting'}
+                  disabled={(draftSnap.entryCount === 0 && snap.task?.responseMode !== 'manipulate') || draftSnap.status === 'submitting'}
                   onClick={() => void submitDraft()}
                 >
                   {draftSnap.status === 'submitting' ? 'Sending…' : 'Done'}

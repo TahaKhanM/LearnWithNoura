@@ -1,0 +1,155 @@
+{
+  "compiledLessonId": "compiled-fixture-numberline-fractions",
+  "schemaVersion": "1.0.0",
+  "goal": "Place fractions on a number line",
+  "objective": "Locate one-half and three-quarters on the same number line",
+  "blueprint": {
+    "blueprintId": "blueprint-fixture-numberline-fractions",
+    "goal": "Locate one-half and three-quarters on the same number line",
+    "mode": "board_led",
+    "successCriteria": [
+      "Learner places the marker on three-quarters",
+      "Learner explains why three-quarters is farther right than one-half"
+    ],
+    "anchor": {
+      "semanticGroupId": "lesson-anchor",
+      "template": "fraction_comparison",
+      "instructionalQuestion": "Where do one-half and three-quarters live on the same line?",
+      "invariantObjectIds": ["lesson-anchor-line", "lesson-anchor-marker"]
+    },
+    "stages": [
+      {
+        "id": "orient",
+        "kind": "orient",
+        "objective": "Meet the fraction number line and the draggable marker",
+        "boardPurpose": "establish_anchor",
+        "allowedBoardMutation": "establish",
+        "learnerOpportunity": "Notice the marks for one-half and three-quarters",
+        "evidenceExpected": "recall",
+        "checks": [
+          {
+            "id": "orient-marks",
+            "questionOrTask": "Which mark is farther to the right, one-half or three-quarters?",
+            "responseMode": "voice",
+            "targetObjectIds": ["lesson-anchor-line"]
+          }
+        ]
+      },
+      {
+        "id": "guided",
+        "kind": "guided_check",
+        "objective": "Place the marker on three-quarters",
+        "boardPurpose": "elicit_learner_work",
+        "allowedBoardMutation": "emphasize",
+        "learnerOpportunity": "Drag the marker onto three-quarters",
+        "evidenceExpected": "application",
+        "checks": [
+          {
+            "id": "place-three-quarters",
+            "questionOrTask": "Drag the marker onto three-quarters on the number line.",
+            "responseMode": "manipulate",
+            "targetObjectIds": ["lesson-anchor-marker", "lesson-anchor-line", "lesson-anchor-zone-three-quarters"],
+            "manipulativeCheck": {
+              "targetId": "lesson-anchor-marker",
+              "predicate": "snapped",
+              "snapZoneId": "lesson-anchor-zone-three-quarters",
+              "tolerance": 12
+            }
+          }
+        ]
+      },
+      {
+        "id": "closure",
+        "kind": "closure",
+        "objective": "Say why three-quarters is farther right",
+        "boardPurpose": "summarize",
+        "allowedBoardMutation": "none",
+        "learnerOpportunity": "Explain the placement in their own words",
+        "evidenceExpected": "explanation"
+      }
+    ],
+    "currentStageIndex": 0,
+    "detourStack": []
+  },
+  "anchorScene": {
+    "groupId": "lesson-anchor",
+    "groupLabel": "Fraction number line",
+    "template": null,
+    "ops": [
+      {
+        "op": "add",
+        "id": "lesson-anchor-line",
+        "spec": {
+          "kind": "numberline",
+          "at": [130, 300],
+          "w": 740,
+          "min": 0,
+          "max": 1,
+          "step": 0.25,
+          "marks": [
+            { "value": 0.5, "label": "1/2", "color": "blue" },
+            { "value": 0.75, "label": "3/4", "color": "red" }
+          ]
+        }
+      },
+      {
+        "op": "add",
+        "id": "lesson-anchor-zone-three-quarters",
+        "spec": {
+          "kind": "snapZone",
+          "shape": "interval",
+          "at": [685, 300],
+          "numberlineId": "lesson-anchor-line",
+          "from": 0.7,
+          "to": 0.8,
+          "tolerance": 12
+        }
+      },
+      {
+        "op": "add",
+        "id": "lesson-anchor-marker",
+        "color": "amber",
+        "spec": {
+          "kind": "draggable",
+          "handle": "token",
+          "at": [200, 300],
+          "size": 44,
+          "label": "marker"
+        }
+      },
+      {
+        "op": "add",
+        "id": "lesson-anchor-prompt",
+        "spec": {
+          "kind": "text",
+          "at": [500, 140],
+          "text": "Drag the marker to the correct fraction",
+          "size": "big",
+          "align": "middle"
+        }
+      }
+    ],
+    "storyboard": [
+      {
+        "id": "reveal-line",
+        "reveal": "outline",
+        "narration": "Here is one number line from zero to one.",
+        "objectIds": ["lesson-anchor-line"]
+      },
+      {
+        "id": "reveal-marks",
+        "reveal": "label",
+        "narration": "One-half and three-quarters are marked for you.",
+        "objectIds": ["lesson-anchor-prompt"]
+      },
+      {
+        "id": "reveal-marker",
+        "reveal": "emphasis",
+        "narration": "This marker is yours to move.",
+        "objectIds": ["lesson-anchor-zone-three-quarters", "lesson-anchor-marker"]
+      }
+    ]
+  },
+  "compiledAt": 0,
+  "compilerModel": "fixture-compiler"
+}

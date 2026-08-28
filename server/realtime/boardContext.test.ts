@@ -72,6 +72,19 @@ describe('released board context', () => {
     expect(board.toolSnapshot().summary).toContain('text “watch this”, handwritten');
   });
 
+  it('replays persisted manipulative marker updates on reconnect', () => {
+    const board = new BoardContextTracker();
+    board.apply([
+      { op: 'add', id: 'fraction-line', spec: { kind: 'numberline', at: [130, 300], w: 740, min: 0, max: 1 } },
+      { op: 'add', id: 'fraction-marker', spec: { kind: 'draggable', handle: 'token', at: [200, 300], size: 44 } },
+    ], 'tutor', 'fractions', 'Fractions');
+    board.apply([
+      { op: 'update', id: 'fraction-marker', props: { at: [685, 300] } },
+    ], 'learner', 'fractions', 'Fractions');
+    const marker = board.manipulativeSceneItems().find((item) => item.id === 'fraction-marker');
+    expect(marker?.spec.kind === 'draggable' ? marker.spec.at : null).toEqual([685, 300]);
+  });
+
   it('emits visible ops that preserve region membership for the current-board raster', () => {
     const board = new BoardContextTracker();
     board.apply([{ op: 'add', id: 'one-box', spec: { kind: 'box', at: [500, 300], text: 'one' } }], 'tutor', 'region-one');

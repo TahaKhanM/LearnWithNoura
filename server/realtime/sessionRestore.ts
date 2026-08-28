@@ -1,4 +1,5 @@
-import { normalizeColor, validateOps, validateSpec, type BoardOp } from '../../shared/boardOps.js';
+import { validateOps } from '../../shared/boardOps.js';
+import { learnerBoardOps } from '../../shared/learnerSubmissionOps.js';
 import { AnchorSceneSchema, type AnchorScene } from '../../shared/compiledLesson.js';
 import { LessonBlueprintSchema, type LessonBlueprint } from '../../shared/pedagogy.js';
 import { DeliveredTaskSchema, type DeliveredTask } from '../../shared/lessonTurn.js';
@@ -45,7 +46,7 @@ export async function replayBoard(ctx: CoordinatorContext): Promise<void> {
     .filter((event) => event.type === 'learner_board' && event.released)
     .map((event) => {
       const payload = event.payload as { ops?: unknown; semanticObjectId?: unknown };
-      const ops = learnerBoardOps(payload.ops);
+      const ops = learnerBoardOps(payload.ops, { trustPersistedManipulativeUpdates: true });
       return { ops, ...(typeof payload.semanticObjectId === 'string' ? { semanticObjectId: payload.semanticObjectId } : {}) };
     })
     .filter((batch) => batch.ops.length > 0);
@@ -180,28 +181,7 @@ export async function conversationContext(ctx: CoordinatorContext): Promise<stri
   ].join('\n');
 }
 
-export function learnerBoardOps(raw: unknown): BoardOp[] {
-  if (!Array.isArray(raw)) return [];
-  const ops: BoardOp[] = [];
-  for (const entry of raw.slice(0, 40)) {
-    if (typeof entry !== 'object' || entry === null) continue;
-    const candidate = entry as { op?: unknown; id?: unknown; color?: unknown; spec?: unknown };
-    const id = typeof candidate.id === 'string' && /^sketch-[\w-]{1,80}$/.test(candidate.id)
-      ? candidate.id
-      : null;
-    if (!id) continue;
-    if (candidate.op === 'erase') {
-      ops.push({ op: 'erase', id });
-      continue;
-    }
-    if (candidate.op !== 'add' || typeof candidate.spec !== 'object' || candidate.spec === null) continue;
-    const spec = validateSpec(candidate.spec as never);
-    if (spec?.kind !== 'path') continue;
-    const color = normalizeColor(candidate.color);
-    ops.push({ op: 'add', id, spec, ...(color ? { color } : {}) });
-  }
-  return ops;
-}
+export { learnerBoardOps } from '../../shared/learnerSubmissionOps.js';
 
 export function safeBoardImage(value: unknown): string | null {
   if (typeof value !== 'string' || value.length > 320_000) return null;

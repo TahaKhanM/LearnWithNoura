@@ -36,6 +36,8 @@ export interface BoardSubmissionInput {
   description: string;
   ops: BoardOp[];
   analysis?: LearnerBoardAnalysis;
+  manipulativeCheck?: import('../../shared/manipulativeCheck.js').ManipulativeCheck;
+  manipulativeResult?: import('../../shared/manipulativeCheck.js').ManipulativeCheckResult;
   imageDataUrl?: string | null;
 }
 export interface TurnMetrics {
@@ -429,6 +431,8 @@ export class RealtimeSession {
       ...(input.semanticGroupId ? { semanticGroupId: input.semanticGroupId } : {}),
       ...(input.semanticGroupLabel ? { semanticGroupLabel: input.semanticGroupLabel } : {}),
       ...(input.analysis ? { analysis: input.analysis } : {}),
+      ...(input.manipulativeCheck ? { manipulativeCheck: input.manipulativeCheck } : {}),
+      ...(input.manipulativeResult ? { manipulativeResult: input.manipulativeResult } : {}),
       ...(input.imageDataUrl ? { imageDataUrl: input.imageDataUrl } : {}),
     });
     this.update({ phase: 'thinking', submission: { submissionId: input.submissionId, status: 'sending' } });

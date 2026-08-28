@@ -5,14 +5,18 @@
  */
 
 import { isBoardAssetId } from './boardAssets';
+import { validateManipulativeKind } from './manipulativeSpecs';
+import type { DraggableSpec, SnapZoneSpec, TappableSpec } from './manipulativeSpecs';
 
 /** Local copies so this module does not import boardOps (cycle: boardOps → here). */
 const BOARD_W = 1000;
 const BOARD_H = 600;
 type Vec = [number, number];
 
-export const AUTHORED_ONLY_KINDS = ['arc', 'curve', 'asset'] as const;
+export const AUTHORED_ONLY_KINDS = ['arc', 'curve', 'asset', 'draggable', 'snapZone', 'tappable'] as const;
 export type AuthoredOnlyKind = (typeof AUTHORED_ONLY_KINDS)[number];
+
+export type { DraggableSpec, SnapZoneSpec, TappableSpec } from './manipulativeSpecs';
 
 export interface CenterArcSpec {
   kind: 'arc';
@@ -134,7 +138,11 @@ export function validateAssetSpec(raw: Record<string, unknown>): AssetSpec | nul
   };
 }
 
-export function validateAuthoredKind(raw: Record<string, unknown>): ArcSpec | CurveSpec | AssetSpec | null {
+export function validateAuthoredKind(
+  raw: Record<string, unknown>,
+): ArcSpec | CurveSpec | AssetSpec | DraggableSpec | SnapZoneSpec | TappableSpec | null {
+  const manipulative = validateManipulativeKind(raw);
+  if (manipulative) return manipulative;
   switch (raw.kind) {
     case 'arc':
       return validateArcSpec(raw);
@@ -152,10 +160,15 @@ export function isAuthoredOnlySpec(spec: { kind: string; style?: string }): bool
     || (spec.kind === 'text' && spec.style === 'handwritten');
 }
 
+const MANIPULATIVE_AUTHORED_PROPS = new Set([
+  'at', 'selected', 'from', 'to', 'handle', 'tolerance', 'shape', 'numberlineId', 'w', 'h', 'r', 'size', 'label',
+]);
+
 /** Fast-tier update props that would introduce authored-only vocabulary. */
 export function updatePropsYieldAuthored(props: Record<string, unknown>): boolean {
   if (props.style === 'handwritten') return true;
-  return typeof props.kind === 'string' && (AUTHORED_ONLY_KINDS as readonly string[]).includes(props.kind);
+  if (typeof props.kind === 'string' && (AUTHORED_ONLY_KINDS as readonly string[]).includes(props.kind)) return true;
+  return Object.keys(props).some((key) => MANIPULATIVE_AUTHORED_PROPS.has(key));
 }
 
 export function authoredRejectionReason(kind: unknown, raw: Record<string, unknown>): string {

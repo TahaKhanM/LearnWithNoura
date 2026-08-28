@@ -1,6 +1,7 @@
 import type { RuntimeEventEnvelope } from '../../shared/runtimeProtocol.js';
 import { MetricInputSchema, TELEMETRY_SCHEMA_VERSION } from '../../shared/sessionTelemetry.js';
 import { BoardSubmissionSchema } from '../../shared/lessonTurn.js';
+import { evaluateManipulativeCheck } from '../../shared/manipulativeCheck.js';
 import { reduceLesson } from '../lesson/orchestrator.js';
 import { metricContextFromIdentity } from '../session/telemetryRecorder.js';
 import { loadReleasedBoardContext } from './boardContext.js';
@@ -187,10 +188,20 @@ export async function handleClientEvent(
         break;
       }
       const description = submission.description.trim().slice(0, 4000);
-      const ops = learnerBoardOps(submission.ops);
+      const ops = learnerBoardOps(submission.ops, {
+        manipulativeTargetIds: state.boardContext.learnerUpdatableManipulativeIds(),
+      });
       const imageDataUrl = safeBoardImage(submission.imageDataUrl);
       const analysis = submission.analysis ?? null;
-      if (!description && ops.length === 0) {
+      const manipulativeCheck = submission.manipulativeCheck ?? null;
+      state.boardContext.apply(ops, 'learner', submission.semanticGroupId, submission.semanticGroupLabel);
+      const manipulativeResult = manipulativeCheck
+        ? evaluateManipulativeCheck({
+          check: manipulativeCheck,
+          items: state.boardContext.manipulativeSceneItems(),
+        })
+        : null;
+      if (!description && ops.length === 0 && !manipulativeResult) {
         ctx.sendClient({ type: 'board_submission_ack', submissionId: submission.submissionId, empty: true });
         break;
       }
@@ -208,10 +219,11 @@ export async function handleClientEvent(
         ...(submission.semanticGroupId ? { semanticObjectId: submission.semanticGroupId } : {}),
         ...(submission.semanticGroupLabel ? { groupLabel: submission.semanticGroupLabel } : {}),
         ...(analysis ? { analysis } : {}),
+        ...(manipulativeCheck ? { manipulativeCheck } : {}),
+        ...(manipulativeResult ? { manipulativeResult, localCheckPassed: manipulativeResult.passed } : {}),
       });
       // Evidence recorded for this answer cites the board event itself.
       state.lastLearnerEventId = eventId;
-      state.boardContext.apply(ops, 'learner', submission.semanticGroupId, submission.semanticGroupLabel);
       if (analysis) state.boardContext.observeLearnerAnalysis(analysis);
       refreshBoardInstructions(ctx);
       try { state.lessonState = reduceLesson(state.lessonState, { type: 'LEARNER_RESPONSE_RECEIVED' }); }
@@ -222,6 +234,9 @@ export async function handleClientEvent(
           '[The learner finished a drawing on the shared board and pressed Done. This is their complete submitted answer, not a partial stroke.]',
           submission.taskId ? `It answers task ${submission.taskId}.` : '',
           description,
+          manipulativeResult
+            ? `Local manipulative check (${manipulativeResult.predicate} on ${manipulativeResult.targetId}): ${manipulativeResult.passed ? 'passed' : 'not yet correct'}. ${manipulativeResult.summary}`
+            : '',
           analysis ? `Deterministic vector analysis (spatial hints, not meaning): ${analysis.summary}` : '',
           imageDataUrl
             ? 'Use the attached full-board/detail image to interpret the drawing. If its meaning is ambiguous, ask the learner rather than guessing.'

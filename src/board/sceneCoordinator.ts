@@ -33,6 +33,12 @@ export class BoardSceneCoordinator {
     return applied;
   }
 
+  applyManipulativeDraft(ops: BoardOp[], semanticGroupId?: string): AppliedOps {
+    const applied = applyOps(this.value, ops, 'learner', semanticGroupId, { manipulativeDraft: true });
+    this.value = applied.scene;
+    return applied;
+  }
+
   /**
    * A checkpoint that atomically replaces one section: the scoped clear and
    * the replacement content land in a single committed scene, so there is
@@ -82,7 +88,14 @@ export class BoardSceneCoordinator {
   }
 
   applyReplay(ops: BoardOp[], owner: Owner, semanticGroupId?: string, replacesGroup?: string): AppliedOps | null {
-    if (owner === 'learner') return this.applyLearner(ops, semanticGroupId);
+    if (owner === 'learner') {
+      const hasManipulative = ops.some((op) => op.op === 'update');
+      const applied = hasManipulative
+        ? applyOps(this.value, ops, owner, semanticGroupId, { manipulativeDraft: true })
+        : applyOps(this.value, ops, owner, semanticGroupId);
+      this.value = applied.scene;
+      return applied;
+    }
     // Released replay is historical visible truth. Re-run deterministic
     // annotation layout under current code, but never make an older accepted
     // section disappear because today's quality budget became stricter.
