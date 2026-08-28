@@ -261,6 +261,24 @@ export function createApi(
     });
   });
 
+  router.get('/board-assets/:assetId', async (req, res) => {
+    const parentId = parent(req);
+    if (!parentId) { res.status(401).json({ error: 'Parent authentication required.' }); return; }
+    const assetId = String(req.params.assetId ?? '');
+    if (!/^img-[a-z0-9]{8,40}$/.test(assetId)) {
+      res.status(404).json({ error: 'not found' });
+      return;
+    }
+    const asset = await repo.getBoardAsset(assetId);
+    if (!asset) {
+      res.status(404).json({ error: 'not found' });
+      return;
+    }
+    res.setHeader('Content-Type', asset.mime);
+    res.setHeader('Cache-Control', 'private, max-age=86400');
+    res.send(Buffer.from(asset.bytes));
+  });
+
   router.get('/children/:id/overview', async (req, res) => {
     const parentId = parent(req);
     if (!parentId) { res.status(401).json({ error: 'Parent authentication required.' }); return; }

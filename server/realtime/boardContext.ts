@@ -290,6 +290,7 @@ function describeSpec(spec: ShapeSpec): string {
       : `arc through (${spec.from}) (${spec.through}) (${spec.to})`;
     case 'curve': return `curve with ${spec.points.length} points`;
     case 'asset': return `icon ${spec.assetId}${spec.label ? ` labelled “${spec.label}”` : ''}`;
+    case 'image': return `illustration ${spec.assetId} “${spec.alt}”`;
     case 'draggable': return `draggable ${spec.handle} at (${spec.at})${spec.label ? ` labelled “${spec.label}”` : ''}`;
     case 'snapZone': return `snap zone ${spec.shape} at (${spec.at})`;
     case 'tappable': return `tap target at (${spec.at})${spec.selected ? ' [selected]' : ''}${spec.label ? ` labelled “${spec.label}”` : ''}`;

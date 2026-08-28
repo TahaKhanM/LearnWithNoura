@@ -107,6 +107,25 @@ describe('PostgresRepo domain contract', () => {
     expect(failed).toMatchObject({ status: 'failed', failureReason: 'validation exhausted retries', lesson: null });
   }, HEAVY_CONTRACT_TIMEOUT_MS);
 
+  it('stores generated illustration bytes by id and cache key', async () => {
+    const repo = postgresRepo();
+    await repo.initialize();
+    const bytes = Uint8Array.from([137, 80, 78, 71]);
+    await repo.putBoardAsset({
+      id: 'img-a1b2c3d4e5f67890',
+      cacheKey: 'abc'.repeat(16).slice(0, 64),
+      mime: 'image/png',
+      bytes,
+      createdAt: 1,
+    });
+    const stored = await repo.getBoardAsset('img-a1b2c3d4e5f67890');
+    expect(stored).toMatchObject({ id: 'img-a1b2c3d4e5f67890', mime: 'image/png' });
+    expect(Array.from(stored?.bytes ?? [])).toEqual([137, 80, 78, 71]);
+    await expect(repo.getBoardAssetByCacheKey('abc'.repeat(16).slice(0, 64))).resolves.toMatchObject({
+      id: 'img-a1b2c3d4e5f67890',
+    });
+  }, HEAVY_CONTRACT_TIMEOUT_MS);
+
   it('locks the session row before inserting an event transactionally', async () => {
     const queries: string[] = [];
     const repo = postgresRepo(queries);

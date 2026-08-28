@@ -10,9 +10,11 @@ export interface StorageSnapshot {
   evidence: Record<string, unknown>[];
   /** Absent in snapshots exported before the lesson compiler existed. */
   compiledLessons?: Record<string, unknown>[];
+  /** Absent in snapshots exported before generated illustrations existed. */
+  boardAssets?: Record<string, unknown>[];
 }
 
-export interface StorageCounts { children: number; sessions: number; events: number; evidence: number; compiledLessons: number }
+export interface StorageCounts { children: number; sessions: number; events: number; evidence: number; compiledLessons: number; boardAssets: number }
 
 export interface PortableDurableStore {
   initialize(): Promise<void>;
@@ -43,7 +45,8 @@ export class PostgresStore implements PortableDurableStore {
         (SELECT COUNT(*)::int FROM noura.sessions) AS sessions,
         (SELECT COUNT(*)::int FROM noura.events) AS events,
         (SELECT COUNT(*)::int FROM noura.evidence) AS evidence,
-        (SELECT COUNT(*)::int FROM noura.compiled_lessons) AS compiled_lessons
+        (SELECT COUNT(*)::int FROM noura.compiled_lessons) AS compiled_lessons,
+        (SELECT COUNT(*)::int FROM noura.board_assets) AS board_assets
     `);
     const row = result.rows[0] as Record<string, unknown>;
     return {
@@ -52,16 +55,18 @@ export class PostgresStore implements PortableDurableStore {
       events: Number(row.events),
       evidence: Number(row.evidence),
       compiledLessons: Number(row.compiled_lessons),
+      boardAssets: Number(row.board_assets),
     };
   }
 
   async exportSnapshot(): Promise<StorageSnapshot> {
-    const [children, sessions, events, evidence, compiledLessons] = await Promise.all([
+    const [children, sessions, events, evidence, compiledLessons, boardAssets] = await Promise.all([
       this.pool.query('SELECT * FROM noura.children ORDER BY id'),
       this.pool.query('SELECT * FROM noura.sessions ORDER BY id'),
       this.pool.query('SELECT * FROM noura.events ORDER BY id'),
       this.pool.query('SELECT * FROM noura.evidence ORDER BY id'),
       this.pool.query('SELECT * FROM noura.compiled_lessons ORDER BY session_id'),
+      this.pool.query('SELECT id, cache_key, mime, bytes, created_at FROM noura.board_assets ORDER BY id'),
     ]);
     return {
       schemaVersion: 1,
@@ -71,6 +76,15 @@ export class PostgresStore implements PortableDurableStore {
       events: events.rows,
       evidence: evidence.rows,
       compiledLessons: compiledLessons.rows,
+      boardAssets: boardAssets.rows.map((row) => ({
+        id: row.id,
+        cache_key: row.cache_key,
+        mime: row.mime,
+        bytes_b64: typeof row.bytes === 'string'
+          ? row.bytes
+          : Buffer.from(row.bytes ?? []).toString('base64'),
+        created_at: row.created_at,
+      })),
     };
   }
 
@@ -84,6 +98,7 @@ export class PostgresStore implements PortableDurableStore {
       for (const row of snapshot.events) await insertEvent(client, row);
       for (const row of snapshot.evidence) await insertEvidence(client, row);
       for (const row of snapshot.compiledLessons ?? []) await insertCompiledLesson(client, row);
+      for (const row of snapshot.boardAssets ?? []) await insertBoardAsset(client, row);
       await client.query("SELECT setval(pg_get_serial_sequence('noura.events', 'id'), GREATEST(COALESCE((SELECT MAX(id) FROM noura.events), 1), 1), EXISTS (SELECT 1 FROM noura.events))");
       await client.query("SELECT setval(pg_get_serial_sequence('noura.evidence', 'id'), GREATEST(COALESCE((SELECT MAX(id) FROM noura.evidence), 1), 1), EXISTS (SELECT 1 FROM noura.evidence))");
       await client.query('COMMIT');
@@ -100,6 +115,7 @@ export class PostgresStore implements PortableDurableStore {
       events: snapshot.events.length,
       evidence: snapshot.evidence.length,
       compiledLessons: snapshot.compiledLessons?.length ?? 0,
+      boardAssets: snapshot.boardAssets?.length ?? 0,
     };
     if (JSON.stringify(actual) !== JSON.stringify(expected)) throw new Error('Postgres import row-count verification failed.');
     return actual;
@@ -130,6 +146,17 @@ async function insertEvidence(client: PoolClient, row: Record<string, unknown>):
     row.opportunity_kind ?? 'recall',row.retrieval_of ?? null,row.released !== false,row.idempotency_key ?? null,
   ]);
 }
+async function insertBoardAsset(client: PoolClient, row: Record<string, unknown>): Promise<void> {
+  const bytesB64 = typeof row.bytes_b64 === 'string'
+    ? row.bytes_b64
+    : Buffer.from(row.bytes as Buffer | Uint8Array | string ?? []).toString('base64');
+  await client.query(
+    `INSERT INTO noura.board_assets (id, cache_key, mime, bytes, created_at)
+     VALUES ($1, $2, $3, $4, $5) ON CONFLICT (id) DO NOTHING`,
+    [row.id, row.cache_key, row.mime, bytesB64, row.created_at],
+  );
+}
+
 async function insertCompiledLesson(client: PoolClient, row: Record<string, unknown>): Promise<void> {
   await client.query(
     `INSERT INTO noura.compiled_lessons (session_id,status,lesson_json,failure_reason,created_at,updated_at)

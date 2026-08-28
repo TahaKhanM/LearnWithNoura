@@ -216,3 +216,82 @@ describe('authored-tier manipulatives', () => {
     expect(rejected[0].reason).toMatch(/manipulative|authored|director/i);
   });
 });
+
+describe('authored-tier generated illustrations', () => {
+  const imageAdd = {
+    op: 'add' as const,
+    id: 'pond',
+    kind: 'image',
+    assetId: 'img-a1b2c3d4e5f67890',
+    at: [80, 60],
+    w: 840,
+    h: 420,
+    alt: 'A pond habitat with plants and a frog, no words',
+  };
+
+  it('accepts a server-issued image spec on the authored tier', () => {
+    const { ops, rejected } = validateOps([imageAdd], { tier: 'authored' });
+    expect(rejected).toHaveLength(0);
+    expect(ops[0]).toMatchObject({
+      op: 'add',
+      id: 'pond',
+      spec: {
+        kind: 'image',
+        assetId: 'img-a1b2c3d4e5f67890',
+        at: [80, 60],
+        w: 840,
+        h: 420,
+        alt: 'A pond habitat with plants and a frog, no words',
+      },
+    });
+  });
+
+  it('rejects image add and update from the voice-model fast tier', () => {
+    const add = validateOps([imageAdd]);
+    expect(add.ops).toHaveLength(0);
+    expect(add.rejected[0].reason).toMatch(/director|compiler|authored/i);
+
+    const update = validateOps([
+      { op: 'update', id: 'pond', props: { assetId: 'img-a1b2c3d4e5f67890', alt: 'changed' } },
+    ]);
+    expect(update.ops).toHaveLength(0);
+    expect(update.rejected[0].reason).toMatch(/manipulative|authored|director/i);
+  });
+
+  it('rejects a missing alt, a data-URL assetId, and an http assetId', () => {
+    const missingAlt = validateOps([{ ...imageAdd, alt: '' }], { tier: 'authored' });
+    expect(missingAlt.ops).toHaveLength(0);
+    expect(missingAlt.rejected[0].reason).toMatch(/alt|image/i);
+
+    const dataUrl = validateOps([{
+      ...imageAdd,
+      assetId: 'data:image/png;base64,AAAA',
+    }], { tier: 'authored' });
+    expect(dataUrl.ops).toHaveLength(0);
+    expect(dataUrl.rejected[0].reason).toMatch(/assetId|image|server-issued/i);
+
+    const remote = validateOps([{
+      ...imageAdd,
+      assetId: 'https://example.test/pond.png',
+    }], { tier: 'authored' });
+    expect(remote.ops).toHaveLength(0);
+    expect(remote.rejected[0].reason).toMatch(/assetId|image|server-issued/i);
+  });
+
+  it('accepts an optional crop and clamps placement onto the board', () => {
+    const { ops, rejected } = validateOps([{
+      ...imageAdd,
+      at: [-20, 800],
+      w: 2000,
+      h: 10,
+      crop: { x: -4, y: 10, w: 200, h: 80 },
+    }], { tier: 'authored' });
+    expect(rejected).toHaveLength(0);
+    const spec = (ops[0] as { spec: { at: number[]; w: number; h: number; crop?: { x: number; y: number; w: number; h: number } } }).spec;
+    expect(spec.at[0]).toBe(0);
+    expect(spec.at[1]).toBe(BOARD_H);
+    expect(spec.w).toBeLessThanOrEqual(BOARD_W);
+    expect(spec.h).toBeGreaterThanOrEqual(40);
+    expect(spec.crop?.x).toBe(0);
+  });
+});

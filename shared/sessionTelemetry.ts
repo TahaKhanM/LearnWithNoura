@@ -99,6 +99,17 @@ export const MetricInputSchema = z.discriminatedUnion('name', [
     value: durationValue,
   }),
   z.object({
+    ...durationMetricBase,
+    name: z.literal('illustration_generation'),
+    value: durationValue,
+    dimensions: z.object({
+      cache: z.enum(['hit', 'miss']),
+      outcome: z.enum(['accepted', 'failed', 'refused']),
+      imageCount: nonNegativeInt,
+      totalTokens: nonNegativeInt,
+    }),
+  }),
+  z.object({
     ...countMetricBase,
     name: z.literal('barge_in_gate_outcome'),
     dimensions: z.object({ outcome: BargeInGateOutcomeSchema }),
@@ -326,6 +337,7 @@ export const DURATION_METRIC_NAMES = [
   'ask_to_first_audio',
   'board_reveal_to_narration',
   'tutor_audio_output_duration',
+  'illustration_generation',
 ] as const;
 
 export type DurationMetricName = (typeof DURATION_METRIC_NAMES)[number];

@@ -1,5 +1,6 @@
 import type { CompiledLessonRecord, CompiledLessonUpdate } from '../../shared/compiledLesson.js';
 import type {
+  BoardAssetRecord,
   Child,
   EventRow,
   EvidenceInput,
@@ -31,6 +32,9 @@ export interface DomainRepository {
   createContinuation(id: string): Awaitable<Session>;
   upsertCompiledLesson(sessionId: string, update: CompiledLessonUpdate): Awaitable<CompiledLessonRecord>;
   getCompiledLesson(sessionId: string): Awaitable<CompiledLessonRecord | null>;
+  putBoardAsset(record: BoardAssetRecord): Awaitable<void>;
+  getBoardAsset(id: string): Awaitable<BoardAssetRecord | null>;
+  getBoardAssetByCacheKey(cacheKey: string): Awaitable<BoardAssetRecord | null>;
   claimFallbackTurn(identity: FallbackTurnIdentity): Awaitable<FallbackTurnClaim>;
   isFallbackTurnActive(identity: FallbackTurnIdentity): Awaitable<boolean>;
   addFallbackEvent(identity: FallbackTurnIdentity, type: string, payload: unknown, released?: boolean): Awaitable<number>;

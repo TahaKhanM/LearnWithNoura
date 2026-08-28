@@ -52,6 +52,15 @@ function nodeMarkup(node: RenderNode): string {
       ` text-anchor="${node.anchor}" font-family="${escapeXml(FONT_HAND)}" font-weight="${handwritten ? 500 : 600}"` +
       `${handwritten ? ' data-style="handwritten"' : ''}>${escapeXml(node.text)}</text>`;
   }
+  if (node.type === 'image') {
+    const href = escapeXml(node.href);
+    const alt = escapeXml(node.alt);
+    const crop = node.crop
+      ? ` clip-path="inset(${Math.max(0, node.crop.y - node.y)} ${Math.max(0, node.x + node.w - (node.crop.x + node.crop.w))} ${Math.max(0, node.y + node.h - (node.crop.y + node.crop.h))} ${Math.max(0, node.crop.x - node.x)})"`
+      : '';
+    return `<image href="${href}" x="${node.x}" y="${node.y}" width="${node.w}" height="${node.h}"` +
+      ` preserveAspectRatio="xMidYMid meet" aria-label="${alt}"${crop}/>`;
+  }
   // Equations render as deterministic plain math text. KaTeX HTML needs its
   // external stylesheet, which a serialized snapshot cannot rely on; readable
   // math text keeps the equation legible for vision instead of dropping it.

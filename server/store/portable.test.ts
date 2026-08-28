@@ -42,7 +42,7 @@ describe('PostgresStore portable contract', () => {
         failure_reason: null, created_at: 2, updated_at: 2,
       }],
     };
-    await expect(store.importSnapshot(snapshot)).resolves.toEqual({ children: 1, sessions: 1, events: 1, evidence: 1, compiledLessons: 1 });
+    await expect(store.importSnapshot(snapshot)).resolves.toEqual({ children: 1, sessions: 1, events: 1, evidence: 1, compiledLessons: 1, boardAssets: 0 });
     const exported = await store.exportSnapshot();
     expect(exported.children.map((row) => row.id)).toEqual(['child-1']);
     expect(exported.events.map((row) => row.id)).toEqual([1]);
@@ -76,7 +76,7 @@ describe('PostgresStore portable contract', () => {
       events: [],
       evidence: [],
     } as StorageSnapshot;
-    await expect(store.importSnapshot(legacySnapshot)).resolves.toEqual({ children: 1, sessions: 0, events: 0, evidence: 0, compiledLessons: 0 });
+    await expect(store.importSnapshot(legacySnapshot)).resolves.toEqual({ children: 1, sessions: 0, events: 0, evidence: 0, compiledLessons: 0, boardAssets: 0 });
     await store.close();
   }, HEAVY_CONTRACT_TIMEOUT_MS);
 });

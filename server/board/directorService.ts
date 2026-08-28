@@ -5,6 +5,7 @@ import {
   type BoardDirector,
   type DirectorChatClient,
   type DirectorMessage,
+  type IllustrationDirectorPort,
 } from './director.js';
 
 /**
@@ -21,6 +22,7 @@ export interface LiveBoardDirectorOptions {
   reasoningEffort: 'low' | 'medium' | 'high';
   harness: HeadlessSceneValidatorHandle;
   maxCorrectionRounds?: number;
+  illustrations?: IllustrationDirectorPort | null;
 }
 
 export function createLiveBoardDirector(options: LiveBoardDirectorOptions): BoardDirector {
@@ -40,6 +42,7 @@ export function createLiveBoardDirector(options: LiveBoardDirectorOptions): Boar
     validateScene: options.harness.validate,
     renderScene: options.harness.render,
     maxCorrectionRounds: options.maxCorrectionRounds,
+    illustrations: options.illustrations ?? null,
   }, request);
 }
 

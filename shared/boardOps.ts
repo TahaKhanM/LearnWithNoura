@@ -18,11 +18,12 @@ import {
   type AssetSpec,
   type CurveSpec,
   type DraggableSpec,
+  type ImageSpec,
   type SnapZoneSpec,
   type TappableSpec,
 } from './authoredSpecs';
 
-export type { ArcSpec, AssetSpec, CurveSpec, DraggableSpec, SnapZoneSpec, TappableSpec } from './authoredSpecs';
+export type { ArcSpec, AssetSpec, CurveSpec, DraggableSpec, ImageSpec, SnapZoneSpec, TappableSpec } from './authoredSpecs';
 export { AUTHORED_ONLY_KINDS } from './authoredSpecs';
 export { MIN_MANIPULATIVE_HIT_PX } from './manipulativeSpecs';
 
@@ -214,6 +215,7 @@ export type ShapeSpec =
   | ArcSpec
   | CurveSpec
   | AssetSpec
+  | ImageSpec
   | DraggableSpec
   | SnapZoneSpec
   | TappableSpec;

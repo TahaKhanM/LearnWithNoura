@@ -1,7 +1,8 @@
 import type { BoardOp } from '../../shared/boardOps.js';
 import type { SceneValidator } from '../lesson/compiler.js';
 import type { SceneRenderer } from '../lesson/headlessSceneValidator.js';
-import { DIRECTOR_PROPOSE_PROMPT, DIRECTOR_VISION_PROMPT } from './directorPrompts.js';
+import { directorProposePrompt, DIRECTOR_VISION_PROMPT } from './directorPrompts.js';
+import type { IllustrationBrief, IllustrationHooks, IllustrationPrepareResult } from './illustration.js';
 import {
   applyDirectorBoardPolicy,
   buildDirectedScene,
@@ -48,11 +49,17 @@ export interface DirectorSceneRequest {
   currentBoardOps: BoardOp[];
   stageBrief: string;
   learnerContext: string;
+  illustrationHooks?: IllustrationHooks;
 }
 
 export type DirectorResult =
-  | { ok: true; scene: DirectedScene }
-  | { ok: false; reasons: string[] };
+  | { ok: true; scene: DirectedScene; illustration?: IllustrationPrepareResult }
+  | { ok: false; reasons: string[]; illustration?: IllustrationPrepareResult };
+
+export interface IllustrationDirectorPort {
+  enabled: boolean;
+  prepare(brief: IllustrationBrief, hooks?: IllustrationHooks): Promise<IllustrationPrepareResult>;
+}
 
 export interface BoardDirectorDeps {
   client: DirectorChatClient;
@@ -62,6 +69,8 @@ export interface BoardDirectorDeps {
   renderScene: SceneRenderer;
   /** Bounded self-correction rounds after the first rejection. Default 2. */
   maxCorrectionRounds?: number;
+  /** When omitted or disabled, the Director never requests generated images. */
+  illustrations?: IllustrationDirectorPort | null;
 }
 
 export type BoardDirector = (request: DirectorSceneRequest) => Promise<DirectorResult>;
@@ -72,10 +81,11 @@ export async function directVisual(deps: BoardDirectorDeps, request: DirectorSce
     ? await deps.renderScene(request.currentBoardOps)
     : null;
   let feedback: string[] = [];
+  let lastIllustration: IllustrationPrepareResult | undefined;
 
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     const reply = await deps.client.complete({
-      messages: proposalMessages(request, boardImage, feedback),
+      messages: proposalMessages(request, boardImage, feedback, Boolean(deps.illustrations?.enabled)),
     });
     if (!reply) {
       feedback = ['The model returned an empty reply.'];
@@ -87,20 +97,55 @@ export async function directVisual(deps: BoardDirectorDeps, request: DirectorSce
       // Permanence violations are stripped by the policy; a design that
       // relied on destruction fails the storyboard coverage checks in
       // buildDirectedScene and comes back here as feedback.
-      const policy = applyDirectorBoardPolicy(proposal.ops, {
-        density: request.density,
-        visibleObjectIds: request.visibleObjectIds,
-      });
+      const overlayOps = Array.isArray(proposal.ops)
+        ? proposal.ops.filter((op) => !isImageOp(op))
+        : proposal.ops;
+      let illustration: IllustrationPrepareResult | undefined;
+      if (proposal.representation === 'illustration') {
+        if (!deps.illustrations?.enabled) {
+          feedback = ['Illustrations are not available; design a vector or asset diagram instead.'];
+          continue;
+        }
+        if (!proposal.illustration) {
+          feedback = ['An illustration request needs purpose, subject, and required or forbidden elements.'];
+          continue;
+        }
+        illustration = await deps.illustrations.prepare(proposal.illustration, request.illustrationHooks);
+        lastIllustration = illustration;
+        if (!illustration.ok) {
+          feedback = [...illustration.reasons, 'Design a vector or asset diagram instead of an illustration.'];
+          continue;
+        }
+      }
+      const imageOp = illustration && illustration.ok
+        ? { op: 'add' as const, id: illustration.objectId, spec: illustration.spec }
+        : null;
+      const emptyOverlays = Array.isArray(overlayOps) && overlayOps.length === 0;
+      if (emptyOverlays && !imageOp) {
+        feedback = ['The scene must add objects; erase, clear, update, and highlight are not available to the Director.'];
+        continue;
+      }
+      const policy = emptyOverlays && imageOp
+        ? { ok: true as const, ops: [] }
+        : applyDirectorBoardPolicy(overlayOps, {
+          density: request.density,
+          visibleObjectIds: request.visibleObjectIds,
+        });
       if (!policy.ok) {
         feedback = policy.reasons;
         continue;
       }
+      const placed = imageOp ? [imageOp, ...policy.ops] : policy.ops;
+      const storyboard = illustration && illustration.ok
+        ? withIllustrationReveal(proposal.storyboard, illustration.objectId)
+        : proposal.storyboard;
       scene = buildDirectedScene({
         groupId: request.sectionId,
         groupLabel: proposal.groupLabel,
-        ops: policy.ops,
-        storyboard: proposal.storyboard,
+        ops: placed,
+        storyboard,
       });
+      if (illustration) lastIllustration = illustration;
     } catch (error) {
       feedback = [describeError(error)];
       continue;
@@ -127,12 +172,13 @@ export async function directVisual(deps: BoardDirectorDeps, request: DirectorSce
     } catch (error) {
       feedback = [`The vision inspection reply was invalid: ${describeError(error)}`];
     }
-    if (approved) return { ok: true, scene };
+    if (approved) return { ok: true, scene, ...(lastIllustration ? { illustration: lastIllustration } : {}) };
   }
 
   return {
     ok: false,
     reasons: feedback.length > 0 ? feedback : ['The Director produced no acceptable scene.'],
+    ...(lastIllustration ? { illustration: lastIllustration } : {}),
   };
 }
 
@@ -140,6 +186,7 @@ function proposalMessages(
   request: DirectorSceneRequest,
   boardImage: string | null,
   feedback: string[],
+  illustrationsEnabled: boolean,
 ): DirectorMessage[] {
   const lines = [
     request.learnerContext,
@@ -166,7 +213,7 @@ function proposalMessages(
     content.push({ type: 'image', dataUrl: boardImage });
   }
   return [
-    { role: 'system', content: [{ type: 'text', text: DIRECTOR_PROPOSE_PROMPT }] },
+    { role: 'system', content: [{ type: 'text', text: directorProposePrompt(illustrationsEnabled) }] },
     { role: 'user', content },
   ];
 }
@@ -191,6 +238,22 @@ function visionMessages(
       ],
     },
   ];
+}
+
+function isImageOp(raw: unknown): boolean {
+  if (typeof raw !== 'object' || raw === null) return false;
+  const op = raw as { spec?: { kind?: unknown }; kind?: unknown };
+  return op.spec?.kind === 'image' || op.kind === 'image';
+}
+
+function withIllustrationReveal(
+  storyboard: DirectedScene['storyboard'],
+  imageId: string,
+): DirectedScene['storyboard'] {
+  if (storyboard.some((step) => step.objectIds.includes(imageId))) return storyboard;
+  if (storyboard.length === 0) return storyboard;
+  const [first, ...rest] = storyboard;
+  return [{ ...first, objectIds: [imageId, ...first.objectIds] }, ...rest];
 }
 
 function describeError(error: unknown): string {

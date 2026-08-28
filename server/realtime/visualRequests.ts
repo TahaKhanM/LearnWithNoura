@@ -360,7 +360,17 @@ function startDirectedScene(
       currentBoardOps: state.boardContext.visibleOps(),
       stageBrief: stage ? `${stage.id} (${stage.kind}) — ${stage.objective}` : `Lesson goal: ${ctx.lessonGoal}`,
       learnerContext: `Lesson goal: ${ctx.lessonGoal}`,
+      illustrationHooks: {
+        onPreparing: (alt) => ctx.sendClient({ type: 'illustration_status', status: 'preparing', alt }),
+        onPartial: (dataUrl, alt) => ctx.sendClient({
+          type: 'illustration_status',
+          status: 'partial',
+          alt,
+          partialDataUrl: dataUrl,
+        }),
+      },
     });
+    recordIllustrationMetric(ctx, result.illustration);
     if (visualRequestIsStale(ctx, epoch)) {
       staleAbandon(result.ok ? result.scene.storyboard.length : 0);
       return;
@@ -398,6 +408,7 @@ function startDirectedScene(
       return;
     }
     state.visualPlanState = 'rendering';
+    ctx.sendClient({ type: 'illustration_status', status: 'ready' });
     const floorBusy = state.childHoldsFloor || state.speechInProgress || state.draftOpen;
     startStoryboardRun(ctx, {
       runId,
@@ -424,9 +435,30 @@ function startDirectedScene(
 
 /** Fail closed with an honest bridge: the tutor was told the visual was
  * being prepared, so it must also hear that it will not appear. */
+function recordIllustrationMetric(
+  ctx: CoordinatorContext,
+  illustration: { ok: boolean; cacheHit: boolean; latencyMs: number; imageCount: number; totalTokens: number; refused?: boolean } | undefined,
+): void {
+  const identity = ctx.state.clientIdentity;
+  if (!identity || !illustration) return;
+  ctx.telemetryWriter.submit({
+    schemaVersion: TELEMETRY_SCHEMA_VERSION,
+    name: 'illustration_generation',
+    unit: 'ms',
+    value: illustration.latencyMs,
+    dimensions: {
+      cache: illustration.cacheHit ? 'hit' : 'miss',
+      outcome: illustration.ok ? 'accepted' : illustration.refused ? 'refused' : 'failed',
+      imageCount: illustration.imageCount,
+      totalTokens: illustration.totalTokens,
+    },
+  }, metricContextFromIdentity(identity));
+}
+
 function failDirectedScene(ctx: CoordinatorContext, reasons: string[]): void {
   const { state } = ctx;
   state.visualPlanState = 'failed';
+  ctx.sendClient({ type: 'illustration_status', status: 'failed' });
   state.boardContext.observeBoardRejection(reasons.join('; ').slice(0, 300));
   refreshBoardInstructions(ctx);
   ctx.sendUpstream({

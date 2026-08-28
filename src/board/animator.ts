@@ -10,7 +10,7 @@ export interface AnimTask {
   /** Element + geometry for each node of the item, in draw order. */
   nodes: {
     el: SVGElement;
-    kind: 'path' | 'text' | 'katex';
+    kind: 'path' | 'text' | 'katex' | 'image';
     length: number;
   }[];
 }
@@ -33,7 +33,7 @@ function prefersReducedMotion(): boolean {
   );
 }
 
-export function hideForAnimation(el: SVGElement, kind: 'path' | 'text' | 'katex', length: number): void {
+export function hideForAnimation(el: SVGElement, kind: 'path' | 'text' | 'katex' | 'image', length: number): void {
   if (kind === 'path') {
     el.style.strokeDasharray = `${length}`;
     el.style.strokeDashoffset = `${length}`;
@@ -44,7 +44,7 @@ export function hideForAnimation(el: SVGElement, kind: 'path' | 'text' | 'katex'
   }
 }
 
-function revealNode(el: SVGElement, kind: 'path' | 'text' | 'katex'): void {
+function revealNode(el: SVGElement, kind: 'path' | 'text' | 'katex' | 'image'): void {
   if (kind === 'path') {
     el.style.strokeDasharray = '';
     el.style.strokeDashoffset = '';

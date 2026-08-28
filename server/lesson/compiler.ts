@@ -226,6 +226,11 @@ function buildAnchorScene(input: CompileLessonInput, anchor: NonNullable<Authore
     if (validated.rejected.length > 0 || validated.ops.length !== anchor.ops.length) {
       throw new LessonCompileError('Raw anchor ops failed board validation.', validated.rejected.map((entry) => entry.reason));
     }
+    if (validated.ops.some((op) => op.op === 'add' && op.spec.kind === 'image')) {
+      throw new LessonCompileError('Raw anchor ops failed board validation.', [
+        'image ops are Director-time only; the compiler cannot invent an assetId',
+      ]);
+    }
     return AnchorSceneSchema.parse({
       groupId: ANCHOR_GROUP_ID,
       groupLabel: anchor.groupLabel,

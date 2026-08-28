@@ -25,6 +25,13 @@ describe('scene inspection and repair', () => {
     expect(report.issues.filter((issue) => issue.kind === 'bounds' && ['arc', 'curve', 'sun'].includes(issue.itemId))).toEqual([]);
   });
 
+  it('treats a generated illustration as a solid container inside the safe board', () => {
+    const report = inspectScene(applyOps(emptyScene, [
+      { op: 'add', id: 'pond', spec: { kind: 'image', assetId: 'img-a1b2c3d4e5f67890', at: [80, 60], w: 840, h: 420, alt: 'A pond habitat' } },
+    ], 'tutor').scene);
+    expect(report.issues.filter((issue) => issue.itemId === 'pond')).toEqual([]);
+  });
+
   it('detects destructive text-bearing collisions', () => {
     const scene = applyOps(emptyScene, [
       { op: 'add', id: 'a', spec: { kind: 'box', at: [400, 300], text: 'First idea' } },
