@@ -21,6 +21,7 @@
     "test:storage": "vitest run server/store/portable.test.ts server/store/postgresRepo.test.ts server/store/db.test.ts",
     "test:runtime-models": "node scripts/runtime-model-diff.mjs",
     "test:av": "tsx scripts/evaluate-av-character.ts",
+    "test:lesson-eval": "tsx scripts/evaluate-lesson.ts",
     "test:smoke-report": "node --test scripts/e2e-live.node-test.mjs",
     "e2e:live": "node scripts/e2e-live.mjs"
   },

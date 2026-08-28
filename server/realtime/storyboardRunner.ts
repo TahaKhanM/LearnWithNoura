@@ -230,15 +230,13 @@ export function noteStoryboardResponseDone(ctx: CoordinatorContext, responseId: 
   const run = ctx.state.storyboardRun;
   if (!run) return;
   if (responseId !== null && responseId === run.handoffResponseId) {
-    if (status === 'cancelled') {
-      // A barge-in cancelled the handoff mid-sentence: the stage check was
-      // never delivered, so the next quiet floor recreates it.
-      run.handoffResponseId = null;
+    if (status === 'completed') {
+      completeStoryboardRun(ctx, 'completed');
       return;
     }
-    // The handoff finished (or failed terminally — the ordinary lesson
-    // machinery recovers from there): the run's job is done.
-    completeStoryboardRun(ctx, 'completed');
+    // Cancelled, failed, or any other non-terminal-success: the stage check
+    // was not delivered. Clear the id so the next quiet floor retries.
+    run.handoffResponseId = null;
     return;
   }
   advanceStoryboardRun(ctx);

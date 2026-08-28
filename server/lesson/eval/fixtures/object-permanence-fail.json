@@ -1,0 +1,23 @@
+{
+  "schemaVersion": "1.0.0",
+  "label": "triangle anchor — tutor erase outside navigation",
+  "expectPass": false,
+  "boardOpBatches": [
+    {
+      "owner": "tutor",
+      "ts": 100,
+      "ops": [{ "op": "add", "id": "lesson-anchor-triangle", "spec": { "kind": "point", "at": [100, 200] } }]
+    },
+    {
+      "owner": "tutor",
+      "ts": 420,
+      "ops": [{ "op": "add", "id": "lesson-anchor-angle-a", "spec": { "kind": "point", "at": [200, 200] } }]
+    },
+    {
+      "owner": "tutor",
+      "ts": 900,
+      "ops": [{ "op": "erase", "id": "lesson-anchor-angle-a" }]
+    }
+  ],
+  "sectionNavigations": []
+}

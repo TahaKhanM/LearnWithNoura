@@ -1,0 +1,84 @@
+{
+  "schemaVersion": "1.0.0",
+  "label": "triangle-angle-sum fixture blueprint — known good",
+  "expectPass": true,
+  "blueprint": {
+    "blueprintId": "blueprint-fixture-triangle-angle-sum",
+    "goal": "Explain why the three angles of any triangle add up to 180 degrees",
+    "mode": "board_led",
+    "successCriteria": [
+      "Learner explains that the three angles rearrange into a straight line",
+      "Learner finds a missing angle from the other two"
+    ],
+    "anchor": {
+      "semanticGroupId": "lesson-anchor",
+      "template": "triangle_angle_sum",
+      "instructionalQuestion": "Why do the three corner angles always fill a straight line?",
+      "invariantObjectIds": []
+    },
+    "stages": [
+      {
+        "id": "orient",
+        "kind": "orient",
+        "objective": "Meet the triangle and its three corner angles",
+        "boardPurpose": "establish_anchor",
+        "allowedBoardMutation": "establish",
+        "learnerOpportunity": "Point out the widest-looking corner",
+        "evidenceExpected": "recall",
+        "checks": [
+          {
+            "id": "orient-widest",
+            "questionOrTask": "Which corner of the triangle looks the widest to you?",
+            "responseMode": "voice",
+            "targetObjectIds": ["lesson-anchor-angle-a", "lesson-anchor-angle-b", "lesson-anchor-angle-c"]
+          }
+        ]
+      },
+      {
+        "id": "model",
+        "kind": "model",
+        "objective": "See the three angles fill the straight line",
+        "boardPurpose": "reveal_relation",
+        "allowedBoardMutation": "extend",
+        "learnerOpportunity": "Predict the total before the sum is revealed",
+        "evidenceExpected": "reasoning",
+        "checks": [
+          {
+            "id": "model-predict",
+            "questionOrTask": "If we slide all three angles onto the straight line, how much of it do you think they fill?",
+            "responseMode": "voice",
+            "targetObjectIds": ["lesson-anchor-straight-line"]
+          }
+        ]
+      },
+      {
+        "id": "apply",
+        "kind": "guided_check",
+        "objective": "Use the sum to find a missing angle",
+        "boardPurpose": "elicit_learner_work",
+        "allowedBoardMutation": "emphasize",
+        "learnerOpportunity": "Work out the third angle aloud from two given angles",
+        "evidenceExpected": "application",
+        "checks": [
+          {
+            "id": "apply-missing",
+            "questionOrTask": "A triangle has angles of 60 degrees and 80 degrees. What must the third angle be?",
+            "responseMode": "voice",
+            "targetObjectIds": ["lesson-anchor-sum"]
+          }
+        ]
+      },
+      {
+        "id": "closure",
+        "kind": "closure",
+        "objective": "Say the rule in their own words",
+        "boardPurpose": "summarize",
+        "allowedBoardMutation": "none",
+        "learnerOpportunity": "Explain the straight-line idea to a friend",
+        "evidenceExpected": "explanation"
+      }
+    ],
+    "currentStageIndex": 0,
+    "detourStack": []
+  }
+}

@@ -41,12 +41,26 @@ describe('PostgresStore portable contract', () => {
         session_id: 'session-1', status: 'ready', lesson_json: conversationCompiledLesson(),
         failure_reason: null, created_at: 2, updated_at: 2,
       }],
+      boardAssets: [{
+        id: 'img-a1b2c3d4e5f67890',
+        cache_key: 'a'.repeat(64),
+        mime: 'image/png',
+        bytes_b64: Buffer.from([137, 80, 78, 71]).toString('base64'),
+        created_at: 2,
+        parent_id: 'parent-1',
+        session_id: 'session-1',
+      }],
     };
-    await expect(store.importSnapshot(snapshot)).resolves.toEqual({ children: 1, sessions: 1, events: 1, evidence: 1, compiledLessons: 1, boardAssets: 0 });
+    await expect(store.importSnapshot(snapshot)).resolves.toEqual({ children: 1, sessions: 1, events: 1, evidence: 1, compiledLessons: 1, boardAssets: 1 });
     const exported = await store.exportSnapshot();
     expect(exported.children.map((row) => row.id)).toEqual(['child-1']);
     expect(exported.events.map((row) => row.id)).toEqual([1]);
     expect((exported.compiledLessons ?? []).map((row) => row.session_id)).toEqual(['session-1']);
+    expect(exported.boardAssets).toEqual([expect.objectContaining({
+      id: 'img-a1b2c3d4e5f67890',
+      parent_id: 'parent-1',
+      session_id: 'session-1',
+    })]);
     await expect(store.health()).resolves.toBe(true);
     await store.close();
   }, HEAVY_CONTRACT_TIMEOUT_MS);

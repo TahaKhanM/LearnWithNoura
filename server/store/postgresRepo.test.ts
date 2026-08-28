@@ -117,9 +117,16 @@ describe('PostgresRepo domain contract', () => {
       mime: 'image/png',
       bytes,
       createdAt: 1,
+      parentId: 'parent-a',
+      sessionId: 'session-a',
     });
     const stored = await repo.getBoardAsset('img-a1b2c3d4e5f67890');
-    expect(stored).toMatchObject({ id: 'img-a1b2c3d4e5f67890', mime: 'image/png' });
+    expect(stored).toMatchObject({
+      id: 'img-a1b2c3d4e5f67890',
+      mime: 'image/png',
+      parentId: 'parent-a',
+      sessionId: 'session-a',
+    });
     expect(Array.from(stored?.bytes ?? [])).toEqual([137, 80, 78, 71]);
     await expect(repo.getBoardAssetByCacheKey('abc'.repeat(16).slice(0, 64))).resolves.toMatchObject({
       id: 'img-a1b2c3d4e5f67890',
