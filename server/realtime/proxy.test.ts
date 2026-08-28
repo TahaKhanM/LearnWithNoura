@@ -369,6 +369,54 @@ describe('realtime proxy response annotation', () => {
     expect(sent.filter((event) => event.type === 'response.create')).toHaveLength(2);
   });
 
+  it('continues after a spoken acknowledgement once that response finishes, not during it', async () => {
+    vi.stubGlobal('WebSocket', FakeUpstream);
+    const repo = new Repo(openTestDb());
+    const child = repo.createChild('Maya', 10);
+    const session = repo.createSession(child.id, 'geometry');
+    const client = new FakeClient();
+    await connectRealtimeProxy(client as never, { apiKey: 'offline-fixture', model: 'gpt-realtime-2.1', repo, sessionId: session.id, createUpstream: () => new FakeUpstream() as never });
+    const active = { ...identity, sessionId: session.id };
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 0, 'hello', {})));
+    const upstream = FakeUpstream.latest;
+    const creates = () => upstream.sent.map((raw) => JSON.parse(raw) as { type: string }).filter((event) => event.type === 'response.create');
+
+    upstream.emit({ type: 'response.created', response: { id: 'okay-response' } });
+    upstream.emit({
+      type: 'response.function_call_arguments.done', response_id: 'okay-response', call_id: 'ops-call', name: 'board_ops',
+      arguments: JSON.stringify({ ops: [{ op: 'add', id: 'triangle', spec: { kind: 'polygon', points: [[200, 400], [500, 120], [800, 400]] } }] }),
+    });
+    await flushProxy();
+    expect(toolOutput(upstream, 'ops-call')).toMatchObject({ ok: true, applied: 1 });
+    expect(creates()).toEqual([]);
+
+    upstream.emit({ type: 'response.done', response: { id: 'okay-response', status: 'completed', output: [{ type: 'function_call' }] } });
+    await flushProxy();
+    expect(creates()).toHaveLength(1);
+  });
+
+  it('retries a tool continuation that hit an already-active response', async () => {
+    vi.stubGlobal('WebSocket', FakeUpstream);
+    const repo = new Repo(openTestDb());
+    const child = repo.createChild('Maya', 10);
+    const session = repo.createSession(child.id, 'geometry');
+    const client = new FakeClient();
+    await connectRealtimeProxy(client as never, { apiKey: 'offline-fixture', model: 'gpt-realtime-2.1', repo, sessionId: session.id, createUpstream: () => new FakeUpstream() as never });
+    const active = { ...identity, sessionId: session.id };
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 0, 'hello', {})));
+    const upstream = FakeUpstream.latest;
+
+    upstream.emit({
+      type: 'error',
+      error: { code: 'conversation_already_has_active_response', message: 'Conversation already has an active response.' },
+    });
+    upstream.emit({ type: 'response.done', response: { id: 'stale-response', status: 'completed', output: [] } });
+    await flushProxy();
+    // lastCreateSource starts as 'start'; a rejected opening create must retry.
+    expect(upstream.sent.map((raw) => JSON.parse(raw) as { type: string }).filter((event) => event.type === 'response.create'))
+      .toHaveLength(1);
+  });
+
   it('delivers an imperative drawing task as an explicit handoff without injecting another question', async () => {
     vi.stubGlobal('WebSocket', FakeUpstream);
     const repo = new Repo(openTestDb());
@@ -724,9 +772,14 @@ describe('realtime proxy response annotation', () => {
       guidance: expect.stringContaining('Keep teaching'),
     });
     expect(directorRequests).toEqual(['lesson-anchor-alt1']);
-    // The tool continuation lets the model keep narrating while it waits.
+    // The follow-up is deferred until this response finishes — creating
+    // now would be rejected as already-active and used to drop the turn.
     expect(upstream.sent.map((raw) => JSON.parse(raw) as { type: string })
-      .filter((event) => event.type === 'response.create').length).toBeGreaterThan(0);
+      .filter((event) => event.type === 'response.create')).toEqual([]);
+    upstream.emit({ type: 'response.done', response: { id: 'compare-response', status: 'completed', output: [{ type: 'function_call' }] } });
+    await flushProxy();
+    expect(upstream.sent.map((raw) => JSON.parse(raw) as { type: string })
+      .filter((event) => event.type === 'response.create')).toHaveLength(1);
 
     // A second structural request in the same tutor turn is rejected.
     upstream.emit({

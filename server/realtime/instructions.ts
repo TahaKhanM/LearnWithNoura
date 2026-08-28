@@ -62,6 +62,11 @@ export function lessonExecutionContext(
     `Learner opportunity to create: ${stage.learnerOpportunity}`,
     `Evidence this stage expects: ${stage.evidenceExpected}`,
   ];
+  if (blueprint.mode === 'conversation_led' || !anchorScene) {
+    lines.push(
+      'This lesson has no pre-validated scene. Allowed board mutation none means no required scene change — it does not forbid drawing. If the learner asks you to draw, or a simple picture would help, call board_ops immediately. A blank board is allowed; the first marks do not need existing object ids. Never say you cannot draw.',
+    );
+  }
   if (blueprint.detourStack.length > 0) {
     const top = blueprint.detourStack[blueprint.detourStack.length - 1];
     lines.push(`You are on a prerequisite detour (${top.reason}); after it resolves, the lesson returns to its recorded stage automatically.`);

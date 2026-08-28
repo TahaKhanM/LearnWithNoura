@@ -50,7 +50,8 @@
 }
 
 .avatar__eyes {
-  transform-origin: 374px 269px;
+  transform-box: fill-box;
+  transform-origin: center;
   animation: avatar-blink 5.6s ease-in-out infinite;
 }
 

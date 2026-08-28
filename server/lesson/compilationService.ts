@@ -12,11 +12,13 @@ import {
 } from './compiler.js';
 import { compileFixtureLesson, normalizeFixtureGoal } from './fixtureCompiler.js';
 import { createHeadlessSceneValidator, type HeadlessSceneValidatorHandle } from './headlessSceneValidator.js';
+import { compileProvisionalConversationLesson, PROVISIONAL_COMPILER_MODEL } from './provisionalLesson.js';
 
 /**
  * The session-facing face of the lesson compiler. Session creation calls
- * normalize() inside the request, then start() writes a pending record and
- * compiles in the background; the lesson page polls the record's status.
+ * normalize() inside the request, then start() writes a ready conversation-led
+ * plan immediately so Preparing does not block Begin. A stronger compile may
+ * replace that plan in the background while it is still provisional.
  */
 
 export interface CompilationStartInput {
@@ -121,7 +123,15 @@ export function createLiveCompilationService(options: LiveCompilationOptions): L
   return {
     normalize: (input) => normalizeGoal(deps, input),
     start: async (input) => {
-      const pending = await options.repo.upsertCompiledLesson(input.sessionId, { status: 'pending' });
+      const provisional = compileProvisionalConversationLesson({
+        lessonKey: input.sessionId,
+        goal: input.goal,
+        objective: input.objective,
+      });
+      const ready = await options.repo.upsertCompiledLesson(input.sessionId, {
+        status: 'ready',
+        lesson: provisional,
+      });
       const work = (async () => {
         try {
           const lesson = await compileLesson(deps, {
@@ -131,20 +141,19 @@ export function createLiveCompilationService(options: LiveCompilationOptions): L
             learnerName: input.learnerName,
             learnerAge: input.learnerAge,
           });
+          const current = await options.repo.getCompiledLesson(input.sessionId);
+          if (current && !isUpgradeableCompiledLesson(current)) return;
           await options.repo.upsertCompiledLesson(input.sessionId, { status: 'ready', lesson });
         } catch (error) {
           const reasons = error instanceof LessonCompileError && error.reasons.length > 0
             ? error.reasons
             : [String(error instanceof Error ? error.message : error).slice(0, 300)];
           options.onCompileError?.(input.sessionId, reasons);
-          await Promise.resolve(options.repo.upsertCompiledLesson(input.sessionId, {
-            status: 'failed',
-            failureReason: reasons.join('; ').slice(0, 600),
-          })).catch(() => {});
+          // Keep the provisional plan teachable; do not fail the session.
         }
       })();
       options.keepAlive?.(work);
-      return pending;
+      return ready;
     },
     planDetour: (input) => compileDetourStages(deps, input),
     close: async () => {
@@ -152,4 +161,8 @@ export function createLiveCompilationService(options: LiveCompilationOptions): L
       validator = null;
     },
   };
+}
+
+function isUpgradeableCompiledLesson(record: { status: string; lesson: { compilerModel?: string } | null }): boolean {
+  return record.status === 'pending' || record.lesson?.compilerModel === PROVISIONAL_COMPILER_MODEL;
 }

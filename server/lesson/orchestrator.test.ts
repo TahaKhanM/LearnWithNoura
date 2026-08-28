@@ -143,6 +143,35 @@ describe('lesson orchestrator', () => {
     expect(currentStage(state)?.id).toBe('model');
   });
 
+  it('allows a conversation-led visual move even when the stage has no required scene', () => {
+    const conversation: LessonBlueprint = {
+      ...blueprint,
+      mode: 'conversation_led',
+      anchor: null,
+      stages: blueprint.stages.map((stage) => ({
+        ...stage,
+        boardPurpose: 'none',
+        allowedBoardMutation: 'none',
+      })),
+    };
+    let state = reduceLesson(createLessonState('fractions', 'generation-1'), { type: 'BLUEPRINT_CREATED', blueprint: conversation });
+    state = reduceLesson(state, {
+      type: 'MOVE_PROPOSED',
+      move: {
+        rationale: 'Learner asked for a picture',
+        microObjective: 'Sketch the idea',
+        strategy: 'draw',
+        childFacingText: 'Here is a simple picture.',
+        proposedAction: 'visual',
+        blueprintId: conversation.blueprintId,
+        stageId: 'orient',
+        boardPurpose: 'none',
+      },
+    });
+    expect(state.phase).toBe('VISUALIZE');
+    expect(state.owedAction).toBe('visual');
+  });
+
   it('rejects detour plans without a blueprint and enforces the one-to-two stage bound', () => {
     const bare = createLessonState('fractions', 'generation-1');
     const stage = { id: 'detour', kind: 'orient' as const, objective: 'Prerequisite', boardPurpose: 'none' as const, allowedBoardMutation: 'none' as const, learnerOpportunity: 'Try', evidenceExpected: 'recall' };
