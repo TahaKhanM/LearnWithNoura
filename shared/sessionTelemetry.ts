@@ -1,4 +1,20 @@
 import { z } from 'zod';
+import {
+  DRAWING_METRIC_SCHEMAS,
+} from './drawingTelemetry.js';
+
+export {
+  DirectorReasoningEffortSchema,
+  DRAWING_METRIC_SCHEMAS,
+  OpenAiTelemetryModelSchema,
+  VisionAuditOutcomeSchema,
+  VisualTelemetryLaneSchema,
+} from './drawingTelemetry.js';
+export type {
+  DirectorReasoningEffort,
+  VisionAuditOutcome,
+  VisualTelemetryLane,
+} from './drawingTelemetry.js';
 
 export const TELEMETRY_SCHEMA_VERSION = '1.0.0' as const;
 export const TELEMETRY_ENCODING_VERSION = 'hmac-sha256-v2' as const;
@@ -109,6 +125,7 @@ export const MetricInputSchema = z.discriminatedUnion('name', [
       totalTokens: nonNegativeInt,
     }),
   }),
+  ...DRAWING_METRIC_SCHEMAS,
   z.object({
     ...countMetricBase,
     name: z.literal('barge_in_gate_outcome'),
@@ -338,6 +355,10 @@ export const DURATION_METRIC_NAMES = [
   'board_reveal_to_narration',
   'tutor_audio_output_duration',
   'illustration_generation',
+  'visual_first_paint',
+  'visual_scene_complete',
+  'director_stream_first_op',
+  'vision_audit_outcome',
 ] as const;
 
 export type DurationMetricName = (typeof DURATION_METRIC_NAMES)[number];
