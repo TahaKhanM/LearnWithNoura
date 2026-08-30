@@ -44,7 +44,7 @@ const STEP_OPS = {
   label: { op: 'add', id: 'anchor-label', spec: { kind: 'text', at: [130, 250], text: 'One shared scale' } },
 } as const;
 
-test('the anchor builds step by step between narration beats and survives an interruption intact', async ({ page, request }) => {
+test('the anchor builds step by step between narration beats and survives an interruption intact', async ({ page, request }, testInfo) => {
   const { session, lessonCapability } = await createSyntheticSession(request, `storyboard-${Date.now().toString(36)}`);
   await installFakeRealtime(page);
   await setLessonCapability(page, session.id, lessonCapability);
@@ -72,6 +72,7 @@ test('the anchor builds step by step between narration beats and survives an int
   await stopFakePlayback(page, 'anchor-response', 1_500);
   await expect(scale).toBeVisible();
   await expect.poll(() => opsShownFor(page, 501)).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath('storyboard-first-paint.png'), fullPage: true });
   await page.evaluate(() => {
     const socket = (window as typeof window & { __nouraFakeSocket: FakeSocket }).__nouraFakeSocket;
     socket.emit('response_started', { response_id: 'beat-0' });
@@ -122,4 +123,5 @@ test('the anchor builds step by step between narration beats and survives an int
   await expect(scale).toBeVisible();
   await expect(mark).toBeVisible();
   await expect(label).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath('storyboard-complete.png'), fullPage: true });
 });
