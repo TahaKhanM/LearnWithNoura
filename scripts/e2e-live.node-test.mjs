@@ -225,6 +225,54 @@ test('package scripts keep deterministic reporting separate from live authorizat
   assert.doesNotMatch(packageJson.scripts['e2e:live'], /authorized-live-run/);
 });
 
+test('Drawing vNext latency and audit metrics survive the strict report allowlist', () => {
+  const fixture = telemetryFixture();
+  const drawingMetrics = [
+    { name: 'visual_first_paint', value: 5_200, dimensions: { lane: 'director' } },
+    { name: 'visual_scene_complete', value: 7_900, dimensions: { lane: 'director' } },
+    {
+      name: 'director_stream_first_op', value: 4_800,
+      dimensions: { model: 'gpt-5.6-luna', reasoningEffort: 'low' },
+    },
+    {
+      name: 'vision_audit_outcome', value: 1_300,
+      dimensions: { model: 'gpt-5.6-luna', reasoningEffort: 'low', outcome: 'approved' },
+    },
+  ];
+  for (const [index, metric] of drawingMetrics.entries()) {
+    fixture.log.timeline.push({
+      eventId: 6 + index,
+      ts: 6 + index,
+      unit: 'ms',
+      ...metric,
+    });
+    fixture.log.summary.durations[metric.name] = {
+      count: 1,
+      min: metric.value,
+      max: metric.value,
+      mean: metric.value,
+      latest: metric.value,
+    };
+  }
+
+  const result = runScript([
+    '--report-fixture',
+    writeFixture('drawing-vnext-telemetry', fixture),
+    '--text-only',
+  ]);
+  assert.equal(result.status, 0, result.stderr);
+  const report = parseReport(result);
+  for (const metric of drawingMetrics) {
+    assert.deepEqual(report.phase0Aggregates.durations[metric.name], {
+      count: 1,
+      min: metric.value,
+      max: metric.value,
+      mean: metric.value,
+      latest: metric.value,
+    });
+  }
+});
+
 test('live journey readiness accepts an existing learner with no selection', () => {
   const script = readFileSync(scriptPath, 'utf8');
   const readySelector = script.match(

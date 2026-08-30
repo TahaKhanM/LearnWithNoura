@@ -80,6 +80,71 @@ describe('session telemetry contract', () => {
     }).success).toBe(false);
   });
 
+  it('accepts Drawing vNext latency and audit metrics with closed dimensions', () => {
+    for (const name of ['visual_first_paint', 'visual_scene_complete'] as const) {
+      expect(MetricInputSchema.safeParse({
+        schemaVersion: '1.0.0',
+        name,
+        unit: 'ms',
+        value: 840,
+        dimensions: { lane: 'director' },
+      }).success).toBe(true);
+      expect(MetricInputSchema.safeParse({
+        schemaVersion: '1.0.0',
+        name,
+        unit: 'ms',
+        value: 840,
+        dimensions: { lane: 'unbounded-experiment' },
+      }).success).toBe(false);
+    }
+
+    expect(MetricInputSchema.safeParse({
+      schemaVersion: '1.0.0',
+      name: 'director_stream_first_op',
+      unit: 'ms',
+      value: 4_600,
+      dimensions: {
+        model: 'gpt-5.6-luna',
+        reasoningEffort: 'low',
+      },
+    }).success).toBe(true);
+    expect(MetricInputSchema.safeParse({
+      schemaVersion: '1.0.0',
+      name: 'director_stream_first_op',
+      unit: 'ms',
+      value: 4_600,
+      dimensions: {
+        model: 'another-provider-model',
+        reasoningEffort: 'low',
+      },
+    }).success).toBe(false);
+
+    for (const outcome of ['approved', 'rejected', 'timeout', 'invalid', 'error'] as const) {
+      expect(MetricInputSchema.safeParse({
+        schemaVersion: '1.0.0',
+        name: 'vision_audit_outcome',
+        unit: 'ms',
+        value: 1_250,
+        dimensions: {
+          model: 'gpt-5.6-luna',
+          reasoningEffort: 'low',
+          outcome,
+        },
+      }).success).toBe(true);
+    }
+    expect(MetricInputSchema.safeParse({
+      schemaVersion: '1.0.0',
+      name: 'vision_audit_outcome',
+      unit: 'ms',
+      value: 1_250,
+      dimensions: {
+        model: 'gpt-5.6-luna',
+        reasoningEffort: 'low',
+        outcome: 'probably fine',
+      },
+    }).success).toBe(false);
+  });
+
   it('rejects unknown names, free-form outcomes, and non-finite values', () => {
     expect(MetricInputSchema.safeParse({ schemaVersion: '1.0.0', name: 'child_text', unit: 'count', value: 1 }).success).toBe(false);
     expect(MetricInputSchema.safeParse({
@@ -104,6 +169,10 @@ describe('session telemetry contract', () => {
       'ask_to_first_audio',
       'tutor_audio_output_duration',
       'illustration_generation',
+      'visual_first_paint',
+      'visual_scene_complete',
+      'director_stream_first_op',
+      'vision_audit_outcome',
     ] as const;
 
     for (const name of nonBoardDurationNames) {

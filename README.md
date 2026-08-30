@@ -69,6 +69,11 @@ The Phase 0 timing boundaries are deliberately narrow:
 - “First audio” ends when the browser handles the provider’s `output_audio_buffer.started` playback boundary for the current response on the WebRTC data channel. It is a browser-received boundary, not speaker onset or acoustic evidence.
 - `board_reveal_to_narration` is `playback-start boundary − first committed board paint` on one browser monotonic clock. Positive means the board appeared first; negative means narration started first. It is not animation-completion time.
 - Tutor audio duration is the browser-reported heard duration relayed as a `playback_boundary` envelope event, recorded once per response.
+- Drawing vNext adds `visual_first_paint` (accepted visual intent to
+  `ops_presented`), `visual_scene_complete` (intent to the final durable
+  visual step), `director_stream_first_op` and `vision_audit_outcome`.
+  Every drawing duration carries a closed lane/model/outcome vocabulary; the
+  browser acknowledges event identity but never supplies server elapsed time.
 
 These offline and browser-observer definitions prevent lifecycle regressions.
 One authorized synthetic Preview session produced provider usage and duration
@@ -167,11 +172,21 @@ npm run test:a11y
 npm run test:security
 npm run test:storage
 npm run test:brand
+npm run test:runtime-models
+npm run test:director-eval
 ```
 
 `npx vercel@latest build` is the deployment build gate. The installed global CLI predates Vercel’s native WebSocket public beta, so deployment work uses the current CLI without changing the global installation.
 
 The browser suites use synthetic learner fixtures. Paid live-provider runs are not part of the default test commands. The Playwright servers set `NOURA_LESSON_COMPILER=fixture`, so a locally configured provider key never triggers live lesson-compilation calls from a test run; production startup refuses that flag.
+
+`npm run test:director-eval` is also deterministic and offline by default. It
+runs the checked-in 24-intent representative corpus plus the sealed 12-intent
+holdout over scripted warm/cold condition fixtures, production proposal and
+board-policy validators, seeded audit defects and synthetic jittered sketches.
+It makes zero provider calls and cannot select a runtime default. The explicit
+`--authorized-live-run` path is separately spend-capped at $30 and requires a
+configured local board harness; do not invoke it without fresh authorization.
 
 ## Interaction and privacy notes
 

@@ -1,0 +1,12 @@
+[
+  { "id": "line", "expectedInterpretation": "straight line", "points": [[120,300],[220,302],[320,299],[420,301],[520,300]] },
+  { "id": "underline", "expectedInterpretation": "underline", "points": [[180,410],[280,412],[380,411],[480,413],[580,412]] },
+  { "id": "circle", "expectedInterpretation": "circle", "points": [[500,170],[570,190],[600,250],[575,315],[505,340],[435,315],[405,250],[430,190],[500,170]] },
+  { "id": "triangle", "expectedInterpretation": "triangle", "points": [[500,130],[680,390],[320,390],[500,130]] },
+  { "id": "arrow", "expectedInterpretation": "right arrow", "points": [[240,300],[650,300],[590,245],[650,300],[590,355]] },
+  { "id": "cross", "expectedInterpretation": "cross mark", "points": [[390,210],[610,390],[500,300],[610,210],[390,390]] },
+  { "id": "check", "expectedInterpretation": "check mark", "points": [[300,310],[430,420],[700,170]] },
+  { "id": "closed-box", "expectedInterpretation": "box", "points": [[300,180],[700,180],[700,420],[300,420],[300,180]] },
+  { "id": "upward-curve", "expectedInterpretation": "increasing curve", "points": [[180,430],[260,420],[340,390],[420,340],[500,275],[580,205],[660,150]] },
+  { "id": "fraction-bar", "expectedInterpretation": "fraction partition", "points": [[220,240],[780,240],[780,360],[220,360],[220,240],[360,240],[360,360],[500,240],[500,360],[640,240],[640,360]] }
+]
