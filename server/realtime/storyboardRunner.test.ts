@@ -180,7 +180,9 @@ async function connectBoardLed(
     },
     showStep(cueIndex: number) {
       const cue = this.boardCues()[cueIndex];
-      this.emitClient('ops_shown', { event_id: (cue.payload as { event_id?: number }).event_id });
+      const eventId = (cue.payload as { event_id?: number }).event_id;
+      this.emitClient('ops_presented', { event_id: eventId });
+      this.emitClient('ops_shown', { event_id: eventId });
     },
   };
 }
@@ -303,6 +305,12 @@ describe('the storyboard runner', () => {
     expect(harness.progressEvents().at(-1)).toMatchObject({ status: 'completed', revealedSteps: 3, totalSteps: 3, source: 'anchor' });
     expect(harness.metrics.filter((metric) => metric.name === 'storyboard_outcome')).toEqual([
       expect.objectContaining({ dimensions: { outcome: 'completed', source: 'anchor', revealedSteps: 3, totalSteps: 3 } }),
+    ]);
+    expect(harness.metrics.filter((metric) => metric.name === 'visual_first_paint')).toEqual([
+      expect.objectContaining({ unit: 'ms', dimensions: { lane: 'anchor' } }),
+    ]);
+    expect(harness.metrics.filter((metric) => metric.name === 'visual_scene_complete')).toEqual([
+      expect.objectContaining({ unit: 'ms', dimensions: { lane: 'anchor' } }),
     ]);
     harness.upstream.emit({ type: 'response.created', response: { id: 'ask-response' } });
     harness.upstream.emit({ type: 'response.output_audio_transcript.done', response_id: 'ask-response', transcript: 'Which mark is farther right?' });

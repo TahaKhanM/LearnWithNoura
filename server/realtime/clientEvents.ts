@@ -1,4 +1,5 @@
 import type { RuntimeEventEnvelope } from '../../shared/runtimeProtocol.js';
+import { recordVisualClientEventTiming } from './visualTelemetry.js';
 import { MetricInputSchema, TELEMETRY_SCHEMA_VERSION } from '../../shared/sessionTelemetry.js';
 import { BoardSubmissionSchema } from '../../shared/lessonTurn.js';
 import { evaluateBoardSubmissionCheck } from './manipulativeSubmission.js';
@@ -26,6 +27,7 @@ export async function handleClientEvent(
   envelope: RuntimeEventEnvelope,
 ): Promise<void> {
   const { state } = ctx;
+  recordVisualClientEventTiming(ctx, message);
   switch (message.type) {
     case 'start': {
       if (state.started) break;

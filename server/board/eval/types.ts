@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { BoardOp } from '../../../shared/boardOps.js';
 
 export const DirectorEvalCategorySchema = z.enum([
   'exact_math_geometry',
@@ -22,8 +23,12 @@ export const DirectorEvalIntentSchema = z.object({
   density: z.enum(['minimal', 'standard']),
   difficulty: z.number().int().min(1).max(3),
   existingBoardDescription: z.string().min(1).max(500).optional(),
+  existingBoardOps: z.array(z.unknown()).min(1).max(40).optional(),
 });
-export type DirectorEvalIntent = z.infer<typeof DirectorEvalIntentSchema>;
+type ParsedDirectorEvalIntent = z.infer<typeof DirectorEvalIntentSchema>;
+export type DirectorEvalIntent = Omit<ParsedDirectorEvalIntent, 'existingBoardOps'> & {
+  existingBoardOps?: BoardOp[];
+};
 
 export const SeededDefectSchema = z.object({
   id: z.string().min(1).max(80),
@@ -32,8 +37,14 @@ export const SeededDefectSchema = z.object({
   defectDescription: z.string().min(1).max(500),
   deterministicValidatorPasses: z.literal(true),
   expectedAuditReject: z.literal(true),
+  defectOps: z.array(z.unknown()).min(1).max(40),
+  cleanOps: z.array(z.unknown()).min(1).max(40),
 });
-export type SeededDefect = z.infer<typeof SeededDefectSchema>;
+type ParsedSeededDefect = z.infer<typeof SeededDefectSchema>;
+export type SeededDefect = Omit<ParsedSeededDefect, 'defectOps' | 'cleanOps'> & {
+  defectOps: BoardOp[];
+  cleanOps: BoardOp[];
+};
 
 export const SketchBaseSchema = z.object({
   id: z.string().min(1).max(80),
@@ -64,14 +75,35 @@ export interface DirectorEvalTrial {
   cacheState: 'cold' | 'warm';
   trial: number;
   ttftMs: number;
-  firstValidOpMs: number;
+  firstValidOpMs: number | null;
+  firstStepStatus: 'valid' | 'invalid' | 'missing';
   completeSceneMs: number;
   strictSchemaValid: boolean;
   validatorPassed: boolean;
   storyboardCoverage: boolean;
   qualityGrade: number;
+  qualityEvidenceComplete: boolean;
+  cacheExpectationMet: boolean;
+  inputTokens: number;
   cachedInputTokens: number;
+  cacheWriteTokens: number;
+  outputTokens: number;
+  usageComplete: boolean;
+  selectedLegIndex: number;
+  modelUsage: Array<{
+    model: 'gpt-5.6-terra' | 'gpt-5.6-luna';
+    inputTokens: number;
+    cachedInputTokens: number;
+    cacheWriteTokens: number;
+    outputTokens: number;
+    usageComplete: boolean;
+  }>;
   costUsd: number;
+  costUpperBoundUsd: number;
+  proposalText: string;
+  validationReasons: string[];
+  judgeReasons: string[];
+  rasterHashes: string[];
 }
 
 export interface ConditionSummary {
@@ -80,4 +112,10 @@ export interface ConditionSummary {
   qualityGrade: number;
   p50FirstValidOpMs: number;
   meanCostUsd: number;
+  p50TtftMs?: number;
+  p50CompleteSceneMs?: number;
+  strictSchemaValidity?: number;
+  validatorPassRate?: number;
+  storyboardCoverageRate?: number;
+  meanCostUpperBoundUsd?: number;
 }

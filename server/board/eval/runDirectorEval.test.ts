@@ -11,8 +11,8 @@ import {
 } from './corpus.js';
 import { chooseCompositionWinner } from './decision.js';
 import { runOfflineDirectorEval } from './runDirectorEval.js';
-import { completeOpsArrayItems, containsCompleteValidAdd, directorEvalMessages } from './streamingProbe.js';
-import { seededDefectOps, sketchSvgDataUrl } from './liveStudies.js';
+import { directorEvalMessages } from './streamingProbe.js';
+import { seededDefectOps, syntheticSketchOps } from './liveStudies.js';
 import { validateOps } from '../../../shared/boardOps.js';
 import { SpendGuard } from './liveDirectorEval.js';
 
@@ -37,6 +37,9 @@ describe('Drawing vNext M0 evaluation harness', () => {
     ]));
     expect(promptTuningCorpus().every((entry) => entry.split === 'representative')).toBe(true);
     expect(promptTuningCorpus()).toHaveLength(24);
+    const revisions = corpus.filter((entry) => entry.category === 'revisions_existing_board');
+    expect(revisions).toHaveLength(4);
+    expect(revisions.every((entry) => (entry.existingBoardOps?.length ?? 0) > 0)).toBe(true);
   });
 
   it('pins the four single configurations and one first-valid-step hedge', () => {
@@ -53,16 +56,6 @@ describe('Drawing vNext M0 evaluation harness', () => {
         ],
       },
     ]);
-  });
-
-  it('detects only complete valid add ops in a partial streamed ops array', () => {
-    const partial = '{"groupLabel":"Fractions","ops":[{"op":"add","id":"box-1","spec":{"kind":"box","at":[500,300],"text":"A } inside text"}}';
-    expect(completeOpsArrayItems(partial)).toEqual([
-      '{"op":"add","id":"box-1","spec":{"kind":"box","at":[500,300],"text":"A } inside text"}}',
-    ]);
-    expect(containsCompleteValidAdd(partial)).toBe(true);
-    expect(containsCompleteValidAdd(partial.slice(0, -1))).toBe(false);
-    expect(containsCompleteValidAdd('{"ops":[{"op":"erase","id":"box-1"}]}')).toBe(false);
   });
 
   it('keeps the cacheable Director policy static and puts intent data last', () => {
@@ -111,7 +104,7 @@ describe('Drawing vNext M0 evaluation harness', () => {
     for (const defect of defects) {
       expect(validateOps(seededDefectOps(defect), { tier: 'authored' }).rejected).toEqual([]);
     }
-    expect(sketchSvgDataUrl(sketches[0])).toMatch(/^data:image\/svg\+xml;base64,/);
+    expect(syntheticSketchOps(sketches[0])[0]).toMatchObject({ op: 'add', spec: { kind: 'path' } });
   });
 
   it('runs 5 warm and 5 cold trials per condition and intent without provider calls', () => {

@@ -273,6 +273,27 @@ test('Drawing vNext latency and audit metrics survive the strict report allowlis
   }
 });
 
+test('Drawing telemetry rejects unknown gpt-prefixed model dimensions', () => {
+  const fixture = telemetryFixture();
+  fixture.log.timeline.push({
+    eventId: 6,
+    ts: 6,
+    name: 'director_stream_first_op',
+    unit: 'ms',
+    value: 4_800,
+    dimensions: { model: 'gpt-learner-name-2014', reasoningEffort: 'low' },
+  });
+  fixture.log.summary.durations.director_stream_first_op = {
+    count: 1, min: 4_800, max: 4_800, mean: 4_800, latest: 4_800,
+  };
+  const result = runScript([
+    '--report-fixture',
+    writeFixture('drawing-vnext-unknown-model', fixture),
+    '--text-only',
+  ]);
+  assert.equal(result.status, 1);
+});
+
 test('live journey readiness accepts an existing learner with no selection', () => {
   const script = readFileSync(scriptPath, 'utf8');
   const readySelector = script.match(
