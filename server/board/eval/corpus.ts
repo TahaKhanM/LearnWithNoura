@@ -1,6 +1,7 @@
 import intentsJson from './fixtures/director-intents.json' with { type: 'json' };
 import defectsJson from './fixtures/seeded-defects.json' with { type: 'json' };
 import sketchesJson from './fixtures/sketch-bases.json' with { type: 'json' };
+import { validateOps, type BoardOp } from '../../../shared/boardOps.js';
 import {
   DirectorEvalIntentSchema,
   SeededDefectSchema,
@@ -25,7 +26,12 @@ export const DIRECTOR_EVAL_CONDITIONS: DirectorEvalCondition[] = [
 ];
 
 export function loadDirectorEvalCorpus(): DirectorEvalIntent[] {
-  return DirectorEvalIntentSchema.array().length(36).parse(intentsJson);
+  return DirectorEvalIntentSchema.array().length(36).parse(intentsJson).map((entry) => {
+    const { existingBoardOps, ...intent } = entry;
+    return existingBoardOps
+      ? { ...intent, existingBoardOps: validateExistingBoardOps(entry.id, existingBoardOps) }
+      : intent;
+  });
 }
 
 export function promptTuningCorpus(): DirectorEvalIntent[] {
@@ -33,7 +39,38 @@ export function promptTuningCorpus(): DirectorEvalIntent[] {
 }
 
 export function loadSeededDefects(): SeededDefect[] {
-  return SeededDefectSchema.array().min(9).parse(defectsJson);
+  return SeededDefectSchema.array().length(12).parse(defectsJson).map((entry) => ({
+    ...entry,
+    defectOps: validateSeededFixtureOps(entry.id, 'defectOps', entry.defectOps),
+    cleanOps: validateSeededFixtureOps(entry.id, 'cleanOps', entry.cleanOps),
+  }));
+}
+
+function validateSeededFixtureOps(
+  defectId: string,
+  variant: 'defectOps' | 'cleanOps',
+  rawOps: unknown[],
+): BoardOp[] {
+  const validated = validateOps(rawOps, { tier: 'authored' });
+  if (validated.rejected.length > 0 || validated.ops.length !== rawOps.length) {
+    throw new Error(`Seeded defect ${defectId} ${variant} failed authored BoardOp validation: ${validated.rejected.map((entry) => entry.reason).join('; ')}`);
+  }
+  if (validated.ops.some((op) => op.op !== 'add')) {
+    throw new Error(`Seeded defect ${defectId} ${variant} must be add-only.`);
+  }
+  const ids = validated.ops.map((op) => op.op === 'add' ? op.id : '');
+  if (new Set(ids).size !== ids.length) {
+    throw new Error(`Seeded defect ${defectId} ${variant} has duplicate object ids.`);
+  }
+  return validated.ops;
+}
+
+function validateExistingBoardOps(intentId: string, rawOps: unknown[]): BoardOp[] {
+  const validated = validateOps(rawOps, { tier: 'authored' });
+  if (validated.rejected.length > 0 || validated.ops.length !== rawOps.length || validated.ops.some((op) => op.op !== 'add')) {
+    throw new Error(`Director evaluation intent ${intentId} has invalid existing-board ops.`);
+  }
+  return validated.ops;
 }
 
 export interface SyntheticSketch {

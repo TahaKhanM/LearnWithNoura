@@ -1,5 +1,5 @@
 import rubric from './fixtures/director-raster-rubric.json' with { type: 'json' };
-import { applyDirectorBoardPolicy, buildDirectedScene, DirectorProposalSchema } from '../directorSchema.js';
+import { applyDirectorBoardPolicy, buildDirectedScene } from '../directorSchema.js';
 import { DIRECTOR_EVAL_CONDITIONS, loadDirectorEvalCorpus, loadSeededDefects, materializeSketchCorpus } from './corpus.js';
 import { chooseCompositionWinner } from './decision.js';
 import type {
@@ -8,6 +8,8 @@ import type {
   DirectorEvalIntent,
   DirectorEvalTrial,
 } from './types.js';
+import { parseVNextEvalDirectorProposal } from './vnextEvalSchema.js';
+import { chooseVisionAuditDecision } from './liveStudies.js';
 
 const TRIALS_PER_CACHE_STATE = 5;
 
@@ -87,7 +89,9 @@ function offlineTrial(
   const profile = PROFILES[conditionId];
   const seed = stableUnit(`${intent.id}:${conditionId}:${cacheState}:${trial}`);
   const strictSchemaValid = seed < profile.validity;
-  const productionContract = strictSchemaValid ? validateFixtureProposal(intent) : { validatorPassed: false, storyboardCoverage: false };
+  const productionContract = strictSchemaValid
+    ? validateFixtureProposal(intent)
+    : { validatorPassed: false, storyboardCoverage: false, proposalText: '{"invalid":true}' };
   const cacheFactor = cacheState === 'warm' ? 0.88 : 1;
   const difficultyFactor = 1 + (intent.difficulty - 1) * 0.08;
   const jitter = 0.9 + stableUnit(`latency:${intent.id}:${conditionId}:${cacheState}:${trial}`) * 0.2;
@@ -100,65 +104,105 @@ function offlineTrial(
     cacheState,
     trial,
     ttftMs: Math.round(profile.ttftMs * latencyFactor),
-    firstValidOpMs: Math.round(profile.firstValidOpMs * latencyFactor),
+    firstValidOpMs: strictSchemaValid ? Math.round(profile.firstValidOpMs * latencyFactor) : null,
+    firstStepStatus: strictSchemaValid ? 'valid' : 'invalid',
     completeSceneMs: Math.round(profile.completeSceneMs * latencyFactor),
     strictSchemaValid,
     validatorPassed: productionContract.validatorPassed,
     storyboardCoverage: productionContract.storyboardCoverage,
     qualityGrade: round(Math.max(1, Math.min(5, profile.qualityGrade - (intent.difficulty - 1) * 0.12 + qualityJitter)), 2),
+    qualityEvidenceComplete: true,
+    cacheExpectationMet: true,
+    inputTokens: cacheState === 'warm' ? 5_000 : 4_800,
     cachedInputTokens: cacheState === 'warm' ? 4_096 + Math.floor(seed * 512) : 0,
+    cacheWriteTokens: cacheState === 'cold' ? 4_096 : 0,
+    outputTokens: 600 + Math.floor(seed * 180),
+    usageComplete: true,
+    selectedLegIndex: 0,
+    modelUsage: (DIRECTOR_EVAL_CONDITIONS.find((condition) => condition.id === conditionId)?.legs ?? [])
+      .map((leg) => ({
+        model: leg.model,
+        inputTokens: cacheState === 'warm' ? 5_000 : 4_800,
+        cachedInputTokens: cacheState === 'warm' ? 4_096 + Math.floor(seed * 512) : 0,
+        cacheWriteTokens: cacheState === 'cold' ? 4_096 : 0,
+        outputTokens: 600 + Math.floor(seed * 180),
+        usageComplete: true,
+      })),
     costUsd: round(profile.costUsd * (0.94 + seed * 0.12), 6),
+    costUpperBoundUsd: round(profile.costUsd * (0.94 + seed * 0.12), 6),
+    proposalText: productionContract.proposalText,
+    validationReasons: [],
+    judgeReasons: ['Fixed offline blind-rubric fixture grade.'],
+    rasterHashes: [],
   };
 }
 
-function validateFixtureProposal(intent: DirectorEvalIntent): { validatorPassed: boolean; storyboardCoverage: boolean } {
+function validateFixtureProposal(intent: DirectorEvalIntent): { validatorPassed: boolean; storyboardCoverage: boolean; proposalText: string } {
+  let proposalText = '';
   try {
     const objectId = `eval-${intent.id}`.replace(/[^a-z0-9_-]/gi, '-').slice(0, 40);
-    const proposal = DirectorProposalSchema.parse({
+    proposalText = JSON.stringify({
+      template: null,
       groupLabel: intent.intent.slice(0, 80),
       representation: 'diagram',
-      ops: [{ op: 'add', id: objectId, color: 'blue', spec: { kind: 'box', at: [500, 300], w: 520, h: 180, text: intent.purpose.slice(0, 100) } }],
-      storyboard: [{ id: `${objectId}-step`, reveal: 'outline', narration: intent.purpose.slice(0, 200), objectIds: [objectId] }],
+      illustration: null,
+      steps: [{
+        id: `${objectId}-step`,
+        reveal: 'outline',
+        narration: intent.purpose.slice(0, 200),
+        ops: [{ op: 'add', id: objectId, color: 'blue', spec: { kind: 'box', at: [500, 300], w: 520, h: 180, text: intent.purpose.slice(0, 100) } }],
+      }],
     });
-    const policy = applyDirectorBoardPolicy(proposal.ops, { density: intent.density, visibleObjectIds: [] });
-    if (!policy.ok) return { validatorPassed: false, storyboardCoverage: false };
+    const proposal = parseVNextEvalDirectorProposal(proposalText, intent.density);
+    const visibleObjectIds = (intent.existingBoardOps ?? []).flatMap((op) => op.op === 'add' ? [op.id] : []);
+    const policy = applyDirectorBoardPolicy(proposal.ops, { density: intent.density, visibleObjectIds });
+    if (!policy.ok) return { validatorPassed: false, storyboardCoverage: false, proposalText };
     const scene = buildDirectedScene({
       groupId: `group-${intent.id}`.replace(/[^a-z0-9_-]/gi, '-').slice(0, 80),
       groupLabel: proposal.groupLabel,
       ops: policy.ops,
       storyboard: proposal.storyboard,
     });
-    return { validatorPassed: true, storyboardCoverage: scene.storyboard[0]?.objectIds[0] === objectId };
+    return { validatorPassed: true, storyboardCoverage: scene.storyboard[0]?.objectIds[0] === objectId, proposalText };
   } catch {
-    return { validatorPassed: false, storyboardCoverage: false };
+    return { validatorPassed: false, storyboardCoverage: false, proposalText };
   }
 }
 
 function summarizeCondition(conditionId: DirectorEvalConditionId, trials: DirectorEvalTrial[]): ConditionSummary {
-  const valid = trials.filter((trial) => trial.strictSchemaValid && trial.validatorPassed && trial.storyboardCoverage);
+  const valid = trials.filter((trial) => trial.firstStepStatus === 'valid' && trial.strictSchemaValid && trial.validatorPassed && trial.storyboardCoverage);
   return {
     conditionId,
     firstPassValidity: round(valid.length / trials.length, 4),
     qualityGrade: round(mean(valid.map((trial) => trial.qualityGrade)), 2),
-    p50FirstValidOpMs: percentile(valid.map((trial) => trial.firstValidOpMs), 0.5),
+    p50FirstValidOpMs: percentile(valid.flatMap((trial) => trial.firstValidOpMs === null ? [] : [trial.firstValidOpMs]), 0.5),
     meanCostUsd: round(mean(trials.map((trial) => trial.costUsd)), 6),
+    p50TtftMs: percentile(valid.map((trial) => trial.ttftMs), 0.5),
+    p50CompleteSceneMs: percentile(valid.map((trial) => trial.completeSceneMs), 0.5),
+    strictSchemaValidity: round(trials.filter((trial) => trial.strictSchemaValid).length / trials.length, 4),
+    validatorPassRate: round(trials.filter((trial) => trial.validatorPassed).length / trials.length, 4),
+    storyboardCoverageRate: round(trials.filter((trial) => trial.storyboardCoverage).length / trials.length, 4),
+    meanCostUpperBoundUsd: round(mean(trials.map((trial) => trial.costUpperBoundUsd)), 6),
   };
 }
 
 function offlineVisionAudit() {
   const defects = loadSeededDefects();
   const candidates = [
-    { conditionId: 'terra-low', model: 'gpt-5.6-terra', caught: defects.length - 1, p50LatencyMs: 2_200, p95LatencyMs: 3_180 },
-    { conditionId: 'luna-low', model: 'gpt-5.6-luna', caught: defects.length - 2, p50LatencyMs: 1_420, p95LatencyMs: 2_960 },
+    { conditionId: 'terra-low', model: 'gpt-5.6-terra' as const, caught: defects.length - 1, falseRejectRate: 0.0833, invalidReplyRate: 0, p50LatencyMs: 2_200, p95LatencyMs: 3_180, costUsd: 0.2 },
+    { conditionId: 'luna-low', model: 'gpt-5.6-luna' as const, caught: defects.length - 2, falseRejectRate: 0, invalidReplyRate: 0, p50LatencyMs: 1_420, p95LatencyMs: 2_960, costUsd: 0.04 },
   ].map((entry) => ({ ...entry, catchRate: round(entry.caught / defects.length, 4) }));
+  const decision = chooseVisionAuditDecision(candidates);
   return {
     evidenceMode: 'scripted_seeded_defects' as const,
     seededDefectCount: defects.length,
     defectKinds: [...new Set(defects.map((entry) => entry.defectKind))],
     deterministicCatchRate: 0,
+    deterministicFalseRejectRate: 0,
     candidates,
+    decision,
     revealGateDraft: {
-      auditBudgetMs: 3_500,
+      auditBudgetMs: decision.auditBudgetMs,
       rule: 'Step 1 waits up to the budget; timeout releases on deterministic checks and gates step 2; hard rejection abandons only unrevealed work.',
     },
   };
