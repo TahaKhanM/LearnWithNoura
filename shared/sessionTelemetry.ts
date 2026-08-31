@@ -12,6 +12,7 @@ export {
 } from './drawingTelemetry.js';
 export type {
   DirectorReasoningEffort,
+  OpenAiTelemetryModel,
   VisionAuditOutcome,
   VisualTelemetryLane,
 } from './drawingTelemetry.js';
