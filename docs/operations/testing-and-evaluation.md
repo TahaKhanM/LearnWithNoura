@@ -67,23 +67,27 @@ Vitest/proxy interruption rows.
 fixtures. It covers 24 representative and 12 sealed holdout intents across
 exact maths/geometry, graphs/charts, scientific systems, timelines/causal
 structure, grammar, comparisons/part-whole, unfamiliar abstractions,
-diagram-plus-illustration requests, and revisions against an existing-board
-description. The holdout split is never returned by the prompt-tuning helper.
+diagram-plus-illustration requests, and revisions against exact released
+existing-board BoardOps plus a rendered board raster. The holdout split is
+never returned by the prompt-tuning helper.
 
 The offline matrix is five trials for both cold and warm cache states under
 `terra-low`, `terra-med`, `luna-low`, `luna-med`, and the first-valid-step
 `terra-low+luna-low` hedge. Synthetic timings exercise the aggregation and
-pre-registered decision rule; proposals cross the production structured
-schema, authored BoardOp validator, permanence/density/id policy, and
-storyboard-coverage validator. Fixed fixture grades exercise the blind raster
-rubric contract. They are not provider or model-quality evidence.
+pre-registered decision rule; proposals use the template-first strict vNext
+`steps[].ops` schema and cross the authored BoardOp validator,
+permanence/density/id policy, browser preflight, and storyboard-coverage
+validator. Fixed fixture grades exercise the blind raster rubric contract.
+They are not provider or model-quality evidence.
 
-The same gate scores 12 semantic defects that deterministic geometry accepts
-(wrong shading, mislabeled value, reversed arrow) and materializes 30
+The same gate scores 12 exact semantic-defect rasters plus 12 matched clean
+controls that authored validation, Director policy, and browser preflight all
+accept (wrong shading, mislabeled value, reversed arrow). It materializes 30
 synthetic sketches from ten board-coordinate bases with three deterministic
-jitter seeds. No child data is used. The cheaper sketch second opinion remains
-off unless an authorized result clears the pre-registered five-point accuracy
-gain.
+jitter seeds and renders them through the real board harness. No child data is
+used. The cheaper sketch second opinion remains off: this corpus measures
+interpretation rather than semantic check grading, even when a paired
+significance test finds an interpretation gain.
 
 Live evaluation is a separate, explicit path:
 
@@ -97,7 +101,11 @@ The live path uses only checked-in synthetic inputs, streams every composition
 condition, validates and rasters through the configured real board harness,
 blind-grades rasters with the pinned rubric judge, measures cache-token usage,
 runs the seeded vision-audit and sketch studies, aborts losing hedge legs, and
-fails before another call can cross its spend ceiling. Raw decision evidence
+fails before another call can cross its spend ceiling. The complete 4,072-call
+plan has a cache/raster-aware $29.433 conservative bound; an unexpected warm
+cache miss stops the run immediately, and an aborted hedge leg without final
+usage is charged its cold-call bound. Raw trial checkpoints append to NDJSON
+so a transport failure does not discard paid evidence. Raw decision evidence
 belongs under `server/board/eval/results/`; do not copy the offline artifact
 there or present an offline fixture winner as an adopted model.
 
