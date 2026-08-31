@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import OpenAI from 'openai';
 import { parseDirectorEvalAuthorization } from '../server/board/eval/authorization.js';
@@ -52,24 +52,44 @@ if (!authorization.authorizedLiveRun) {
   const harnessUrl = process.env.NOURA_BOARD_HARNESS_URL;
   if (!apiKey) throw new Error('OPENAI_API_KEY is required for an authorized live Director evaluation.');
   if (!harnessUrl) throw new Error('NOURA_BOARD_HARNESS_URL is required for raster validation in an authorized live Director evaluation.');
-  const report = await runLiveDirectorEval({
-    client: new OpenAI({ apiKey }),
-    harnessUrl,
-    maxSpendUsd: authorization.maxSpendUsd,
-    onProgress: (message) => console.error(message),
-  });
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
   const target = outputPath ?? resolve(`server/board/eval/results/director-bakeoff-${stamp}.json`);
-  writeJson(target, report);
-  console.log(JSON.stringify({
-    ok: report.pass,
-    evidenceMode: report.evidenceMode,
-    providerCalls: report.providerCalls,
-    estimatedCostUsd: report.estimatedCostUsd,
-    outputPath: target,
-    compositionDecision: report.compositionDecision,
-  }, null, 2));
-  if (!report.pass) process.exitCode = 1;
+  const partialPath = `${target}.partial.ndjson`;
+  try {
+    const report = await runLiveDirectorEval({
+      client: new OpenAI({ apiKey }),
+      harnessUrl,
+      maxSpendUsd: authorization.maxSpendUsd,
+      onProgress: (message) => console.error(message),
+      onCheckpoint: (checkpoint) => {
+        mkdirSync(dirname(partialPath), { recursive: true });
+        appendFileSync(partialPath, `${JSON.stringify(checkpoint)}\n`);
+      },
+    });
+    writeJson(target, report);
+    console.log(JSON.stringify({
+      ok: report.pass,
+      evidenceMode: report.evidenceMode,
+      providerCalls: report.providerCalls,
+      estimatedCostUsd: report.estimatedCostUsd,
+      accountedCostUsd: report.accountedCostUsd,
+      outputPath: target,
+      partialPath,
+      compositionDecision: report.compositionDecision,
+    }, null, 2));
+    if (!report.pass) process.exitCode = 1;
+  } catch (error) {
+    const failure = {
+      schemaVersion: '1.0.0',
+      pass: false,
+      evidenceMode: 'authorized_live_synthetic_incomplete',
+      error: String(error instanceof Error ? error.message : error).slice(0, 500),
+      partialPath,
+    };
+    writeJson(target, failure);
+    console.error(JSON.stringify(failure, null, 2));
+    process.exitCode = 1;
+  }
 }
 
 function writeJson(path: string, value: unknown): void {

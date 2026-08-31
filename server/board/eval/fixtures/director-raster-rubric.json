@@ -1,7 +1,7 @@
 {
   "schemaVersion": "1.0.0",
   "blind": true,
-  "judgeModel": "gpt-5.6-terra",
+  "judgeModel": "gpt-5.6-luna",
   "judgeReasoningEffort": "low",
   "gradeRange": [1, 5],
   "dimensions": [

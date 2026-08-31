@@ -118,6 +118,16 @@ describe('session telemetry contract', () => {
         reasoningEffort: 'low',
       },
     }).success).toBe(false);
+    expect(MetricInputSchema.safeParse({
+      schemaVersion: '1.0.0',
+      name: 'director_stream_first_op',
+      unit: 'ms',
+      value: 4_600,
+      dimensions: {
+        model: 'gpt-learner-name-2014',
+        reasoningEffort: 'low',
+      },
+    }).success).toBe(false);
 
     for (const outcome of ['approved', 'rejected', 'timeout', 'invalid', 'error'] as const) {
       expect(MetricInputSchema.safeParse({

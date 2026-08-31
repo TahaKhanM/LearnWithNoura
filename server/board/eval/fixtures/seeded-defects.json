@@ -1,14 +1,231 @@
 [
-  { "id": "shade-1", "defectKind": "wrong_shading", "intent": "Shade 3 of 5 equal parts.", "defectDescription": "The raster shades 2 of 5 parts while all geometry remains valid.", "deterministicValidatorPasses": true, "expectedAuditReject": true },
-  { "id": "shade-2", "defectKind": "wrong_shading", "intent": "Shade the region satisfying x > 2.", "defectDescription": "The raster shades the left side of x = 2 instead of the right.", "deterministicValidatorPasses": true, "expectedAuditReject": true },
-  { "id": "shade-3", "defectKind": "wrong_shading", "intent": "Show 70 percent of a bar shaded.", "defectDescription": "The raster shades approximately 30 percent of the bar.", "deterministicValidatorPasses": true, "expectedAuditReject": true },
-  { "id": "shade-4", "defectKind": "wrong_shading", "intent": "Shade the overlap of two sets.", "defectDescription": "The raster shades both non-overlap lobes and leaves the intersection empty.", "deterministicValidatorPasses": true, "expectedAuditReject": true },
-  { "id": "label-1", "defectKind": "mislabeled_value", "intent": "Mark 3/4 on a zero-to-one number line.", "defectDescription": "The point at 3/4 is labelled 2/3.", "deterministicValidatorPasses": true, "expectedAuditReject": true },
-  { "id": "label-2", "defectKind": "mislabeled_value", "intent": "Label the triangle's 70 degree angle.", "defectDescription": "The correct angle arc is labelled 110 degrees.", "deterministicValidatorPasses": true, "expectedAuditReject": true },
-  { "id": "label-3", "defectKind": "mislabeled_value", "intent": "Plot the point (2, 5).", "defectDescription": "The point is plotted correctly but labelled (5, 2).", "deterministicValidatorPasses": true, "expectedAuditReject": true },
-  { "id": "label-4", "defectKind": "mislabeled_value", "intent": "Show 4 groups of 6 equals 24.", "defectDescription": "The four groups are correct but the equation says 4 times 6 equals 20.", "deterministicValidatorPasses": true, "expectedAuditReject": true },
-  { "id": "arrow-1", "defectKind": "reversed_arrow", "intent": "Show heat flowing from the hotter object to the cooler object.", "defectDescription": "The arrow points from cool to hot.", "deterministicValidatorPasses": true, "expectedAuditReject": true },
-  { "id": "arrow-2", "defectKind": "reversed_arrow", "intent": "Show water evaporating from the sea to the air.", "defectDescription": "The evaporation arrow points downward into the sea.", "deterministicValidatorPasses": true, "expectedAuditReject": true },
-  { "id": "arrow-3", "defectKind": "reversed_arrow", "intent": "Show cause leading to effect.", "defectDescription": "The connector arrow points from effect back to cause.", "deterministicValidatorPasses": true, "expectedAuditReject": true },
-  { "id": "arrow-4", "defectKind": "reversed_arrow", "intent": "Show current direction around a simple circuit.", "defectDescription": "One arrow opposes all other current-direction arrows.", "deterministicValidatorPasses": true, "expectedAuditReject": true }
+  {
+    "id": "shade-1",
+    "defectKind": "wrong_shading",
+    "intent": "Shade 3 of 5 equal parts.",
+    "defectDescription": "The raster shades 2 of 5 parts while all geometry remains valid.",
+    "deterministicValidatorPasses": true,
+    "expectedAuditReject": true,
+    "defectOps": [
+      { "op": "add", "id": "shade-1-fill", "color": "blue", "spec": { "kind": "polygon", "points": [[180, 240], [436, 240], [436, 360], [180, 360]], "fill": true } },
+      { "op": "add", "id": "shade-1-outline", "spec": { "kind": "polygon", "points": [[180, 240], [820, 240], [820, 360], [180, 360]] } },
+      { "op": "add", "id": "shade-1-cut-1", "spec": { "kind": "line", "from": [308, 240], "to": [308, 360] } },
+      { "op": "add", "id": "shade-1-cut-2", "spec": { "kind": "line", "from": [436, 240], "to": [436, 360] } },
+      { "op": "add", "id": "shade-1-cut-3", "spec": { "kind": "line", "from": [564, 240], "to": [564, 360] } },
+      { "op": "add", "id": "shade-1-cut-4", "spec": { "kind": "line", "from": [692, 240], "to": [692, 360] } },
+      { "op": "add", "id": "shade-1-label", "spec": { "kind": "text", "at": [500, 150], "text": "3 of 5 equal parts", "align": "middle" } }
+    ],
+    "cleanOps": [
+      { "op": "add", "id": "shade-1-fill", "color": "blue", "spec": { "kind": "polygon", "points": [[180, 240], [564, 240], [564, 360], [180, 360]], "fill": true } },
+      { "op": "add", "id": "shade-1-outline", "spec": { "kind": "polygon", "points": [[180, 240], [820, 240], [820, 360], [180, 360]] } },
+      { "op": "add", "id": "shade-1-cut-1", "spec": { "kind": "line", "from": [308, 240], "to": [308, 360] } },
+      { "op": "add", "id": "shade-1-cut-2", "spec": { "kind": "line", "from": [436, 240], "to": [436, 360] } },
+      { "op": "add", "id": "shade-1-cut-3", "spec": { "kind": "line", "from": [564, 240], "to": [564, 360] } },
+      { "op": "add", "id": "shade-1-cut-4", "spec": { "kind": "line", "from": [692, 240], "to": [692, 360] } },
+      { "op": "add", "id": "shade-1-label", "spec": { "kind": "text", "at": [500, 150], "text": "3 of 5 equal parts", "align": "middle" } }
+    ]
+  },
+  {
+    "id": "shade-2",
+    "defectKind": "wrong_shading",
+    "intent": "Shade the region satisfying x > 2.",
+    "defectDescription": "The raster shades the left side of x = 2 instead of the right.",
+    "deterministicValidatorPasses": true,
+    "expectedAuditReject": true,
+    "defectOps": [
+      { "op": "add", "id": "shade-2-region", "color": "blue", "spec": { "kind": "polygon", "points": [[180, 275], [500, 275], [500, 365], [180, 365]], "fill": true } },
+      { "op": "add", "id": "shade-2-line", "spec": { "kind": "numberline", "at": [180, 320], "w": 640, "min": 0, "max": 4, "step": 1, "marks": [{ "value": 2, "label": "2", "color": "red" }] } },
+      { "op": "add", "id": "shade-2-label", "spec": { "kind": "equation", "at": [500, 150], "latex": "x > 2" } }
+    ],
+    "cleanOps": [
+      { "op": "add", "id": "shade-2-region", "color": "blue", "spec": { "kind": "polygon", "points": [[500, 275], [820, 275], [820, 365], [500, 365]], "fill": true } },
+      { "op": "add", "id": "shade-2-line", "spec": { "kind": "numberline", "at": [180, 320], "w": 640, "min": 0, "max": 4, "step": 1, "marks": [{ "value": 2, "label": "2", "color": "red" }] } },
+      { "op": "add", "id": "shade-2-label", "spec": { "kind": "equation", "at": [500, 150], "latex": "x > 2" } }
+    ]
+  },
+  {
+    "id": "shade-3",
+    "defectKind": "wrong_shading",
+    "intent": "Show 70 percent of a bar shaded.",
+    "defectDescription": "The raster shades approximately 30 percent of the bar.",
+    "deterministicValidatorPasses": true,
+    "expectedAuditReject": true,
+    "defectOps": [
+      { "op": "add", "id": "shade-3-fill", "color": "blue", "spec": { "kind": "polygon", "points": [[150, 255], [360, 255], [360, 345], [150, 345]], "fill": true } },
+      { "op": "add", "id": "shade-3-outline", "spec": { "kind": "polygon", "points": [[150, 255], [850, 255], [850, 345], [150, 345]] } },
+      { "op": "add", "id": "shade-3-scale", "spec": { "kind": "numberline", "at": [150, 370], "w": 700, "min": 0, "max": 100, "step": 10 } },
+      { "op": "add", "id": "shade-3-label", "spec": { "kind": "text", "at": [500, 150], "text": "70%", "align": "middle", "size": "big" } }
+    ],
+    "cleanOps": [
+      { "op": "add", "id": "shade-3-fill", "color": "blue", "spec": { "kind": "polygon", "points": [[150, 255], [640, 255], [640, 345], [150, 345]], "fill": true } },
+      { "op": "add", "id": "shade-3-outline", "spec": { "kind": "polygon", "points": [[150, 255], [850, 255], [850, 345], [150, 345]] } },
+      { "op": "add", "id": "shade-3-scale", "spec": { "kind": "numberline", "at": [150, 370], "w": 700, "min": 0, "max": 100, "step": 10 } },
+      { "op": "add", "id": "shade-3-label", "spec": { "kind": "text", "at": [500, 150], "text": "70%", "align": "middle", "size": "big" } }
+    ]
+  },
+  {
+    "id": "shade-4",
+    "defectKind": "wrong_shading",
+    "intent": "Shade the overlap of two sets.",
+    "defectDescription": "The raster shades both non-overlap lobes and leaves the intersection empty.",
+    "deterministicValidatorPasses": true,
+    "expectedAuditReject": true,
+    "defectOps": [
+      { "op": "add", "id": "shade-4-left-lobe", "color": "blue", "spec": { "kind": "ellipse", "center": [365, 300], "rx": 65, "ry": 115, "fill": true } },
+      { "op": "add", "id": "shade-4-right-lobe", "color": "blue", "spec": { "kind": "ellipse", "center": [635, 300], "rx": 65, "ry": 115, "fill": true } },
+      { "op": "add", "id": "shade-4-left", "spec": { "kind": "circle", "center": [420, 300], "r": 150 } },
+      { "op": "add", "id": "shade-4-right", "spec": { "kind": "circle", "center": [580, 300], "r": 150 } },
+      { "op": "add", "id": "shade-4-label", "spec": { "kind": "text", "at": [500, 500], "text": "Shade only the overlap", "align": "middle" } }
+    ],
+    "cleanOps": [
+      { "op": "add", "id": "shade-4-overlap", "color": "blue", "spec": { "kind": "ellipse", "center": [500, 300], "rx": 65, "ry": 115, "fill": true } },
+      { "op": "add", "id": "shade-4-left", "spec": { "kind": "circle", "center": [420, 300], "r": 150 } },
+      { "op": "add", "id": "shade-4-right", "spec": { "kind": "circle", "center": [580, 300], "r": 150 } },
+      { "op": "add", "id": "shade-4-label", "spec": { "kind": "text", "at": [500, 500], "text": "Shade only the overlap", "align": "middle" } }
+    ]
+  },
+  {
+    "id": "label-1",
+    "defectKind": "mislabeled_value",
+    "intent": "Mark 3/4 on a zero-to-one number line.",
+    "defectDescription": "The point at 3/4 is labelled 2/3.",
+    "deterministicValidatorPasses": true,
+    "expectedAuditReject": true,
+    "defectOps": [{ "op": "add", "id": "label-1-line", "spec": { "kind": "numberline", "at": [150, 320], "w": 700, "min": 0, "max": 1, "step": 0.25, "marks": [{ "value": 0.75, "label": "2/3", "color": "red" }] } }],
+    "cleanOps": [{ "op": "add", "id": "label-1-line", "spec": { "kind": "numberline", "at": [150, 320], "w": 700, "min": 0, "max": 1, "step": 0.25, "marks": [{ "value": 0.75, "label": "3/4", "color": "red" }] } }]
+  },
+  {
+    "id": "label-2",
+    "defectKind": "mislabeled_value",
+    "intent": "Label the triangle's 70 degree angle.",
+    "defectDescription": "The correct angle arc is labelled 110 degrees.",
+    "deterministicValidatorPasses": true,
+    "expectedAuditReject": true,
+    "defectOps": [
+      { "op": "add", "id": "label-2-triangle", "spec": { "kind": "polygon", "points": [[500, 160], [300, 450], [700, 450]] } },
+      { "op": "add", "id": "label-2-angle", "color": "red", "spec": { "kind": "angle", "vertex": [500, 160], "from": [300, 450], "to": [700, 450], "label": "110°", "radius": 65 } }
+    ],
+    "cleanOps": [
+      { "op": "add", "id": "label-2-triangle", "spec": { "kind": "polygon", "points": [[500, 160], [300, 450], [700, 450]] } },
+      { "op": "add", "id": "label-2-angle", "color": "red", "spec": { "kind": "angle", "vertex": [500, 160], "from": [300, 450], "to": [700, 450], "label": "70°", "radius": 65 } }
+    ]
+  },
+  {
+    "id": "label-3",
+    "defectKind": "mislabeled_value",
+    "intent": "Plot the point (2, 5).",
+    "defectDescription": "The point is plotted correctly but labelled (5, 2).",
+    "deterministicValidatorPasses": true,
+    "expectedAuditReject": true,
+    "defectOps": [
+      { "op": "add", "id": "label-3-axes", "spec": { "kind": "axes", "at": [200, 100], "w": 600, "h": 400, "xRange": [0, 6], "yRange": [0, 6], "xLabel": "x", "yLabel": "y" } },
+      { "op": "add", "id": "label-3-point", "color": "red", "spec": { "kind": "point", "at": [400, 167], "label": "(5, 2)" } }
+    ],
+    "cleanOps": [
+      { "op": "add", "id": "label-3-axes", "spec": { "kind": "axes", "at": [200, 100], "w": 600, "h": 400, "xRange": [0, 6], "yRange": [0, 6], "xLabel": "x", "yLabel": "y" } },
+      { "op": "add", "id": "label-3-point", "color": "red", "spec": { "kind": "point", "at": [400, 167], "label": "(2, 5)" } }
+    ]
+  },
+  {
+    "id": "label-4",
+    "defectKind": "mislabeled_value",
+    "intent": "Show 4 groups of 6 equals 24.",
+    "defectDescription": "The four groups are correct but the equation says 4 times 6 equals 20.",
+    "deterministicValidatorPasses": true,
+    "expectedAuditReject": true,
+    "defectOps": [
+      { "op": "add", "id": "label-4-group-1", "spec": { "kind": "box", "at": [200, 260], "w": 130, "h": 90, "text": "6" } },
+      { "op": "add", "id": "label-4-group-2", "spec": { "kind": "box", "at": [400, 260], "w": 130, "h": 90, "text": "6" } },
+      { "op": "add", "id": "label-4-group-3", "spec": { "kind": "box", "at": [600, 260], "w": 130, "h": 90, "text": "6" } },
+      { "op": "add", "id": "label-4-group-4", "spec": { "kind": "box", "at": [800, 260], "w": 130, "h": 90, "text": "6" } },
+      { "op": "add", "id": "label-4-equation", "color": "red", "spec": { "kind": "equation", "at": [500, 430], "latex": "4 \\times 6 = 20", "size": "big" } }
+    ],
+    "cleanOps": [
+      { "op": "add", "id": "label-4-group-1", "spec": { "kind": "box", "at": [200, 260], "w": 130, "h": 90, "text": "6" } },
+      { "op": "add", "id": "label-4-group-2", "spec": { "kind": "box", "at": [400, 260], "w": 130, "h": 90, "text": "6" } },
+      { "op": "add", "id": "label-4-group-3", "spec": { "kind": "box", "at": [600, 260], "w": 130, "h": 90, "text": "6" } },
+      { "op": "add", "id": "label-4-group-4", "spec": { "kind": "box", "at": [800, 260], "w": 130, "h": 90, "text": "6" } },
+      { "op": "add", "id": "label-4-equation", "color": "red", "spec": { "kind": "equation", "at": [500, 430], "latex": "4 \\times 6 = 24", "size": "big" } }
+    ]
+  },
+  {
+    "id": "arrow-1",
+    "defectKind": "reversed_arrow",
+    "intent": "Show heat flowing from the hotter object to the cooler object.",
+    "defectDescription": "The arrow points from cool to hot.",
+    "deterministicValidatorPasses": true,
+    "expectedAuditReject": true,
+    "defectOps": [
+      { "op": "add", "id": "arrow-1-hot", "color": "red", "spec": { "kind": "box", "at": [280, 300], "w": 220, "h": 120, "text": "HOT" } },
+      { "op": "add", "id": "arrow-1-cool", "color": "blue", "spec": { "kind": "box", "at": [720, 300], "w": 220, "h": 120, "text": "COOL" } },
+      { "op": "add", "id": "arrow-1-flow", "color": "red", "spec": { "kind": "connector", "from": "arrow-1-cool", "to": "arrow-1-hot", "label": "heat" } }
+    ],
+    "cleanOps": [
+      { "op": "add", "id": "arrow-1-hot", "color": "red", "spec": { "kind": "box", "at": [280, 300], "w": 220, "h": 120, "text": "HOT" } },
+      { "op": "add", "id": "arrow-1-cool", "color": "blue", "spec": { "kind": "box", "at": [720, 300], "w": 220, "h": 120, "text": "COOL" } },
+      { "op": "add", "id": "arrow-1-flow", "color": "red", "spec": { "kind": "connector", "from": "arrow-1-hot", "to": "arrow-1-cool", "label": "heat" } }
+    ]
+  },
+  {
+    "id": "arrow-2",
+    "defectKind": "reversed_arrow",
+    "intent": "Show water evaporating from the sea to the air.",
+    "defectDescription": "The evaporation arrow points downward into the sea.",
+    "deterministicValidatorPasses": true,
+    "expectedAuditReject": true,
+    "defectOps": [
+      { "op": "add", "id": "arrow-2-air", "spec": { "kind": "box", "at": [500, 160], "w": 280, "h": 90, "text": "AIR" } },
+      { "op": "add", "id": "arrow-2-sea", "color": "blue", "spec": { "kind": "box", "at": [500, 450], "w": 500, "h": 100, "text": "SEA" } },
+      { "op": "add", "id": "arrow-2-flow", "color": "red", "spec": { "kind": "connector", "from": "arrow-2-air", "to": "arrow-2-sea", "label": "evaporation" } }
+    ],
+    "cleanOps": [
+      { "op": "add", "id": "arrow-2-air", "spec": { "kind": "box", "at": [500, 160], "w": 280, "h": 90, "text": "AIR" } },
+      { "op": "add", "id": "arrow-2-sea", "color": "blue", "spec": { "kind": "box", "at": [500, 450], "w": 500, "h": 100, "text": "SEA" } },
+      { "op": "add", "id": "arrow-2-flow", "color": "red", "spec": { "kind": "connector", "from": "arrow-2-sea", "to": "arrow-2-air", "label": "evaporation" } }
+    ]
+  },
+  {
+    "id": "arrow-3",
+    "defectKind": "reversed_arrow",
+    "intent": "Show cause leading to effect.",
+    "defectDescription": "The connector arrow points from effect back to cause.",
+    "deterministicValidatorPasses": true,
+    "expectedAuditReject": true,
+    "defectOps": [
+      { "op": "add", "id": "arrow-3-cause", "spec": { "kind": "box", "at": [280, 300], "text": "CAUSE" } },
+      { "op": "add", "id": "arrow-3-effect", "spec": { "kind": "box", "at": [720, 300], "text": "EFFECT" } },
+      { "op": "add", "id": "arrow-3-link", "color": "red", "spec": { "kind": "connector", "from": "arrow-3-effect", "to": "arrow-3-cause", "label": "leads to" } }
+    ],
+    "cleanOps": [
+      { "op": "add", "id": "arrow-3-cause", "spec": { "kind": "box", "at": [280, 300], "text": "CAUSE" } },
+      { "op": "add", "id": "arrow-3-effect", "spec": { "kind": "box", "at": [720, 300], "text": "EFFECT" } },
+      { "op": "add", "id": "arrow-3-link", "color": "red", "spec": { "kind": "connector", "from": "arrow-3-cause", "to": "arrow-3-effect", "label": "leads to" } }
+    ]
+  },
+  {
+    "id": "arrow-4",
+    "defectKind": "reversed_arrow",
+    "intent": "Show current direction around a simple circuit.",
+    "defectDescription": "One arrow opposes all other current-direction arrows.",
+    "deterministicValidatorPasses": true,
+    "expectedAuditReject": true,
+    "defectOps": [
+      { "op": "add", "id": "arrow-4-battery", "spec": { "kind": "box", "at": [250, 300], "w": 150, "h": 90, "text": "BATTERY" } },
+      { "op": "add", "id": "arrow-4-bulb", "spec": { "kind": "box", "at": [750, 300], "w": 150, "h": 90, "text": "BULB" } },
+      { "op": "add", "id": "arrow-4-top-left", "color": "green", "spec": { "kind": "line", "from": [250, 180], "to": [500, 180], "arrow": "end" } },
+      { "op": "add", "id": "arrow-4-top-right", "color": "green", "spec": { "kind": "line", "from": [750, 180], "to": [500, 180], "arrow": "end" } },
+      { "op": "add", "id": "arrow-4-right", "color": "green", "spec": { "kind": "line", "from": [750, 180], "to": [750, 420], "arrow": "end" } },
+      { "op": "add", "id": "arrow-4-bottom", "color": "green", "spec": { "kind": "line", "from": [750, 420], "to": [250, 420], "arrow": "end" } },
+      { "op": "add", "id": "arrow-4-left", "color": "green", "spec": { "kind": "line", "from": [250, 420], "to": [250, 180], "arrow": "end" } }
+    ],
+    "cleanOps": [
+      { "op": "add", "id": "arrow-4-battery", "spec": { "kind": "box", "at": [250, 300], "w": 150, "h": 90, "text": "BATTERY" } },
+      { "op": "add", "id": "arrow-4-bulb", "spec": { "kind": "box", "at": [750, 300], "w": 150, "h": 90, "text": "BULB" } },
+      { "op": "add", "id": "arrow-4-top-left", "color": "green", "spec": { "kind": "line", "from": [250, 180], "to": [500, 180], "arrow": "end" } },
+      { "op": "add", "id": "arrow-4-top-right", "color": "green", "spec": { "kind": "line", "from": [500, 180], "to": [750, 180], "arrow": "end" } },
+      { "op": "add", "id": "arrow-4-right", "color": "green", "spec": { "kind": "line", "from": [750, 180], "to": [750, 420], "arrow": "end" } },
+      { "op": "add", "id": "arrow-4-bottom", "color": "green", "spec": { "kind": "line", "from": [750, 420], "to": [250, 420], "arrow": "end" } },
+      { "op": "add", "id": "arrow-4-left", "color": "green", "spec": { "kind": "line", "from": [250, 420], "to": [250, 180], "arrow": "end" } }
+    ]
+  }
 ]

@@ -29,10 +29,12 @@ export const VisionAuditOutcomeSchema = z.enum([
 ]);
 export type VisionAuditOutcome = z.infer<typeof VisionAuditOutcomeSchema>;
 
-export const OpenAiTelemetryModelSchema = z.string()
-  .min(1)
-  .max(120)
-  .regex(/^gpt-[a-z0-9][a-z0-9.-]*$/);
+export const OpenAiTelemetryModelSchema = z.enum([
+  'gpt-5.6-sol',
+  'gpt-5.6-terra',
+  'gpt-5.6-luna',
+]);
+export type OpenAiTelemetryModel = z.infer<typeof OpenAiTelemetryModelSchema>;
 
 const drawingDurationBase = {
   schemaVersion: z.literal('1.0.0'),

@@ -12,6 +12,7 @@ const DURATION_NAMES = new Set([
 const VISUAL_LANES = ['anchor', 'template', 'director', 'cache'];
 const REASONING_EFFORTS = ['none', 'low', 'medium', 'high', 'xhigh', 'max'];
 const VISION_AUDIT_OUTCOMES = ['approved', 'rejected', 'timeout', 'invalid', 'error'];
+const DRAWING_MODELS = ['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna'];
 const LIFECYCLE_NAMES = new Set([
   'barge_in_gate_outcome',
   'barge_in_cancel_outcome',
@@ -267,7 +268,7 @@ function projectDrawingDurationDimensions(name, value, label) {
     ? ['model', 'reasoningEffort', 'outcome']
     : ['model', 'reasoningEffort'];
   assertExactKeys(dimensions, keys, label);
-  if (typeof dimensions.model !== 'string' || !/^gpt-[a-z0-9][a-z0-9.-]*$/.test(dimensions.model) || dimensions.model.length > 120) {
+  if (!DRAWING_MODELS.includes(dimensions.model)) {
     throw new Error(`${label}.model is invalid.`);
   }
   if (!REASONING_EFFORTS.includes(dimensions.reasoningEffort)) {

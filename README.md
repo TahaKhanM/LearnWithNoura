@@ -183,7 +183,9 @@ The browser suites use synthetic learner fixtures. Paid live-provider runs are n
 `npm run test:director-eval` is also deterministic and offline by default. It
 runs the checked-in 24-intent representative corpus plus the sealed 12-intent
 holdout over scripted warm/cold condition fixtures, production proposal and
-board-policy validators, seeded audit defects and synthetic jittered sketches.
+board-policy validators, the strict template-first vNext step schema, exact
+defect/control rasters, contextual revision-board rasters and harness-rendered
+synthetic jittered sketches.
 It makes zero provider calls and cannot select a runtime default. The explicit
 `--authorized-live-run` path is separately spend-capped at $30 and requires a
 configured local board harness; do not invoke it without fresh authorization.
