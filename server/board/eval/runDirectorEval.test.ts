@@ -44,15 +44,15 @@ describe('Drawing vNext M0 evaluation harness', () => {
 
   it('pins the four single configurations and one first-valid-step hedge', () => {
     expect(DIRECTOR_EVAL_CONDITIONS).toEqual([
-      { id: 'terra-low', legs: [{ model: 'gpt-5.6-terra', reasoningEffort: 'low' }] },
-      { id: 'terra-med', legs: [{ model: 'gpt-5.6-terra', reasoningEffort: 'medium' }] },
-      { id: 'luna-low', legs: [{ model: 'gpt-5.6-luna', reasoningEffort: 'low' }] },
-      { id: 'luna-med', legs: [{ model: 'gpt-5.6-luna', reasoningEffort: 'medium' }] },
+      { id: 'terra-low', legs: [{ model: 'gpt-5.6-terra', reasoningEffort: 'low', maxCompletionTokens: 4_000 }] },
+      { id: 'terra-med', legs: [{ model: 'gpt-5.6-terra', reasoningEffort: 'medium', maxCompletionTokens: 4_000 }] },
+      { id: 'luna-low', legs: [{ model: 'gpt-5.6-luna', reasoningEffort: 'low', maxCompletionTokens: 5_000 }] },
+      { id: 'luna-med', legs: [{ model: 'gpt-5.6-luna', reasoningEffort: 'medium', maxCompletionTokens: 5_000 }] },
       {
         id: 'terra-low+luna-low',
         legs: [
-          { model: 'gpt-5.6-terra', reasoningEffort: 'low' },
-          { model: 'gpt-5.6-luna', reasoningEffort: 'low' },
+          { model: 'gpt-5.6-terra', reasoningEffort: 'low', maxCompletionTokens: 2_000 },
+          { model: 'gpt-5.6-luna', reasoningEffort: 'low', maxCompletionTokens: 2_000 },
         ],
       },
     ]);
@@ -114,6 +114,9 @@ describe('Drawing vNext M0 evaluation harness', () => {
     expect(report.providerCalls).toBe(0);
     expect(report.trials).toHaveLength(36 * 5 * 5 * 2);
     expect(report.trials.filter((trial) => trial.cacheState === 'warm')).toHaveLength(36 * 5 * 5);
+    expect(report.trials.filter((trial) => trial.qualitySampled)).toHaveLength(25 * 5);
+    expect(report.trials.filter((trial) => !trial.qualitySampled).every((trial) =>
+      trial.qualityGrade === null && !trial.qualityEvidenceComplete)).toBe(true);
     expect(report.compositionDecision.status).toBe('offline_fixture_only');
     expect(report.visionAudit.seededDefectCount).toBeGreaterThanOrEqual(9);
     expect(report.visionAudit.deterministicCatchRate).toBe(0);
@@ -136,12 +139,12 @@ describe('Drawing vNext M0 evaluation harness', () => {
 
   it('stops before a live call could cross its configured spend ceiling', () => {
     const spend = new SpendGuard(1);
-    spend.beforeCall(0.8);
-    spend.noteCall();
-    spend.add(0.7);
+    const callId = spend.begin({ phase: 'composition', models: ['gpt-5.6-terra'], reserveUsd: 0.8 });
+    spend.noteProviderCalls(callId, 1);
+    spend.complete(callId, { status: 'completed', observedCostUsd: 0.7, upperBoundUsd: 0.7, usage: [] });
     expect(spend.providerCalls).toBe(1);
     expect(spend.estimatedCostUsd).toBe(0.7);
-    expect(() => spend.beforeCall(0.31)).toThrow(/spend cap/i);
+    expect(() => spend.begin({ phase: 'judge', models: ['gpt-5.6-luna'], reserveUsd: 0.31 })).toThrow(/spend cap/i);
   });
 
   it('exposes a default-offline package gate', () => {

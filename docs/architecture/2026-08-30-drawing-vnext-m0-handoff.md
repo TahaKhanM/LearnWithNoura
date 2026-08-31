@@ -1,123 +1,132 @@
-# Drawing vNext M0 handoff — telemetry and evaluation harness (2026-08-30)
+# Drawing vNext M0 handoff — telemetry and model evidence
 
-Status: offline implementation complete; milestone acceptance remains open
-because no live-provider spend was authorized in this session. M1 has not
-started.
+Status: implementation and authorized synthetic evidence complete on
+2026-09-01. M1 has not started.
 
 ## Outcome
 
-M0 now has a fail-closed measurement surface without changing any runtime
-model default:
+M0 adds the four closed telemetry contracts required by Drawing vNext:
 
-- `visual_first_paint`: accepted intent to the browser's first committed
+- `visual_first_paint`: accepted visual intent to the browser's first durable
   `ops_presented` acknowledgement;
-- `visual_scene_complete`: accepted intent to the last durable storyboard
-  step;
+- `visual_scene_complete`: accepted visual intent to the final durable
+  storyboard step;
 - `director_stream_first_op`: stream start to the first complete BoardOp that
-  passes authored validation;
-- `vision_audit_outcome`: audit latency with the closed
-  `approved|rejected|timeout|invalid|error` verdict.
+  passes authored policy and browser preflight;
+- `vision_audit_outcome`: bounded `approved|rejected|timeout|invalid|error`
+  audit outcome and latency.
 
-Visual timing is measured from server-owned timestamps. The browser supplies
-only the already-trusted event acknowledgement, so it cannot choose the lane or
-elapsed duration. Restored mid-stream runs omit an intent timestamp instead of
-claiming reconnect-relative latency. The strict smoke-report projection accepts
-the four new contracts and reconstructs their duration summaries from timeline
-rows. `director_stream_first_op` and `vision_audit_outcome` have closed runtime
-helpers now; their production call sites arrive with the M1 streaming/audit
-pipeline and are not claimed as emitted by the classic path.
+Timing starts from server-owned timestamps. Reconnect does not fabricate a new
+intent timestamp. The smoke-report projection accepts only closed lanes,
+providers, efforts, and audit outcomes.
 
-## Evaluation contract
+The Director evaluator is offline by default and live only behind explicit
+authorization. The final live evidence is the strict N=5 warm/cold matrix:
 
-`npm run test:director-eval` is offline by default and produced 1,800 scripted
-rows: 36 intents × five configurations × warm/cold × five trials. The corpus is
-24 representative plus 12 sealed holdout intents across all nine required
-families. Fixture proposals cross `DirectorProposalSchema`,
-`validateOps({ tier: 'authored' })`, `applyDirectorBoardPolicy`, and
-`AnchorSceneSchema` storyboard coverage. Live decoding uses the template-first
-strict vNext proposal with ordered `steps[].ops`; a hedge can win only after
-step one clears authored/cumulative policy and browser preflight. The fixed
-raster rubric pins `gpt-5.6-luna` at low effort as the blind judge and receives
-the cumulative raster after every reveal, so storyboard coherence is visible.
+- 36 synthetic intents: 24 representative and 12 sealed holdout;
+- five conditions: Terra/Luna low/medium plus the first-valid-step hedge;
+- 1,800 composition rows;
+- a pre-registered 25-intent cold trial-one blind-raster sample;
+- 12 seeded semantic defects plus 12 clean controls for each audit candidate;
+- 30 synthetic jittered board sketches for each grounding candidate.
 
-The pre-registered composition rule is executable: ≥95% first-pass validity;
-quality within one grade of `terra-med`; lowest p50 first-valid-op; cost as the
-tie-breaker; the hedge only when it improves the best single p50 by at least
-15% and stays below $0.10 mean composition cost. The live runner uses a $30
-hard ceiling. Its complete 4,072-call plan is preflighted at a conservative
-$29.433 including cache writes, context rasters, judge/audit/sketch calls,
-aborted warm hedge legs, and one cache-miss contingency. A selected warm leg
-without cached tokens stops immediately. Early stopping is round-robin and
-requires >2× superiority on every recorded latency, validity, quality, and
-cost metric after every arm has been sampled.
+Every retained row crosses strict schema parsing, authored BoardOp validation,
+Director policy, the real `/dev/board` browser preflight, and storyboard
+coverage. Live requests use a static prefix and dynamic suffix. Cold prompts
+carry a run-scoped nonce; warm evidence requires the measured 1,792-token cache
+block and is accepted by an aggregate ≥80% hit rule per condition. Failed and
+usage-incomplete calls are charged their full reservation.
 
-The audit corpus has twelve exact geometry-valid semantic defects plus matched
-clean controls: four wrong shading, four mislabeled values, and four reversed
-arrows. Every pair must also clear Director policy and the real browser
-preflight before the study begins. The selected audit model must clear catch,
-false-reject, invalid-reply, and maximum-p95 bars; `auditBudgetMs` is derived
-from measured p95 plus margin. The sketch corpus contains ten synthetic
-board-coordinate bases expanded with three deterministic jitter seeds each and
-renders through the board harness. It cannot authorize semantic grading assist,
-so the assist remains off. There is no real child data.
+## Live decision
+
+The canonical decision record is
+`docs/architecture/2026-09-01-drawing-model-bakeoff-decision.md`; raw evidence
+is `server/board/eval/results/2026-08-31-drawing-model-bakeoff-raw.json`.
+
+- **Composition:** no arm met the pre-registered 95% first-pass validity bar.
+  No composition winner is adopted, and hedge adoption is off. Terra-low had
+  the best validity (91.4%) and 2,834 ms p50 first-valid-op, but remains only
+  the prompt-mandated M1 interim fallback behind rollback—not an evidence
+  winner.
+- **Vision audit:** adopt Luna-low with a 3,000 ms step-one budget. It caught
+  100% of seeded defects, false-rejected 8.3% of clean controls, returned no
+  invalid replies, and measured 2,398 ms p95.
+- **Sketch grounding:** assistance remains off. Terra-low and Luna-low each
+  achieved 10% accuracy, with zero paired gain and p=1.0.
+- **Cache:** cold cells stayed cold; substantive warm-hit rates were
+  98.3%–100% by condition.
+
+The negative composition result is complete evidence, not an incomplete run.
+M1 must improve deterministic/browser validity; lowering the 95% gate or
+inventing a winner is not permitted.
 
 ## Proven offline
 
-- The untouched starting tree passed all fourteen README gates plus
-  `test:runtime-models` before edits (626 unit tests, 26 E2E, 53 visual, five
-  accessibility, 23 security, and ten storage tests).
-- Telemetry schema, server emission, session aggregation, and smoke projection
-  accept the new bounded contracts and reject unknown lanes, providers,
-  efforts, and outcomes.
-- A real anchor storyboard records one first-paint and one scene-complete
-  metric while preserving its existing completion outcome.
-- The default Director evaluator reports `providerCalls: 0`,
-  `runtimeCostUsd: 0`, and `evidenceMode: deterministic_offline_fixture`.
-- The offline fixture winner is deliberately labelled `offline_fixture_only`;
-  it is not a runtime model decision.
-- The expanded 16-command README gate set passed after the adversarial rework:
-  667 unit tests, 665 integration-scope tests, 26 E2E, 53 visual, five
-  accessibility, 23 security, ten storage, plus runtime-model and Director
-  evaluation gates (36 focused evaluator tests and a scripted 4,072-call full
-  matrix). The smoke reporter passed 74 tests. Lint retained only the two
-  pre-existing unused-variable warnings under `demo/intro-video/`.
+- Telemetry schemas, emitters, session aggregation, and smoke projection are
+  closed and bounded.
+- The default evaluator makes zero provider calls and labels its scripted
+  decision `offline_fixture_only`.
+- Strict template-first streamed proposals, early-step inspection, cold nonce,
+  cache accounting, hard spend reservations, semantic judge retries,
+  transport retries, and hashed multi-run resume are unit tested.
+- Resume rejects discontinuous ledgers, open reservations, incompatible model
+  caps, superseded cache flags, incomplete quality grades, duplicate/conflicting
+  rows, and modified source hashes.
+- The decision compiler independently reconstructs the matrix, quality sample,
+  summaries, negative adoption decision, cache rates, vision decision, sketch
+  decision, provider calls, phase costs, authorization arithmetic, and every
+  source hash.
 
 ## Browser verification
 
-The offline `storyboard-build` Playwright row drives the actual Lesson page
-with the fake voice transport and now captures both decisive states. The
-inspected first-paint screenshot showed only the exact 0–1 number-line scale,
-with the Board status reporting one object. The inspected completed screenshot
-kept that scale in place and added the exact `2/3` point plus the “One shared
-scale” label; the typed interruption caption was visible and no revealed mark
-vanished. The same row confirmed all three `ops_shown` acknowledgements and
-passed in 6.2 seconds. The in-app browser also inspected the real `/dev/board`
-fraction fixture: ticks, `3/5`, and `2/3` were legible, ordered on one scale,
-and the long description named the correct number-line object.
+The real local `/dev/board` harness validates and rasters the production BoardOp
+contract. The inspected fraction fixture kept `3/5` and `2/3` legible and in
+the correct order. The actual Lesson page's offline fake-transport storyboard
+row captured first paint and completion: the exact scale remained visible,
+later labels/points accumulated, and interruption did not erase revealed work.
 
-## Requires authorized live verification
+## Spend and privacy
 
-- The complete five-condition N=5 warm/cold bake-off on all 36 synthetic
-  intents, including provider cache-token telemetry and combined hedge cost.
-- Blind grading of the rendered candidate rasters through the configured real
-  board harness.
-- Terra-low versus Luna-low audit catch rate and latency on the seeded defects,
-  which finalizes `auditBudgetMs` and the reveal-gate weight.
-- The 30-item sketch accuracy/calibration comparison and any cheaper-model
-  second-opinion decision.
-- The required decision record
-  `docs/architecture/2026-XX-XX-drawing-model-bakeoff-decision.md` plus raw JSON
-  under `server/board/eval/results/`.
+The user authorized a cumulative hard maximum of $30. The completed evidence
+chain ended at $29.73066603 conservative liability, including stopped attempts,
+failed calls, and usage-incomplete reservations. The final ledger and all
+retained source ledgers have zero open reservations.
 
-No live call, deployment, paid resource, push, or runtime-default change was
-made. Until the authorized evidence exists, M0 is not accepted and M1 must not
-begin.
+Only checked-in synthetic intents, synthetic board rasters, seeded synthetic
+defects/controls, and synthetic jittered sketches were used. No child data,
+learner identifier, account credential, deployment, generated-image call,
+push, or runtime-default mutation occurred.
 
-## Provider-documentation check
+## Recorded evaluator-only module-size exceptions
 
-Current official OpenAI documentation confirms that GPT-5.6 Terra and Luna
-support streaming and Structured Outputs, stable-prefix prompt caching exposes
-cached-token usage, and GPT-Image-2 supports partial images through the Image
-API. References: [model comparison](https://developers.openai.com/api/docs/models/compare),
-[prompt caching](https://developers.openai.com/api/docs/guides/prompt-caching), and
-[image generation](https://developers.openai.com/api/docs/guides/image-generation).
+Three M0-only modules exceed the repository's approximate 400-line guideline:
+
+- `liveDirectorEval.ts` keeps the pre-registered matrix, spend-guarded provider
+  lifecycle, raster grading, and summary calculation in one auditable runner;
+- `decisionEvidence.ts` deliberately colocates the strict raw-report schemas
+  with every independent reconstruction check, so schema and verifier changes
+  cannot drift across modules;
+- `liveStudies.ts` contains the paired vision-defect and sketch studies plus
+  their shared retry/cost/statistical helpers.
+
+They are evaluation tooling, not the production drawing runtime, and have no
+runtime import from the application path. The resume and spend-ledger state
+machines were split into focused modules. A later extraction is justified only
+if it preserves one strict schema/reconstruction boundary; line-count-only
+splitting would make the decision audit harder to review.
+
+## Deferred to M1+
+
+- Production streaming step intake, epoch aborts, adaptive reveal gating, and
+  classic-vs-streamed A/B behavior remain M1.
+- Role ports/defaults and any later composition re-evaluation remain M2. M2 may
+  adopt Luna-low for audit, but may not claim a composition winner from M0.
+- Deterministic template routing remains M3; the negative composition result
+  strengthens its priority for exact and quantitative content.
+- Generated-image decoupling remains M4; grounding hardening remains M5;
+  precomputation and classic-path removal remain M6.
+
+Official references checked for the run: [model comparison and
+pricing](https://developers.openai.com/api/docs/models/compare), [GPT-5.6
+Luna](https://developers.openai.com/api/docs/models/gpt-5.6-luna), and [prompt
+caching](https://developers.openai.com/api/docs/guides/prompt-caching).

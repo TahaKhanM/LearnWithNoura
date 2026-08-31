@@ -1,6 +1,8 @@
 import intentsJson from './fixtures/director-intents.json' with { type: 'json' };
 import defectsJson from './fixtures/seeded-defects.json' with { type: 'json' };
 import sketchesJson from './fixtures/sketch-bases.json' with { type: 'json' };
+import qualitySampleJson from './fixtures/director-quality-sample.json' with { type: 'json' };
+import { z } from 'zod';
 import { validateOps, type BoardOp } from '../../../shared/boardOps.js';
 import {
   DirectorEvalIntentSchema,
@@ -12,15 +14,15 @@ import {
 } from './types.js';
 
 export const DIRECTOR_EVAL_CONDITIONS: DirectorEvalCondition[] = [
-  { id: 'terra-low', legs: [{ model: 'gpt-5.6-terra', reasoningEffort: 'low' }] },
-  { id: 'terra-med', legs: [{ model: 'gpt-5.6-terra', reasoningEffort: 'medium' }] },
-  { id: 'luna-low', legs: [{ model: 'gpt-5.6-luna', reasoningEffort: 'low' }] },
-  { id: 'luna-med', legs: [{ model: 'gpt-5.6-luna', reasoningEffort: 'medium' }] },
+  { id: 'terra-low', legs: [{ model: 'gpt-5.6-terra', reasoningEffort: 'low', maxCompletionTokens: 4_000 }] },
+  { id: 'terra-med', legs: [{ model: 'gpt-5.6-terra', reasoningEffort: 'medium', maxCompletionTokens: 4_000 }] },
+  { id: 'luna-low', legs: [{ model: 'gpt-5.6-luna', reasoningEffort: 'low', maxCompletionTokens: 5_000 }] },
+  { id: 'luna-med', legs: [{ model: 'gpt-5.6-luna', reasoningEffort: 'medium', maxCompletionTokens: 5_000 }] },
   {
     id: 'terra-low+luna-low',
     legs: [
-      { model: 'gpt-5.6-terra', reasoningEffort: 'low' },
-      { model: 'gpt-5.6-luna', reasoningEffort: 'low' },
+      { model: 'gpt-5.6-terra', reasoningEffort: 'low', maxCompletionTokens: 2_000 },
+      { model: 'gpt-5.6-luna', reasoningEffort: 'low', maxCompletionTokens: 2_000 },
     ],
   },
 ];
@@ -36,6 +38,33 @@ export function loadDirectorEvalCorpus(): DirectorEvalIntent[] {
 
 export function promptTuningCorpus(): DirectorEvalIntent[] {
   return loadDirectorEvalCorpus().filter((entry) => entry.split === 'representative');
+}
+
+const qualitySampleIds = z.array(z.string().min(1).max(80)).length(25).parse(qualitySampleJson);
+const qualitySampleIdSet = new Set(qualitySampleIds);
+
+export function loadDirectorQualitySampleIntentIds(): string[] {
+  const corpus = loadDirectorEvalCorpus();
+  const byId = new Map(corpus.map((intent) => [intent.id, intent]));
+  if (qualitySampleIdSet.size !== qualitySampleIds.length ||
+      qualitySampleIds.some((id) => !byId.has(id))) {
+    throw new Error('Director blind-quality sample must contain 25 unique checked-in intent ids.');
+  }
+  const selected = qualitySampleIds.map((id) => byId.get(id)!);
+  if (selected.filter((intent) => intent.split === 'representative').length !== 16 ||
+      selected.filter((intent) => intent.split === 'holdout').length !== 9) {
+    throw new Error('Director blind-quality sample must retain the pre-registered 16/9 split.');
+  }
+  const corpusCategories = new Set(corpus.map((intent) => intent.category));
+  const selectedCategories = new Set(selected.map((intent) => intent.category));
+  if (selectedCategories.size !== corpusCategories.size) {
+    throw new Error('Director blind-quality sample must cover every intent category.');
+  }
+  return [...qualitySampleIds];
+}
+
+export function isDirectorQualitySampleIntent(intentId: string): boolean {
+  return qualitySampleIdSet.has(intentId);
 }
 
 export function loadSeededDefects(): SeededDefect[] {

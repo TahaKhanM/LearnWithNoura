@@ -1,7 +1,11 @@
 import type OpenAI from 'openai';
 import type { AddOp } from '../../../shared/boardOps.js';
 import type { DirectorDensity } from '../directorSchema.js';
-import { compositionCallReserveUsd, estimateUsageCostUsd } from './budget.js';
+import {
+  compositionCallReserveUsd,
+  DIRECTOR_PROPOSAL_MAX_COMPLETION_TOKENS,
+  estimateUsageCostUsd,
+} from './budget.js';
 import type { DirectorEvalIntent } from './types.js';
 import {
   DIRECTOR_VNEXT_EVAL_RESPONSE_FORMAT,
@@ -26,6 +30,8 @@ export interface StreamingProbeResult {
   usage: ProbeUsage;
   aborted: boolean;
   usageComplete: boolean;
+  finishReason: 'stop' | 'length' | 'tool_calls' | 'content_filter' | 'function_call' | null;
+  maxCompletionTokens: number;
   estimatedCostUsd: number;
   costUpperBoundUsd: number;
   selectedLegIndex?: number;
@@ -33,6 +39,8 @@ export interface StreamingProbeResult {
     model: 'gpt-5.6-terra' | 'gpt-5.6-luna';
     usage: ProbeUsage;
     usageComplete: boolean;
+    finishReason: StreamingProbeResult['finishReason'];
+    maxCompletionTokens: number;
   }>;
 }
 
@@ -41,6 +49,7 @@ interface ProbeInput {
   intent: DirectorEvalIntent;
   model: 'gpt-5.6-terra' | 'gpt-5.6-luna';
   reasoningEffort: 'low' | 'medium';
+  maxCompletionTokens?: number;
   cacheState: 'cold' | 'warm';
   trialKey: string;
   signal?: AbortSignal;
@@ -54,6 +63,8 @@ interface ProbeInput {
  * and every per-intent value stays in the dynamic final message, preserving
  * a reusable cache prefix. */
 export async function runStreamingProbe(input: ProbeInput): Promise<StreamingProbeResult> {
+  const maxCompletionTokens = input.maxCompletionTokens ??
+    DIRECTOR_PROPOSAL_MAX_COMPLETION_TOKENS[input.model][input.reasoningEffort];
   const startedAt = performance.now();
   let ttftMs = Number.POSITIVE_INFINITY;
   let firstValidOpMs = Number.POSITIVE_INFINITY;
@@ -61,6 +72,7 @@ export async function runStreamingProbe(input: ProbeInput): Promise<StreamingPro
   let text = '';
   let usage: ProbeUsage = { inputTokens: 0, cachedInputTokens: 0, cacheWriteTokens: 0, outputTokens: 0 };
   let usageComplete = false;
+  let finishReason: StreamingProbeResult['finishReason'] = null;
   let firstStepChecked = false;
   let aborted = false;
   try {
@@ -69,7 +81,8 @@ export async function runStreamingProbe(input: ProbeInput): Promise<StreamingPro
       reasoning_effort: input.reasoningEffort,
       stream: true,
       stream_options: { include_usage: true },
-      max_completion_tokens: 600,
+      max_completion_tokens: maxCompletionTokens,
+      verbosity: 'low',
       response_format: DIRECTOR_VNEXT_EVAL_RESPONSE_FORMAT,
       prompt_cache_key: input.cacheState === 'warm'
         ? `noura-director-eval:${input.model}:${input.reasoningEffort}`
@@ -81,6 +94,7 @@ export async function runStreamingProbe(input: ProbeInput): Promise<StreamingPro
       }),
     }, { signal: input.signal });
     for await (const chunk of stream) {
+      if (chunk.choices[0]?.finish_reason) finishReason = chunk.choices[0].finish_reason;
       const delta = chunk.choices[0]?.delta?.content ?? '';
       if (delta) {
         if (!Number.isFinite(ttftMs)) ttftMs = performance.now() - startedAt;
@@ -129,10 +143,18 @@ export async function runStreamingProbe(input: ProbeInput): Promise<StreamingPro
     usage,
     aborted,
     usageComplete,
+    finishReason,
+    maxCompletionTokens,
     estimatedCostUsd,
     costUpperBoundUsd: usageComplete
       ? estimatedCostUsd
-      : compositionCallReserveUsd(input.model, 'cold', Boolean(input.currentBoardRaster)),
+      : compositionCallReserveUsd(
+          input.model,
+          'cold',
+          Boolean(input.currentBoardRaster),
+          input.reasoningEffort,
+          maxCompletionTokens,
+        ),
   };
 }
 

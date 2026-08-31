@@ -189,6 +189,10 @@ synthetic jittered sketches.
 It makes zero provider calls and cannot select a runtime default. The explicit
 `--authorized-live-run` path is separately spend-capped at $30 and requires a
 configured local board harness; do not invoke it without fresh authorization.
+The completed M0 synthetic decision is recorded in
+`docs/architecture/2026-09-01-drawing-model-bakeoff-decision.md`: no
+composition arm cleared the 95% adoption bar, Luna-low was selected for the
+3,000 ms vision-audit role and sketch assistance remains off.
 
 ## Interaction and privacy notes
 
