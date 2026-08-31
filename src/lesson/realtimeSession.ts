@@ -77,7 +77,7 @@ export interface IllustrationStatus {
 }
 
 interface QueuedAsk { text: string; idempotencyKey: string; identity: GenerationIdentity }
-export interface VisualCueMetadata { responseId?: string; visualCueId?: string; semanticObjectId?: string; groupLabel?: string; checkpoint?: string; replacesGroup?: string; awaitNarration?: boolean }
+export interface VisualCueMetadata { responseId?: string; visualCueId?: string; semanticObjectId?: string; groupLabel?: string; checkpoint?: string; replacesGroup?: string; awaitNarration?: boolean; eventId?: number }
 
 export type VoiceTransportFactory = (input: {
   sessionId: string;
@@ -167,6 +167,11 @@ export class RealtimeSession {
 
   noteBoardReveal(identity: GenerationIdentity, cue: VisualCueMetadata): void {
     if (!this.isCurrent(identity)) return;
+    if (cue.eventId !== undefined) {
+      // First committed paint: the server may now tell the model these marks
+      // are visible. Durable replay still waits for animation completion.
+      this.send('ops_presented', { event_id: cue.eventId });
+    }
     if (cue.awaitNarration) {
       // A storyboard step: the narration that describes it is the NEXT
       // playback start, not this cue's own (already finished) response.
@@ -939,6 +944,7 @@ export class RealtimeSession {
       checkpoint: item.checkpoint,
       replacesGroup: item.replacesGroup,
       awaitNarration: item.awaitNarration,
+      eventId: item.eventId ?? undefined,
     })).then((completed) => {
       if (completed === false && item.eventId !== null) {
         this.send('ops_rejected', {

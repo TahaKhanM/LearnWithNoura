@@ -4,6 +4,7 @@ import { metricContextFromIdentity } from '../session/telemetryRecorder.js';
 import type { CoordinatorContext } from './coordinatorContext.js';
 import { addBounded } from './responseRegistry.js';
 import { sendResponseCreate, tutorFloorIsFree } from './turnFloor.js';
+import { recordVisualSceneComplete } from './visualTelemetry.js';
 
 /**
  * The interleaved reveal-narrate engine. One runner plays ANY storyboard —
@@ -68,6 +69,11 @@ export interface StoryboardRunState {
   nextBeatFraming: string[];
   /** Instruction lines for the final beat's handoff duty. */
   handoff: string;
+  /** Server wall-clock start of the accepted visual intent. Restored runs
+   * omit it rather than reporting a reconnect-relative latency. */
+  visualIntentStartedAtMs: number | null;
+  firstPaintRecorded: boolean;
+  sceneCompleteRecorded: boolean;
 }
 
 export interface StoryboardRunInput {
@@ -86,6 +92,8 @@ export interface StoryboardRunInput {
   /** Hold the run until the next response resolves (reconnect: the resume
    * greeting speaks first; the build continues at its playback boundary). */
   startPaused?: boolean;
+  /** Captured before anchor preflight or Director composition begins. */
+  visualIntentStartedAtMs?: number;
 }
 
 /** Derives runnable steps from any anchor-shaped scene (compiled anchor or
@@ -120,6 +128,9 @@ export function startStoryboardRun(ctx: CoordinatorContext, input: StoryboardRun
     stepTimer: null,
     nextBeatFraming: [...(input.firstBeatFraming ?? [])],
     handoff: input.handoff,
+    visualIntentStartedAtMs: input.visualIntentStartedAtMs ?? null,
+    firstPaintRecorded: false,
+    sceneCompleteRecorded: false,
   };
   ctx.state.storyboardRun = run;
   persistProgress(ctx, run, 'active');
@@ -343,6 +354,10 @@ async function onStepVisibility(ctx: CoordinatorContext, run: StoryboardRunState
     return;
   }
   run.revealedSteps += 1;
+  if (run.revealedSteps === run.steps.length && !run.sceneCompleteRecorded) {
+    run.sceneCompleteRecorded = true;
+    recordVisualSceneComplete(ctx, run);
+  }
   // The step boundary is crossed only once it is durable: a sideband
   // reconnect between ops_shown and this write landing must restore the
   // step it can prove, never skip past it.

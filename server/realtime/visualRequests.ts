@@ -227,6 +227,7 @@ function startAnchorStoryboard(
   scene: AnchorScene,
 ): void {
   const { state } = ctx;
+  const visualIntentStartedAtMs = Date.now();
   state.planStagedThisTurn = true;
   state.planAttemptsThisTurn += 1;
   state.visualPlanState = 'preparing';
@@ -293,6 +294,7 @@ function startAnchorStoryboard(
       steps,
       revealAfterResponseId: floorBusy ? null : responseId,
       handoff: anchorHandoff(ctx),
+      visualIntentStartedAtMs,
     });
   })().catch((error) => {
     ctx.log(`session ${ctx.sessionId}: anchor storyboard staging error ${String(error).slice(0, 200)}`);
@@ -333,6 +335,7 @@ function startDirectedScene(
   state.planStagedThisTurn = true;
   state.planAttemptsThisTurn += 1;
   state.visualPlanState = 'preparing';
+  const visualIntentStartedAtMs = Date.now();
   const sectionId = request.action === 'establish'
     ? anchor
     : `${anchor}-alt${++state.comparisonSectionCounter}`;
@@ -428,6 +431,7 @@ function startDirectedScene(
         ? [`A new board section called “${scene.groupLabel}” was just added beside the current work; the learner's view does not switch by itself. Tell the learner it is there and where to look before this beat.`]
         : [],
       handoff: directorHandoff(),
+      visualIntentStartedAtMs,
     });
   })().catch((error) => {
     ctx.log(`session ${ctx.sessionId}: directed scene error ${String(error).slice(0, 200)}`);

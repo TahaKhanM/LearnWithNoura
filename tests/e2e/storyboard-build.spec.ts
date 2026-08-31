@@ -38,6 +38,13 @@ async function opsShownFor(page: import('@playwright/test').Page, eventId: numbe
   }, eventId);
 }
 
+async function opsPresentedFor(page: import('@playwright/test').Page, eventId: number): Promise<boolean> {
+  return page.evaluate((id) => {
+    const socket = (window as typeof window & { __nouraFakeSocket: FakeSocket }).__nouraFakeSocket;
+    return socket.sent.some((event) => event.type === 'ops_presented' && event.payload?.event_id === id);
+  }, eventId);
+}
+
 const STEP_OPS = {
   scale: { op: 'add', id: 'anchor-scale', spec: { kind: 'numberline', at: [130, 300], w: 740, min: 0, max: 1 } },
   mark: { op: 'add', id: 'anchor-mark', spec: { kind: 'point', at: [620, 300], label: '2/3' } },
@@ -71,6 +78,7 @@ test('the anchor builds step by step between narration beats and survives an int
   // rides tagged to the (not yet playing) first beat and stays hidden.
   await stopFakePlayback(page, 'anchor-response', 1_500);
   await expect(scale).toBeVisible();
+  await expect.poll(() => opsPresentedFor(page, 501)).toBe(true);
   await expect.poll(() => opsShownFor(page, 501)).toBe(true);
   await page.screenshot({ path: testInfo.outputPath('storyboard-first-paint.png'), fullPage: true });
   await page.evaluate(() => {
