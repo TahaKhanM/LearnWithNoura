@@ -60,6 +60,47 @@ The blueprint rubric, fixtures, and scorer modules compose with — and do not
 replace — `npm run test:av`, `npm run test:smoke-report`, and the existing
 Vitest/proxy interruption rows.
 
+## Drawing Director evaluation (Drawing vNext M0)
+
+`npm run test:director-eval` writes
+`artifacts/evaluation/director-eval-report.json` from deterministic offline
+fixtures. It covers 24 representative and 12 sealed holdout intents across
+exact maths/geometry, graphs/charts, scientific systems, timelines/causal
+structure, grammar, comparisons/part-whole, unfamiliar abstractions,
+diagram-plus-illustration requests, and revisions against an existing-board
+description. The holdout split is never returned by the prompt-tuning helper.
+
+The offline matrix is five trials for both cold and warm cache states under
+`terra-low`, `terra-med`, `luna-low`, `luna-med`, and the first-valid-step
+`terra-low+luna-low` hedge. Synthetic timings exercise the aggregation and
+pre-registered decision rule; proposals cross the production structured
+schema, authored BoardOp validator, permanence/density/id policy, and
+storyboard-coverage validator. Fixed fixture grades exercise the blind raster
+rubric contract. They are not provider or model-quality evidence.
+
+The same gate scores 12 semantic defects that deterministic geometry accepts
+(wrong shading, mislabeled value, reversed arrow) and materializes 30
+synthetic sketches from ten board-coordinate bases with three deterministic
+jitter seeds. No child data is used. The cheaper sketch second opinion remains
+off unless an authorized result clears the pre-registered five-point accuracy
+gain.
+
+Live evaluation is a separate, explicit path:
+
+```bash
+# DO NOT RUN without fresh provider-spend authorization.
+NOURA_BOARD_HARNESS_URL=http://127.0.0.1:5173/dev/board \
+npm run test:director-eval -- --authorized-live-run --max-spend-usd 30
+```
+
+The live path uses only checked-in synthetic inputs, streams every composition
+condition, validates and rasters through the configured real board harness,
+blind-grades rasters with the pinned rubric judge, measures cache-token usage,
+runs the seeded vision-audit and sketch studies, aborts losing hedge legs, and
+fails before another call can cross its spend ceiling. Raw decision evidence
+belongs under `server/board/eval/results/`; do not copy the offline artifact
+there or present an offline fixture winner as an adopted model.
+
 Voice-interruption unit/integration rows cover short loud noise plus server VAD,
 sustained local energy without server confirmation, adaptive room-noise
 calibration, sustained speech with both detectors, one-turn high-eagerness

@@ -4,7 +4,14 @@ const DURATION_NAMES = new Set([
   'ask_to_first_audio',
   'board_reveal_to_narration',
   'tutor_audio_output_duration',
+  'visual_first_paint',
+  'visual_scene_complete',
+  'director_stream_first_op',
+  'vision_audit_outcome',
 ]);
+const VISUAL_LANES = ['anchor', 'template', 'director', 'cache'];
+const REASONING_EFFORTS = ['none', 'low', 'medium', 'high', 'xhigh', 'max'];
+const VISION_AUDIT_OUTCOMES = ['approved', 'rejected', 'timeout', 'invalid', 'error'];
 const LIFECYCLE_NAMES = new Set([
   'barge_in_gate_outcome',
   'barge_in_cancel_outcome',
@@ -201,13 +208,14 @@ function projectTimelineEntry(value, label) {
         ),
       };
   if (DURATION_NAMES.has(name)) {
-    if (entry.unit !== 'ms' || entry.dimensions !== undefined) {
+    const dimensions = projectDrawingDurationDimensions(name, entry.dimensions, `${label}.dimensions`);
+    if (entry.unit !== 'ms') {
       throw new Error(`${label} has invalid duration fields.`);
     }
     const valueNumber = name === 'board_reveal_to_narration'
       ? readSafeInteger(entry.value, `${label}.value`)
       : readSafeNonNegativeInteger(entry.value, `${label}.value`);
-    return { eventId, ts, name, value: valueNumber };
+    return { eventId, ts, name, value: valueNumber, ...(dimensions ? { dimensions } : {}) };
   }
   if (name === 'provider_usage') {
     if (entry.unit !== 'count') throw new Error(`${label}.unit is invalid.`);
@@ -242,6 +250,37 @@ function projectTimelineEntry(value, label) {
     `${label}.dimensions`,
   );
   return { eventId, ts, name, value: 1, dimensions, ...correlation };
+}
+
+function projectDrawingDurationDimensions(name, value, label) {
+  if (!['visual_first_paint', 'visual_scene_complete', 'director_stream_first_op', 'vision_audit_outcome'].includes(name)) {
+    if (value !== undefined) throw new Error(`${label} is not allowed.`);
+    return undefined;
+  }
+  const dimensions = requireRecord(value, label);
+  if (name === 'visual_first_paint' || name === 'visual_scene_complete') {
+    assertExactKeys(dimensions, ['lane'], label);
+    if (!VISUAL_LANES.includes(dimensions.lane)) throw new Error(`${label}.lane is invalid.`);
+    return { lane: dimensions.lane };
+  }
+  const keys = name === 'vision_audit_outcome'
+    ? ['model', 'reasoningEffort', 'outcome']
+    : ['model', 'reasoningEffort'];
+  assertExactKeys(dimensions, keys, label);
+  if (typeof dimensions.model !== 'string' || !/^gpt-[a-z0-9][a-z0-9.-]*$/.test(dimensions.model) || dimensions.model.length > 120) {
+    throw new Error(`${label}.model is invalid.`);
+  }
+  if (!REASONING_EFFORTS.includes(dimensions.reasoningEffort)) {
+    throw new Error(`${label}.reasoningEffort is invalid.`);
+  }
+  if (name === 'vision_audit_outcome' && !VISION_AUDIT_OUTCOMES.includes(dimensions.outcome)) {
+    throw new Error(`${label}.outcome is invalid.`);
+  }
+  return {
+    model: dimensions.model,
+    reasoningEffort: dimensions.reasoningEffort,
+    ...(name === 'vision_audit_outcome' ? { outcome: dimensions.outcome } : {}),
+  };
 }
 
 function projectLifecycleDimensions(name, value, label) {

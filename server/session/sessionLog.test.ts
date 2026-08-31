@@ -198,6 +198,37 @@ describe('buildSessionTelemetryLog', () => {
     });
   });
 
+  it('aggregates Drawing vNext durations while retaining only closed dimensions', () => {
+    const events = [
+      metricEvent(1, {
+        schemaVersion: '1.0.0',
+        name: 'visual_first_paint',
+        unit: 'ms',
+        value: 5_200,
+        dimensions: { lane: 'director' },
+      }),
+      metricEvent(2, {
+        schemaVersion: '1.0.0',
+        name: 'vision_audit_outcome',
+        unit: 'ms',
+        value: 1_300,
+        dimensions: {
+          model: 'gpt-5.6-luna',
+          reasoningEffort: 'low',
+          outcome: 'approved',
+        },
+      }),
+    ];
+    const log = buildSessionTelemetryLog('session-1', events, 5_000);
+
+    expect(log.summary.durations.visual_first_paint).toMatchObject({ count: 1, latest: 5_200 });
+    expect(log.summary.durations.vision_audit_outcome).toMatchObject({ count: 1, latest: 1_300 });
+    expect(log.timeline.map((entry) => entry.dimensions)).toEqual([
+      { lane: 'director' },
+      { model: 'gpt-5.6-luna', reasoningEffort: 'low', outcome: 'approved' },
+    ]);
+  });
+
   it('does not increment section switches for initial_anchor', () => {
     const events = [
       metricEvent(1, {

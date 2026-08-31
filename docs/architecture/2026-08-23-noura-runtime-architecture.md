@@ -75,6 +75,16 @@ gap reaches the server, so those runs cannot prove complete telemetry delivery.
 
 The first-audio duration ends when the browser handles the provider’s `output_audio_buffer.started` playback boundary for the accepted response (Phase 1; formerly the first tutor audio delta). It is browser-received timing, not acoustic onset. The signed board metric is `playback-start boundary − first committed board paint`: positive means board first and negative means narration first. It is not animation-completion time. These deterministic boundaries make no live latency or target-hardware claim.
 
+Drawing vNext M0 extends this observer path with four closed contracts:
+`visual_first_paint` (server acceptance to `ops_presented`),
+`visual_scene_complete` (acceptance to the final durable visual step),
+`director_stream_first_op`, and latency-bearing `vision_audit_outcome`.
+Lane, OpenAI model, reasoning effort, and verdict dimensions are bounded enums;
+the browser never supplies elapsed time. The accompanying Director evaluator is
+offline by default, keeps a 24/12 representative/holdout split, and cannot
+change runtime defaults. Its authorized live path is synthetic-only and
+spend-capped; see [the M0 handoff](2026-08-30-drawing-vnext-m0-handoff.md).
+
 Phase 0 was built on WebSocket plus browser-owned PCM; Phase 1 (below) moved the audio plane to WebRTC while preserving every Phase 0 metric name, envelope trust check, pseudonymization step, and gap-accounting behavior.
 
 ## Voice transport: WebRTC media plane plus server sideband (Phase 1, 2026-08-26)

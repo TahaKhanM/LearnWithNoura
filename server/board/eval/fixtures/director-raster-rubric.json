@@ -1,0 +1,16 @@
+{
+  "schemaVersion": "1.0.0",
+  "blind": true,
+  "judgeModel": "gpt-5.6-terra",
+  "judgeReasoningEffort": "low",
+  "gradeRange": [1, 5],
+  "dimensions": [
+    { "id": "semantic_correctness", "weight": 0.35, "description": "The raster teaches the requested idea without a semantic error." },
+    { "id": "legibility", "weight": 0.2, "description": "Labels and exact overlays are readable and attached to the right objects." },
+    { "id": "layout", "weight": 0.15, "description": "Objects do not collide, clip, or obscure the instructional relationship." },
+    { "id": "storyboard_coherence", "weight": 0.2, "description": "The visual remains understandable when revealed in the proposed order." },
+    { "id": "instructional_efficiency", "weight": 0.1, "description": "The scene uses no more visual complexity than the teaching goal needs." }
+  ],
+  "passingGrade": 3,
+  "decisionReferenceCondition": "terra-med"
+}
