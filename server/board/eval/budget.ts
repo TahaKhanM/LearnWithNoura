@@ -2,27 +2,29 @@ import type { DirectorEvalCondition } from './types.js';
 
 export type EvalTextModel = 'gpt-5.6-terra' | 'gpt-5.6-luna';
 
+export const DIRECTOR_PROPOSAL_MAX_COMPLETION_TOKENS = {
+  'gpt-5.6-terra': { low: 4_000, medium: 4_000 },
+  'gpt-5.6-luna': { low: 5_000, medium: 5_000 },
+} as const;
+/** Provider reporting for these models is rounded down to 128-token cache
+ * boundaries. The raster-bearing production-shaped prefix reports 1,792. */
+export const DIRECTOR_MIN_WARM_CACHED_INPUT_TOKENS = 1_792;
+
 const TOKEN_RATES_PER_MILLION = {
   'gpt-5.6-terra': { input: 2, cachedInput: 0.2, output: 12 },
   'gpt-5.6-luna': { input: 0.2, cachedInput: 0.02, output: 1.2 },
 } as const;
-
-/** Derived from a 6k-token cold prefix/dynamic bound, 5k-token warm cache
- * hit, 1.6k-token high-detail board raster bound, and the probe's 600 output
- * token cap. Values round upward and include GPT-5.6's 1.25x cache write. */
-const COMPOSITION_RESERVE_USD = {
-  cold: {
-    withoutRaster: { 'gpt-5.6-terra': 0.023, 'gpt-5.6-luna': 0.0023 },
-    withRaster: { 'gpt-5.6-terra': 0.027, 'gpt-5.6-luna': 0.0027 },
-  },
-  warm: {
-    withoutRaster: { 'gpt-5.6-terra': 0.011, 'gpt-5.6-luna': 0.0011 },
-    withRaster: { 'gpt-5.6-terra': 0.015, 'gpt-5.6-luna': 0.0015 },
-  },
+/** The static schema/prompt plus bounded fixture suffix is below 3k input
+ * tokens in live usage. A high-detail 960x576 board raster raises the bound
+ * to 5k. Cold calls conservatively charge every input token as a 1.25x cache
+ * write; warm calls receive discounted pricing only for the enforced 2k hit. */
+const COMPOSITION_INPUT_TOKEN_BOUND = {
+  withoutRaster: 3_000,
+  withRaster: 5_000,
 } as const;
-/** Luna judge: up to eight high-detail 960×576 cumulative rasters plus the
- * 300-token strict verdict. Rounded above the image-token calculator bound. */
-const JUDGE_RESERVE_USD = 0.0032;
+/** Luna judge: up to eight high-detail 960×576 cumulative rasters plus a
+ * 1,000-token reasoning-and-verdict ceiling. */
+const JUDGE_RESERVE_USD = 0.0041;
 const VISION_RESERVE_USD: Record<EvalTextModel, number> = {
   'gpt-5.6-terra': 0.01,
   'gpt-5.6-luna': 0.001,
@@ -31,7 +33,9 @@ const SKETCH_RESERVE_USD: Record<EvalTextModel, number> = {
   'gpt-5.6-terra': 0.0068,
   'gpt-5.6-luna': 0.00068,
 };
-const CACHE_MISS_CONTINGENCY_USD = 0.25;
+/** The runner stops on the first selected warm-leg cache miss. The largest
+ * cold-vs-warm reservation delta is below two cents, including a raster. */
+const CACHE_MISS_CONTINGENCY_USD = 0.02;
 
 export interface EvalUsageCostInput {
   inputTokens: number;
@@ -60,19 +64,39 @@ export function compositionCallReserveUsd(
   model: EvalTextModel,
   cacheState: 'cold' | 'warm' = 'cold',
   hasBoardRaster = false,
+  reasoningEffort: 'low' | 'medium' = 'low',
+  maxCompletionTokens: number = DIRECTOR_PROPOSAL_MAX_COMPLETION_TOKENS[model][reasoningEffort],
 ): number {
-  return COMPOSITION_RESERVE_USD[cacheState][hasBoardRaster ? 'withRaster' : 'withoutRaster'][model];
+  const inputTokens = COMPOSITION_INPUT_TOKEN_BOUND[hasBoardRaster ? 'withRaster' : 'withoutRaster'];
+  const estimated = estimateUsageCostUsd(model, {
+    inputTokens,
+    cachedInputTokens: cacheState === 'warm' ? DIRECTOR_MIN_WARM_CACHED_INPUT_TOKENS : 0,
+    cacheWriteTokens: cacheState === 'cold' ? inputTokens : 0,
+    outputTokens: maxCompletionTokens,
+  });
+  return Math.ceil((estimated - 1e-12) * 10_000) / 10_000;
 }
 
 export function plannedLiveBudget(input: {
   intentCount: number;
+  judgedIntentCount: number;
   trialsPerCacheState: number;
+  judgedTrialsPerCacheState: number;
+  judgedCacheStateCount: 1 | 2;
   conditions: DirectorEvalCondition[];
   defectCount: number;
   sketchCount: number;
   contextRasterIntentCount?: number;
 }) {
-  const trialsPerCondition = input.intentCount * 2 * input.trialsPerCacheState;
+  if (!Number.isInteger(input.judgedTrialsPerCacheState) ||
+      input.judgedTrialsPerCacheState < 0 ||
+      input.judgedTrialsPerCacheState > input.trialsPerCacheState) {
+    throw new Error('Judged trials per cache state must be an integer within the planned trial count.');
+  }
+  if (!Number.isInteger(input.judgedIntentCount) || input.judgedIntentCount < 0 ||
+      input.judgedIntentCount > input.intentCount) {
+    throw new Error('Judged intent count must be an integer within the corpus size.');
+  }
   const contextRasterIntentCount = Math.max(0, input.contextRasterIntentCount ?? 0);
   const compositionLegCounts: Record<EvalTextModel, { cold: number; warm: number }> = {
     'gpt-5.6-terra': { cold: 0, warm: 0 },
@@ -86,29 +110,40 @@ export function plannedLiveBudget(input: {
   }
   const compositionCalls = Object.values(compositionLegCounts)
     .reduce((sum, value) => sum + value.cold + value.warm, 0);
-  const judgeCalls = trialsPerCondition * input.conditions.length;
+  const judgeCalls = input.judgedIntentCount * input.judgedCacheStateCount *
+    input.judgedTrialsPerCacheState * input.conditions.length;
   const visionAuditCalls = input.defectCount * 2 * 2;
   const sketchCalls = input.sketchCount * 2;
   const warmupKeys = new Set(input.conditions.flatMap((condition) =>
     condition.legs.map((leg) => `${leg.model}:${leg.reasoningEffort}`)));
   const warmupUsd = [...warmupKeys].reduce((total, key) => {
     const model = key.split(':', 1)[0] as EvalTextModel;
-    return total + compositionCallReserveUsd(model, 'cold', false);
+    const reasoningEffort = key.split(':')[1] as 'low' | 'medium';
+    const maxCompletionTokens = Math.max(...input.conditions.flatMap((condition) =>
+      condition.legs.filter((leg) => `${leg.model}:${leg.reasoningEffort}` === key)
+        .map((leg) => leg.maxCompletionTokens)));
+    return total + compositionCallReserveUsd(
+      model, 'cold', false, reasoningEffort, maxCompletionTokens,
+    );
   }, 0);
-  const conditionLegCounts = (Object.keys(compositionLegCounts) as EvalTextModel[]).map((model) => ({
-    model,
-    legMultiplicity: input.conditions.reduce((count, condition) =>
-      count + condition.legs.filter((leg) => leg.model === model).length, 0),
-  }));
-  const compositionUsd = conditionLegCounts.reduce((total, { model, legMultiplicity }) => {
-    const plainPerCache = (input.intentCount - contextRasterIntentCount) * input.trialsPerCacheState * legMultiplicity;
-    const rasterPerCache = contextRasterIntentCount * input.trialsPerCacheState * legMultiplicity;
-    return total +
-      plainPerCache * compositionCallReserveUsd(model, 'cold', false) +
-      rasterPerCache * compositionCallReserveUsd(model, 'cold', true) +
-      plainPerCache * compositionCallReserveUsd(model, 'warm', false) +
-      rasterPerCache * compositionCallReserveUsd(model, 'warm', true);
-  }, 0);
+  const compositionUsd = input.conditions.reduce((conditionTotal, condition) =>
+    conditionTotal + condition.legs.reduce((total, leg) => {
+      const plainPerCache = (input.intentCount - contextRasterIntentCount) * input.trialsPerCacheState;
+      const rasterPerCache = contextRasterIntentCount * input.trialsPerCacheState;
+      return total +
+        plainPerCache * compositionCallReserveUsd(
+          leg.model, 'cold', false, leg.reasoningEffort, leg.maxCompletionTokens,
+        ) +
+        rasterPerCache * compositionCallReserveUsd(
+          leg.model, 'cold', true, leg.reasoningEffort, leg.maxCompletionTokens,
+        ) +
+        plainPerCache * compositionCallReserveUsd(
+          leg.model, 'warm', false, leg.reasoningEffort, leg.maxCompletionTokens,
+        ) +
+        rasterPerCache * compositionCallReserveUsd(
+          leg.model, 'warm', true, leg.reasoningEffort, leg.maxCompletionTokens,
+        );
+    }, 0), 0);
   const judgeUsd = judgeCalls * JUDGE_RESERVE_USD;
   const visionAuditUsd = input.defectCount * 2 *
     (VISION_RESERVE_USD['gpt-5.6-terra'] + VISION_RESERVE_USD['gpt-5.6-luna']);
@@ -146,15 +181,24 @@ function hedgeWarmAbortReservation(
   hedge: DirectorEvalCondition,
   contextRasterIntentCount: number,
 ): number {
-  const worstModel = hedge.legs.some((leg) => leg.model === 'gpt-5.6-terra')
-    ? 'gpt-5.6-terra'
-    : 'gpt-5.6-luna';
+  const worstLeg = hedge.legs.find((leg) => leg.model === 'gpt-5.6-terra') ?? hedge.legs[0];
+  if (!worstLeg) return 0;
   const plainTrials = (input.intentCount - contextRasterIntentCount) * input.trialsPerCacheState;
   const rasterTrials = contextRasterIntentCount * input.trialsPerCacheState;
   return plainTrials * (
-    compositionCallReserveUsd(worstModel, 'cold', false) - compositionCallReserveUsd(worstModel, 'warm', false)
+    compositionCallReserveUsd(
+      worstLeg.model, 'cold', false, worstLeg.reasoningEffort, worstLeg.maxCompletionTokens,
+    ) -
+    compositionCallReserveUsd(
+      worstLeg.model, 'warm', false, worstLeg.reasoningEffort, worstLeg.maxCompletionTokens,
+    )
   ) + rasterTrials * (
-    compositionCallReserveUsd(worstModel, 'cold', true) - compositionCallReserveUsd(worstModel, 'warm', true)
+    compositionCallReserveUsd(
+      worstLeg.model, 'cold', true, worstLeg.reasoningEffort, worstLeg.maxCompletionTokens,
+    ) -
+    compositionCallReserveUsd(
+      worstLeg.model, 'warm', true, worstLeg.reasoningEffort, worstLeg.maxCompletionTokens,
+    )
   );
 }
 
