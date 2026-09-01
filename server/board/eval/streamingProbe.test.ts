@@ -11,11 +11,14 @@ import { compositionCallReserveUsd } from './budget.js';
 import {
   DIRECTOR_VNEXT_EVAL_JSON_SCHEMA,
   DIRECTOR_VNEXT_EVAL_RESPONSE_FORMAT,
+  DIRECTOR_STREAM_JSON_SCHEMA,
+  DIRECTOR_STREAM_RESPONSE_FORMAT,
+  DirectorStreamProposalSchema,
   VNextEvalProposalSchema,
   parseVNextEvalDirectorProposal,
   validatePolicyReadyEvalStep,
-} from './vnextEvalSchema.js';
-import type { JsonSchema } from './vnextBoardOpSchema.js';
+} from '../directorStreamSchema.js';
+import type { JsonSchema } from '../directorVNextBoardOpSchema.js';
 
 describe('Drawing vNext evaluation stream contract', () => {
   it('uses strict json_schema decoding with template as the first field', () => {
@@ -23,6 +26,9 @@ describe('Drawing vNext evaluation stream contract', () => {
       type: 'json_schema',
       json_schema: { name: 'noura_director_vnext_eval', strict: true },
     });
+    expect(DIRECTOR_STREAM_RESPONSE_FORMAT).toBe(DIRECTOR_VNEXT_EVAL_RESPONSE_FORMAT);
+    expect(DIRECTOR_STREAM_JSON_SCHEMA).toBe(DIRECTOR_VNEXT_EVAL_JSON_SCHEMA);
+    expect(DirectorStreamProposalSchema).toBe(VNextEvalProposalSchema);
     const properties = DIRECTOR_VNEXT_EVAL_JSON_SCHEMA.properties as Record<string, JsonSchema>;
     expect(Object.keys(properties)).toEqual([
       'template', 'groupLabel', 'representation', 'illustration', 'steps',

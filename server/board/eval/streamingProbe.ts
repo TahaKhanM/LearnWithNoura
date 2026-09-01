@@ -12,7 +12,7 @@ import {
   DIRECTOR_VNEXT_EVAL_STATIC_PROMPT,
   VNextEvalHeaderSchema,
   validatePolicyReadyEvalStep,
-} from './vnextEvalSchema.js';
+} from '../directorStreamSchema.js';
 
 export interface ProbeUsage {
   inputTokens: number;
