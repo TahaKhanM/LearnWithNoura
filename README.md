@@ -174,6 +174,7 @@ npm run test:storage
 npm run test:brand
 npm run test:runtime-models
 npm run test:director-eval
+npm run test:director-m1-eval
 ```
 
 `npx vercel@latest build` is the deployment build gate. The installed global CLI predates Vercel’s native WebSocket public beta, so deployment work uses the current CLI without changing the global installation.
@@ -193,6 +194,14 @@ The completed M0 synthetic decision is recorded in
 `docs/architecture/2026-09-01-drawing-model-bakeoff-decision.md`: no
 composition arm cleared the 95% adoption bar, Luna-low was selected for the
 3,000 ms vision-audit role and sketch assistance remains off.
+
+`npm run test:director-m1-eval` is provider-free by default. It verifies the
+policy-pinned local browser ledger and paired atomic/incremental delivery
+report. The supplemental delivery study has 0 pp diagram-validity loss,
+complete 24/24 grade reuse and a 43.6066% conservative provider-readiness
+cut. Its overall M1 decision is intentionally **false**: Terra-low remains
+329/360 (91.3889%), below the unchanged 95% first-pass gate and the readiness
+measure is not relabelled as actual `ops_presented` first paint.
 
 ## Interaction and privacy notes
 
