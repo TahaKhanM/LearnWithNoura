@@ -119,7 +119,7 @@ export function createAdaptiveVisionAuditGate(input: {
       if (settled) return;
       if (verdict.outcome === 'approved') settleSafe('approved', startedAtMs);
       else settleRejection(verdict.outcome, startedAtMs);
-    } catch (error) {
+    } catch {
       if (settled) return;
       if (input.parentSignal.aborted) {
         settleAborted();
