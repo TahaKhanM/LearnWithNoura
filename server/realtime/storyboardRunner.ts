@@ -74,6 +74,9 @@ export interface StoryboardRunState {
   visualIntentStartedAtMs: number | null;
   firstPaintRecorded: boolean;
   sceneCompleteRecorded: boolean;
+  /** True while the Director may append more validated steps. Reaching the
+   * current step count cannot create the closing handoff until intake closes. */
+  streamOpen: boolean;
 }
 
 export interface StoryboardRunInput {
@@ -94,6 +97,7 @@ export interface StoryboardRunInput {
   startPaused?: boolean;
   /** Captured before anchor preflight or Director composition begins. */
   visualIntentStartedAtMs?: number;
+  streamOpen?: boolean;
 }
 
 /** Derives runnable steps from any anchor-shaped scene (compiled anchor or
@@ -131,15 +135,16 @@ export function startStoryboardRun(ctx: CoordinatorContext, input: StoryboardRun
     visualIntentStartedAtMs: input.visualIntentStartedAtMs ?? null,
     firstPaintRecorded: false,
     sceneCompleteRecorded: false,
+    streamOpen: input.streamOpen ?? false,
   };
   ctx.state.storyboardRun = run;
   persistProgress(ctx, run, 'active');
-  if (run.steps.length === 0) {
+  if (run.steps.length === 0 && !run.streamOpen) {
     completeStoryboardRun(ctx, 'completed');
     return;
   }
   if (input.startPaused) return;
-  if (run.revealedSteps >= run.steps.length) {
+  if (run.revealedSteps >= run.steps.length && !run.streamOpen) {
     // Everything was revealed before this (re)start — a reconnect landed in
     // the handoff window. The closing handoff must still be delivered.
     advanceStoryboardRun(ctx);
@@ -151,6 +156,51 @@ export function startStoryboardRun(ctx: CoordinatorContext, input: StoryboardRun
   }
   // No boundary to bind to yet: the first reveal waits for a free floor.
   advanceStoryboardRun(ctx);
+}
+
+export function appendIncrementalStoryboardStepState(
+  run: StoryboardRunState,
+  step: StoryboardRunStep,
+): boolean {
+  if (!run.streamOpen || run.steps.some((candidate) => candidate.id === step.id)) return false;
+  const existingIds = new Set(run.steps.flatMap((candidate) => candidate.objectIds));
+  if (step.objectIds.some((id) => existingIds.has(id))) return false;
+  run.steps.push({
+    ...step,
+    objectIds: [...step.objectIds],
+    ops: [...step.ops],
+  });
+  return true;
+}
+
+export function appendStoryboardRunStep(
+  ctx: CoordinatorContext,
+  runId: string,
+  step: StoryboardRunStep,
+): boolean {
+  const run = ctx.state.storyboardRun;
+  if (!run || run.runId !== runId || !appendIncrementalStoryboardStepState(run, step)) return false;
+  persistProgress(ctx, run, 'active');
+  advanceStoryboardRun(ctx);
+  return true;
+}
+
+export function closeIncrementalStoryboardState(run: StoryboardRunState): boolean {
+  if (!run.streamOpen || run.steps.length === 0) return false;
+  run.streamOpen = false;
+  return true;
+}
+
+export function closeStoryboardRunIntake(ctx: CoordinatorContext, runId: string): boolean {
+  const run = ctx.state.storyboardRun;
+  if (!run || run.runId !== runId || !closeIncrementalStoryboardState(run)) return false;
+  if (run.revealedSteps === run.steps.length && !run.sceneCompleteRecorded) {
+    run.sceneCompleteRecorded = true;
+    recordVisualSceneComplete(ctx, run);
+  }
+  persistProgress(ctx, run, 'active');
+  advanceStoryboardRun(ctx);
+  return true;
 }
 
 /** The learner took the floor (confirmed interrupt or speech start): stop
@@ -188,6 +238,7 @@ export function advanceStoryboardRun(ctx: CoordinatorContext): void {
     return;
   }
   if (run.revealedSteps >= run.steps.length) {
+    if (run.streamOpen) return;
     // Everything is revealed and narrated: one ordinary handoff response
     // (never marked as a beat) delivers the stage's check/task through the
     // existing delivered-task contract.
@@ -354,7 +405,7 @@ async function onStepVisibility(ctx: CoordinatorContext, run: StoryboardRunState
     return;
   }
   run.revealedSteps += 1;
-  if (run.revealedSteps === run.steps.length && !run.sceneCompleteRecorded) {
+  if (!run.streamOpen && run.revealedSteps === run.steps.length && !run.sceneCompleteRecorded) {
     run.sceneCompleteRecorded = true;
     recordVisualSceneComplete(ctx, run);
   }
