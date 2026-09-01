@@ -37,9 +37,10 @@ function openRun(): StoryboardRunState {
     runId: 'run-stream', source: 'director', groupId: 'group', groupLabel: 'Stream',
     steps: [], revealedSteps: 0, narratedSteps: 0, beatCreateInFlight: false,
     pendingBeatStepIndex: null, handoffResponseId: null, cancelPendingBeat: false,
-    pendingStepEventId: null, needsResend: false, stepTimer: null,
+    pendingStepEventId: null, stepCueCreateInFlight: false, needsResend: false, stepTimer: null,
     nextBeatFraming: [], handoff: 'Ask the check.', visualIntentStartedAtMs: 1,
     firstPaintRecorded: false, sceneCompleteRecorded: false, streamOpen: true,
+    progressWrite: Promise.resolve(),
   };
 }
 

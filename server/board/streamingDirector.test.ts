@@ -87,6 +87,37 @@ describe('streaming Board Director', () => {
     })).rejects.toMatchObject({ name: 'AbortError' });
     expect(delivered).toEqual(['s1']);
   });
+
+  it('rejects an illustration header before delivering any overlay step', async () => {
+    const proposal = {
+      ...scene(),
+      representation: 'illustration',
+      illustration: {
+        purpose: 'Add context',
+        subject: 'A quiet garden',
+        style: null,
+        requiredElements: ['plants'],
+        forbiddenElements: ['text'],
+        alt: 'A garden',
+      },
+    };
+    const onStep = vi.fn(async () => {});
+    const result = await streamVisual({
+      model: { streamProposal: () => oneChunk(JSON.stringify(proposal)) },
+      validateScene: async () => ({ ok: true }),
+      renderScene: async () => null,
+    }, request(), {
+      signal: new AbortController().signal,
+      onStep,
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      reasons: ['Streaming illustration composition is deferred to the parallel illustration lane.'],
+      fallback: 'classic_illustration',
+    });
+    expect(onStep).not.toHaveBeenCalled();
+  });
 });
 
 function scene() {

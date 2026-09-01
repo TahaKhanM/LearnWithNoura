@@ -5,7 +5,10 @@ import express from 'express';
 import OpenAI from 'openai';
 import { WebSocketServer } from 'ws';
 import { createApi } from './api.js';
-import { createLiveBoardDirector } from './board/directorService.js';
+import {
+  createLiveBoardDirector,
+  createLiveStreamingBoardDirector,
+} from './board/directorService.js';
 import { createLiveIllustrationService } from './board/illustrationService.js';
 import { illustrationStoreFromRepo } from './board/repoIllustrationStore.js';
 import { fallbackTurns } from './fallbackTutor.js';
@@ -66,15 +69,14 @@ const compilation: LessonCompilationService = openai && !fixtureCompilerForced
     })
   : createFixtureCompilationService(repo);
 
-// The Board Director: slow-tier scene requests during live lessons. It
-// needs both a configured provider and a reachable board harness; without
-// either, new-scene requests fail closed with a clean rejection instead of
-// unvalidated geometry. Live lessons themselves already require the
-// provider, so no fixture Director exists.
+// Optional early/offline headless validation. Live scene requests bind the
+// Director to the connected learner browser instead; provider availability,
+// not a server-side Chromium process, controls whether the Director exists.
+// No fixture Director exists because live lessons already require a provider.
 const directorHarness: HeadlessSceneValidatorHandle | null = openai && !fixtureCompilerForced && boardHarnessUrl
   ? createHeadlessSceneValidator({ harnessUrl: boardHarnessUrl })
   : null;
-const illustrationService = openai && runtimeConfig.illustrationsEnabled
+const illustrationService = openai && !fixtureCompilerForced && runtimeConfig.illustrationsEnabled
   ? createLiveIllustrationService({
       client: openai,
       imageModel: runtimeConfig.illustrationModel,
@@ -84,13 +86,25 @@ const illustrationService = openai && runtimeConfig.illustrationsEnabled
       enabled: true,
     })
   : null;
-const boardDirector = openai && directorHarness
+// A connected lesson browser is the live validation/render authority, so
+// the Director remains available in production even when a serverless
+// isolate cannot launch Chromium. A configured harness is still useful for
+// offline compilation and as a non-realtime fallback.
+const boardDirector = openai && !fixtureCompilerForced
   ? createLiveBoardDirector({
       client: openai,
       model: runtimeConfig.directorModel,
       reasoningEffort: runtimeConfig.directorReasoningEffort,
       harness: directorHarness,
       illustrations: illustrationService,
+    })
+  : null;
+const streamingBoardDirector = openai && !fixtureCompilerForced && runtimeConfig.directorPipeline === 'streaming'
+  ? createLiveStreamingBoardDirector({
+      client: openai,
+      model: runtimeConfig.directorModel,
+      reasoningEffort: runtimeConfig.directorReasoningEffort,
+      harness: directorHarness,
     })
   : null;
 
@@ -420,6 +434,7 @@ server.on('upgrade', async (request, socket, head) => {
       sidebandRegistry,
       planDetour: (input) => compilation.planDetour(input),
       ...(boardDirector ? { directVisual: boardDirector } : {}),
+      ...(streamingBoardDirector ? { streamVisual: streamingBoardDirector } : {}),
       log: (line) => console.log(`[realtime] ${line}`),
       onLifecycle: (lifecycle) => proxyLifecycles.register(lifecycle),
     }).catch(() => {

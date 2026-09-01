@@ -283,20 +283,42 @@ export async function handleClientEvent(
       break;
     }
 
+    case 'visual_render_result': {
+      const renderId = String(message.render_id ?? '');
+      const resolver = state.pendingVisualRenders.get(renderId);
+      if (!resolver) break;
+      const candidate = typeof message.image_data_url === 'string' ? message.image_data_url : '';
+      const imageDataUrl = candidate.length <= 350_000 && /^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(candidate)
+        ? candidate
+        : null;
+      resolver(imageDataUrl);
+      break;
+    }
+
+    case 'ops_presented': {
+      // First-paint truth is separate from animation completion. It is safe
+      // for the model to refer to the objects now, but durable replay still
+      // waits for ops_shown below.
+      if (typeof message.event_id === 'number') {
+        presentPendingBoardOps(ctx, message.event_id);
+      }
+      break;
+    }
+
     case 'ops_shown': {
-      // The child has actually seen this batch; it is now part of the board.
+      // The draw-on transaction completed. Persist it for replay; older
+      // clients that do not send ops_presented still cross first-paint truth
+      // here before the event is released.
       if (typeof message.event_id === 'number') {
         await ctx.repo.markEventReleased(ctx.sessionId, message.event_id);
-        const pending = state.pendingBoardOps.get(message.event_id);
-        if (pending) {
-          if (pending.replacesGroup) state.boardContext.applyReplacement(pending.ops, pending.replacesGroup, pending.groupLabel);
-          else state.boardContext.apply(pending.ops, 'tutor', pending.semanticGroupId, pending.groupLabel);
-          state.pendingBoardOps.delete(message.event_id);
-        } else {
+        const wasKnown = presentPendingBoardOps(ctx, message.event_id);
+        state.pendingBoardOps.delete(message.event_id);
+        state.presentedBoardOps.delete(message.event_id);
+        if (!wasKnown) {
           // Covers acknowledgement after an unusual connection handoff.
           state.boardContext = await loadReleasedBoardContext(ctx.repo, ctx.sessionId);
+          refreshBoardInstructions(ctx);
         }
-        refreshBoardInstructions(ctx);
         // The visibility barrier: a staged plan's tool result waits here.
         state.pendingVisibility.get(message.event_id)?.(true);
       }
@@ -308,6 +330,13 @@ export async function handleClientEvent(
       if (eventId !== null) {
         state.pendingBoardOps.delete(eventId);
         state.pendingVisibility.get(eventId)?.(false);
+        state.pendingPresentation.get(eventId)?.(false);
+        // A rejection should precede first paint. If a malformed/late client
+        // reports it afterwards, restore the released ledger rather than
+        // leaving optimistic state in the model's board mirror.
+        if (state.presentedBoardOps.delete(eventId)) {
+          state.boardContext = await loadReleasedBoardContext(ctx.repo, ctx.sessionId);
+        }
       }
       const reason = String(message.reason ?? 'The board checkpoint failed client layout validation.').slice(0, 300);
       await ctx.repo.addEvent(ctx.sessionId, 'board_rejected', { eventId, reason });
@@ -344,4 +373,26 @@ export async function handleClientEvent(
     default:
       break;
   }
+}
+
+function presentPendingBoardOps(ctx: CoordinatorContext, eventId: number): boolean {
+  const { state } = ctx;
+  if (state.presentedBoardOps.has(eventId)) {
+    state.pendingPresentation.get(eventId)?.(true);
+    return true;
+  }
+  const pending = state.pendingBoardOps.get(eventId);
+  if (!pending) return false;
+  if (pending.replacesGroup) {
+    state.boardContext.applyReplacement(pending.ops, pending.replacesGroup, pending.groupLabel);
+  } else {
+    state.boardContext.apply(pending.ops, 'tutor', pending.semanticGroupId, pending.groupLabel, { tier: 'authored' });
+  }
+  refreshBoardInstructions(ctx);
+  state.presentedBoardOps.add(eventId);
+  if (state.presentedBoardOps.size > 256) {
+    state.presentedBoardOps.delete(state.presentedBoardOps.values().next().value as number);
+  }
+  state.pendingPresentation.get(eventId)?.(true);
+  return true;
 }

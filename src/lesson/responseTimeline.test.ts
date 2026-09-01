@@ -99,6 +99,21 @@ describe('response cue timeline (playback-bound)', () => {
     expect(timeline.drain(() => 'finished').map((cue) => cue.cueId)).toEqual(['board-event-503']);
   });
 
+  it('cancels only unrevealed board events by event id and preserves the generation', () => {
+    const timeline = new ResponseCueTimeline();
+    timeline.enqueue({ ...visual('board-event-11', 1, 'cover'), eventId: 11, awaitNarration: true });
+    timeline.enqueue({ ...visual('board-event-12', 2, 'cover'), eventId: 12, awaitNarration: true });
+
+    expect(timeline.cancelVisualEvents([11]).map((cue) => cue.cueId)).toEqual(['board-event-11']);
+    expect(timeline.drain(() => 'finished').map((cue) => cue.cueId)).toEqual(['board-event-12']);
+    expect(timeline.enqueue({ ...visual('board-event-11', 3, 'later'), eventId: 11 })).toBe(true);
+
+    // Drained means already first-painted, so a late cancellation cannot
+    // retract it or poison other cues from the same generation.
+    expect(timeline.drain(() => 'finished').map((cue) => cue.cueId)).toEqual(['board-event-11']);
+    expect(timeline.cancelVisualEvents([11])).toEqual([]);
+  });
+
   it('navigation cleanup removes every pending cue', () => {
     const timeline = new ResponseCueTimeline();
     timeline.enqueue(semantic('state', 1));

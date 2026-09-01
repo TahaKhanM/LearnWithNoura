@@ -145,6 +145,9 @@ export class RealtimeSession {
   onSubmissionResult: (submissionId: string, accepted: boolean, error?: string) => void = () => {};
   /** Compile-checks a complete candidate visual plan without committing it. */
   onVisualPreflight: (ops: BoardOp[], semanticGroupId?: string, replacesGroup?: string) => Promise<{ accepted: boolean; reasons: string[] }> | { accepted: boolean; reasons: string[] } = () => ({ accepted: true, reasons: [] });
+  /** Renders immutable candidate ops through the learner's real browser
+   * pipeline for Director vision inspection. */
+  onVisualRender: (ops: BoardOp[], semanticGroupId?: string) => Promise<string | null> | string | null = () => null;
   onEnded: () => void = () => {};
 
   constructor(sessionId: string, injectedVoiceTransport?: VoiceTransportFactory) {
@@ -758,6 +761,13 @@ export class RealtimeSession {
         this.releasePending();
         break;
       }
+      case 'board_ops_cancelled': {
+        const eventIds = Array.isArray(message.event_ids)
+          ? message.event_ids.filter((value): value is number => Number.isSafeInteger(value) && value >= 0).slice(0, 64)
+          : [];
+        this.timeline.cancelVisualEvents(eventIds);
+        break;
+      }
       case 'user_transcript': {
         const text = String(message.text ?? '').trim();
         if (text) this.appendCaption({ role: 'child', text, live: false });
@@ -833,6 +843,18 @@ export class RealtimeSession {
         void Promise.resolve(this.onVisualPreflight(message.ops as BoardOp[], semanticGroupId, replacesGroup))
           .then((result) => this.send('visual_preflight_result', { preflight_id: preflightId, accepted: result.accepted, reasons: result.reasons.slice(0, 8) }))
           .catch(() => this.send('visual_preflight_result', { preflight_id: preflightId, accepted: false, reasons: ['preflight crashed'] }));
+        break;
+      }
+      case 'visual_render': {
+        const renderId = String(message.render_id ?? '');
+        if (!renderId || !Array.isArray(message.ops)) break;
+        const semanticGroupId = typeof message.semanticObjectId === 'string' ? message.semanticObjectId : undefined;
+        void Promise.resolve(this.onVisualRender(message.ops as BoardOp[], semanticGroupId))
+          .then((imageDataUrl) => this.send('visual_render_result', {
+            render_id: renderId,
+            ...(imageDataUrl ? { image_data_url: imageDataUrl } : {}),
+          }))
+          .catch(() => this.send('visual_render_result', { render_id: renderId }));
         break;
       }
       case 'lesson_state': {

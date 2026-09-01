@@ -7,6 +7,8 @@ import {
   type DirectorMessage,
   type IllustrationDirectorPort,
 } from './director.js';
+import { createOpenAIDirectorStreamPort } from './directorStreamingService.js';
+import { streamVisual, type StreamingBoardDirector } from './streamingDirector.js';
 
 /**
  * The app-facing face of the Board Director: maps the neutral multimodal
@@ -20,7 +22,9 @@ export interface LiveBoardDirectorOptions {
   client: OpenAI;
   model: string;
   reasoningEffort: 'low' | 'medium' | 'high';
-  harness: HeadlessSceneValidatorHandle;
+  /** Optional compiler/offline harness. Live lesson requests override these
+   * ports with the connected learner browser's real render pipeline. */
+  harness?: HeadlessSceneValidatorHandle | null;
   maxCorrectionRounds?: number;
   illustrations?: IllustrationDirectorPort | null;
 }
@@ -39,11 +43,34 @@ export function createLiveBoardDirector(options: LiveBoardDirectorOptions): Boar
   };
   return (request) => directVisual({
     client: chat,
-    validateScene: options.harness.validate,
-    renderScene: options.harness.render,
+    validateScene: options.harness?.validate ?? (async () => ({
+      ok: false,
+      issues: ['No scene validation authority is connected.'],
+    })),
+    renderScene: options.harness?.render ?? (async () => null),
     maxCorrectionRounds: options.maxCorrectionRounds,
     illustrations: options.illustrations ?? null,
   }, request);
+}
+
+export function createLiveStreamingBoardDirector(
+  options: LiveBoardDirectorOptions & { maxCompletionTokens?: number },
+): StreamingBoardDirector {
+  const model = createOpenAIDirectorStreamPort({
+    client: options.client,
+    model: options.model,
+    reasoningEffort: options.reasoningEffort,
+    maxCompletionTokens: options.maxCompletionTokens ??
+      (options.model.includes('luna') ? 5_000 : 4_000),
+  });
+  return (request, runtime) => streamVisual({
+    model,
+    validateScene: options.harness?.validate ?? (async () => ({
+      ok: false,
+      issues: ['No scene validation authority is connected.'],
+    })),
+    renderScene: options.harness?.render ?? (async () => null),
+  }, request, runtime);
 }
 
 function toOpenAiMessage(message: DirectorMessage): OpenAI.Chat.Completions.ChatCompletionMessageParam {

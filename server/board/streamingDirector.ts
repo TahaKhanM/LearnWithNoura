@@ -19,6 +19,14 @@ export interface StreamingDirectorDeps {
   renderScene: SceneRenderer;
 }
 
+export type StreamingBoardDirector = (
+  request: DirectorSceneRequest,
+  options: {
+    signal: AbortSignal;
+    onStep: (step: StreamingDirectorStep) => Promise<void>;
+  },
+) => Promise<DirectorResult>;
+
 /** Streams and validates a diagram one complete step at a time. The callback
  * is the only handoff point to staging: malformed, policy-rejected, or
  * browser-rejected partial JSON never reaches it. */
@@ -46,6 +54,16 @@ export async function streamVisual(
     for await (const chunk of chunks) {
       throwIfAborted(options.signal);
       for (const step of parser.push(chunk)) {
+        // M4 owns the parallel image lane. Until then an illustration header
+        // must fail before any overlay callback can queue or reveal a partial
+        // scene that the completed stream is guaranteed to reject.
+        if (step.header.representation === 'illustration') {
+          return {
+            ok: false,
+            reasons: ['Streaming illustration composition is deferred to the parallel illustration lane.'],
+            fallback: 'classic_illustration',
+          };
+        }
         cumulativeOps.push(...step.ops);
         const verdict = await validateScene([...cumulativeOps]);
         throwIfAborted(options.signal);
@@ -65,6 +83,7 @@ export async function streamVisual(
       return {
         ok: false,
         reasons: ['Streaming illustration composition is deferred to the parallel illustration lane.'],
+        fallback: 'classic_illustration',
       };
     }
     const scene = buildDirectedScene({

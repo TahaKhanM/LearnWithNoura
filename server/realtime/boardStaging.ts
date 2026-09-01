@@ -75,6 +75,35 @@ export function preflightWithClient(
   });
 }
 
+/** Renders immutable BoardOps in the connected learner browser. The same
+ * client compiler, fonts, asset URLs, and canvas implementation that will
+ * display the scene therefore provide the Director's vision image. */
+export function renderWithClient(
+  ctx: CoordinatorContext,
+  ops: BoardOp[],
+  semanticGroupId?: string,
+): Promise<string | null> {
+  if (!ctx.state.clientIdentity || !ctx.clientConnected()) return Promise.resolve(null);
+  const renderId = `render-${++ctx.state.visualRenderCounter}`;
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      ctx.state.pendingVisualRenders.delete(renderId);
+      resolve(null);
+    }, Math.max(5_000, ctx.preflightTimeoutMs));
+    ctx.state.pendingVisualRenders.set(renderId, (imageDataUrl) => {
+      clearTimeout(timer);
+      ctx.state.pendingVisualRenders.delete(renderId);
+      resolve(imageDataUrl);
+    });
+    ctx.sendClient({
+      type: 'visual_render',
+      render_id: renderId,
+      ops,
+      ...(semanticGroupId ? { semanticObjectId: semanticGroupId } : {}),
+    });
+  });
+}
+
 /**
  * The visibility barrier for fast-tier board confirmations: validate →
  * preflight (fail closed) → stage exactly one plan → wait until the browser

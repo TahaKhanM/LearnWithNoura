@@ -8,6 +8,7 @@ describe('runtime configuration', () => {
     expect(config.textModel).toBe('gpt-5.6-terra');
     expect(config.directorModel).toBe('gpt-5.6-terra');
     expect(config.directorReasoningEffort).toBe('medium');
+    expect(config.directorPipeline).toBe('classic');
     expect(config.illustrationModel).toBe('gpt-image-1.5');
     expect(config.illustrationsEnabled).toBe(true);
   });
@@ -25,9 +26,25 @@ describe('runtime configuration', () => {
     const config = readRuntimeConfig({
       NOURA_DIRECTOR_MODEL: 'custom-director-model',
       NOURA_DIRECTOR_REASONING_EFFORT: 'high',
+      NOURA_DIRECTOR_PIPELINE: 'streaming',
     });
     expect(config.directorModel).toBe('custom-director-model');
     expect(config.directorReasoningEffort).toBe('high');
+    expect(config.directorPipeline).toBe('streaming');
+  });
+
+  it('uses the reviewed low-effort interim when streaming is enabled', () => {
+    const config = readRuntimeConfig({ NOURA_DIRECTOR_PIPELINE: 'streaming' });
+    expect(config.directorPipeline).toBe('streaming');
+    expect(config.directorReasoningEffort).toBe('low');
+  });
+
+  it('honors an explicit medium-effort streaming override', () => {
+    const config = readRuntimeConfig({
+      NOURA_DIRECTOR_PIPELINE: 'streaming',
+      NOURA_DIRECTOR_REASONING_EFFORT: 'medium',
+    });
+    expect(config.directorReasoningEffort).toBe('medium');
   });
 
   it('fails Production closed without durable storage, auth, privacy, and provider gates', () => {
