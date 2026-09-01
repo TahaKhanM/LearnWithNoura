@@ -10,6 +10,7 @@ import {
   createLiveStreamingBoardDirector,
 } from './board/directorService.js';
 import { createLiveIllustrationService } from './board/illustrationService.js';
+import { createOpenAIVisionAuditPort } from './board/visionAuditService.js';
 import { illustrationStoreFromRepo } from './board/repoIllustrationStore.js';
 import { fallbackTurns } from './fallbackTutor.js';
 import { createHeadlessSceneValidator, type HeadlessSceneValidatorHandle } from './lesson/headlessSceneValidator.js';
@@ -97,6 +98,15 @@ const boardDirector = openai && !fixtureCompilerForced
       reasoningEffort: runtimeConfig.directorReasoningEffort,
       harness: directorHarness,
       illustrations: illustrationService,
+    })
+  : null;
+const visionAudit = openai && !fixtureCompilerForced
+  ? createOpenAIVisionAuditPort({
+      client: openai,
+      // M0 winner: 100% seeded-defect catch at 8.3% false rejection;
+      // M2 promotes these role settings to independent environment knobs.
+      model: 'gpt-5.6-luna',
+      reasoningEffort: 'low',
     })
   : null;
 const streamingBoardDirector = openai && !fixtureCompilerForced && runtimeConfig.directorPipeline === 'streaming'
@@ -435,6 +445,7 @@ server.on('upgrade', async (request, socket, head) => {
       planDetour: (input) => compilation.planDetour(input),
       ...(boardDirector ? { directVisual: boardDirector } : {}),
       ...(streamingBoardDirector ? { streamVisual: streamingBoardDirector } : {}),
+      ...(visionAudit ? { visionAudit } : {}),
       log: (line) => console.log(`[realtime] ${line}`),
       onLifecycle: (lifecycle) => proxyLifecycles.register(lifecycle),
     }).catch(() => {

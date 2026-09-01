@@ -18,6 +18,9 @@ import {
 } from './storyboardRunner.js';
 import { finishTool, sendResponseCreate, tutorFloorIsFree } from './turnFloor.js';
 import { streamedStepDuplicateReasons } from './streamingVisualPolicy.js';
+import { recordDirectorStreamFirstOp, recordVisionAuditOutcome } from './visualTelemetry.js';
+import { StreamingDirectorPrecommitError } from '../board/streamingDirector.js';
+import { createAdaptiveVisionAuditGate, type AdaptiveVisionAuditGate } from './adaptiveVisionAuditGate.js';
 
 /**
  * The `request_visual` tool: the voice model supplies INTENT, never
@@ -333,12 +336,16 @@ function startStreamingDirectedScene(
   state.visualPlanState = 'preparing';
   const startedAt = Date.now();
   const visualIntentStartedAtMs = Date.now();
+  const timingIdentity = state.clientIdentity ? { ...state.clientIdentity } : null;
   const epoch = state.visualRequestEpoch;
   const sectionId = request.action === 'establish'
     ? anchor
     : `${anchor}-alt${++state.comparisonSectionCounter}`;
   const runId = `run-${request.requestId}`.slice(0, 120);
   let intakeStarted = false;
+  const auditGateRef: { current: AdaptiveVisionAuditGate | null } = { current: null };
+  let auditRejected = false;
+  let runnerAbandoned = false;
   const recordOutcome = (status: string, reasons: string[] = []) => {
     recordVisualRequestOutcome(ctx, request, status, Date.now() - startedAt, reasons);
   };
@@ -379,11 +386,17 @@ function startStreamingDirectedScene(
       renderScene: (ops, semanticGroupId) => renderWithClient(ctx, ops, semanticGroupId),
     }, {
       signal: controller.signal,
+      onFirstValidatedOp: ({ model, reasoningEffort }) => recordDirectorStreamFirstOp(ctx, {
+        startedAtMs: visualIntentStartedAtMs,
+        model,
+        reasoningEffort,
+        identity: timingIdentity,
+      }),
       onStep: async (parsed) => {
         if (isStale()) throw abortError();
         const duplicateReasons = streamedStepDuplicateReasons(state.boardContext, parsed.ops);
         if (duplicateReasons.length > 0) {
-          throw new Error(`Streaming novelty policy rejected the step: ${duplicateReasons.join('; ')}`);
+          throw new StreamingDirectorPrecommitError(`Streaming novelty policy rejected the step: ${duplicateReasons.join('; ')}`);
         }
         const step = {
           id: parsed.step.id,
@@ -412,7 +425,31 @@ function startStreamingDirectedScene(
               : [],
             handoff: directorHandoff(),
             visualIntentStartedAtMs,
+            firstRevealHeld: Boolean(ctx.visionAudit),
+            subsequentRevealsHeld: Boolean(ctx.visionAudit),
+            onAbandoned: () => {
+              runnerAbandoned = true;
+              controller.abort('storyboard runner abandoned the streamed scene');
+            },
           });
+          if (ctx.visionAudit) {
+            auditGateRef.current = createAdaptiveVisionAuditGate({
+              ctx,
+              runId,
+              port: ctx.visionAudit,
+              request: {
+                purpose: request.purpose,
+                idea: request.idea,
+                constraints: request.constraints ?? null,
+              },
+              raster: renderWithClient(ctx, parsed.cumulativeOps, sectionId),
+              parentSignal: controller.signal,
+              abortComposition: () => controller.abort('vision audit rejected the streamed scene'),
+              onRejected: () => { auditRejected = true; },
+              onOutcome: (event) => recordVisionAuditOutcome(ctx, { ...event, identity: timingIdentity }),
+              budgetMs: ctx.visionAuditBudgetMs,
+            });
+          }
           ctx.sendClient({ type: 'illustration_status', status: 'ready' });
           return;
         }
@@ -421,7 +458,6 @@ function startStreamingDirectedScene(
         }
       },
     });
-    if (isStale()) throw abortError();
     if (!result.ok) {
       if (result.fallback === 'classic_illustration' && !intakeStarted && ctx.directVisual) {
         if (state.activeVisualRequestAbortController === controller) {
@@ -433,12 +469,28 @@ function startStreamingDirectedScene(
         });
         return;
       }
+      controller.abort('streamed composition failed before terminal scene');
       recordOutcome('director_rejected', result.reasons);
       if (intakeStarted && state.storyboardRun?.runId === runId) {
         abandonStoryboardRun(ctx, { injectNote: true });
       } else failDirectedScene(ctx, result.reasons);
       return;
     }
+    const auditGate = auditGateRef.current;
+    if (auditGate) {
+      auditGate.markCompositionComplete(result.scene.storyboard.length);
+      const audit = await auditGate.terminal;
+      if (audit.aborted) throw abortError();
+      if (audit.externalFailure) {
+        recordOutcome('runner_abandoned');
+        return;
+      }
+      if (!audit.safe) {
+        recordOutcome('audit_rejected');
+        return;
+      }
+    }
+    if (isStale()) throw abortError();
     if (!intakeStarted || state.storyboardRun?.runId !== runId) {
       throw new Error('The Director stream completed without an active incremental storyboard.');
     }
@@ -465,7 +517,10 @@ function startStreamingDirectedScene(
     } else {
       failDirectedScene(ctx, [String(error).slice(0, 260)]);
     }
-    recordOutcome(aborted ? 'stale' : 'error', [String(error).slice(0, 160)]);
+    recordOutcome(
+      auditRejected ? 'audit_rejected' : runnerAbandoned ? 'runner_abandoned' : aborted ? 'stale' : 'error',
+      [String(error).slice(0, 160)],
+    );
   }).finally(() => {
     if (state.activeVisualRequestAbortController === controller) {
       state.activeVisualRequestAbortController = null;

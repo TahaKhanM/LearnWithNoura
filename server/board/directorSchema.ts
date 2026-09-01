@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { VisionAuditVerdictSchema } from './visionAuditService.js';
 import { validateOps, type AddOp, type BoardOp } from '../../shared/boardOps.js';
 import { AnchorSceneSchema, StoryboardStepSchema, type AnchorScene } from '../../shared/compiledLesson.js';
 
@@ -32,10 +33,7 @@ export const DirectorProposalSchema = z.object({
 export type DirectorProposal = z.infer<typeof DirectorProposalSchema>;
 
 /** What the Director model must return for one vision inspection round. */
-export const DirectorVisionVerdictSchema = z.object({
-  approved: z.boolean(),
-  issues: z.array(z.string().min(1).max(300)).max(8).default([]),
-});
+export const DirectorVisionVerdictSchema = VisionAuditVerdictSchema;
 export type DirectorVisionVerdict = z.infer<typeof DirectorVisionVerdictSchema>;
 
 export const DIRECTOR_DENSITY_BUDGETS = { minimal: 14, standard: 30 } as const;

@@ -143,6 +143,27 @@ describe('Drawing vNext runtime telemetry', () => {
       }),
     ]);
   });
+
+  it('attributes a late audit completion to the identity captured at dispatch', () => {
+    vi.spyOn(Date, 'now').mockReturnValue(20_000);
+    const { ctx, submitted } = contextWithRun({
+      source: 'director', pendingStepEventId: null,
+      visualIntentStartedAtMs: 10_000, firstPaintRecorded: false,
+    });
+    const captured = { ...identity };
+    ctx.state.clientIdentity = { ...identity, turnId: 'new-turn', generationId: 'new-generation' };
+    recordVisionAuditOutcome(ctx, {
+      startedAtMs: 18_000,
+      model: 'gpt-5.6-luna',
+      reasoningEffort: 'low',
+      outcome: 'approved',
+      identity: captured,
+    });
+    expect(submitted[0].context).toMatchObject({
+      turnId: 'turn-3',
+      generationId: 'generation-4',
+    });
+  });
 });
 
 function contextWithRun(run: TestRun): {

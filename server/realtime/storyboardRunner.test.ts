@@ -4,7 +4,7 @@ import { CompiledLessonSchema, COMPILED_LESSON_SCHEMA_VERSION } from '../../shar
 import { createRuntimeEvent, type GenerationIdentity, type RuntimeEventEnvelope } from '../../shared/runtimeProtocol';
 import type { MetricObservation } from '../../shared/sessionTelemetry';
 import type { BoardDirector, DirectorSceneRequest } from '../board/director';
-import type { StreamingBoardDirector } from '../board/streamingDirector';
+import { streamVisual as runStreamingDirector, type StreamingBoardDirector } from '../board/streamingDirector';
 import { openTestDb } from '../store/db';
 import { Repo } from '../store/repo';
 import { connectRealtimeProxy, type ProxyOptions } from './proxy';
@@ -192,6 +192,25 @@ async function flushProxy(): Promise<void> {
   for (let index = 0; index < 20; index += 1) {
     await new Promise<void>((resolve) => setImmediate(resolve));
   }
+}
+
+function auditedProposal() {
+  return {
+    template: null,
+    groupLabel: 'Audited stream',
+    representation: 'diagram',
+    illustration: null,
+    steps: [
+      {
+        id: 'audit-s1', reveal: 'outline', narration: 'First appears.',
+        ops: [{ op: 'add', id: 'audit-a', color: 'blue', spec: { kind: 'box', at: [300, 220], w: 220, h: 100, text: 'A' } }],
+      },
+      {
+        id: 'audit-s2', reveal: 'relation', narration: 'Then the relation.',
+        ops: [{ op: 'add', id: 'audit-b', color: 'blue', spec: { kind: 'box', at: [650, 220], w: 220, h: 100, text: 'B' } }],
+      },
+    ],
+  };
 }
 
 /** Acknowledge a deferred covering `response.create` so the floor is free. */
@@ -644,6 +663,165 @@ describe('the storyboard runner', () => {
     expect(harness.repo.listEvents(harness.session.id).filter((event) => event.type === 'directed_scene')).toHaveLength(1);
     expect(harness.boardCues()).toHaveLength(1);
     expect(harness.toolOutput('illustration-call')).toMatchObject({ status: 'preparing', semanticGroupId: 'lesson-anchor-alt1' });
+  });
+
+  it('keeps revealed step 1 permanent when a late adaptive audit rejects step 2', async () => {
+    let resolveAudit!: (value: { outcome: 'rejected'; issues: string[] }) => void;
+    const audit = new Promise<{ outcome: 'rejected'; issues: string[] }>((resolve) => { resolveAudit = resolve; });
+    const proposal = auditedProposal();
+    const streamVisual: StreamingBoardDirector = (request, runtime) => runStreamingDirector({
+      model: { streamProposal: () => (async function* () { yield JSON.stringify(proposal); })() },
+      validateScene: async () => ({ ok: false, issues: ['request browser port required'] }),
+      renderScene: async () => null,
+      composition: { model: 'gpt-5.6-terra', reasoningEffort: 'low' },
+    }, request, runtime);
+    const harness = await connectBoardLed({
+      streamVisual,
+      visionAudit: {
+        model: 'gpt-5.6-luna', reasoningEffort: 'low',
+        inspect: async () => audit,
+      },
+      visionAuditBudgetMs: 50,
+    });
+    harness.upstream.emit({ type: 'response.created', response: { id: 'cover-audit' } });
+    harness.upstream.emit({
+      type: 'response.function_call_arguments.done', response_id: 'cover-audit', call_id: 'audit-call', name: 'request_visual',
+      arguments: JSON.stringify({
+        schemaVersion: '3.0.0', requestId: 'audit-case', action: 'compare',
+        purpose: 'Audit a relationship', idea: 'two related boxes', density: 'minimal',
+      }),
+    });
+    await flushProxy();
+    const firstPreflight = harness.client.sent.find((event) => event.type === 'visual_preflight');
+    harness.emitClient('visual_preflight_result', {
+      preflight_id: (firstPreflight!.payload as { preflight_id?: string }).preflight_id,
+      accepted: true,
+      reasons: [],
+    });
+    await flushProxy();
+    const render = harness.client.sent.find((event) => event.type === 'visual_render');
+    harness.emitClient('visual_render_result', {
+      render_id: (render!.payload as { render_id?: string }).render_id,
+      image_data_url: 'data:image/jpeg;base64,YXVkaXQ=',
+    });
+    await flushProxy();
+    const preflights = harness.client.sent.filter((event) => event.type === 'visual_preflight');
+    expect(preflights).toHaveLength(2);
+    expect(harness.boardCues()).toHaveLength(0);
+    harness.upstream.emit({
+      type: 'response.done',
+      response: { id: 'cover-audit', status: 'completed', output: [{ type: 'function_call' }] },
+    });
+    await flushProxy();
+    await settleUnscopedCreate(harness, 'cover-audit-followup');
+    await vi.waitFor(() => expect(harness.boardCues()).toHaveLength(1));
+    harness.showStep(0);
+    await flushProxy();
+    resolveAudit({ outcome: 'rejected', issues: ['the relation points the wrong way'] });
+    harness.emitClient('visual_preflight_result', {
+      preflight_id: (preflights[1].payload as { preflight_id?: string }).preflight_id,
+      accepted: true,
+      reasons: [],
+    });
+    await flushProxy();
+
+    const released = harness.repo.listEvents(harness.session.id).filter((event) => event.type === 'semantic_scene');
+    expect(released).toHaveLength(1);
+    expect(JSON.stringify(released[0].payload)).toContain('audit-a');
+    expect(JSON.stringify(released[0].payload)).not.toContain('audit-b');
+    expect(harness.repo.listEvents(harness.session.id).some((event) => event.type === 'directed_scene')).toBe(false);
+    expect(harness.progressEvents().at(-1)?.status).toBe('abandoned');
+    expect(harness.systemNotes().filter((note) => note.includes('board build stopped early'))).toHaveLength(1);
+    expect(harness.metrics).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: 'director_stream_first_op', dimensions: { model: 'gpt-5.6-terra', reasoningEffort: 'low' } }),
+      expect.objectContaining({ name: 'vision_audit_outcome', dimensions: { model: 'gpt-5.6-luna', reasoningEffort: 'low', outcome: 'rejected' } }),
+    ]));
+  });
+
+  it('times out only at the real step-2 boundary and then completes once', async () => {
+    let auditAborted = false;
+    const streamVisual: StreamingBoardDirector = (request, runtime) => runStreamingDirector({
+      model: { streamProposal: () => (async function* () { yield JSON.stringify(auditedProposal()); })() },
+      validateScene: async () => ({ ok: false, issues: ['request browser port required'] }),
+      renderScene: async () => null,
+      composition: { model: 'gpt-5.6-terra', reasoningEffort: 'low' },
+    }, request, runtime);
+    const harness = await connectBoardLed({
+      streamVisual,
+      visionAudit: {
+        model: 'gpt-5.6-luna', reasoningEffort: 'low',
+        inspect: async (_request, options) => {
+          options.signal.addEventListener('abort', () => { auditAborted = true; }, { once: true });
+          return new Promise(() => {});
+        },
+      },
+      visionAuditBudgetMs: 20,
+    });
+    harness.upstream.emit({ type: 'response.created', response: { id: 'cover-audit-timeout' } });
+    harness.upstream.emit({
+      type: 'response.function_call_arguments.done', response_id: 'cover-audit-timeout', call_id: 'audit-timeout-call', name: 'request_visual',
+      arguments: JSON.stringify({
+        schemaVersion: '3.0.0', requestId: 'audit-timeout-case', action: 'compare',
+        purpose: 'Audit a relationship', idea: 'two related boxes', density: 'minimal',
+      }),
+    });
+    await flushProxy();
+    harness.upstream.emit({
+      type: 'response.done',
+      response: { id: 'cover-audit-timeout', status: 'completed', output: [{ type: 'function_call' }] },
+    });
+    await flushProxy();
+    await settleUnscopedCreate(harness, 'cover-audit-timeout-followup');
+    const firstPreflight = harness.client.sent.find((event) => event.type === 'visual_preflight');
+    harness.emitClient('visual_preflight_result', {
+      preflight_id: (firstPreflight!.payload as { preflight_id?: string }).preflight_id,
+      accepted: true, reasons: [],
+    });
+    await flushProxy();
+    const render = harness.client.sent.find((event) => event.type === 'visual_render');
+    harness.emitClient('visual_render_result', {
+      render_id: (render!.payload as { render_id?: string }).render_id,
+      image_data_url: 'data:image/jpeg;base64,YXVkaXQ=',
+    });
+    await flushProxy();
+    const preflights = harness.client.sent.filter((event) => event.type === 'visual_preflight');
+    expect(preflights).toHaveLength(2);
+    harness.emitClient('visual_preflight_result', {
+      preflight_id: (preflights[1].payload as { preflight_id?: string }).preflight_id,
+      accepted: true, reasons: [],
+    });
+    await vi.waitFor(() => expect(harness.boardCues()).toHaveLength(1));
+    expect(auditAborted).toBe(false);
+    harness.showStep(0);
+    await flushProxy();
+    expect(harness.scopedCreates()).toHaveLength(1);
+    harness.upstream.emit({ type: 'response.created', response: { id: 'audit-timeout-beat-0' } });
+    await flushProxy();
+    expect(auditAborted).toBe(false);
+    expect(harness.repo.listEvents(harness.session.id).filter((event) => event.type === 'directed_scene')).toHaveLength(0);
+    harness.upstream.emit({
+      type: 'response.output_audio_transcript.done',
+      response_id: 'audit-timeout-beat-0',
+      transcript: 'First appears.',
+    });
+    harness.upstream.emit({ type: 'response.done', response: { id: 'audit-timeout-beat-0', status: 'completed', output: [] } });
+    await flushProxy();
+    expect(auditAborted).toBe(false);
+    expect(harness.boardCues()).toHaveLength(1);
+    harness.emitClient('playback_boundary', {
+      response_id: 'audit-timeout-beat-0', boundary: 'stopped', played_ms: 800,
+    });
+    await flushProxy();
+    expect(auditAborted).toBe(true);
+    expect(harness.repo.listEvents(harness.session.id).filter((event) => event.type === 'directed_scene')).toHaveLength(1);
+    expect(harness.boardCues()).toHaveLength(2);
+    expect(harness.metrics).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        name: 'vision_audit_outcome',
+        dimensions: { model: 'gpt-5.6-luna', reasoningEffort: 'low', outcome: 'timeout' },
+      }),
+    ]));
+    expect(harness.progressEvents().every((event) => event.status !== 'abandoned')).toBe(true);
   });
 
   it('reserves step persistence while a later streamed step arrives', async () => {

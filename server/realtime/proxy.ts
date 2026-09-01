@@ -17,6 +17,7 @@ import {
 } from '../session/telemetryRepository.js';
 import type { BoardDirector } from '../board/director.js';
 import type { StreamingBoardDirector } from '../board/streamingDirector.js';
+import { VISION_AUDIT_BUDGET_MS, type VisionAuditPort } from '../board/visionAudit.js';
 import type { ClientCueOptional, CoordinatorContext, CoordinatorState } from './coordinatorContext.js';
 import type { GenerationIdentity } from '../../shared/runtimeProtocol.js';
 import { latestVoiceCallId, type SidebandRegistry } from './callBootstrap.js';
@@ -65,6 +66,8 @@ export interface ProxyOptions {
   directVisual?: BoardDirector;
   /** Streaming Director pipeline; absent keeps the classic rollback path. */
   streamVisual?: StreamingBoardDirector;
+  visionAudit?: VisionAuditPort;
+  visionAuditBudgetMs?: number;
   /** How long one storyboard step may await visibility confirmation. */
   stepRevealTimeoutMs?: number;
   onLifecycle?: (lifecycle: ProxyLifecycle) => void;
@@ -224,6 +227,8 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
     detourPlanTimeoutMs: options.detourPlanTimeoutMs ?? DETOUR_PLAN_TIMEOUT_MS,
     directVisual: options.directVisual ?? null,
     streamVisual: options.streamVisual ?? null,
+    visionAudit: options.visionAudit ?? null,
+    visionAuditBudgetMs: options.visionAuditBudgetMs ?? VISION_AUDIT_BUDGET_MS,
     stepRevealTimeoutMs: options.stepRevealTimeoutMs ?? 45_000,
     state,
     sendClient(
