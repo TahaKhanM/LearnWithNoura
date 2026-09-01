@@ -1,7 +1,7 @@
 import type { BoardOp } from '../../shared/boardOps';
 import { inspectScene, repairSceneOnce, type SceneInspection } from './inspection';
 import { layoutTutorAnnotations } from './annotationLayout';
-import { applyOps, emptyScene, type AppliedOps, type Owner, type SceneItem, type SceneState } from './scene';
+import { applyOps, emptyScene, type AppliedOps, type Owner, type SceneState } from './scene';
 import { sceneForGroup } from './sceneGroups';
 import { evaluateBoardQuality, type BoardQualityReport } from './quality';
 
@@ -49,8 +49,12 @@ export class BoardSceneCoordinator {
     const scope = replacesGroup ?? semanticGroupId;
     const applied = applyOps(this.value, effectiveOps, 'tutor', scope);
     const fullCandidate = applied.scene;
-    const prepared = prepareTutorCandidate(scope ? sceneForGroup(fullCandidate, scope) : fullCandidate);
-    const { candidate, inspection } = prepared;
+    let candidate = layoutTutorAnnotations(scope ? sceneForGroup(fullCandidate, scope) : fullCandidate);
+    let inspection = tutorInspection(candidate);
+    if (!inspection.accepted) {
+      candidate = repairSceneOnce(candidate, inspection);
+      inspection = tutorInspection(candidate);
+    }
     if (!inspection.accepted) return null;
     const quality = evaluateBoardQuality(candidate);
     this.quality = quality;
@@ -70,9 +74,12 @@ export class BoardSceneCoordinator {
     const effectiveOps: BoardOp[] = replacesGroup ? [{ op: 'clear' }, ...ops] : ops;
     const scope = replacesGroup ?? semanticGroupId;
     const applied = applyOps(this.value, effectiveOps, 'tutor', scope);
-    const { candidate, inspection } = prepareTutorCandidate(
-      scope ? sceneForGroup(applied.scene, scope) : applied.scene,
-    );
+    let candidate = layoutTutorAnnotations(scope ? sceneForGroup(applied.scene, scope) : applied.scene);
+    let inspection = tutorInspection(candidate);
+    if (!inspection.accepted) {
+      candidate = repairSceneOnce(candidate, inspection);
+      inspection = tutorInspection(candidate);
+    }
     if (!inspection.accepted) {
       return { accepted: false, reasons: inspection.issues.slice(0, 8).map((issue) => `${issue.kind}:${issue.itemId}${issue.withItemId ? `:${issue.withItemId}` : ''}`) };
     }
@@ -115,51 +122,4 @@ function tutorInspection(scene: SceneState): SceneInspection {
   const ownerById = new Map(scene.items.map((item) => [item.id, item.owner]));
   const issues = inspection.issues.filter((issue) => ownerById.get(issue.itemId) === 'tutor');
   return { accepted: issues.length === 0, issues };
-}
-
-const EXTRA_LAYOUT_REPAIR_CYCLES = 2;
-const CONVERGENCE_SAFE_KINDS = new Set<SceneItem['spec']['kind']>([
-  'text',
-  'equation',
-  'box',
-]);
-
-/**
- * Runs the existing layout + one repair unchanged, then resolves at most two
- * repair-induced annotation dependencies. The extra cycles are permitted
- * only while every failing tutor item is movable/non-semantic; measured
- * geometry (points, axes, plots, angles, marks, and strokes) is never shifted
- * merely to make a scene pass.
- */
-function prepareTutorCandidate(scene: SceneState): {
-  candidate: SceneState;
-  inspection: SceneInspection;
-} {
-  let candidate = layoutTutorAnnotations(scene);
-  let inspection = tutorInspection(candidate);
-  if (inspection.accepted) return { candidate, inspection };
-
-  candidate = repairSceneOnce(candidate, inspection);
-  inspection = tutorInspection(candidate);
-  if (inspection.accepted) return { candidate, inspection };
-
-  for (let cycle = 0; cycle < EXTRA_LAYOUT_REPAIR_CYCLES; cycle += 1) {
-    if (!onlyConvergenceSafeIssues(candidate, inspection)) break;
-    candidate = layoutTutorAnnotations(candidate);
-    inspection = tutorInspection(candidate);
-    if (inspection.accepted) break;
-    if (!onlyConvergenceSafeIssues(candidate, inspection)) break;
-    candidate = repairSceneOnce(candidate, inspection);
-    inspection = tutorInspection(candidate);
-    if (inspection.accepted) break;
-  }
-  return { candidate, inspection };
-}
-
-function onlyConvergenceSafeIssues(scene: SceneState, inspection: SceneInspection): boolean {
-  const byId = new Map(scene.items.map((item) => [item.id, item]));
-  return inspection.issues.length > 0 && inspection.issues.every((issue) => {
-    const item = byId.get(issue.itemId);
-    return item?.owner === 'tutor' && CONVERGENCE_SAFE_KINDS.has(item.spec.kind);
-  });
 }
