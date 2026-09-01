@@ -4,6 +4,7 @@ import type { GenerationIdentity, RuntimeEventEnvelope } from '../../shared/runt
 import type { DeliveredTask } from '../../shared/lessonTurn.js';
 import type { LessonStage } from '../../shared/pedagogy.js';
 import type { BoardDirector } from '../board/director.js';
+import type { StreamingBoardDirector } from '../board/streamingDirector.js';
 import type { LessonOrchestrationState } from '../lesson/orchestrator.js';
 import type { DomainRepository } from '../store/domain.js';
 import type { SessionTelemetryWriter } from '../session/telemetryWriter.js';
@@ -80,6 +81,11 @@ export interface CoordinatorState {
   pendingDeliveredTask: DeliveredTask | null;
   preflightCounter: number;
   pendingPreflights: Map<string, (result: { accepted: boolean; reasons: string[] }) => void>;
+  visualRenderCounter: number;
+  /** Pending canonical scene renders delegated to the connected learner
+   * browser. The browser is the production render authority; a server-side
+   * Chromium process is an optional offline/compiler optimization only. */
+  pendingVisualRenders: Map<string, (imageDataUrl: string | null) => void>;
   /**
    * Logical tutor-turn visual budget. At most one semantic plan may be
    * prepared per tutor turn; the budget resets only when a genuine learner
@@ -93,6 +99,7 @@ export interface CoordinatorState {
    * completions are abandoned explicitly instead of building mid-turn.
    */
   visualRequestEpoch: number;
+  activeVisualRequestAbortController: AbortController | null;
   /** Request ids whose stale completion was already abandoned — the honest
    * "will not appear" note must fire at most once per request. */
   abandonedVisualRequests: Set<string>;
@@ -103,6 +110,13 @@ export interface CoordinatorState {
   objectsCreatedThisTurn: Set<string>;
   /** Resolvers waiting for the browser to confirm a checkpoint on screen. */
   pendingVisibility: Map<number, (shown: boolean) => void>;
+  /** First-paint acknowledgements. Tool results wait for these rather than
+   * guessing that a sent cue is visible or waiting for the whole draw-on
+   * animation to finish. */
+  pendingPresentation: Map<number, (presented: boolean) => void>;
+  /** Events already incorporated into the live board mirror at first paint.
+   * They remain pending until ops_shown makes them durable. */
+  presentedBoardOps: Set<number>;
   /** Count of announced comparison sections beside the anchor. */
   comparisonSectionCounter: number;
   /** Server-side mirror of the board the learner has actually seen. */
@@ -147,6 +161,7 @@ export interface CoordinatorContext {
   /** The Board Director for slow-tier scene requests; null when none is
    * wired — new-scene requests then fail closed with a clean rejection. */
   readonly directVisual: BoardDirector | null;
+  readonly streamVisual: StreamingBoardDirector | null;
   /** How long one storyboard step may await its visibility confirmation
    * (covers the previous beat's playback plus the draw-on animation). */
   readonly stepRevealTimeoutMs: number;

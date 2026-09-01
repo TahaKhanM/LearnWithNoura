@@ -62,6 +62,9 @@ export interface StoryboardRunState {
   cancelPendingBeat: boolean;
   /** The persisted event id of the step cue awaiting ops_shown. */
   pendingStepEventId: number | null;
+  /** Reserves step creation across the repository await so append/advance
+   * cannot enqueue the same step twice. */
+  stepCueCreateInFlight: boolean;
   /** The pending cue may have been dropped by an interruption. */
   needsResend: boolean;
   stepTimer: ReturnType<typeof setTimeout> | null;
@@ -74,6 +77,12 @@ export interface StoryboardRunState {
   visualIntentStartedAtMs: number | null;
   firstPaintRecorded: boolean;
   sceneCompleteRecorded: boolean;
+  /** True while the Director may append more validated steps. Reaching the
+   * current step count cannot create the closing handoff until intake closes. */
+  streamOpen: boolean;
+  /** Per-run write tail. Progress events must reach durable storage in the
+   * same order they were decided, especially terminal abandonment. */
+  progressWrite: Promise<void>;
 }
 
 export interface StoryboardRunInput {
@@ -94,6 +103,7 @@ export interface StoryboardRunInput {
   startPaused?: boolean;
   /** Captured before anchor preflight or Director composition begins. */
   visualIntentStartedAtMs?: number;
+  streamOpen?: boolean;
 }
 
 /** Derives runnable steps from any anchor-shaped scene (compiled anchor or
@@ -124,6 +134,7 @@ export function startStoryboardRun(ctx: CoordinatorContext, input: StoryboardRun
     handoffResponseId: null,
     cancelPendingBeat: false,
     pendingStepEventId: null,
+    stepCueCreateInFlight: false,
     needsResend: false,
     stepTimer: null,
     nextBeatFraming: [...(input.firstBeatFraming ?? [])],
@@ -131,15 +142,17 @@ export function startStoryboardRun(ctx: CoordinatorContext, input: StoryboardRun
     visualIntentStartedAtMs: input.visualIntentStartedAtMs ?? null,
     firstPaintRecorded: false,
     sceneCompleteRecorded: false,
+    streamOpen: input.streamOpen ?? false,
+    progressWrite: Promise.resolve(),
   };
   ctx.state.storyboardRun = run;
   persistProgress(ctx, run, 'active');
-  if (run.steps.length === 0) {
+  if (run.steps.length === 0 && !run.streamOpen) {
     completeStoryboardRun(ctx, 'completed');
     return;
   }
   if (input.startPaused) return;
-  if (run.revealedSteps >= run.steps.length) {
+  if (run.revealedSteps >= run.steps.length && !run.streamOpen) {
     // Everything was revealed before this (re)start — a reconnect landed in
     // the handoff window. The closing handoff must still be delivered.
     advanceStoryboardRun(ctx);
@@ -151,6 +164,51 @@ export function startStoryboardRun(ctx: CoordinatorContext, input: StoryboardRun
   }
   // No boundary to bind to yet: the first reveal waits for a free floor.
   advanceStoryboardRun(ctx);
+}
+
+export function appendIncrementalStoryboardStepState(
+  run: StoryboardRunState,
+  step: StoryboardRunStep,
+): boolean {
+  if (!run.streamOpen || run.steps.some((candidate) => candidate.id === step.id)) return false;
+  const existingIds = new Set(run.steps.flatMap((candidate) => candidate.objectIds));
+  if (step.objectIds.some((id) => existingIds.has(id))) return false;
+  run.steps.push({
+    ...step,
+    objectIds: [...step.objectIds],
+    ops: [...step.ops],
+  });
+  return true;
+}
+
+export function appendStoryboardRunStep(
+  ctx: CoordinatorContext,
+  runId: string,
+  step: StoryboardRunStep,
+): boolean {
+  const run = ctx.state.storyboardRun;
+  if (!run || run.runId !== runId || !appendIncrementalStoryboardStepState(run, step)) return false;
+  persistProgress(ctx, run, 'active');
+  advanceStoryboardRun(ctx);
+  return true;
+}
+
+export function closeIncrementalStoryboardState(run: StoryboardRunState): boolean {
+  if (!run.streamOpen || run.steps.length === 0) return false;
+  run.streamOpen = false;
+  return true;
+}
+
+export function closeStoryboardRunIntake(ctx: CoordinatorContext, runId: string): boolean {
+  const run = ctx.state.storyboardRun;
+  if (!run || run.runId !== runId || !closeIncrementalStoryboardState(run)) return false;
+  if (run.revealedSteps === run.steps.length && !run.sceneCompleteRecorded) {
+    run.sceneCompleteRecorded = true;
+    recordVisualSceneComplete(ctx, run);
+  }
+  persistProgress(ctx, run, 'active');
+  advanceStoryboardRun(ctx);
+  return true;
 }
 
 /** The learner took the floor (confirmed interrupt or speech start): stop
@@ -178,7 +236,7 @@ export function pauseStoryboardRun(ctx: CoordinatorContext): void {
  */
 export function advanceStoryboardRun(ctx: CoordinatorContext): void {
   const run = ctx.state.storyboardRun;
-  if (!run || run.beatCreateInFlight) return;
+  if (!run || run.beatCreateInFlight || run.stepCueCreateInFlight) return;
   // The closing handoff already exists: the run is waiting for it to
   // finish (noteStoryboardResponseDone completes or retries it).
   if (run.handoffResponseId !== null) return;
@@ -188,6 +246,7 @@ export function advanceStoryboardRun(ctx: CoordinatorContext): void {
     return;
   }
   if (run.revealedSteps >= run.steps.length) {
+    if (run.streamOpen) return;
     // Everything is revealed and narrated: one ordinary handoff response
     // (never marked as a beat) delivers the stage's check/task through the
     // existing delivered-task contract.
@@ -280,27 +339,37 @@ export function noteStoryboardClientIdentityChanged(ctx: CoordinatorContext): vo
 async function sendStepCue(ctx: CoordinatorContext, tagResponseId: string | null): Promise<void> {
   const { state } = ctx;
   const run = state.storyboardRun;
-  if (!run || run.pendingStepEventId !== null || run.revealedSteps >= run.steps.length) return;
+  if (!run || run.pendingStepEventId !== null || run.stepCueCreateInFlight || run.revealedSteps >= run.steps.length) return;
+  run.stepCueCreateInFlight = true;
   const step = run.steps[run.revealedSteps];
-  const eventId = await ctx.repo.addEvent(ctx.sessionId, 'semantic_scene', {
-    ops: step.ops,
-    checkpointId: step.id,
-    reveal: step.reveal,
-    semanticObjectId: run.groupId,
-    groupLabel: run.groupLabel,
-    runId: run.runId,
-  }, false);
-  if (state.storyboardRun !== run) return;
-  run.pendingStepEventId = eventId;
-  state.pendingBoardOps.set(eventId, { ops: step.ops, semanticGroupId: run.groupId, groupLabel: run.groupLabel });
-  state.pendingVisibility.set(eventId, (shown) => {
-    state.pendingVisibility.delete(eventId);
-    ctx.trackSideEffect(onStepVisibility(ctx, run, eventId, shown));
-  });
-  for (const op of step.ops) if (op.op === 'add') state.objectsCreatedThisTurn.add(op.id);
-  armStepTimer(ctx, run);
-  const safeTag = tagResponseId && !state.cancelledResponses.has(tagResponseId) ? tagResponseId : null;
-  sendCueEnvelope(ctx, run, step, eventId, safeTag);
+  try {
+    const eventId = await ctx.repo.addEvent(ctx.sessionId, 'semantic_scene', {
+      ops: step.ops,
+      checkpointId: step.id,
+      reveal: step.reveal,
+      semanticObjectId: run.groupId,
+      groupLabel: run.groupLabel,
+      runId: run.runId,
+    }, false);
+    if (state.storyboardRun !== run) return;
+    run.pendingStepEventId = eventId;
+    state.pendingBoardOps.set(eventId, { ops: step.ops, semanticGroupId: run.groupId, groupLabel: run.groupLabel });
+    state.pendingVisibility.set(eventId, (shown) => {
+      state.pendingVisibility.delete(eventId);
+      ctx.trackSideEffect(onStepVisibility(ctx, run, eventId, shown));
+    });
+    for (const op of step.ops) if (op.op === 'add') state.objectsCreatedThisTurn.add(op.id);
+    armStepTimer(ctx, run);
+    const safeTag = tagResponseId && !state.cancelledResponses.has(tagResponseId) ? tagResponseId : null;
+    sendCueEnvelope(ctx, run, step, eventId, safeTag);
+  } catch (error) {
+    if (state.storyboardRun === run) {
+      ctx.log(`session ${ctx.sessionId}: storyboard step persistence failed ${String(error).slice(0, 200)}`);
+      abandonStoryboardRun(ctx, { injectNote: true });
+    }
+  } finally {
+    run.stepCueCreateInFlight = false;
+  }
 }
 
 /** Re-sends the persisted pending step cue after an interruption dropped
@@ -354,7 +423,7 @@ async function onStepVisibility(ctx: CoordinatorContext, run: StoryboardRunState
     return;
   }
   run.revealedSteps += 1;
-  if (run.revealedSteps === run.steps.length && !run.sceneCompleteRecorded) {
+  if (!run.streamOpen && run.revealedSteps === run.steps.length && !run.sceneCompleteRecorded) {
     run.sceneCompleteRecorded = true;
     recordVisualSceneComplete(ctx, run);
   }
@@ -362,7 +431,7 @@ async function onStepVisibility(ctx: CoordinatorContext, run: StoryboardRunState
   // reconnect between ops_shown and this write landing must restore the
   // step it can prove, never skip past it.
   try {
-    await persistProgressWrite(ctx, run, 'active');
+    await queueProgressWrite(ctx, run, 'active');
   } catch (error) {
     ctx.log(`session ${ctx.sessionId}: storyboard progress write failed ${String(error).slice(0, 200)}`);
   }
@@ -440,12 +509,22 @@ function completeStoryboardRun(ctx: CoordinatorContext, outcome: 'completed'): v
 
 /** Fail-closed stop: the tutor continues with what is visible. Revealed
  * steps stay on the board (permanence); unrevealed steps never appear. */
-export function abandonStoryboardRun(ctx: CoordinatorContext, options: { injectNote: boolean }): void {
+export function abandonStoryboardRun(
+  ctx: CoordinatorContext,
+  options: { injectNote: boolean; requestResponse?: boolean; persistBridge?: boolean },
+): void {
   const { state } = ctx;
   const run = state.storyboardRun;
   if (!run) return;
   clearStepTimer(run);
   if (run.pendingStepEventId !== null) {
+    // A cue may already be queued behind a playback boundary in the client.
+    // Cancel by durable event id before dropping server bookkeeping. The
+    // client deliberately ignores this once first paint has happened.
+    ctx.sendClient({
+      type: 'board_ops_cancelled',
+      event_ids: [run.pendingStepEventId],
+    }, state.clientIdentity);
     state.pendingVisibility.delete(run.pendingStepEventId);
     state.pendingBoardOps.delete(run.pendingStepEventId);
   }
@@ -453,6 +532,7 @@ export function abandonStoryboardRun(ctx: CoordinatorContext, options: { injectN
   state.visualPlanState = 'failed';
   persistProgress(ctx, run, 'abandoned');
   submitOutcome(ctx, run, 'abandoned');
+  if (options.persistBridge) persistAbandonmentBridge(ctx, run);
   if (!options.injectNote) return;
   ctx.sendUpstream({
     type: 'conversation.item.create',
@@ -465,7 +545,21 @@ export function abandonStoryboardRun(ctx: CoordinatorContext, options: { injectN
       }],
     },
   });
-  if (tutorFloorIsFree(ctx)) sendResponseCreate(ctx, 'tool');
+  if (options.requestResponse !== false && tutorFloorIsFree(ctx)) sendResponseCreate(ctx, 'tool');
+}
+
+function persistAbandonmentBridge(ctx: CoordinatorContext, run: StoryboardRunState): void {
+  const write = run.progressWrite
+    .catch(() => undefined)
+    .then(() => Promise.resolve(ctx.repo.addEvent(ctx.sessionId, 'storyboard_bridge_pending', {
+      runId: run.runId,
+      source: run.source,
+    })))
+    .then(() => undefined);
+  run.progressWrite = write;
+  ctx.trackSideEffect(write.catch((error) => {
+    ctx.log(`session ${ctx.sessionId}: storyboard reconnect bridge write failed ${String(error).slice(0, 200)}`);
+  }));
 }
 
 function persistProgress(
@@ -473,24 +567,30 @@ function persistProgress(
   run: StoryboardRunState,
   status: 'active' | 'completed' | 'abandoned',
 ): void {
-  ctx.trackSideEffect(persistProgressWrite(ctx, run, status).catch((error) => {
+  ctx.trackSideEffect(queueProgressWrite(ctx, run, status).catch((error) => {
     ctx.log(`session ${ctx.sessionId}: storyboard progress write failed ${String(error).slice(0, 200)}`);
   }));
 }
 
-function persistProgressWrite(
+function queueProgressWrite(
   ctx: CoordinatorContext,
   run: StoryboardRunState,
   status: 'active' | 'completed' | 'abandoned',
 ): Promise<void> {
-  return Promise.resolve(ctx.repo.addEvent(ctx.sessionId, 'storyboard_progress', {
+  const payload = {
     runId: run.runId,
     source: run.source,
     groupId: run.groupId,
     revealedSteps: run.revealedSteps,
     totalSteps: run.steps.length,
     status,
-  })).then(() => undefined);
+  };
+  const write = run.progressWrite
+    .catch(() => undefined)
+    .then(() => Promise.resolve(ctx.repo.addEvent(ctx.sessionId, 'storyboard_progress', payload)))
+    .then(() => undefined);
+  run.progressWrite = write;
+  return write;
 }
 
 function submitOutcome(ctx: CoordinatorContext, run: StoryboardRunState, outcome: 'completed' | 'abandoned'): void {

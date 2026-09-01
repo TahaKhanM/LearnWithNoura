@@ -73,6 +73,22 @@ export class ResponseCueTimeline {
     return removed;
   }
 
+  /** Removes unreleased board events without cancelling their whole
+   * generation. Once a cue has drained it is already first-painted and this
+   * intentionally becomes a no-op, preserving the permanence contract. */
+  cancelVisualEvents(eventIds: Iterable<number>): ResponseCue[] {
+    const targets = new Set(eventIds);
+    if (targets.size === 0) return [];
+    const removed: ResponseCue[] = [];
+    this.pending = this.pending.filter((cue) => {
+      const matches = cue.kind === 'visual' && cue.eventId !== null && targets.has(cue.eventId);
+      if (matches) removed.push(cue);
+      return !matches;
+    });
+    this.forget(removed);
+    return removed;
+  }
+
   pendingCount(kind?: ResponseCue['kind']): number {
     return kind ? this.pending.filter((cue) => cue.kind === kind).length : this.pending.length;
   }

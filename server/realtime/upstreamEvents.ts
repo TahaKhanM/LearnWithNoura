@@ -120,6 +120,8 @@ export async function handleUpstreamEvent(ctx: CoordinatorContext, event: Upstre
       state.speechInProgress = true;
       // Speech start invalidates in-flight preflight: a completion that
       // lands before speech_stopped must not start a build mid-turn.
+      state.activeVisualRequestAbortController?.abort('learner speech superseded visual request');
+      state.activeVisualRequestAbortController = null;
       state.visualRequestEpoch += 1;
       // A learner speaking pauses any storyboard build; revealed objects
       // stay visible and the run resumes after their turn resolves.

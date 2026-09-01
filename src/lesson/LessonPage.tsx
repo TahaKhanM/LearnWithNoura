@@ -16,6 +16,8 @@ import { groupItemCount, sceneForGroup } from '../board/sceneGroups';
 import { analyzeLearnerBoardChange, analysisFocusBox } from '../board/learnerSketch';
 import { deriveSemanticViewports } from '../board/semanticViewport';
 import { renderSceneImage } from '../board/snapshot';
+import { registerKatexMeasurer } from '../board/compile';
+import { measureKatexInDom } from '../board/domKatexMeasurer';
 import { evaluateManipulativeCheck } from '../../shared/manipulativeCheck';
 import type { ManipulativeFeedback } from '../board/ManipulativeLayer';
 import type { UpdateOp } from '../../shared/boardOps';
@@ -294,8 +296,33 @@ export function LessonPage({ sessionId }: LessonPageProps) {
     };
     // Complete-plan preflight: the model only hears "accepted" for visuals
     // whose entire final scene compiles and passes quality checks offscreen.
-    session.onVisualPreflight = (ops, semanticGroupId, replacesGroup) =>
-      boardState.current.preflightTutorOps(ops, semanticGroupId, replacesGroup);
+    session.onVisualPreflight = async (ops, semanticGroupId, replacesGroup) => {
+      await document.fonts.ready;
+      registerKatexMeasurer(measureKatexInDom);
+      try {
+        return boardState.current.preflightTutorOps(ops, semanticGroupId, replacesGroup);
+      } finally {
+        registerKatexMeasurer(null);
+      }
+    };
+    session.onVisualRender = async (ops, semanticGroupId) => {
+      await document.fonts.ready;
+      registerKatexMeasurer(measureKatexInDom);
+      try {
+        // A render without a target group is the Director asking what the
+        // learner sees now. Capture the committed client scene itself rather
+        // than reconstructing it from server ops and losing client-side
+        // annotation repair or spatial-region layout.
+        if (!semanticGroupId) return await renderSceneImage(boardState.current.current);
+        const candidate = new BoardSceneCoordinator();
+        const applied = candidate.applyReplay(ops, 'tutor', semanticGroupId);
+        if (!applied) return null;
+        const scoped = sceneForGroup(applied.scene, semanticGroupId);
+        return await renderSceneImage(scoped);
+      } finally {
+        registerKatexMeasurer(null);
+      }
+    };
     session.onSubmissionResult = (submissionId, accepted, error) => {
       if (accepted) {
         draftRef.current.submitSucceeded();

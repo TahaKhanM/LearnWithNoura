@@ -4,6 +4,7 @@ import { CompiledLessonSchema, COMPILED_LESSON_SCHEMA_VERSION } from '../../shar
 import { createRuntimeEvent, type GenerationIdentity, type RuntimeEventEnvelope } from '../../shared/runtimeProtocol';
 import type { MetricObservation } from '../../shared/sessionTelemetry';
 import type { BoardDirector, DirectorSceneRequest } from '../board/director';
+import type { StreamingBoardDirector } from '../board/streamingDirector';
 import { openTestDb } from '../store/db';
 import { Repo } from '../store/repo';
 import { connectRealtimeProxy, type ProxyOptions } from './proxy';
@@ -494,6 +495,377 @@ describe('the storyboard runner', () => {
     harness.upstream.emit({ type: 'response.done', response: { id: 'director-handoff', status: 'completed', output: [] } });
     await flushProxy();
     expect(harness.progressEvents().at(-1)).toMatchObject({ status: 'completed', source: 'director', revealedSteps: 2, totalSteps: 2 });
+  });
+
+  it('stages the first streamed Director step before the full scene persists', async () => {
+    let releaseTail!: () => void;
+    const tail = new Promise<void>((resolve) => { releaseTail = resolve; });
+    let firstDelivered!: () => void;
+    const first = new Promise<void>((resolve) => { firstDelivered = resolve; });
+    const ops = [
+      { op: 'add' as const, id: 'stream-a', spec: { kind: 'box' as const, at: [350, 220] as [number, number], text: 'first' } },
+      { op: 'add' as const, id: 'stream-b', spec: { kind: 'box' as const, at: [700, 220] as [number, number], text: 'second' } },
+    ];
+    const streamVisual: StreamingBoardDirector = async (request, runtime) => {
+      await runtime.onStep({
+        index: 0,
+        header: { template: null, groupLabel: 'Live stream', representation: 'diagram', illustration: null },
+        step: { id: 's1', reveal: 'outline', narration: 'First appears.', ops: [ops[0]] },
+        ops: [ops[0]], priorOps: [], cumulativeOps: [ops[0]],
+      });
+      firstDelivered();
+      await tail;
+      await runtime.onStep({
+        index: 1,
+        header: { template: null, groupLabel: 'Live stream', representation: 'diagram', illustration: null },
+        step: { id: 's2', reveal: 'relation', narration: 'Second appears.', ops: [ops[1]] },
+        ops: [ops[1]], priorOps: [ops[0]], cumulativeOps: ops,
+      });
+      return {
+        ok: true,
+        scene: {
+          groupId: request.sectionId,
+          groupLabel: 'Live stream',
+          template: null,
+          ops,
+          storyboard: [
+            { id: 's1', reveal: 'outline', narration: 'First appears.', objectIds: ['stream-a'] },
+            { id: 's2', reveal: 'relation', narration: 'Second appears.', objectIds: ['stream-b'] },
+          ],
+        },
+      };
+    };
+    const harness = await connectBoardLed({ streamVisual });
+    harness.upstream.emit({ type: 'response.created', response: { id: 'cover-stream' } });
+    harness.upstream.emit({
+      type: 'response.function_call_arguments.done', response_id: 'cover-stream', call_id: 'stream-call', name: 'request_visual',
+      arguments: JSON.stringify({
+        schemaVersion: '3.0.0', requestId: 'stream-case', action: 'compare',
+        purpose: 'Stream a comparison', idea: 'two streamed boxes', density: 'minimal',
+      }),
+    });
+    await first;
+    await flushProxy();
+    expect(harness.toolOutput('stream-call')).toMatchObject({ ok: true, status: 'preparing' });
+    expect(harness.boardCues()).toHaveLength(1);
+    expect(harness.repo.listEvents(harness.session.id).some((event) => event.type === 'directed_scene')).toBe(false);
+
+    releaseTail();
+    await flushProxy();
+    await flushProxy();
+    expect(harness.repo.listEvents(harness.session.id).filter((event) => event.type === 'directed_scene')).toHaveLength(1);
+    expect(harness.progressEvents().at(-1)).toMatchObject({ totalSteps: 2, status: 'active' });
+  });
+
+  it('cancels a queued unrevealed step when the Director tail fails', async () => {
+    const firstOp = {
+      op: 'add' as const,
+      id: 'queued-first',
+      spec: { kind: 'box' as const, at: [350, 220] as [number, number], text: 'queued' },
+    };
+    const streamVisual: StreamingBoardDirector = async (_request, runtime) => {
+      await runtime.onStep({
+        index: 0,
+        header: { template: null, groupLabel: 'Failing stream', representation: 'diagram', illustration: null },
+        step: { id: 'queued-step', reveal: 'outline', narration: 'This cue is waiting.', ops: [firstOp] },
+        ops: [firstOp],
+        priorOps: [],
+        cumulativeOps: [firstOp],
+      });
+      return { ok: false, reasons: ['step 2 failed cumulative policy'] };
+    };
+    const harness = await connectBoardLed({ streamVisual });
+    harness.upstream.emit({ type: 'response.created', response: { id: 'cover-failing-stream' } });
+    harness.upstream.emit({
+      type: 'response.function_call_arguments.done',
+      response_id: 'cover-failing-stream',
+      call_id: 'failing-stream-call',
+      name: 'request_visual',
+      arguments: JSON.stringify({
+        schemaVersion: '3.0.0', requestId: 'failing-stream', action: 'compare',
+        purpose: 'Exercise fail-closed streaming', idea: 'a scene with an invalid tail', density: 'minimal',
+      }),
+    });
+    await flushProxy();
+
+    const queued = harness.boardCues();
+    expect(queued).toHaveLength(1);
+    const queuedEventId = (queued[0].payload as { event_id?: number }).event_id;
+    expect(harness.client.sent).toContainEqual(expect.objectContaining({
+      type: 'board_ops_cancelled',
+      payload: { event_ids: [queuedEventId] },
+    }));
+    expect(harness.progressEvents().at(-1)).toMatchObject({
+      status: 'abandoned', revealedSteps: 0, totalSteps: 1,
+    });
+    expect(harness.repo.listEvents(harness.session.id).some((event) => event.type === 'directed_scene')).toBe(false);
+  });
+
+  it('falls back to the classic illustration lane before any streamed step is revealed', async () => {
+    const streamVisual: StreamingBoardDirector = async () => ({
+      ok: false,
+      reasons: ['Streaming illustration composition is deferred to the parallel illustration lane.'],
+      fallback: 'classic_illustration',
+    });
+    let classicCalls = 0;
+    const directVisual: BoardDirector = async (request) => {
+      classicCalls += 1;
+      return {
+        ok: true,
+        scene: {
+          groupId: request.sectionId,
+          groupLabel: 'Garden context',
+          template: null,
+          ops: [{ op: 'add', id: 'garden-image', spec: { kind: 'asset', at: [500, 320], assetId: 'garden' } }],
+          storyboard: [{ id: 'garden-step', reveal: 'outline', narration: 'Here is the garden.', objectIds: ['garden-image'] }],
+        },
+      };
+    };
+    const harness = await connectBoardLed({ streamVisual, directVisual });
+    harness.upstream.emit({ type: 'response.created', response: { id: 'cover-illustration' } });
+    harness.upstream.emit({
+      type: 'response.function_call_arguments.done', response_id: 'cover-illustration', call_id: 'illustration-call', name: 'request_visual',
+      arguments: JSON.stringify({
+        schemaVersion: '3.0.0', requestId: 'illustration-case', action: 'compare',
+        purpose: 'Show a garden context', idea: 'a garden scene', density: 'minimal',
+      }),
+    });
+    await flushProxy();
+    expect(classicCalls).toBe(1);
+    expect(harness.boardCues()).toEqual([]);
+    const preflight = harness.client.sent.find((event) => event.type === 'visual_preflight');
+    expect(preflight?.payload).toMatchObject({ semanticObjectId: 'lesson-anchor-alt1' });
+    harness.emitClient('visual_preflight_result', {
+      preflight_id: (preflight!.payload as { preflight_id?: string }).preflight_id,
+      accepted: true,
+      reasons: [],
+    });
+    await flushProxy();
+    expect(harness.repo.listEvents(harness.session.id).filter((event) => event.type === 'directed_scene')).toHaveLength(1);
+    expect(harness.boardCues()).toHaveLength(1);
+    expect(harness.toolOutput('illustration-call')).toMatchObject({ status: 'preparing', semanticGroupId: 'lesson-anchor-alt1' });
+  });
+
+  it('reserves step persistence while a later streamed step arrives', async () => {
+    let releaseStepWrite!: () => void;
+    const stepWrite = new Promise<void>((resolve) => { releaseStepWrite = resolve; });
+    let semanticWrites = 0;
+    const ops = [
+      { op: 'add' as const, id: 'reserved-a', spec: { kind: 'box' as const, at: [300, 220] as [number, number], text: 'A' } },
+      { op: 'add' as const, id: 'reserved-b', spec: { kind: 'box' as const, at: [650, 220] as [number, number], text: 'B' } },
+    ];
+    const streamVisual: StreamingBoardDirector = async (request, runtime) => {
+      await runtime.onStep({
+        index: 0,
+        header: { template: null, groupLabel: 'Reserved stream', representation: 'diagram', illustration: null },
+        step: { id: 'reserve-s1', reveal: 'outline', narration: 'First.', ops: [ops[0]] },
+        ops: [ops[0]], priorOps: [], cumulativeOps: [ops[0]],
+      });
+      await runtime.onStep({
+        index: 1,
+        header: { template: null, groupLabel: 'Reserved stream', representation: 'diagram', illustration: null },
+        step: { id: 'reserve-s2', reveal: 'relation', narration: 'Second.', ops: [ops[1]] },
+        ops: [ops[1]], priorOps: [ops[0]], cumulativeOps: ops,
+      });
+      return {
+        ok: true,
+        scene: {
+          groupId: request.sectionId, groupLabel: 'Reserved stream', template: null, ops,
+          storyboard: [
+            { id: 'reserve-s1', reveal: 'outline', narration: 'First.', objectIds: ['reserved-a'] },
+            { id: 'reserve-s2', reveal: 'relation', narration: 'Second.', objectIds: ['reserved-b'] },
+          ],
+        },
+      };
+    };
+    const harness = await connectBoardLed({
+      streamVisual,
+      wrapRepo: (repo) => {
+        const wrapped = Object.create(repo) as ProxyOptions['repo'];
+        wrapped.addEvent = async (sessionId, type, payload, released) => {
+          if (type === 'semantic_scene') {
+            semanticWrites += 1;
+            if (semanticWrites === 1) await stepWrite;
+          }
+          return repo.addEvent(sessionId, type, payload, released);
+        };
+        return wrapped;
+      },
+    });
+    harness.upstream.emit({ type: 'response.created', response: { id: 'cover-reserved' } });
+    harness.upstream.emit({
+      type: 'response.function_call_arguments.done', response_id: 'cover-reserved', call_id: 'reserved-call', name: 'request_visual',
+      arguments: JSON.stringify({
+        schemaVersion: '3.0.0', requestId: 'reserved-case', action: 'compare',
+        purpose: 'Exercise persistence reservation', idea: 'two fast streamed steps', density: 'minimal',
+      }),
+    });
+    await flushProxy();
+    expect(semanticWrites).toBe(1);
+    releaseStepWrite();
+    await flushProxy();
+    expect(semanticWrites).toBe(1);
+    expect(harness.boardCues()).toHaveLength(1);
+  });
+
+  it('serializes progress writes so terminal abandonment is always last', async () => {
+    let releaseFirstProgress!: () => void;
+    const firstProgress = new Promise<void>((resolve) => { releaseFirstProgress = resolve; });
+    const progressCalls: string[] = [];
+    const firstOp = { op: 'add' as const, id: 'ordered-a', spec: { kind: 'box' as const, at: [300, 220] as [number, number], text: 'A' } };
+    const secondOp = { op: 'add' as const, id: 'ordered-b', spec: { kind: 'box' as const, at: [650, 220] as [number, number], text: 'B' } };
+    const streamVisual: StreamingBoardDirector = async (_request, runtime) => {
+      await runtime.onStep({
+        index: 0,
+        header: { template: null, groupLabel: 'Ordered stream', representation: 'diagram', illustration: null },
+        step: { id: 'ordered-s1', reveal: 'outline', narration: 'First.', ops: [firstOp] },
+        ops: [firstOp], priorOps: [], cumulativeOps: [firstOp],
+      });
+      await runtime.onStep({
+        index: 1,
+        header: { template: null, groupLabel: 'Ordered stream', representation: 'diagram', illustration: null },
+        step: { id: 'ordered-s2', reveal: 'relation', narration: 'Second.', ops: [secondOp] },
+        ops: [secondOp], priorOps: [firstOp], cumulativeOps: [firstOp, secondOp],
+      });
+      return { ok: false, reasons: ['invalid tail'] };
+    };
+    const harness = await connectBoardLed({
+      streamVisual,
+      wrapRepo: (repo) => {
+        const wrapped = Object.create(repo) as ProxyOptions['repo'];
+        wrapped.addEvent = async (sessionId, type, payload, released) => {
+          if (type === 'storyboard_progress') {
+            const status = String((payload as { status?: unknown }).status ?? '');
+            progressCalls.push(status);
+            if (progressCalls.length === 1) await firstProgress;
+          }
+          return repo.addEvent(sessionId, type, payload, released);
+        };
+        return wrapped;
+      },
+    });
+    harness.upstream.emit({ type: 'response.created', response: { id: 'cover-ordered' } });
+    harness.upstream.emit({
+      type: 'response.function_call_arguments.done', response_id: 'cover-ordered', call_id: 'ordered-call', name: 'request_visual',
+      arguments: JSON.stringify({
+        schemaVersion: '3.0.0', requestId: 'ordered-case', action: 'compare',
+        purpose: 'Exercise ordered progress', idea: 'two steps then fail', density: 'minimal',
+      }),
+    });
+    await flushProxy();
+    expect(progressCalls).toEqual(['active']);
+    releaseFirstProgress();
+    await vi.waitFor(() => expect(progressCalls.at(-1)).toBe('abandoned'));
+    const persisted = harness.progressEvents();
+    expect(persisted.at(-1)?.status).toBe('abandoned');
+    expect(persisted.findIndex((event) => event.status === 'abandoned')).toBe(persisted.length - 1);
+  });
+
+  it('keeps streaming across a same-connection generation change but abandons on reconnect', async () => {
+    let signalAborted = false;
+    let rejectTail!: (error: Error) => void;
+    const tail = new Promise<never>((_resolve, reject) => { rejectTail = reject; });
+    const firstOp = { op: 'add' as const, id: 'identity-a', spec: { kind: 'box' as const, at: [300, 220] as [number, number], text: 'A' } };
+    const streamVisual: StreamingBoardDirector = async (_request, runtime) => {
+      runtime.signal.addEventListener('abort', () => {
+        signalAborted = true;
+        const error = new Error('aborted');
+        error.name = 'AbortError';
+        rejectTail(error);
+      }, { once: true });
+      await runtime.onStep({
+        index: 0,
+        header: { template: null, groupLabel: 'Identity stream', representation: 'diagram', illustration: null },
+        step: { id: 'identity-s1', reveal: 'outline', narration: 'First.', ops: [firstOp] },
+        ops: [firstOp], priorOps: [], cumulativeOps: [firstOp],
+      });
+      return tail;
+    };
+    const harness = await connectBoardLed({ streamVisual });
+    harness.upstream.emit({ type: 'response.created', response: { id: 'cover-identity' } });
+    harness.upstream.emit({
+      type: 'response.function_call_arguments.done', response_id: 'cover-identity', call_id: 'identity-call', name: 'request_visual',
+      arguments: JSON.stringify({
+        schemaVersion: '3.0.0', requestId: 'identity-case', action: 'compare',
+        purpose: 'Exercise identity scope', idea: 'a long stream', density: 'minimal',
+      }),
+    });
+    await flushProxy();
+    harness.client.emit('message', JSON.stringify(createRuntimeEvent({
+      ...harness.active, turnId: 'turn-2', generationId: 'generation-2',
+    }, 100, 'hello', {})));
+    await flushProxy();
+    expect(signalAborted).toBe(false);
+
+    harness.client.emit('message', JSON.stringify(createRuntimeEvent({
+      ...harness.active, connectionEpoch: 2, turnId: 'turn-3', generationId: 'generation-3',
+    }, 0, 'hello', {})));
+    await flushProxy();
+    expect(signalAborted).toBe(true);
+    expect(harness.progressEvents().at(-1)?.status).toBe('abandoned');
+    expect(harness.client.sent.some((event) => event.type === 'board_ops_cancelled')).toBe(true);
+    expect(harness.systemNotes().filter((note) => note.includes('board build stopped early'))).toHaveLength(1);
+    expect(harness.responseCreates()).toHaveLength(0);
+  });
+
+  it('delivers a socket-teardown abandonment bridge exactly once after reconnect', async () => {
+    let rejectTail!: (error: Error) => void;
+    const tail = new Promise<never>((_resolve, reject) => { rejectTail = reject; });
+    const firstOp = { op: 'add' as const, id: 'socket-a', spec: { kind: 'box' as const, at: [300, 220] as [number, number], text: 'A' } };
+    const streamVisual: StreamingBoardDirector = async (_request, runtime) => {
+      runtime.signal.addEventListener('abort', () => {
+        const error = new Error('aborted');
+        error.name = 'AbortError';
+        rejectTail(error);
+      }, { once: true });
+      await runtime.onStep({
+        index: 0,
+        header: { template: null, groupLabel: 'Socket stream', representation: 'diagram', illustration: null },
+        step: { id: 'socket-s1', reveal: 'outline', narration: 'First.', ops: [firstOp] },
+        ops: [firstOp], priorOps: [], cumulativeOps: [firstOp],
+      });
+      return tail;
+    };
+    const harness = await connectBoardLed({ streamVisual });
+    harness.upstream.emit({ type: 'response.created', response: { id: 'cover-socket' } });
+    harness.upstream.emit({
+      type: 'response.function_call_arguments.done', response_id: 'cover-socket', call_id: 'socket-call', name: 'request_visual',
+      arguments: JSON.stringify({
+        schemaVersion: '3.0.0', requestId: 'socket-case', action: 'compare',
+        purpose: 'Exercise socket teardown', idea: 'a long stream', density: 'minimal',
+      }),
+    });
+    await flushProxy();
+    harness.client.emit('close');
+    await vi.waitFor(() => expect(
+      harness.repo.listEventsForInternalAudit(harness.session.id)
+        .filter((event) => event.type === 'storyboard_bridge_pending'),
+    ).toHaveLength(1));
+
+    const connectAgain = async (connectionEpoch: number) => {
+      const client = new FakeClient();
+      await connectRealtimeProxy(client as never, {
+        apiKey: 'offline-fixture', model: 'gpt-realtime-2.1', repo: harness.repo, sessionId: harness.session.id,
+        createUpstream: () => new FakeUpstream() as never,
+        telemetryRepo: { appendMetric: async () => 0, hasPriorReleasedSessionStart: async () => true },
+      });
+      const upstream = FakeUpstream.latest;
+      client.emit('message', JSON.stringify(createRuntimeEvent({
+        ...harness.active, connectionEpoch,
+      }, 0, 'hello', {})));
+      upstream.emit({ type: 'session.updated' });
+      await flushProxy();
+      return upstream;
+    };
+
+    const upstream2 = await connectAgain(2);
+    const bridges2 = upstream2.ofType<SystemNote>('conversation.item.create')
+      .filter((event) => event.item?.content?.[0]?.text?.includes('unfinished remainder'));
+    expect(bridges2).toHaveLength(1);
+    const upstream3 = await connectAgain(3);
+    const bridges3 = upstream3.ofType<SystemNote>('conversation.item.create')
+      .filter((event) => event.item?.content?.[0]?.text?.includes('unfinished remainder'));
+    expect(bridges3).toHaveLength(0);
   });
 
   it('restores an in-progress build on reconnect and resumes at the first unrevealed step', async () => {
