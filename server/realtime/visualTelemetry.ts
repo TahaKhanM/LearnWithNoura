@@ -7,6 +7,7 @@ import {
 } from '../../shared/sessionTelemetry.js';
 import { metricContextFromIdentity } from '../session/telemetryRecorder.js';
 import type { CoordinatorContext } from './coordinatorContext.js';
+import type { GenerationIdentity } from '../../shared/runtimeProtocol.js';
 
 type VisualTimingRun = {
   source: 'anchor' | 'director';
@@ -55,7 +56,12 @@ export function recordVisualSceneComplete(
 
 export function recordDirectorStreamFirstOp(
   ctx: CoordinatorContext,
-  input: { startedAtMs: number; model: OpenAiTelemetryModel; reasoningEffort: DirectorReasoningEffort },
+  input: {
+    startedAtMs: number;
+    model: OpenAiTelemetryModel;
+    reasoningEffort: DirectorReasoningEffort;
+    identity?: GenerationIdentity | null;
+  },
 ): void {
   submitModelTiming(ctx, 'director_stream_first_op', input.startedAtMs, input);
 }
@@ -67,6 +73,7 @@ export function recordVisionAuditOutcome(
     model: OpenAiTelemetryModel;
     reasoningEffort: DirectorReasoningEffort;
     outcome: VisionAuditOutcome;
+    identity?: GenerationIdentity | null;
   },
 ): void {
   submitModelTiming(ctx, 'vision_audit_outcome', input.startedAtMs, input);
@@ -97,9 +104,12 @@ function submitModelTiming(
     model: OpenAiTelemetryModel;
     reasoningEffort: DirectorReasoningEffort;
     outcome?: VisionAuditOutcome;
+    identity?: GenerationIdentity | null;
   },
 ): void {
-  const identity = ctx.state.clientIdentity;
+  const identity = Object.hasOwn(input, 'identity')
+    ? input.identity ?? null
+    : ctx.state.clientIdentity;
   if (!identity) return;
   ctx.telemetryWriter.submit({
     schemaVersion: TELEMETRY_SCHEMA_VERSION,

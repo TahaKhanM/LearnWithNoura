@@ -133,3 +133,55 @@ test('the anchor builds step by step between narration beats and survives an int
   await expect(label).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath('storyboard-complete.png'), fullPage: true });
 });
+
+test('a late audit cancellation preserves step one and removes queued step two', async ({ page, request }, testInfo) => {
+  const { session, lessonCapability } = await createSyntheticSession(request, `storyboard-audit-${Date.now().toString(36)}`);
+  await installFakeRealtime(page);
+  await setLessonCapability(page, session.id, lessonCapability);
+  await page.goto(`/lesson/${session.id}`);
+  await page.getByRole('button', { name: 'Begin' }).click();
+  await page.waitForFunction(() => {
+    const socket = (window as typeof window & { __nouraFakeSocket?: FakeSocket }).__nouraFakeSocket;
+    return socket?.sent.some((event) => event.type === 'start') === true;
+  });
+
+  const scale = page.locator('[data-item="anchor-scale"]');
+  const mark = page.locator('[data-item="anchor-mark"]');
+  await page.evaluate(() => {
+    const socket = (window as typeof window & { __nouraFakeSocket: FakeSocket }).__nouraFakeSocket;
+    socket.emit('response_started', { response_id: 'audit-cover' });
+  });
+  await startFakePlayback(page, 'audit-cover');
+  await emitStepCue(page, {
+    responseId: 'audit-cover', eventId: 601, checkpoint: 'outline',
+    op: STEP_OPS.scale, cueId: 'audit-outline',
+  });
+  await stopFakePlayback(page, 'audit-cover', 900);
+  await expect(scale).toBeVisible();
+  await expect.poll(() => opsShownFor(page, 601)).toBe(true);
+
+  await page.evaluate(() => {
+    const socket = (window as typeof window & { __nouraFakeSocket: FakeSocket }).__nouraFakeSocket;
+    socket.emit('response_started', { response_id: 'audit-beat-0' });
+  });
+  await startFakePlayback(page, 'audit-beat-0');
+  await emitStepCue(page, {
+    responseId: 'audit-beat-0', eventId: 602, checkpoint: 'relation',
+    op: STEP_OPS.mark, cueId: 'audit-relation',
+  });
+  await expect(mark).toHaveCount(0);
+
+  // The late semantic rejection arrives before the narration boundary. The
+  // server cancels by durable event id; the client must forget only that
+  // unrevealed cue, never the already-painted first step.
+  await page.evaluate(() => {
+    const socket = (window as typeof window & { __nouraFakeSocket: FakeSocket }).__nouraFakeSocket;
+    socket.emit('board_ops_cancelled', { event_ids: [602] });
+  });
+  await stopFakePlayback(page, 'audit-beat-0', 1_000);
+  await expect(scale).toBeVisible();
+  await expect(mark).toHaveCount(0);
+  await expect.poll(() => opsPresentedFor(page, 602)).toBe(false);
+  await expect.poll(() => opsShownFor(page, 602)).toBe(false);
+  await page.screenshot({ path: testInfo.outputPath('storyboard-audit-rejected.png'), fullPage: true });
+});

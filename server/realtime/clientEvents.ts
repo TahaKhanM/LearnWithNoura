@@ -10,7 +10,7 @@ import type { CoordinatorContext } from './coordinatorContext.js';
 import { addBounded, identityForResponse } from './responseRegistry.js';
 import { refreshBoardInstructions } from './sessionConfig.js';
 import { conversationContext, learnerBoardOps, safeBoardImage } from './sessionRestore.js';
-import { advanceStoryboardRun, pauseStoryboardRun } from './storyboardRunner.js';
+import { advanceStoryboardRun, noteStoryboardPlaybackStopped, noteStoryboardStepPresented, pauseStoryboardRun } from './storyboardRunner.js';
 import { isAllowedClientMetric, MAX_PENDING_VOICE_BARGE_INS, recordClientPlaybackStop, trustedClientResponseId } from './telemetryGlue.js';
 import { requestModelResponse, setEndpointingEagerness } from './turnFloor.js';
 
@@ -155,7 +155,10 @@ export async function handleClientEvent(
     case 'playback_boundary': {
       // The browser relays output_audio_buffer boundaries from its WebRTC
       // data channel; `stopped` carries the played duration for telemetry.
-      if (message.boundary === 'stopped') recordClientPlaybackStop(ctx, message);
+      if (message.boundary === 'stopped') {
+        recordClientPlaybackStop(ctx, message);
+        if (typeof message.response_id === 'string') noteStoryboardPlaybackStopped(ctx, message.response_id);
+      }
       break;
     }
 
@@ -301,6 +304,7 @@ export async function handleClientEvent(
       // waits for ops_shown below.
       if (typeof message.event_id === 'number') {
         presentPendingBoardOps(ctx, message.event_id);
+        noteStoryboardStepPresented(ctx, message.event_id);
       }
       break;
     }
@@ -312,6 +316,7 @@ export async function handleClientEvent(
       if (typeof message.event_id === 'number') {
         await ctx.repo.markEventReleased(ctx.sessionId, message.event_id);
         const wasKnown = presentPendingBoardOps(ctx, message.event_id);
+        noteStoryboardStepPresented(ctx, message.event_id);
         state.pendingBoardOps.delete(message.event_id);
         state.presentedBoardOps.delete(message.event_id);
         if (!wasKnown) {

@@ -65,6 +65,16 @@ export interface StoryboardRunState {
   /** Reserves step creation across the repository await so append/advance
    * cannot enqueue the same step twice. */
   stepCueCreateInFlight: boolean;
+  /** Adaptive audit gates. Step 1 has its own evidence-budget hold; later
+   * reveals remain held until approval/error or the real step-2 boundary. */
+  firstRevealHeld: boolean;
+  subsequentRevealsHeld: boolean;
+  firstRevealAfterResponseId: string | null;
+  onFirstPaint: (() => void) | null;
+  onFirstDurable: (() => void) | null;
+  onSubsequentRevealBlocked: (() => void) | null;
+  onAbandoned: (() => void) | null;
+  auditBoundaryResponseId: string | null;
   /** The pending cue may have been dropped by an interruption. */
   needsResend: boolean;
   stepTimer: ReturnType<typeof setTimeout> | null;
@@ -104,6 +114,12 @@ export interface StoryboardRunInput {
   /** Captured before anchor preflight or Director composition begins. */
   visualIntentStartedAtMs?: number;
   streamOpen?: boolean;
+  firstRevealHeld?: boolean;
+  subsequentRevealsHeld?: boolean;
+  onFirstPaint?: () => void;
+  onFirstDurable?: () => void;
+  onSubsequentRevealBlocked?: () => void;
+  onAbandoned?: () => void;
 }
 
 /** Derives runnable steps from any anchor-shaped scene (compiled anchor or
@@ -135,6 +151,14 @@ export function startStoryboardRun(ctx: CoordinatorContext, input: StoryboardRun
     cancelPendingBeat: false,
     pendingStepEventId: null,
     stepCueCreateInFlight: false,
+    firstRevealHeld: input.firstRevealHeld ?? false,
+    subsequentRevealsHeld: input.subsequentRevealsHeld ?? false,
+    firstRevealAfterResponseId: input.revealAfterResponseId,
+    onFirstPaint: input.onFirstPaint ?? null,
+    onFirstDurable: input.onFirstDurable ?? null,
+    onSubsequentRevealBlocked: input.onSubsequentRevealBlocked ?? null,
+    onAbandoned: input.onAbandoned ?? null,
+    auditBoundaryResponseId: null,
     needsResend: false,
     stepTimer: null,
     nextBeatFraming: [...(input.firstBeatFraming ?? [])],
@@ -158,6 +182,7 @@ export function startStoryboardRun(ctx: CoordinatorContext, input: StoryboardRun
     advanceStoryboardRun(ctx);
     return;
   }
+  if (run.firstRevealHeld) return;
   if (input.revealAfterResponseId !== null) {
     ctx.trackSideEffect(sendStepCue(ctx, input.revealAfterResponseId));
     return;
@@ -237,12 +262,17 @@ export function pauseStoryboardRun(ctx: CoordinatorContext): void {
 export function advanceStoryboardRun(ctx: CoordinatorContext): void {
   const run = ctx.state.storyboardRun;
   if (!run || run.beatCreateInFlight || run.stepCueCreateInFlight) return;
+  if (run.firstRevealHeld && run.revealedSteps === 0) return;
   // The closing handoff already exists: the run is waiting for it to
   // finish (noteStoryboardResponseDone completes or retries it).
   if (run.handoffResponseId !== null) return;
   if (!tutorFloorIsFree(ctx)) return;
   if (run.narratedSteps < run.revealedSteps) {
     createBeat(ctx, run.revealedSteps - 1);
+    return;
+  }
+  if (run.revealedSteps >= 1 && run.revealedSteps < run.steps.length && run.subsequentRevealsHeld) {
+    run.onSubsequentRevealBlocked?.();
     return;
   }
   if (run.revealedSteps >= run.steps.length) {
@@ -260,7 +290,10 @@ export function advanceStoryboardRun(ctx: CoordinatorContext): void {
     }
     return;
   }
-  ctx.trackSideEffect(sendStepCue(ctx, ctx.state.lastCompletedResponseId));
+  const preferredResponseId = run.revealedSteps === 0
+    ? run.firstRevealAfterResponseId
+    : ctx.state.lastCompletedResponseId;
+  ctx.trackSideEffect(sendStepCue(ctx, preferredResponseId));
 }
 
 /** Matches a provider response to the beat/handoff creation in flight. */
@@ -291,9 +324,36 @@ export function noteStoryboardResponseCreated(ctx: CoordinatorContext, responseI
   // Pipelined reveal-at-playback-boundary: the next step's cue rides now,
   // tagged with this beat, and the client applies it exactly when this
   // beat's audio stops.
-  if (run.revealedSteps < run.steps.length && run.pendingStepEventId === null) {
+  if (run.subsequentRevealsHeld) {
+    run.auditBoundaryResponseId = responseId;
+  } else if (run.revealedSteps < run.steps.length && run.pendingStepEventId === null) {
     ctx.trackSideEffect(sendStepCue(ctx, responseId));
   }
+}
+
+export function releaseStoryboardFirstReveal(ctx: CoordinatorContext, runId: string): boolean {
+  const run = ctx.state.storyboardRun;
+  if (!run || run.runId !== runId || !run.firstRevealHeld) return false;
+  run.firstRevealHeld = false;
+  advanceStoryboardRun(ctx);
+  return true;
+}
+
+export function releaseStoryboardSubsequentReveals(ctx: CoordinatorContext, runId: string): boolean {
+  const run = ctx.state.storyboardRun;
+  if (!run || run.runId !== runId || !run.subsequentRevealsHeld) return false;
+  run.subsequentRevealsHeld = false;
+  run.onSubsequentRevealBlocked = null;
+  advanceStoryboardRun(ctx);
+  return true;
+}
+
+export function noteStoryboardStepPresented(ctx: CoordinatorContext, eventId: number): void {
+  const run = ctx.state.storyboardRun;
+  if (!run || run.pendingStepEventId !== eventId || run.revealedSteps !== 0) return;
+  const callback = run.onFirstPaint;
+  run.onFirstPaint = null;
+  callback?.();
 }
 
 export function noteStoryboardResponseDone(ctx: CoordinatorContext, responseId: string | null, status: string): void {
@@ -309,6 +369,18 @@ export function noteStoryboardResponseDone(ctx: CoordinatorContext, responseId: 
     run.handoffResponseId = null;
     return;
   }
+  if (responseId !== null && responseId === run.auditBoundaryResponseId) {
+    const hasAudibleTranscript = Boolean(ctx.state.responseTranscript.get(responseId)?.trim());
+    if (status === 'completed' && hasAudibleTranscript) return;
+    run.auditBoundaryResponseId = null;
+  }
+  advanceStoryboardRun(ctx);
+}
+
+export function noteStoryboardPlaybackStopped(ctx: CoordinatorContext, responseId: string): void {
+  const run = ctx.state.storyboardRun;
+  if (!run || run.auditBoundaryResponseId !== responseId) return;
+  run.auditBoundaryResponseId = null;
   advanceStoryboardRun(ctx);
 }
 
@@ -436,6 +508,12 @@ async function onStepVisibility(ctx: CoordinatorContext, run: StoryboardRunState
     ctx.log(`session ${ctx.sessionId}: storyboard progress write failed ${String(error).slice(0, 200)}`);
   }
   if (ctx.state.storyboardRun !== run) return;
+  if (run.revealedSteps === 1) {
+    const firstDurable = run.onFirstDurable;
+    run.onFirstDurable = null;
+    firstDurable?.();
+  }
+  if (ctx.state.storyboardRun !== run) return;
   advanceStoryboardRun(ctx);
 }
 
@@ -502,6 +580,11 @@ function completeStoryboardRun(ctx: CoordinatorContext, outcome: 'completed'): v
   const run = ctx.state.storyboardRun;
   if (!run) return;
   clearStepTimer(run);
+  run.onFirstPaint = null;
+  run.onFirstDurable = null;
+  run.onSubsequentRevealBlocked = null;
+  run.onAbandoned = null;
+  run.auditBoundaryResponseId = null;
   ctx.state.storyboardRun = null;
   persistProgress(ctx, run, outcome);
   submitOutcome(ctx, run, outcome);
@@ -517,6 +600,12 @@ export function abandonStoryboardRun(
   const run = state.storyboardRun;
   if (!run) return;
   clearStepTimer(run);
+  const onAbandoned = run.onAbandoned;
+  run.onFirstPaint = null;
+  run.onFirstDurable = null;
+  run.onSubsequentRevealBlocked = null;
+  run.onAbandoned = null;
+  run.auditBoundaryResponseId = null;
   if (run.pendingStepEventId !== null) {
     // A cue may already be queued behind a playback boundary in the client.
     // Cancel by durable event id before dropping server bookkeeping. The
@@ -532,6 +621,7 @@ export function abandonStoryboardRun(
   state.visualPlanState = 'failed';
   persistProgress(ctx, run, 'abandoned');
   submitOutcome(ctx, run, 'abandoned');
+  onAbandoned?.();
   if (options.persistBridge) persistAbandonmentBridge(ctx, run);
   if (!options.injectNote) return;
   ctx.sendUpstream({

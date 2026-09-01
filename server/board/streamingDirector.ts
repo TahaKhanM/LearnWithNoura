@@ -8,15 +8,26 @@ import {
   type ParsedDirectorStep,
 } from './directorStreamParser.js';
 import type { DirectorStreamModelPort } from './directorStreamingService.js';
+import type { DirectorReasoningEffort, OpenAiTelemetryModel } from '../../shared/sessionTelemetry.js';
 
 export interface StreamingDirectorStep extends ParsedDirectorStep {
   cumulativeOps: AddOp[];
+}
+
+/** A realtime callback may reject a step before it mutates runner state.
+ * This preserves eligibility for the single M1 medium-effort retry. */
+export class StreamingDirectorPrecommitError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'StreamingDirectorPrecommitError';
+  }
 }
 
 export interface StreamingDirectorDeps {
   model: DirectorStreamModelPort;
   validateScene: SceneValidator;
   renderScene: SceneRenderer;
+  composition?: { model: OpenAiTelemetryModel; reasoningEffort: DirectorReasoningEffort };
 }
 
 export type StreamingBoardDirector = (
@@ -24,6 +35,7 @@ export type StreamingBoardDirector = (
   options: {
     signal: AbortSignal;
     onStep: (step: StreamingDirectorStep) => Promise<void>;
+    onFirstValidatedOp?: (input: { model: OpenAiTelemetryModel; reasoningEffort: DirectorReasoningEffort }) => void;
   },
 ) => Promise<DirectorResult>;
 
@@ -36,6 +48,7 @@ export async function streamVisual(
   options: {
     signal: AbortSignal;
     onStep: (step: StreamingDirectorStep) => Promise<void>;
+    onFirstValidatedOp?: (input: { model: OpenAiTelemetryModel; reasoningEffort: DirectorReasoningEffort }) => void;
   },
 ): Promise<DirectorResult> {
   const renderScene = request.renderScene ?? deps.renderScene;
@@ -49,11 +62,17 @@ export async function streamVisual(
     visibleObjectIds: request.visibleObjectIds,
   });
   const cumulativeOps: AddOp[] = [];
+  let firstValidatedOpReported = false;
+  let deliveredSteps = 0;
+  let failurePhase: 'provider' | 'parse' | 'validate' | 'callback' = 'provider';
   try {
     const chunks = deps.model.streamProposal({ request, boardImage, signal: options.signal });
     for await (const chunk of chunks) {
       throwIfAborted(options.signal);
-      for (const step of parser.push(chunk)) {
+      failurePhase = 'parse';
+      const parsedSteps = parser.push(chunk);
+      failurePhase = 'provider';
+      for (const step of parsedSteps) {
         // M4 owns the parallel image lane. Until then an illustration header
         // must fail before any overlay callback can queue or reveal a partial
         // scene that the completed stream is guaranteed to reject.
@@ -65,6 +84,7 @@ export async function streamVisual(
           };
         }
         cumulativeOps.push(...step.ops);
+        failurePhase = 'validate';
         const verdict = await validateScene([...cumulativeOps]);
         throwIfAborted(options.signal);
         if (!verdict.ok) {
@@ -72,12 +92,22 @@ export async function streamVisual(
             ok: false,
             reasons: verdict.issues.map((issue) =>
               `Step ${step.step.id} failed browser preflight: ${issue}`),
+            retryable: deliveredSteps === 0,
           };
         }
+        failurePhase = 'callback';
         await options.onStep({ ...step, cumulativeOps: [...cumulativeOps] });
         throwIfAborted(options.signal);
+        deliveredSteps += 1;
+        if (!firstValidatedOpReported && deps.composition) {
+          firstValidatedOpReported = true;
+          try { options.onFirstValidatedOp?.(deps.composition); }
+          catch { /* telemetry observers cannot alter composition */ }
+        }
+        failurePhase = 'provider';
       }
     }
+    failurePhase = 'parse';
     const proposal = parser.finish();
     if (proposal.representation === 'illustration') {
       return {
@@ -98,6 +128,8 @@ export async function streamVisual(
     return {
       ok: false,
       reasons: [String(error instanceof Error ? error.message : error).slice(0, 500)],
+      retryable: deliveredSteps === 0 &&
+        (failurePhase === 'parse' || error instanceof StreamingDirectorPrecommitError),
     };
   }
 }
