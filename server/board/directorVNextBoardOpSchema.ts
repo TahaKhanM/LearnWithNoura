@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import { BOARD_ASSET_IDS } from '../../../shared/boardAssets.js';
-import { validateOps, type AddOp } from '../../../shared/boardOps.js';
+import { BOARD_ASSET_IDS } from '../../shared/boardAssets.js';
+import { validateOps, type AddOp } from '../../shared/boardOps.js';
 
 export type JsonSchema = Record<string, unknown>;
 

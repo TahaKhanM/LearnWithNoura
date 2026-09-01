@@ -26,7 +26,7 @@ import {
   directorTrialKey,
   type DirectorResumeEvidence,
 } from './resumeEvidence.js';
-import { parseVNextEvalDirectorProposal } from './vnextEvalSchema.js';
+import { parseVNextEvalDirectorProposal } from '../directorStreamSchema.js';
 import {
   compositionCallReserveUsd,
   DIRECTOR_MIN_WARM_CACHED_INPUT_TOKENS,

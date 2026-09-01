@@ -61,6 +61,7 @@ vi.mock('./realtimeSession', () => {
     onCaptionQuestion: (generation: GenerationIdentity) => void = () => {};
     onSubmissionResult: (submissionId: string, accepted: boolean, error?: string) => void = () => {};
     onVisualPreflight: () => { accepted: boolean; reasons: string[] } = () => ({ accepted: true, reasons: [] });
+    onVisualRender: () => Promise<string | null> | string | null = () => null;
     onEnded: () => void = () => {};
     recordSectionNavigation = vi.fn();
     recordTutorObjectDisappearance = vi.fn();

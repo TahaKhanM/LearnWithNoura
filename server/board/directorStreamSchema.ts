@@ -1,19 +1,19 @@
 import { z } from 'zod';
-import type { AddOp } from '../../../shared/boardOps.js';
-import { VisualTemplateSchema } from '../../../shared/semanticScene.js';
+import type { AddOp } from '../../shared/boardOps.js';
+import { VisualTemplateSchema } from '../../shared/semanticScene.js';
 import {
   applyDirectorBoardPolicy,
   DirectorProposalSchema,
   type DirectorDensity,
   type DirectorProposal,
-} from '../directorSchema.js';
+} from './directorSchema.js';
 import {
   DIRECTOR_EVAL_ADD_OP_JSON_SCHEMA,
   DIRECTOR_EVAL_SPEC_KINDS,
   StrictEvalAddOpSchema,
   parseStrictEvalAddOp,
   type JsonSchema,
-} from './vnextBoardOpSchema.js';
+} from './directorVNextBoardOpSchema.js';
 
 const RevealSchema = z.enum(['outline', 'relation', 'label', 'connector', 'emphasis']);
 const EvalTemplateSchema = VisualTemplateSchema.exclude(['no_board']);
@@ -178,3 +178,16 @@ export function parseVNextEvalDirectorProposal(text: string, density: DirectorDe
     storyboard,
   });
 }
+
+/** Production names. The evaluation aliases above remain temporarily so the
+ * recorded M0 harness and the runtime consume one byte-identical contract. */
+export const DirectorStreamHeaderSchema = VNextEvalHeaderSchema;
+export const DirectorStreamStepSchema = VNextEvalStepSchema;
+export const DirectorStreamProposalSchema = VNextEvalProposalSchema;
+export type DirectorStreamStep = VNextEvalStep;
+export type DirectorStreamProposal = VNextEvalProposal;
+export const DIRECTOR_STREAM_JSON_SCHEMA = DIRECTOR_VNEXT_EVAL_JSON_SCHEMA;
+export const DIRECTOR_STREAM_RESPONSE_FORMAT = DIRECTOR_VNEXT_EVAL_RESPONSE_FORMAT;
+export const DIRECTOR_STREAM_STATIC_PROMPT = DIRECTOR_VNEXT_EVAL_STATIC_PROMPT;
+export const validatePolicyReadyDirectorStep = validatePolicyReadyEvalStep;
+export const parseDirectorStreamProposal = parseVNextEvalDirectorProposal;

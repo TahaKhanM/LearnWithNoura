@@ -58,11 +58,23 @@ export interface DirectorSceneRequest {
   learnerContext: string;
   illustrationHooks?: IllustrationHooks;
   assetOwner?: { parentId?: string; sessionId?: string };
+  /** Per-session render authority. Live realtime requests bind these to the
+   * connected learner browser, so production does not depend on launching
+   * Chromium inside a serverless function. */
+  validateScene?: SceneValidator;
+  renderScene?: SceneRenderer;
 }
 
 export type DirectorResult =
   | { ok: true; scene: DirectedScene; illustration?: IllustrationPrepareResult }
-  | { ok: false; reasons: string[]; illustration?: IllustrationPrepareResult };
+  | {
+    ok: false;
+    reasons: string[];
+    illustration?: IllustrationPrepareResult;
+    /** A safe orchestration-level fallback that must happen before any step
+     * callback. Currently used only to preserve illustrations until M4. */
+    fallback?: 'classic_illustration';
+  };
 
 export interface IllustrationDirectorPort {
   enabled: boolean;
@@ -87,8 +99,10 @@ export type BoardDirector = (request: DirectorSceneRequest) => Promise<DirectorR
 
 export async function directVisual(deps: BoardDirectorDeps, request: DirectorSceneRequest): Promise<DirectorResult> {
   const attempts = 1 + Math.max(0, deps.maxCorrectionRounds ?? 2);
+  const validateScene = request.validateScene ?? deps.validateScene;
+  const renderScene = request.renderScene ?? deps.renderScene;
   const boardImage = request.currentBoardOps.length > 0
-    ? await deps.renderScene(request.currentBoardOps)
+    ? await renderScene(request.currentBoardOps)
     : null;
   let feedback: string[] = [];
   let lastIllustration: IllustrationPrepareResult | undefined;
@@ -160,12 +174,12 @@ export async function directVisual(deps: BoardDirectorDeps, request: DirectorSce
       feedback = [describeError(error)];
       continue;
     }
-    const verdict = await deps.validateScene(scene.ops);
+    const verdict = await validateScene(scene.ops);
     if (!verdict.ok) {
       feedback = verdict.issues.map((issue) => `Deterministic layout validation rejected the scene: ${issue}`);
       continue;
     }
-    const candidateImage = await deps.renderScene(scene.ops, scene.groupId);
+    const candidateImage = await renderScene(scene.ops, scene.groupId);
     if (!candidateImage) {
       feedback = ['The candidate scene could not be rendered for inspection.'];
       continue;

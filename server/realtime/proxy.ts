@@ -16,11 +16,12 @@ import {
   type SessionTelemetryRepository,
 } from '../session/telemetryRepository.js';
 import type { BoardDirector } from '../board/director.js';
+import type { StreamingBoardDirector } from '../board/streamingDirector.js';
 import type { ClientCueOptional, CoordinatorContext, CoordinatorState } from './coordinatorContext.js';
 import type { GenerationIdentity } from '../../shared/runtimeProtocol.js';
 import { latestVoiceCallId, type SidebandRegistry } from './callBootstrap.js';
 import { handleClientEvent } from './clientEvents.js';
-import { noteStoryboardClientIdentityChanged } from './storyboardRunner.js';
+import { abandonStoryboardRun, noteStoryboardClientIdentityChanged } from './storyboardRunner.js';
 import { handleUpstreamEvent, type UpstreamEvent } from './upstreamEvents.js';
 import { initialSessionUpdate, realtimeCallUrl, REALTIME_URL } from './sessionConfig.js';
 
@@ -62,6 +63,8 @@ export interface ProxyOptions {
   /** Board Director for slow-tier scene requests; absent means new-scene
    * requests fail closed with a clean rejection. */
   directVisual?: BoardDirector;
+  /** Streaming Director pipeline; absent keeps the classic rollback path. */
+  streamVisual?: StreamingBoardDirector;
   /** How long one storyboard step may await visibility confirmation. */
   stepRevealTimeoutMs?: number;
   onLifecycle?: (lifecycle: ProxyLifecycle) => void;
@@ -108,13 +111,18 @@ function createCoordinatorState(goal: string): CoordinatorState {
     pendingDeliveredTask: null,
     preflightCounter: 0,
     pendingPreflights: new Map(),
+    visualRenderCounter: 0,
+    pendingVisualRenders: new Map(),
     visualPlanState: 'none',
     visualRequestEpoch: 0,
+    activeVisualRequestAbortController: null,
     abandonedVisualRequests: new Set(),
     planStagedThisTurn: false,
     planAttemptsThisTurn: 0,
     objectsCreatedThisTurn: new Set(),
     pendingVisibility: new Map(),
+    pendingPresentation: new Map(),
+    presentedBoardOps: new Set(),
     comparisonSectionCounter: 0,
     boardContext: new BoardContextTracker(),
     pendingResponseCreates: 0,
@@ -215,6 +223,7 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
     planDetour: options.planDetour ?? null,
     detourPlanTimeoutMs: options.detourPlanTimeoutMs ?? DETOUR_PLAN_TIMEOUT_MS,
     directVisual: options.directVisual ?? null,
+    streamVisual: options.streamVisual ?? null,
     stepRevealTimeoutMs: options.stepRevealTimeoutMs ?? 45_000,
     state,
     sendClient(
@@ -269,6 +278,11 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
 
   function beginTeardown(reason: string): Promise<void> {
     if (teardownPromise) return teardownPromise;
+    state.activeVisualRequestAbortController?.abort(`realtime proxy teardown: ${reason}`);
+    state.activeVisualRequestAbortController = null;
+    if (state.storyboardRun?.streamOpen) {
+      abandonStoryboardRun(ctx, { injectNote: false, persistBridge: true });
+    }
     sealAdmission();
     const sealedClientWork = clientWork;
     const sealedUpstreamWork = upstreamWork;
@@ -304,6 +318,8 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
 
   function forceTerminal(): Promise<void> {
     if (forceTerminalPromise) return forceTerminalPromise;
+    state.activeVisualRequestAbortController?.abort('realtime proxy forced terminal');
+    state.activeVisualRequestAbortController = null;
     sealAdmission();
     telemetryWriter.forceTerminal();
     backgroundTelemetry.clear();
@@ -406,6 +422,20 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
         envelope.turnId !== state.clientIdentity.turnId ||
         envelope.generationId !== state.clientIdentity.generationId;
       if (identityChanged) {
+        const connectionChanged = !state.clientIdentity ||
+          envelope.connectionEpoch !== state.clientIdentity.connectionEpoch;
+        const openStreamingIntake = connectionChanged && state.storyboardRun?.streamOpen === true;
+        if (connectionChanged) {
+          state.activeVisualRequestAbortController?.abort('client reconnected during visual stream');
+          state.activeVisualRequestAbortController = null;
+        }
+        // Unpresented cues from the replaced client generation can no longer
+        // cross first paint under that identity. Release their tool waits as
+        // failed now; reconnect replay contains released truth only.
+        for (const resolvePresentation of state.pendingPresentation.values()) {
+          resolvePresentation(false);
+        }
+        state.pendingPresentation.clear();
         state.clientIdentity = {
           sessionId: envelope.sessionId,
           connectionEpoch: envelope.connectionEpoch,
@@ -415,7 +445,13 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
         state.clientSequence = 0;
         state.lastClientSequence = -1;
         flushPendingClientPayloads();
-        noteStoryboardClientIdentityChanged(ctx);
+        if (openStreamingIntake && state.storyboardRun?.streamOpen) {
+          // The full directed_scene does not exist yet, so only already
+          // released board events are durable across this reconnect.
+          abandonStoryboardRun(ctx, { injectNote: true, requestResponse: false });
+        } else {
+          noteStoryboardClientIdentityChanged(ctx);
+        }
       }
       if (envelope.sequence <= state.lastClientSequence) return;
       state.lastClientSequence = envelope.sequence;

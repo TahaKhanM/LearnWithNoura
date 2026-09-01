@@ -61,6 +61,8 @@ export function requestModelResponse(
   // visual budget and the erase guard reset here and nowhere else, and any
   // in-flight asynchronous visual work becomes stale (its completion is
   // abandoned explicitly rather than built mid-turn).
+  state.activeVisualRequestAbortController?.abort('new teaching turn superseded visual request');
+  state.activeVisualRequestAbortController = null;
   state.visualRequestEpoch += 1;
   state.planStagedThisTurn = false;
   state.planAttemptsThisTurn = 0;

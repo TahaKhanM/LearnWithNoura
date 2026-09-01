@@ -14,7 +14,7 @@ import type {
   DirectorEvalIntent,
   DirectorEvalTrial,
 } from './types.js';
-import { parseVNextEvalDirectorProposal } from './vnextEvalSchema.js';
+import { parseVNextEvalDirectorProposal } from '../directorStreamSchema.js';
 import { chooseVisionAuditDecision } from './liveStudies.js';
 
 const TRIALS_PER_CACHE_STATE = 5;

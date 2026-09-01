@@ -54,6 +54,40 @@ export async function replayBoard(ctx: CoordinatorContext): Promise<void> {
   restoreBlueprint(ctx, events);
   await restoreDeliveredTask(ctx, events);
   restoreStoryboardRun(ctx, events);
+  await restoreStoryboardAbandonmentBridge(ctx, events);
+}
+
+/** A socket can disappear after the tutor promised a preparing picture but
+ * before the stream became a terminal directed_scene. Teardown records this
+ * one-shot bridge; the next attached sideband supplies it to the tutor before
+ * teaching resumes, then durably consumes it. */
+async function restoreStoryboardAbandonmentBridge(
+  ctx: CoordinatorContext,
+  events: StoredEvents,
+): Promise<void> {
+  const delivered = new Set(events
+    .filter((event) => event.type === 'storyboard_bridge_delivered')
+    .map((event) => (event.payload as { runId?: unknown }).runId)
+    .filter((runId): runId is string => typeof runId === 'string'));
+  const pending = [...events].reverse().find((event) => {
+    if (event.type !== 'storyboard_bridge_pending') return false;
+    const runId = (event.payload as { runId?: unknown }).runId;
+    return typeof runId === 'string' && !delivered.has(runId);
+  });
+  if (!pending) return;
+  const runId = (pending.payload as { runId: string }).runId;
+  ctx.sendUpstream({
+    type: 'conversation.item.create',
+    item: {
+      type: 'message',
+      role: 'system',
+      content: [{
+        type: 'input_text',
+        text: '[The lesson reconnected while a board build was still being prepared. That unfinished remainder will not appear.] Continue honestly with the visible board and do not refer to missing parts.',
+      }],
+    },
+  });
+  await ctx.repo.addEvent(ctx.sessionId, 'storyboard_bridge_delivered', { runId });
 }
 
 /**

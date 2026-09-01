@@ -153,6 +153,29 @@ describe('RealtimeSession connecting metric queue', () => {
 });
 
 describe('RealtimeSession playback-bound release', () => {
+  it('renders Director candidates through the connected lesson browser', async () => {
+    const { session, harness } = sessionWithVoice();
+    const sent: RuntimeEventEnvelope<Record<string, unknown>>[] = [];
+    harness.ws = {
+      readyState: 1,
+      send: (raw) => sent.push(JSON.parse(raw) as RuntimeEventEnvelope<Record<string, unknown>>),
+    };
+    session.onVisualRender = vi.fn(async () => 'data:image/jpeg;base64,Y2FuZGlkYXRl');
+    const identity = session.getIdentity();
+    harness.handleServer(createRuntimeEvent(identity, 0, 'visual_render', {
+      render_id: 'render-1',
+      semanticObjectId: 'lesson-anchor',
+      ops: [{ op: 'add', id: 'line', spec: { kind: 'line', from: [0, 0], to: [10, 10] } }],
+    }));
+
+    await vi.waitFor(() => expect(sent.some((event) => event.type === 'visual_render_result')).toBe(true));
+    expect(session.onVisualRender).toHaveBeenCalledWith(expect.any(Array), 'lesson-anchor');
+    expect(sent.find((event) => event.type === 'visual_render_result')?.payload).toEqual({
+      render_id: 'render-1',
+      image_data_url: 'data:image/jpeg;base64,Y2FuZGlkYXRl',
+    });
+  });
+
   it('releases captions and ordinary visuals on arrival but holds lesson state while the response plays', async () => {
     const { session, harness, voice } = sessionWithVoice();
     const board = vi.fn(async () => true);

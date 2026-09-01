@@ -19,6 +19,7 @@ export interface RuntimeConfig {
   compilerReasoningEffort: 'low' | 'medium' | 'high';
   directorModel: string;
   directorReasoningEffort: 'low' | 'medium' | 'high';
+  directorPipeline: 'classic' | 'streaming';
   illustrationModel: string;
   illustrationsEnabled: boolean;
   buildSha: string;
@@ -41,6 +42,12 @@ export function readRuntimeConfig(env: NodeJS.ProcessEnv = process.env): Runtime
       : 'local-synthetic';
   const production = deploymentMode === 'production' || deploymentMode === 'production-v0';
   const v0 = deploymentMode === 'production-v0';
+  const directorPipeline = env.NOURA_DIRECTOR_PIPELINE === 'streaming' ? 'streaming' : 'classic';
+  const directorReasoningEffort = env.NOURA_DIRECTOR_REASONING_EFFORT === 'low' ||
+    env.NOURA_DIRECTOR_REASONING_EFFORT === 'medium' ||
+    env.NOURA_DIRECTOR_REASONING_EFFORT === 'high'
+    ? env.NOURA_DIRECTOR_REASONING_EFFORT
+    : directorPipeline === 'streaming' ? 'low' : 'medium';
 
   return {
     deploymentMode,
@@ -59,9 +66,8 @@ export function readRuntimeConfig(env: NodeJS.ProcessEnv = process.env): Runtime
       ? env.NOURA_COMPILER_REASONING_EFFORT
       : 'medium',
     directorModel: env.NOURA_DIRECTOR_MODEL || env.OPENAI_MODEL || 'gpt-5.6-terra',
-    directorReasoningEffort: env.NOURA_DIRECTOR_REASONING_EFFORT === 'low' || env.NOURA_DIRECTOR_REASONING_EFFORT === 'high'
-      ? env.NOURA_DIRECTOR_REASONING_EFFORT
-      : 'medium',
+    directorReasoningEffort,
+    directorPipeline,
     illustrationModel: env.NOURA_ILLUSTRATION_MODEL || 'gpt-image-1.5',
     illustrationsEnabled: env.NOURA_ILLUSTRATIONS !== 'off',
     buildSha: env.NOURA_BUILD_SHA || env.VERCEL_GIT_COMMIT_SHA || 'local-uncommitted',
