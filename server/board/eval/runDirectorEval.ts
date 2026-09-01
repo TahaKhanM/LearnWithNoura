@@ -1,6 +1,12 @@
 import rubric from './fixtures/director-raster-rubric.json' with { type: 'json' };
 import { applyDirectorBoardPolicy, buildDirectedScene } from '../directorSchema.js';
-import { DIRECTOR_EVAL_CONDITIONS, loadDirectorEvalCorpus, loadSeededDefects, materializeSketchCorpus } from './corpus.js';
+import {
+  DIRECTOR_EVAL_CONDITIONS,
+  isDirectorQualitySampleIntent,
+  loadDirectorEvalCorpus,
+  loadSeededDefects,
+  materializeSketchCorpus,
+} from './corpus.js';
 import { chooseCompositionWinner } from './decision.js';
 import type {
   ConditionSummary,
@@ -87,6 +93,8 @@ function offlineTrial(
   trial: number,
 ): DirectorEvalTrial {
   const profile = PROFILES[conditionId];
+  const condition = DIRECTOR_EVAL_CONDITIONS.find((candidate) => candidate.id === conditionId);
+  if (!condition) throw new Error(`Unknown offline evaluation condition ${conditionId}.`);
   const seed = stableUnit(`${intent.id}:${conditionId}:${cacheState}:${trial}`);
   const strictSchemaValid = seed < profile.validity;
   const productionContract = strictSchemaValid
@@ -97,6 +105,9 @@ function offlineTrial(
   const jitter = 0.9 + stableUnit(`latency:${intent.id}:${conditionId}:${cacheState}:${trial}`) * 0.2;
   const latencyFactor = cacheFactor * difficultyFactor * jitter;
   const qualityJitter = (stableUnit(`quality:${intent.id}:${conditionId}:${trial}`) - 0.5) * 0.3;
+  const qualitySampled = trial === 1 && cacheState === 'cold' &&
+    isDirectorQualitySampleIntent(intent.id);
+  const qualityEvidenceComplete = qualitySampled && productionContract.validatorPassed;
   return {
     intentId: intent.id,
     split: intent.split,
@@ -110,16 +121,21 @@ function offlineTrial(
     strictSchemaValid,
     validatorPassed: productionContract.validatorPassed,
     storyboardCoverage: productionContract.storyboardCoverage,
-    qualityGrade: round(Math.max(1, Math.min(5, profile.qualityGrade - (intent.difficulty - 1) * 0.12 + qualityJitter)), 2),
-    qualityEvidenceComplete: true,
+    qualitySampled,
+    qualityGrade: qualityEvidenceComplete
+      ? round(Math.max(1, Math.min(5, profile.qualityGrade - (intent.difficulty - 1) * 0.12 + qualityJitter)), 2)
+      : null,
+    qualityEvidenceComplete,
     cacheExpectationMet: true,
     inputTokens: cacheState === 'warm' ? 5_000 : 4_800,
     cachedInputTokens: cacheState === 'warm' ? 4_096 + Math.floor(seed * 512) : 0,
     cacheWriteTokens: cacheState === 'cold' ? 4_096 : 0,
     outputTokens: 600 + Math.floor(seed * 180),
     usageComplete: true,
+    finishReason: 'stop',
+    maxCompletionTokens: condition.legs[0].maxCompletionTokens,
     selectedLegIndex: 0,
-    modelUsage: (DIRECTOR_EVAL_CONDITIONS.find((condition) => condition.id === conditionId)?.legs ?? [])
+    modelUsage: condition.legs
       .map((leg) => ({
         model: leg.model,
         inputTokens: cacheState === 'warm' ? 5_000 : 4_800,
@@ -127,12 +143,14 @@ function offlineTrial(
         cacheWriteTokens: cacheState === 'cold' ? 4_096 : 0,
         outputTokens: 600 + Math.floor(seed * 180),
         usageComplete: true,
+        finishReason: 'stop' as const,
+        maxCompletionTokens: leg.maxCompletionTokens,
       })),
     costUsd: round(profile.costUsd * (0.94 + seed * 0.12), 6),
     costUpperBoundUsd: round(profile.costUsd * (0.94 + seed * 0.12), 6),
     proposalText: productionContract.proposalText,
     validationReasons: [],
-    judgeReasons: ['Fixed offline blind-rubric fixture grade.'],
+    judgeReasons: qualityEvidenceComplete ? ['Fixed offline blind-rubric fixture grade.'] : [],
     rasterHashes: [],
   };
 }
@@ -171,10 +189,14 @@ function validateFixtureProposal(intent: DirectorEvalIntent): { validatorPassed:
 
 function summarizeCondition(conditionId: DirectorEvalConditionId, trials: DirectorEvalTrial[]): ConditionSummary {
   const valid = trials.filter((trial) => trial.firstStepStatus === 'valid' && trial.strictSchemaValid && trial.validatorPassed && trial.storyboardCoverage);
+  const qualityGrades = valid.flatMap((trial) =>
+    trial.qualitySampled && trial.qualityEvidenceComplete && trial.qualityGrade !== null
+      ? [trial.qualityGrade]
+      : []);
   return {
     conditionId,
     firstPassValidity: round(valid.length / trials.length, 4),
-    qualityGrade: round(mean(valid.map((trial) => trial.qualityGrade)), 2),
+    qualityGrade: round(mean(qualityGrades), 2),
     p50FirstValidOpMs: percentile(valid.flatMap((trial) => trial.firstValidOpMs === null ? [] : [trial.firstValidOpMs]), 0.5),
     meanCostUsd: round(mean(trials.map((trial) => trial.costUsd)), 6),
     p50TtftMs: percentile(valid.map((trial) => trial.ttftMs), 0.5),

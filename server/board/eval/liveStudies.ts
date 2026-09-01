@@ -7,11 +7,70 @@ import { loadSeededDefects, materializeSketchCorpus, type SyntheticSketch } from
 import type { SeededDefect } from './types.js';
 import { estimateTextCost } from './streamingProbe.js';
 import { sketchCallReserveUsd, visionCallReserveUsd } from './budget.js';
+import type {
+  LiveEvalModel,
+  LiveEvalPhase,
+  LiveSpendLedger,
+  SpendUsageEvidence,
+} from './spendLedger.js';
 
-export interface LiveStudySpend {
-  beforeCall(estimatedMaxUsd: number): void;
-  add(costUsd: number, upperBoundUsd?: number): void;
-  noteCall(): void;
+export type LiveStudySpend = Pick<LiveSpendLedger, 'begin' | 'noteProviderCalls' | 'complete'>;
+
+export class StudyProviderError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = 'StudyProviderError';
+  }
+}
+
+export async function runAccountedChatCompletion(input: {
+  spend: LiveStudySpend;
+  phase: Extract<LiveEvalPhase, 'judge' | 'vision_audit' | 'sketch'>;
+  model: LiveEvalModel;
+  reserveUsd: number;
+  request: () => Promise<OpenAI.Chat.Completions.ChatCompletion>;
+  retryDelay?: (attempt: 2 | 3) => Promise<void>;
+}): Promise<{ response: OpenAI.Chat.Completions.ChatCompletion; costUsd: number }> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    if (attempt > 1) {
+      const retryAttempt = attempt as 2 | 3;
+      await (input.retryDelay ?? defaultRetryDelay)(retryAttempt);
+    }
+    const callId = input.spend.begin({
+      phase: input.phase,
+      models: [input.model],
+      reserveUsd: input.reserveUsd,
+    });
+    input.spend.noteProviderCalls(callId, 1);
+    try {
+      const response = await input.request();
+      const text = response.choices[0]?.message?.content ?? '';
+      const costUsd = completionCost(input.model, response.usage, text);
+      input.spend.complete(callId, {
+        status: 'completed',
+        observedCostUsd: costUsd,
+        upperBoundUsd: response.usage ? costUsd : input.reserveUsd,
+        usage: completionUsage(input.model, response.usage),
+      });
+      return { response, costUsd };
+    } catch (error) {
+      input.spend.complete(callId, {
+        status: 'failed',
+        observedCostUsd: 0,
+        upperBoundUsd: input.reserveUsd,
+        usage: [],
+      });
+      lastError = error;
+    }
+  }
+  throw new StudyProviderError(`${input.phase} provider call failed after two bounded retries.`, {
+    cause: lastError,
+  });
+}
+
+function defaultRetryDelay(attempt: 2 | 3): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, attempt === 2 ? 1_000 : 3_000));
 }
 
 interface VisionAuditTrial {
@@ -141,13 +200,14 @@ export async function runLiveVisionAudit(input: {
       const raster = await input.harness.render(sample.ops, `audit-${defect.id}-${sample.sample}`);
       if (!raster) throw new Error(`Could not render seeded ${sample.sample} ${defect.id}.`);
       for (const condition of conditions) {
-        const startedAt = performance.now();
-        input.spend.beforeCall(visionCallReserveUsd(condition.model));
-        input.spend.noteCall();
         const reserve = visionCallReserveUsd(condition.model);
-        let response: OpenAI.Chat.Completions.ChatCompletion;
-        try {
-          response = await input.client.chat.completions.create({
+        const startedAt = performance.now();
+        const { response, costUsd } = await runAccountedChatCompletion({
+          spend: input.spend,
+          phase: 'vision_audit',
+          model: condition.model,
+          reserveUsd: reserve,
+          request: () => input.client.chat.completions.create({
           model: condition.model,
           reasoning_effort: 'low',
           max_completion_tokens: 500,
@@ -168,22 +228,18 @@ export async function runLiveVisionAudit(input: {
               ],
             },
           ],
-          });
-        } catch (error) {
-          input.spend.add(0, reserve);
-          throw error;
-        }
+          }),
+        });
         const text = response.choices[0]?.message?.content ?? '';
         const parsed = parseVision(text);
         const rejected = !parsed.approved;
-        const costUsd = completionCost(condition.model, response.usage, text);
-        input.spend.add(costUsd, response.usage ? costUsd : reserve);
+        const latencyMs = Math.round(performance.now() - startedAt);
         trials.push({
           defectId: defect.id,
           defectKind: defect.defectKind,
           sample: sample.sample,
           conditionId: condition.id,
-          latencyMs: Math.round(performance.now() - startedAt),
+          latencyMs,
           expectedReject: sample.expectedReject,
           rejected,
           caught: sample.expectedReject && rejected,
@@ -238,12 +294,13 @@ export async function runLiveSketchStudy(input: {
     const raster = await renderSyntheticSketchRaster(input.harness, sketch);
     if (!raster) throw new Error(`Could not render synthetic sketch ${sketch.id} through the board harness.`);
     for (const condition of conditions) {
-      input.spend.beforeCall(sketchCallReserveUsd(condition.model));
-      input.spend.noteCall();
       const reserve = sketchCallReserveUsd(condition.model);
-      let response: OpenAI.Chat.Completions.ChatCompletion;
-      try {
-        response = await input.client.chat.completions.create({
+      const { response, costUsd } = await runAccountedChatCompletion({
+        spend: input.spend,
+        phase: 'sketch',
+        model: condition.model,
+        reserveUsd: reserve,
+        request: () => input.client.chat.completions.create({
         model: condition.model,
         reasoning_effort: 'low',
         max_completion_tokens: 300,
@@ -264,16 +321,11 @@ export async function runLiveSketchStudy(input: {
             ],
           },
         ],
-        });
-      } catch (error) {
-        input.spend.add(0, reserve);
-        throw error;
-      }
+        }),
+      });
       const text = response.choices[0]?.message?.content ?? '';
       const parsed = parseSketch(text);
       const correct = normalize(parsed.interpretation) === normalize(sketch.expectedInterpretation);
-      const costUsd = completionCost(condition.model, response.usage, text);
-      input.spend.add(costUsd, response.usage ? costUsd : reserve);
       rows.push({
         sketchId: sketch.id,
         conditionId: condition.id,
@@ -433,6 +485,21 @@ function completionCost(model: 'gpt-5.6-terra' | 'gpt-5.6-luna', usage: OpenAI.C
     cacheWriteTokens: usage?.prompt_tokens_details?.cache_write_tokens ?? 0,
     outputTokens: usage?.completion_tokens ?? 0,
   }, text);
+}
+
+function completionUsage(
+  model: 'gpt-5.6-terra' | 'gpt-5.6-luna',
+  usage: OpenAI.Completions.CompletionUsage | undefined,
+): SpendUsageEvidence[] {
+  if (!usage) return [];
+  return [{
+    model,
+    inputTokens: usage.prompt_tokens,
+    cachedInputTokens: usage.prompt_tokens_details?.cached_tokens ?? 0,
+    cacheWriteTokens: usage.prompt_tokens_details?.cache_write_tokens ?? 0,
+    outputTokens: usage.completion_tokens,
+    usageComplete: true,
+  }];
 }
 
 function summarizeSketchRows(conditionId: string, rows: Array<{ correct: boolean; confidence: number; validReply: boolean; costUsd: number }>) {

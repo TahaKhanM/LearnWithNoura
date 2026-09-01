@@ -123,6 +123,8 @@ describe('Drawing vNext evaluation stream contract', () => {
     const secondMessages = directorEvalMessages(second);
     expect(firstMessages[0]).toEqual(secondMessages[0]);
     expect(firstMessages[0].content).toContain('step-structured');
+    expect(firstMessages[0].content).toContain('at most 15 operations total');
+    expect(firstMessages[0].content).toContain('complete scene for bounds and collisions');
     expect(firstMessages[0].content).not.toContain(first.intent);
     expect(firstMessages[1].content).toContain(first.intent);
     expect(firstMessages[1]).not.toEqual(secondMessages[1]);
@@ -144,7 +146,7 @@ describe('Drawing vNext evaluation stream contract', () => {
       capturedRequest = request;
       return streamChunks([
       { text: raw.slice(0, split) },
-      { text: raw.slice(split) },
+      { text: raw.slice(split), finishReason: 'stop' },
       { usage: { prompt_tokens: 1_000, completion_tokens: 120, prompt_tokens_details: { cached_tokens: 700, cache_write_tokens: 200 } } },
       ]);
     });
@@ -164,7 +166,8 @@ describe('Drawing vNext evaluation stream contract', () => {
 
     expect(capturedRequest).toMatchObject({
       response_format: { type: 'json_schema', json_schema: { strict: true } },
-      max_completion_tokens: 600,
+      max_completion_tokens: 4_000,
+      verbosity: 'low',
       messages: [
         { role: 'system' },
         { role: 'user', content: expect.arrayContaining([
@@ -181,6 +184,8 @@ describe('Drawing vNext evaluation stream contract', () => {
       outputTokens: 120,
     });
     expect(result.usageComplete).toBe(true);
+    expect(result.finishReason).toBe('stop');
+    expect(result.maxCompletionTokens).toBe(4_000);
     expect(result.firstStepStatus).toBe('valid');
     expect(result.costUpperBoundUsd).toBe(result.estimatedCostUsd);
   });
@@ -217,10 +222,13 @@ describe('Drawing vNext evaluation stream contract', () => {
 async function* streamChunks(chunks: Array<{
   text?: string;
   usage?: { prompt_tokens: number; completion_tokens: number; prompt_tokens_details: { cached_tokens: number; cache_write_tokens: number } };
+  finishReason?: 'stop' | 'length';
 }>) {
   for (const chunk of chunks) {
     yield {
-      choices: chunk.text === undefined ? [] : [{ delta: { content: chunk.text } }],
+      choices: chunk.text === undefined && chunk.finishReason === undefined
+        ? []
+        : [{ delta: { content: chunk.text ?? '' }, finish_reason: chunk.finishReason ?? null }],
       usage: chunk.usage ?? null,
     };
   }

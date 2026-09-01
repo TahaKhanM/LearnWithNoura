@@ -65,6 +65,7 @@ export interface DirectorEvalCondition {
   legs: Array<{
     model: 'gpt-5.6-terra' | 'gpt-5.6-luna';
     reasoningEffort: 'low' | 'medium';
+    maxCompletionTokens: number;
   }>;
 }
 
@@ -81,7 +82,8 @@ export interface DirectorEvalTrial {
   strictSchemaValid: boolean;
   validatorPassed: boolean;
   storyboardCoverage: boolean;
-  qualityGrade: number;
+  qualitySampled: boolean;
+  qualityGrade: number | null;
   qualityEvidenceComplete: boolean;
   cacheExpectationMet: boolean;
   inputTokens: number;
@@ -89,6 +91,8 @@ export interface DirectorEvalTrial {
   cacheWriteTokens: number;
   outputTokens: number;
   usageComplete: boolean;
+  finishReason: 'stop' | 'length' | 'tool_calls' | 'content_filter' | 'function_call' | null;
+  maxCompletionTokens: number;
   selectedLegIndex: number;
   modelUsage: Array<{
     model: 'gpt-5.6-terra' | 'gpt-5.6-luna';
@@ -97,6 +101,8 @@ export interface DirectorEvalTrial {
     cacheWriteTokens: number;
     outputTokens: number;
     usageComplete: boolean;
+    finishReason: 'stop' | 'length' | 'tool_calls' | 'content_filter' | 'function_call' | null;
+    maxCompletionTokens: number;
   }>;
   costUsd: number;
   costUpperBoundUsd: number;

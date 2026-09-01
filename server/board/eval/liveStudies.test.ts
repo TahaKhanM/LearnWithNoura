@@ -5,14 +5,44 @@ import {
   chooseVisionAuditDecision,
   pairedAssistDecision,
   renderSyntheticSketchRaster,
+  runAccountedChatCompletion,
   runLiveSketchStudy,
   runLiveVisionAudit,
   seededCleanOps,
   seededDefectOps,
   syntheticSketchOps,
 } from './liveStudies.js';
+import { LiveSpendLedger } from './spendLedger.js';
 
 describe('Drawing vNext live audit and sketch evidence', () => {
+  it('paces and accounts bounded retries for non-streaming study calls', async () => {
+    const ledger = new LiveSpendLedger(1);
+    let attempts = 0;
+    const result = await runAccountedChatCompletion({
+      spend: ledger,
+      phase: 'judge',
+      model: 'gpt-5.6-luna',
+      reserveUsd: 0.01,
+      retryDelay: async () => undefined,
+      request: async () => {
+        attempts += 1;
+        if (attempts === 1) throw new Error('terminated');
+        return {
+          choices: [{ message: { content: '{"grade":4,"reasons":[]}' } }],
+          usage: {
+            prompt_tokens: 100,
+            completion_tokens: 20,
+            total_tokens: 120,
+            prompt_tokens_details: { cached_tokens: 0, cache_write_tokens: 0 },
+          },
+        } as never;
+      },
+    });
+    expect(result.response.choices[0]?.message.content).toContain('grade');
+    expect(ledger.providerCalls).toBe(2);
+    expect(ledger.entries.filter((entry) => entry.status === 'failed')).toHaveLength(1);
+  });
+
   it('loads twelve exact validator-clean defect/control pairs', () => {
     const defects = loadSeededDefects();
     expect(defects).toHaveLength(12);
@@ -104,7 +134,7 @@ describe('Drawing vNext live audit and sketch evidence', () => {
         usage: { prompt_tokens: 100, completion_tokens: 10, total_tokens: 110, prompt_tokens_details: { cached_tokens: 0 } },
       };
     });
-    const spend = { beforeCall: vi.fn(), add: vi.fn(), noteCall: vi.fn() };
+    const spend = new LiveSpendLedger(30);
     const report = await runLiveVisionAudit({
       client: { chat: { completions: { create } } } as never,
       harness: { render, validate: async () => ({ ok: true }) } as never,
@@ -146,7 +176,7 @@ describe('Drawing vNext live audit and sketch evidence', () => {
     const report = await runLiveSketchStudy({
       client: { chat: { completions: { create } } } as never,
       harness: { render } as never,
-      spend: { beforeCall: vi.fn(), add: vi.fn(), noteCall: vi.fn() },
+      spend: new LiveSpendLedger(30),
     });
 
     expect(render).toHaveBeenCalledTimes(30);

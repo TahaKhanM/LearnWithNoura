@@ -1,80 +1,114 @@
 import type OpenAI from 'openai';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import rubric from './fixtures/director-raster-rubric.json' with { type: 'json' };
 import { createHeadlessSceneValidator } from '../../lesson/headlessSceneValidator.js';
 import type { HeadlessSceneValidatorHandle } from '../../lesson/headlessSceneValidator.js';
 import { applyDirectorBoardPolicy, buildDirectedScene } from '../directorSchema.js';
-import { DIRECTOR_EVAL_CONDITIONS, loadDirectorEvalCorpus, loadSeededDefects, materializeSketchCorpus } from './corpus.js';
+import {
+  DIRECTOR_EVAL_CONDITIONS,
+  isDirectorQualitySampleIntent,
+  loadDirectorEvalCorpus,
+  loadDirectorQualitySampleIntentIds,
+  loadSeededDefects,
+  materializeSketchCorpus,
+} from './corpus.js';
 import { chooseCompositionWinner } from './decision.js';
-import { runLiveSketchStudy, runLiveVisionAudit, type LiveStudySpend } from './liveStudies.js';
-import { estimateTextCost, runStreamingProbe, type StreamingProbeResult } from './streamingProbe.js';
+import {
+  runAccountedChatCompletion,
+  runLiveSketchStudy,
+  runLiveVisionAudit,
+  StudyProviderError,
+  type LiveStudySpend,
+} from './liveStudies.js';
+import { runStreamingProbe, type StreamingProbeResult } from './streamingProbe.js';
 import type { ConditionSummary, DirectorEvalCondition, DirectorEvalIntent, DirectorEvalTrial } from './types.js';
+import {
+  directorTrialKey,
+  type DirectorResumeEvidence,
+} from './resumeEvidence.js';
 import { parseVNextEvalDirectorProposal } from './vnextEvalSchema.js';
 import {
   compositionCallReserveUsd,
+  DIRECTOR_MIN_WARM_CACHED_INPUT_TOKENS,
   judgeCallReserveUsd,
   plannedLiveBudget,
 } from './budget.js';
+import {
+  LiveSpendLedger,
+  SpendCapError,
+  type LiveEvalModel,
+  type SpendLedgerEvent,
+  type SpendUsageEvidence,
+} from './spendLedger.js';
 
 const LIVE_TRIALS = 5;
+const BLIND_QUALITY_SAMPLE_TRIAL = 1;
 
-export class SpendGuard implements LiveStudySpend {
-  estimatedCostUsd = 0;
-  accountedCostUsd = 0;
-  providerCalls = 0;
-
-  constructor(readonly maxSpendUsd: number) {}
-
-  beforeCall(estimatedMaxUsd: number): void {
-    if (this.accountedCostUsd + estimatedMaxUsd > this.maxSpendUsd) {
-      throw new SpendCapError(`The next provider call could cross the $${this.maxSpendUsd} spend cap.`);
-    }
-  }
-
-  add(costUsd: number, upperBoundUsd = costUsd): void {
-    this.estimatedCostUsd = round(this.estimatedCostUsd + Math.max(0, costUsd), 8);
-    this.accountedCostUsd = round(this.accountedCostUsd + Math.max(costUsd, upperBoundUsd), 8);
-    if (this.accountedCostUsd > this.maxSpendUsd) {
-      throw new SpendCapError(`Observed estimated cost crossed the $${this.maxSpendUsd} spend cap.`);
-    }
-  }
-
-  noteCall(): void { this.providerCalls += 1; }
+export class SpendGuard extends LiveSpendLedger implements LiveStudySpend {
+  judgeInvalidResponseRetries = 0;
 }
 
-class SpendCapError extends Error {
-  constructor(message: string) { super(message); this.name = 'SpendCapError'; }
+class ProviderEvidenceError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = 'ProviderEvidenceError';
+  }
 }
 
-class CacheEvidenceError extends Error {
-  constructor(message: string) { super(message); this.name = 'CacheEvidenceError'; }
+class OutputCapEvidenceError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'OutputCapEvidenceError';
+  }
 }
 
 export async function runLiveDirectorEval(input: {
   client: OpenAI;
   harnessUrl: string;
   maxSpendUsd: number;
+  priorReservedUsd?: number;
+  runId?: string;
   onProgress?: (message: string) => void;
   onCheckpoint?: (checkpoint: { trial: DirectorEvalTrial; providerCalls: number; accountedCostUsd: number }) => void;
+  onSpendEvent?: (event: SpendLedgerEvent) => void;
+  resumeEvidence?: DirectorResumeEvidence;
   /** Scripted tests inject the same narrow production harness port. */
   harness?: HeadlessSceneValidatorHandle;
 }) {
+  const priorReservedUsd = input.priorReservedUsd ?? 0;
+  const sessionHardCapUsd = 30;
+  if (!Number.isFinite(priorReservedUsd) || priorReservedUsd < 0) {
+    throw new SpendCapError('Prior reserved spend must be a finite non-negative value. No provider call was made.');
+  }
+  const combinedMaximumUsd = round(priorReservedUsd + input.maxSpendUsd, 10);
+  if (combinedMaximumUsd > sessionHardCapUsd) {
+    throw new SpendCapError(
+      `Prior liability plus this run's cap would cross the $${sessionHardCapUsd} session authorization. No provider call was made.`,
+    );
+  }
   const corpus = loadDirectorEvalCorpus();
+  const qualitySampleIntentIds = loadDirectorQualitySampleIntentIds();
   const budgetPlan = plannedLiveBudget({
     intentCount: corpus.length,
+    judgedIntentCount: qualitySampleIntentIds.length,
     trialsPerCacheState: LIVE_TRIALS,
+    judgedTrialsPerCacheState: 1,
+    judgedCacheStateCount: 1,
     conditions: DIRECTOR_EVAL_CONDITIONS,
     defectCount: loadSeededDefects().length,
     sketchCount: materializeSketchCorpus().length,
     contextRasterIntentCount: corpus.filter((intent) => (intent.existingBoardOps?.length ?? 0) > 0).length,
   });
-  if (budgetPlan.conservativeTotalUsd > input.maxSpendUsd) {
-    throw new SpendCapError(`The complete preregistered study requires a $${budgetPlan.conservativeTotalUsd} conservative budget, above the authorized $${input.maxSpendUsd}. No provider call was made.`);
-  }
-  const spend = new SpendGuard(input.maxSpendUsd);
+  const conservativePlanFitsRunCap = budgetPlan.conservativeTotalUsd <= input.maxSpendUsd;
+  const runId = input.runId ?? `director-eval-${randomUUID()}`;
+  const spend = new SpendGuard(input.maxSpendUsd, input.onSpendEvent, runId);
   const harness = input.harness ?? createHeadlessSceneValidator({ harnessUrl: input.harnessUrl });
   const ownsHarness = !input.harness;
-  const trials: DirectorEvalTrial[] = [];
+  const trials: DirectorEvalTrial[] = [...(input.resumeEvidence?.trials ?? [])];
+  const completedTrialKeys = new Set(trials.map(directorTrialKey));
+  if (completedTrialKeys.size !== trials.length) {
+    throw new Error('Resume evidence contains duplicate Director trial rows.');
+  }
   let visionAudit: Awaited<ReturnType<typeof runLiveVisionAudit>> | null = null;
   let sketchGrounding: Awaited<ReturnType<typeof runLiveSketchStudy>> | null = null;
   let stopReason: string | null = null;
@@ -88,6 +122,8 @@ export async function runLiveDirectorEval(input: {
             await ensureWarmConfigurations({ client: input.client, spend, warmed, intent });
           }
           for (const condition of DIRECTOR_EVAL_CONDITIONS) {
+            const expectedKey = `${intent.id}:${condition.id}:${cacheState}:${trial}`;
+            if (completedTrialKeys.has(expectedKey)) continue;
             input.onProgress?.(`[director-eval] ${condition.id} ${intent.id} ${cacheState} ${trial}/${LIVE_TRIALS}`);
             const completedTrial = await runCompositionTrial({
               client: input.client,
@@ -97,15 +133,19 @@ export async function runLiveDirectorEval(input: {
               intent,
               cacheState,
               trial,
+              runId,
             });
             trials.push(completedTrial);
+            completedTrialKeys.add(directorTrialKey(completedTrial));
             input.onCheckpoint?.({
               trial: completedTrial,
               providerCalls: spend.providerCalls,
               accountedCostUsd: spend.accountedCostUsd,
             });
-            if (cacheState === 'warm' && !completedTrial.cacheExpectationMet) {
-              throw new CacheEvidenceError(`Warm cache evidence was absent for ${condition.id}/${intent.id}; the run stopped before further calls.`);
+            if (trialHitOutputCeiling(completedTrial)) {
+              throw new OutputCapEvidenceError(
+                `A ${completedTrial.conditionId} leg hit its configured proposal ceiling for ${completedTrial.intentId}; the run stopped before collecting censored evidence.`,
+              );
             }
           }
         }
@@ -121,7 +161,6 @@ export async function runLiveDirectorEval(input: {
     sketchGrounding = await runLiveSketchStudy({ client: input.client, harness, spend });
   } catch (error) {
     if (error instanceof SpendCapError) stopReason = `spend_cap:${error.message}`;
-    else if (error instanceof CacheEvidenceError) stopReason = `cache_miss:${error.message}`;
     else throw error;
   } finally {
     if (ownsHarness) await harness.close();
@@ -130,12 +169,17 @@ export async function runLiveDirectorEval(input: {
   const rowsPerCondition = trials.length / DIRECTOR_EVAL_CONDITIONS.length;
   const conditionSummaries = summarizeConditions(trials, rowsPerCondition);
   const completeComposition = conditionSummaries.length === DIRECTOR_EVAL_CONDITIONS.length || stopReason?.startsWith('pre_registered_dominance:');
-  const cacheEvidenceComplete = trials.every((trial) => trial.cacheExpectationMet);
-  const qualityEvidenceComplete = trials.every((trial) => !trial.validatorPassed || trial.qualityEvidenceComplete);
+  const cacheEvidenceComplete = cacheEvidenceSufficient(trials);
+  const qualitySampleRows = trials.filter((trial) => trial.qualitySampled);
+  const qualityEvidenceComplete = qualitySampleRows.length === budgetPlan.judgeCalls &&
+    qualitySampleRows.every((trial) => !trial.validatorPassed || trial.qualityEvidenceComplete);
   const compositionDecision = chooseCompositionWinner(conditionSummaries);
+  const transportRetryProviderCalls = spend.entries
+    .filter((entry) => entry.status === 'failed')
+    .reduce((total, entry) => total + entry.providerCallCount, 0);
   const pass = Boolean(
     completeComposition && cacheEvidenceComplete && qualityEvidenceComplete &&
-    compositionDecision.winnerConditionId && visionAudit && sketchGrounding &&
+    visionAudit && sketchGrounding &&
     !stopReason?.startsWith('spend_cap:'),
   );
   return {
@@ -145,15 +189,35 @@ export async function runLiveDirectorEval(input: {
     evidenceBoundary: 'Synthetic checked-in intents and synthetic board/sketch rasters only; no child data. Provider latency and output quality are live for this run; browser validation is the configured local board harness.',
     realChildData: false as const,
     providerCalls: spend.providerCalls,
+    transportRetryProviderCalls,
+    judgeInvalidResponseRetries: spend.judgeInvalidResponseRetries,
     estimatedCostUsd: spend.estimatedCostUsd,
     accountedCostUsd: spend.accountedCostUsd,
     maxSpendUsd: spend.maxSpendUsd,
+    authorizationLedger: {
+      sessionHardCapUsd,
+      priorReservedUsd,
+      runMaxSpendUsd: spend.maxSpendUsd,
+      combinedMaximumUsd,
+    },
+    spendLedger: spend.snapshot(),
     costSource: 'official rate-card estimate from provider token usage; cache writes are 1.25x and aborted legs without final usage are charged their conservative reservation' as const,
     pricingSource: 'https://developers.openai.com/api/docs/models/compare (checked 2026-08-30)',
     stoppedEarly: stopReason,
+    resumedEvidence: input.resumeEvidence?.metadata ?? null,
+    conservativePlanFitsRunCap,
     budgetPlan,
     cacheEvidenceComplete,
     qualityEvidenceComplete,
+    qualitySample: {
+      preregisteredTrial: BLIND_QUALITY_SAMPLE_TRIAL,
+      cacheState: 'cold' as const,
+      intentIds: qualitySampleIntentIds,
+      plannedRows: budgetPlan.judgeCalls,
+      observedRows: qualitySampleRows.length,
+      eligibleRows: qualitySampleRows.filter((trial) => trial.validatorPassed).length,
+      gradedRows: qualitySampleRows.filter((trial) => trial.qualityEvidenceComplete).length,
+    },
     corpus: {
       representative: corpus.filter((entry) => entry.split === 'representative').length,
       holdout: corpus.filter((entry) => entry.split === 'holdout').length,
@@ -182,23 +246,46 @@ async function ensureWarmConfigurations(input: {
   for (const leg of legs) {
     const key = `${leg.model}:${leg.reasoningEffort}`;
     if (input.warmed.has(key)) continue;
-    input.spend.beforeCall(compositionCallReserveUsd(leg.model, 'cold', false));
-    input.spend.noteCall();
-    let probe: StreamingProbeResult;
-    try {
-      probe = await runStreamingProbe({
-        client: input.client,
-        intent: input.intent,
-        model: leg.model,
-        reasoningEffort: leg.reasoningEffort,
-        cacheState: 'warm',
-        trialKey: `warmup:${key}`,
-      });
-    } catch (error) {
-      input.spend.add(0, compositionCallReserveUsd(leg.model, 'cold', false));
-      throw error;
+    const reserve = compositionCallReserveUsd(
+      leg.model, 'cold', false, leg.reasoningEffort, leg.maxCompletionTokens,
+    );
+    let probe: StreamingProbeResult | null = null;
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= 3 && probe === null; attempt += 1) {
+      if (attempt > 1) await defaultTransportRetryDelay(attempt as 2 | 3);
+      const callId = input.spend.begin({ phase: 'warmup', models: [leg.model], reserveUsd: reserve });
+      input.spend.noteProviderCalls(callId, 1);
+      try {
+        probe = await runStreamingProbe({
+          client: input.client,
+          intent: input.intent,
+          model: leg.model,
+          reasoningEffort: leg.reasoningEffort,
+          maxCompletionTokens: leg.maxCompletionTokens,
+          cacheState: 'warm',
+          trialKey: `warmup:${key}:transport-${attempt}`,
+        });
+        input.spend.complete(callId, {
+          status: 'completed',
+          observedCostUsd: probe.estimatedCostUsd,
+          upperBoundUsd: probe.costUpperBoundUsd,
+          usage: probeSpendUsage(probe, [leg.model]),
+        });
+      } catch (error) {
+        input.spend.complete(callId, {
+          status: 'failed',
+          observedCostUsd: 0,
+          upperBoundUsd: reserve,
+          usage: [],
+        });
+        lastError = error;
+      }
     }
-    input.spend.add(probe.estimatedCostUsd, probe.costUpperBoundUsd);
+    if (!probe) {
+      throw new ProviderEvidenceError('Warmup transport failed after two bounded retries.', {
+        cause: lastError,
+      });
+    }
     input.warmed.add(key);
   }
 }
@@ -211,8 +298,10 @@ export async function runCompositionTrial(input: {
   intent: DirectorEvalIntent;
   cacheState: 'cold' | 'warm';
   trial: number;
+  runId?: string;
+  transportRetryDelay?: (attempt: 2 | 3) => Promise<void>;
 }): Promise<DirectorEvalTrial> {
-  const trialKey = `${input.condition.id}:${input.intent.id}:${input.cacheState}:${input.trial}`;
+  const trialKey = `${input.runId ?? 'scripted-test'}:${input.condition.id}:${input.intent.id}:${input.cacheState}:${input.trial}`;
   const existingOps = input.intent.existingBoardOps ?? [];
   const visibleObjectIds = existingOps.flatMap((op) => op.op === 'add' ? [op.id] : []);
   const currentBoardRaster = existingOps.length > 0
@@ -221,16 +310,17 @@ export async function runCompositionTrial(input: {
   if (existingOps.length > 0 && !currentBoardRaster) {
     throw new Error(`Could not render existing-board context for ${input.intent.id}.`);
   }
-  const probe = await runConditionProbe(input, trialKey, {
+  const probe = await runConditionProbeWithTransportRetry(input, trialKey, {
     currentBoardRaster,
     existingOps,
     visibleObjectIds,
   });
-  input.spend.add(probe.estimatedCostUsd, probe.costUpperBoundUsd);
   let strictSchemaValid = false;
   let validatorPassed = false;
   let storyboardCoverage = false;
-  let qualityGrade = 1;
+  const qualitySampled = input.trial === BLIND_QUALITY_SAMPLE_TRIAL &&
+    input.cacheState === 'cold' && isDirectorQualitySampleIntent(input.intent.id);
+  let qualityGrade: number | null = null;
   let qualityEvidenceComplete = false;
   const validationReasons: string[] = [];
   let judgeReasons: string[] = [];
@@ -254,7 +344,7 @@ export async function runCompositionTrial(input: {
       const validation = await input.harness.validate(combinedOps);
       validatorPassed = validation.ok;
       if (!validation.ok) validationReasons.push(...validation.issues);
-      if (validation.ok) {
+      if (validation.ok && qualitySampled) {
         const rasters = await renderStoryboardRasters(input.harness, input.intent, scene, existingOps);
         rasterHashes = rasters.map(hashRaster);
         if (rasters.length === scene.storyboard.length) {
@@ -274,6 +364,8 @@ export async function runCompositionTrial(input: {
       }
     } else validationReasons.push(...policy.reasons);
   } catch (error) {
+    if (error instanceof SpendCapError || error instanceof ProviderEvidenceError ||
+        error instanceof StudyProviderError) throw error;
     validationReasons.push(String(error instanceof Error ? error.message : error).slice(0, 500));
     // First-pass validity metrics deliberately retain malformed/rejected rows.
   }
@@ -282,10 +374,12 @@ export async function runCompositionTrial(input: {
     model: input.condition.legs[selectedLegIndex]?.model ?? input.condition.legs[0].model,
     usage: probe.usage,
     usageComplete: probe.usageComplete,
+    finishReason: probe.finishReason,
+    maxCompletionTokens: probe.maxCompletionTokens,
   }];
   const selectedUsage = modelUsage[selectedLegIndex]?.usage ?? probe.usage;
   const cacheExpectationMet = input.cacheState === 'warm'
-    ? selectedUsage.cachedInputTokens > 0
+    ? selectedUsage.cachedInputTokens >= DIRECTOR_MIN_WARM_CACHED_INPUT_TOKENS
     : selectedUsage.cachedInputTokens === 0;
   return {
     intentId: input.intent.id,
@@ -300,6 +394,7 @@ export async function runCompositionTrial(input: {
     strictSchemaValid,
     validatorPassed,
     storyboardCoverage,
+    qualitySampled,
     qualityGrade,
     qualityEvidenceComplete,
     cacheExpectationMet,
@@ -308,11 +403,15 @@ export async function runCompositionTrial(input: {
     cacheWriteTokens: probe.usage.cacheWriteTokens,
     outputTokens: probe.usage.outputTokens,
     usageComplete: probe.usageComplete,
+    finishReason: probe.finishReason,
+    maxCompletionTokens: probe.maxCompletionTokens,
     selectedLegIndex,
     modelUsage: modelUsage.map((entry) => ({
       model: entry.model,
       ...entry.usage,
       usageComplete: entry.usageComplete,
+      finishReason: entry.finishReason,
+      maxCompletionTokens: entry.maxCompletionTokens,
     })),
     costUsd: probe.estimatedCostUsd,
     costUpperBoundUsd: probe.costUpperBoundUsd,
@@ -321,6 +420,33 @@ export async function runCompositionTrial(input: {
     judgeReasons,
     rasterHashes,
   };
+}
+
+async function runConditionProbeWithTransportRetry(
+  input: Parameters<typeof runCompositionTrial>[0],
+  trialKey: string,
+  context: Parameters<typeof runConditionProbe>[2],
+): Promise<StreamingProbeResult> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    if (attempt > 1) {
+      const retryAttempt = attempt as 2 | 3;
+      await (input.transportRetryDelay ?? defaultTransportRetryDelay)(retryAttempt);
+    }
+    try {
+      return await runConditionProbe(input, `${trialKey}:transport-${attempt}`, context);
+    } catch (error) {
+      if (error instanceof SpendCapError) throw error;
+      lastError = error;
+    }
+  }
+  throw new ProviderEvidenceError('Composition transport failed after two bounded retries.', {
+    cause: lastError,
+  });
+}
+
+function defaultTransportRetryDelay(attempt: 2 | 3): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, attempt === 2 ? 1_000 : 3_000));
 }
 
 export async function runConditionProbe(
@@ -334,9 +460,12 @@ export async function runConditionProbe(
 ): Promise<StreamingProbeResult> {
   if (input.condition.legs.length === 1) {
     const leg = input.condition.legs[0];
-    const reserve = compositionCallReserveUsd(leg.model, 'cold', Boolean(context.currentBoardRaster));
-    input.spend.beforeCall(reserve);
-    input.spend.noteCall();
+    const reserve = compositionCallReserveUsd(
+      leg.model, 'cold', Boolean(context.currentBoardRaster), leg.reasoningEffort,
+      leg.maxCompletionTokens,
+    );
+    const callId = input.spend.begin({ phase: 'composition', models: [leg.model], reserveUsd: reserve });
+    input.spend.noteProviderCalls(callId, 1);
     let result: StreamingProbeResult;
     try {
       result = await runStreamingProbe({
@@ -344,6 +473,7 @@ export async function runConditionProbe(
         intent: input.intent,
         model: leg.model,
         reasoningEffort: leg.reasoningEffort,
+        maxCompletionTokens: leg.maxCompletionTokens,
         cacheState: input.cacheState,
         trialKey,
         currentBoardRaster: context.currentBoardRaster,
@@ -351,29 +481,51 @@ export async function runConditionProbe(
         validateFirstStep: async (ops) => (await input.harness.validate([...context.existingOps, ...ops])).ok,
       });
     } catch (error) {
-      input.spend.add(0, reserve);
+      input.spend.complete(callId, {
+        status: 'failed',
+        observedCostUsd: 0,
+        upperBoundUsd: reserve,
+        usage: [],
+      });
       throw error;
     }
+    input.spend.complete(callId, {
+      status: 'completed',
+      observedCostUsd: result.estimatedCostUsd,
+      upperBoundUsd: result.costUpperBoundUsd,
+      usage: probeSpendUsage(result, [leg.model]),
+    });
     return {
       ...result,
       selectedLegIndex: 0,
-      legUsage: [{ model: leg.model, usage: result.usage, usageComplete: result.usageComplete }],
+      legUsage: [{
+        model: leg.model,
+        usage: result.usage,
+        usageComplete: result.usageComplete,
+        finishReason: result.finishReason,
+        maxCompletionTokens: result.maxCompletionTokens,
+      }],
     };
   }
   const combinedReserve = input.condition.legs.reduce(
-    (sum, leg) => sum + compositionCallReserveUsd(leg.model, 'cold', Boolean(context.currentBoardRaster)),
+    (sum, leg) => sum + compositionCallReserveUsd(
+      leg.model, 'cold', Boolean(context.currentBoardRaster), leg.reasoningEffort,
+      leg.maxCompletionTokens,
+    ),
     0,
   );
-  input.spend.beforeCall(combinedReserve);
+  const models = input.condition.legs.map((leg) => leg.model);
+  const callId = input.spend.begin({ phase: 'composition', models, reserveUsd: combinedReserve });
+  input.spend.noteProviderCalls(callId, input.condition.legs.length);
   const controllers = input.condition.legs.map(() => new AbortController());
   let winner = -1;
   const promises = input.condition.legs.map((leg, index) => {
-    input.spend.noteCall();
     return runStreamingProbe({
       client: input.client,
       intent: input.intent,
       model: leg.model,
       reasoningEffort: leg.reasoningEffort,
+      maxCompletionTokens: leg.maxCompletionTokens,
       cacheState: input.cacheState,
       trialKey: `${trialKey}:leg-${index}`,
       signal: controllers[index].signal,
@@ -392,7 +544,12 @@ export async function runConditionProbe(
     results = await Promise.all(promises);
   } catch (error) {
     controllers.forEach((controller) => controller.abort('hedge error'));
-    input.spend.add(0, combinedReserve);
+    input.spend.complete(callId, {
+      status: 'failed',
+      observedCostUsd: 0,
+      upperBoundUsd: combinedReserve,
+      usage: [],
+    });
     throw error;
   }
   if (winner < 0) {
@@ -402,7 +559,7 @@ export async function runConditionProbe(
     winner = validResults.sort((left, right) => left.latency - right.latency)[0]?.index ?? 0;
   }
   const chosen = results[Math.max(0, winner)];
-  return {
+  const combinedResult: StreamingProbeResult = {
     ...chosen,
     estimatedCostUsd: round(results.reduce((total, result) => total + result.estimatedCostUsd, 0), 8),
     costUpperBoundUsd: round(results.reduce((total, result) => total + result.costUpperBoundUsd, 0), 8),
@@ -412,6 +569,8 @@ export async function runConditionProbe(
       model: input.condition.legs[index].model,
       usage: result.usage,
       usageComplete: result.usageComplete,
+      finishReason: result.finishReason,
+      maxCompletionTokens: result.maxCompletionTokens,
     })),
     usage: {
       inputTokens: results.reduce((total, result) => total + result.usage.inputTokens, 0),
@@ -420,6 +579,13 @@ export async function runConditionProbe(
       outputTokens: results.reduce((total, result) => total + result.usage.outputTokens, 0),
     },
   };
+  input.spend.complete(callId, {
+    status: 'completed',
+    observedCostUsd: combinedResult.estimatedCostUsd,
+    upperBoundUsd: combinedResult.costUpperBoundUsd,
+    usage: probeSpendUsage(combinedResult, models),
+  });
+  return combinedResult;
 }
 
 async function blindRasterGrade(
@@ -429,15 +595,18 @@ async function blindRasterGrade(
   rasters: string[],
   storyboard: Array<{ reveal: string; narration: string }>,
 ): Promise<{ grade: number; reasons: string[]; valid: boolean }> {
-  spend.beforeCall(judgeCallReserveUsd());
-  spend.noteCall();
   const reserve = judgeCallReserveUsd();
-  let response: OpenAI.Chat.Completions.ChatCompletion;
-  try {
-    response = await client.chat.completions.create({
+  const judgeModel = rubric.judgeModel as 'gpt-5.6-luna';
+  for (let semanticAttempt = 1; semanticAttempt <= 3; semanticAttempt += 1) {
+    const { response } = await runAccountedChatCompletion({
+    spend,
+    phase: 'judge',
+    model: judgeModel,
+    reserveUsd: reserve,
+    request: () => client.chat.completions.create({
     model: rubric.judgeModel,
     reasoning_effort: rubric.judgeReasoningEffort as 'low',
-    max_completion_tokens: 300,
+    max_completion_tokens: 1_000,
     prompt_cache_key: 'noura-director-raster-rubric-v1',
     response_format: {
       type: 'json_schema',
@@ -464,20 +633,16 @@ async function blindRasterGrade(
         ],
       },
     ],
+    }),
     });
-  } catch (error) {
-    spend.add(0, reserve);
-    throw error;
+    const graded = parseJudgeGrade(response.choices[0]?.message?.content ?? '');
+    if (graded.valid || semanticAttempt === 3) return graded;
+    spend.judgeInvalidResponseRetries += 1;
   }
-  const text = response.choices[0]?.message?.content ?? '';
-  const usage = response.usage;
-  const cost = estimateTextCost(rubric.judgeModel as 'gpt-5.6-luna', {
-    inputTokens: usage?.prompt_tokens ?? 0,
-    cachedInputTokens: usage?.prompt_tokens_details?.cached_tokens ?? 0,
-    cacheWriteTokens: usage?.prompt_tokens_details?.cache_write_tokens ?? 0,
-    outputTokens: usage?.completion_tokens ?? 0,
-  }, text);
-  spend.add(cost, response.usage ? cost : reserve);
+  return { grade: 1, reasons: ['Judge response was invalid JSON.'], valid: false };
+}
+
+function parseJudgeGrade(text: string): { grade: number; reasons: string[]; valid: boolean } {
   try {
     const parsed = JSON.parse(text) as { grade?: unknown; reasons?: unknown };
     return {
@@ -519,15 +684,48 @@ function hashRaster(raster: string): string {
   return createHash('sha256').update(raster).digest('hex');
 }
 
+function probeSpendUsage(
+  probe: StreamingProbeResult,
+  models: LiveEvalModel[],
+): SpendUsageEvidence[] {
+  const legs = probe.legUsage ?? [{ model: models[0], usage: probe.usage, usageComplete: probe.usageComplete }];
+  return legs.map((leg) => ({
+    model: leg.model,
+    ...leg.usage,
+    usageComplete: leg.usageComplete,
+  }));
+}
+
+export function trialHitOutputCeiling(trial: DirectorEvalTrial): boolean {
+  return trial.modelUsage.some((usage) =>
+    usage.finishReason === 'length' ||
+    (usage.usageComplete && usage.outputTokens >= usage.maxCompletionTokens));
+}
+
+export function cacheEvidenceSufficient(trials: DirectorEvalTrial[]): boolean {
+  if (trials.some((trial) => trial.cacheState === 'cold' && !trial.cacheExpectationMet)) return false;
+  return DIRECTOR_EVAL_CONDITIONS.every((condition) => {
+    const warm = trials.filter((trial) =>
+      trial.conditionId === condition.id && trial.cacheState === 'warm');
+    return warm.length > 0 && ratio(
+      warm.filter((trial) => trial.cacheExpectationMet).length,
+      warm.length,
+    ) >= 0.8;
+  });
+}
+
 export function summarizeConditions(trials: DirectorEvalTrial[], expected: number): ConditionSummary[] {
   return DIRECTOR_EVAL_CONDITIONS.flatMap((condition): ConditionSummary[] => {
     const rows = trials.filter((trial) => trial.conditionId === condition.id);
     if (rows.length !== expected) return [];
-    const valid = rows.filter((row) => row.firstStepStatus === 'valid' && row.strictSchemaValid && row.validatorPassed && row.storyboardCoverage && row.qualityEvidenceComplete);
+    const valid = rows.filter((row) => row.firstStepStatus === 'valid' && row.strictSchemaValid && row.validatorPassed && row.storyboardCoverage);
+    const graded = valid.flatMap((row) => row.qualitySampled && row.qualityEvidenceComplete && row.qualityGrade !== null
+      ? [row.qualityGrade]
+      : []);
     return [{
       conditionId: condition.id,
       firstPassValidity: ratio(valid.length, rows.length),
-      qualityGrade: round(mean(valid.map((row) => row.qualityGrade)), 2),
+      qualityGrade: round(mean(graded), 2),
       p50FirstValidOpMs: percentile(valid.flatMap((row) => row.firstValidOpMs === null ? [] : [row.firstValidOpMs]), 0.5),
       meanCostUsd: round(mean(rows.map((row) => row.costUpperBoundUsd)), 8),
       p50TtftMs: percentile(valid.map((row) => row.ttftMs), 0.5),

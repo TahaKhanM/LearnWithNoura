@@ -99,15 +99,26 @@ npm run test:director-eval -- --authorized-live-run --max-spend-usd 30
 
 The live path uses only checked-in synthetic inputs, streams every composition
 condition, validates and rasters through the configured real board harness,
-blind-grades rasters with the pinned rubric judge, measures cache-token usage,
-runs the seeded vision-audit and sketch studies, aborts losing hedge legs, and
-fails before another call can cross its spend ceiling. The complete 4,072-call
-plan has a cache/raster-aware $29.433 conservative bound; an unexpected warm
-cache miss stops the run immediately, and an aborted hedge leg without final
-usage is charged its cold-call bound. Raw trial checkpoints append to NDJSON
-so a transport failure does not discard paid evidence. Raw decision evidence
+blind-grades the pre-registered cold trial-one sample with the pinned rubric
+judge, measures cache-token usage, runs the seeded vision-audit and sketch
+studies, aborts losing hedge legs, and refuses any next call whose full
+reservation would cross the configured cap. The base completed design is 2,397
+provider calls (2,160 composition legs, up to 125 judges, four warmups, 48
+audit calls, and 60 sketch calls), plus separately recorded bounded retries.
+Unused completion headroom is not charged; failed and usage-incomplete calls
+retain their full reservation.
+
+Warm cache behavior is measured rather than assumed: every cold cell must stay
+cold, and each condition must achieve at least an 80% hit rate at the measured
+1,792-token provider reporting boundary. Individual misses remain raw data.
+Each live event and trial checkpoint is synchronously appended to NDJSON.
+`--resume-from` may be repeated to merge compatible, non-overlapping rows from
+hashed zero-open-reservation sources; incompatible caps, stale cache flags, and
+incomplete quality grades are discarded and rerun. Raw decision evidence
 belongs under `server/board/eval/results/`; do not copy the offline artifact
-there or present an offline fixture winner as an adopted model.
+there or present an offline fixture winner as an adopted model. The completed
+M0 decision is documented in
+`docs/architecture/2026-09-01-drawing-model-bakeoff-decision.md`.
 
 Voice-interruption unit/integration rows cover short loud noise plus server VAD,
 sustained local energy without server confirmation, adaptive room-noise
@@ -147,6 +158,11 @@ tutor-audio-duration, or provider-usage observations are absent. Text-only mode
 requires its text-ask first-audio boundary and does not require either
 speech-end metric.
 
+For a login-gated target, pass the demo account only through
+`NOURA_SMOKE_LOGIN_EMAIL` and `NOURA_SMOKE_LOGIN_PASSWORD`. The harness detects
+the login boundary, authenticates in the browser, and retains neither value in
+its report.
+
 For an authorized protected `*.vercel.app` target, provide the temporary
 32-character automation credential only through
 `NOURA_VERCEL_PROTECTION_BYPASS`. The harness validates the target, performs a
@@ -182,13 +198,15 @@ fallback/failed transport phase never recovers, final observations can be lost
 before the aggregate client gap is delivered. Reject such a run as unable to
 prove telemetry completeness.
 
-The August 26 authorized exercise completed one provider-backed synthetic
-lesson and recovered a complete, gap-free parent-scoped telemetry log after the
-missing nested Vercel route adapter was deployed. It did not produce a single
-uninterrupted passing reporter run, so the final fixed head is not claimed as
-live-verified. Never loop paid calls for screenshots. Every future deployment
-or provider run requires fresh explicit authorization and must remain short and
-synthetic. Live latency distributions, billed currency, acoustic silence, and
+The August 26 recovery exercise produced a passing provider-backed synthetic
+lesson after the nested Vercel route adapter was deployed. A later smoke on the
+login-gated production deployment authenticated successfully, recovered a
+complete gap-free parent-scoped log, and observed audio, captions, and an
+initial board drawing, but failed the strict gate because its follow-up turn did
+not produce the required second board change within 40 seconds. Do not loop paid
+calls for screenshots. Every future deployment or provider run requires fresh
+explicit authorization and must remain short and synthetic. Drawing reliability,
+live latency distributions, billed currency, acoustic silence, and
 target-hardware results remain UNVERIFIED.
 
 ## Target hardware

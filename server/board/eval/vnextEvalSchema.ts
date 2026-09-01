@@ -120,6 +120,11 @@ export const DIRECTOR_VNEXT_EVAL_STATIC_PROMPT = [
   `Allowed BoardOp spec kinds: ${DIRECTOR_EVAL_SPEC_KINDS.join(', ')}.`,
   'Every operation is additive. Use fresh short ids. Stay within a 1000 by 600 board.',
   'Each step reveals its own operations exactly once. Narration is one or two short child-facing sentences and never mentions ids, tools, or drawing.',
+  'Be compact: prefer two to four steps, at most 15 operations total, one narration sentence of at most 18 words, and no decorative duplicates.',
+  'For quantitative geometry or axes, use a two-column layout: keep the full figure within x=80..540 and y=80..520. Put equations or explanatory text at x=620 in the right column, with y positions at least 100 apart.',
+  'Right-column equations must use small or normal size and short individual equalities; split a long derivation across steps. Never use big equations or text in the right column.',
+  'Keep every object fully inside x=60..940 and y=60..540. Never place text, equations, boxes, or labels on top of a line, axis, polygon, circle, connector, or another annotation.',
+  'Before replying, check the complete scene for bounds and collisions; simplify instead of overlapping objects.',
   'Use illustration only for a background-enhancement brief; all exact labels, values, equations, scales, and arrows remain BoardOp overlays.',
 ].join('\n');
 
