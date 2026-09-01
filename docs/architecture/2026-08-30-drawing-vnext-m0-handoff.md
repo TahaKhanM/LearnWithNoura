@@ -1,7 +1,8 @@
 # Drawing vNext M0 handoff — telemetry and model evidence
 
 Status: implementation and authorized synthetic evidence complete on
-2026-09-01. M1 has not started.
+2026-09-01. M1 implementation is in progress but is not accepted; see
+`docs/architecture/2026-09-01-drawing-vnext-m1-handoff.md`.
 
 ## Outcome
 

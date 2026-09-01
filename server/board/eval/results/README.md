@@ -16,3 +16,18 @@ SHA-256, run id, liability, and retained/discarded trial keys. Keep every source
 NDJSON named by the final report. Other interrupted diagnostics belong in the
 gitignored `artifacts/evaluation/` area. The completed raw JSON and architecture
 decision record are the canonical evidence entry points.
+
+## M1 supplemental delivery evidence
+
+The M1 paired replay is intentionally separate from the live-provider M0 raw
+artifact:
+
+- `2026-09-01-drawing-m1-pipeline-browser-observations.json` is the immutable
+  local Chromium observation ledger, pinned by SHA-256 in the M1 policy;
+- `2026-09-01-drawing-m1-pipeline-study.json` is the independently verified
+  derived report.
+
+It makes zero provider calls and compares atomic versus incremental delivery
+of the same Terra-low proposal. It may support delivery non-inferiority, but it
+must never be presented as a model/generator comparison or as passing M1 while
+the report's absolute 95% validity and actual UI-first-paint gates remain false.

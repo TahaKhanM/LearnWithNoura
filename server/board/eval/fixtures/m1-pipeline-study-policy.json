@@ -1,0 +1,27 @@
+{
+  "schemaVersion": "1.1.0",
+  "studyKind": "paired_delivery_path_same_proposal",
+  "ruleSourcePath": "docs/architecture/2026-08-30-drawing-vnext-implementation-prompt.md",
+  "sourceEvidencePath": "server/board/eval/results/2026-08-31-drawing-model-bakeoff-raw.json",
+  "sourceEvidenceSha256": "e02ccc9f240f72a7937fe192f30867434eb7f857fb6c45a5f8b52fa06507ae79",
+  "browserObservationPath": "server/board/eval/results/2026-09-01-drawing-m1-pipeline-browser-observations.json",
+  "browserObservationSha256": "a8847373ff3a9d3aa8bdd1c34fa5f4dcb99e4bc617ce23459ccdebd67767017a",
+  "conditionId": "terra-low",
+  "expectedSourceQualityEvidenceCompleteRows": 24,
+  "diagramCategories": [
+    "exact_math_geometry",
+    "graphs_charts",
+    "scientific_systems",
+    "timelines_causal",
+    "grammar_structure",
+    "comparisons_part_whole",
+    "unfamiliar_abstract",
+    "revisions_existing_board"
+  ],
+  "classicIllustrationCategory": "mixed_diagram_illustration",
+  "maximumDiagramValidityDropPercentagePoints": 5,
+  "minimumAbsoluteFirstPassValidity": 0.95,
+  "maximumAbsoluteQualityGradeDelta": 1,
+  "minimumProviderCriticalPathReadinessCut": 0.4,
+  "percentileMethod": "lower_nearest_rank"
+}
