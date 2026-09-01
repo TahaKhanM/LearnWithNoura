@@ -9,6 +9,7 @@ import {
 } from './director.js';
 import { createOpenAIDirectorStreamPort } from './directorStreamingService.js';
 import { streamVisual, type StreamingBoardDirector } from './streamingDirector.js';
+import type { OpenAiTelemetryModel } from '../../shared/sessionTelemetry.js';
 
 /**
  * The app-facing face of the Board Director: maps the neutral multimodal
@@ -56,21 +57,50 @@ export function createLiveBoardDirector(options: LiveBoardDirectorOptions): Boar
 export function createLiveStreamingBoardDirector(
   options: LiveBoardDirectorOptions & { maxCompletionTokens?: number },
 ): StreamingBoardDirector {
-  const model = createOpenAIDirectorStreamPort({
+  const maxCompletionTokens = options.maxCompletionTokens ??
+    (options.model.includes('luna') ? 5_000 : 4_000);
+  const port = (reasoningEffort: 'low' | 'medium' | 'high') => createOpenAIDirectorStreamPort({
     client: options.client,
     model: options.model,
-    reasoningEffort: options.reasoningEffort,
-    maxCompletionTokens: options.maxCompletionTokens ??
-      (options.model.includes('luna') ? 5_000 : 4_000),
+    reasoningEffort,
+    maxCompletionTokens,
   });
-  return (request, runtime) => streamVisual({
-    model,
-    validateScene: options.harness?.validate ?? (async () => ({
-      ok: false,
-      issues: ['No scene validation authority is connected.'],
-    })),
-    renderScene: options.harness?.render ?? (async () => null),
-  }, request, runtime);
+  const primary = port(options.reasoningEffort);
+  const escalated = options.reasoningEffort === 'low' ? port('medium') : null;
+  const telemetryModel = openAiTelemetryModel(options.model);
+  const validateScene = options.harness?.validate ?? (async () => ({
+    ok: false as const,
+    issues: ['No scene validation authority is connected.'],
+  }));
+  const renderScene = options.harness?.render ?? (async () => null);
+  return async (request, runtime) => {
+    let deliveredSteps = 0;
+    const guardedRuntime = {
+      ...runtime,
+      onStep: async (step: Parameters<typeof runtime.onStep>[0]) => {
+        await runtime.onStep(step);
+        deliveredSteps += 1;
+      },
+    };
+    const run = (
+      model: ReturnType<typeof port>,
+      reasoningEffort: 'low' | 'medium' | 'high',
+    ) => streamVisual({
+      model,
+      validateScene,
+      renderScene,
+      ...(telemetryModel ? { composition: { model: telemetryModel, reasoningEffort } } : {}),
+    }, request, guardedRuntime);
+    const first = await run(primary, options.reasoningEffort);
+    if (first.ok || !first.retryable || deliveredSteps > 0 || !escalated) return first;
+    return run(escalated, 'medium');
+  };
+}
+
+function openAiTelemetryModel(model: string): OpenAiTelemetryModel | null {
+  return ['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna'].includes(model)
+    ? model as OpenAiTelemetryModel
+    : null;
 }
 
 function toOpenAiMessage(message: DirectorMessage): OpenAI.Chat.Completions.ChatCompletionMessageParam {

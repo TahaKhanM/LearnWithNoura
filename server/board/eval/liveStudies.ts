@@ -1,6 +1,5 @@
 import type OpenAI from 'openai';
 import { validateOps, type BoardOp } from '../../../shared/boardOps.js';
-import { DirectorVisionVerdictSchema } from '../directorSchema.js';
 import { applyDirectorBoardPolicy } from '../directorSchema.js';
 import type { HeadlessSceneValidatorHandle } from '../../lesson/headlessSceneValidator.js';
 import { loadSeededDefects, materializeSketchCorpus, type SyntheticSketch } from './corpus.js';
@@ -13,6 +12,11 @@ import type {
   LiveSpendLedger,
   SpendUsageEvidence,
 } from './spendLedger.js';
+import {
+  VISION_AUDIT_EVAL_STATIC_PROMPT,
+  VISION_AUDIT_VERDICT_JSON_SCHEMA,
+  VisionAuditVerdictSchema,
+} from '../visionAuditService.js';
 
 export type LiveStudySpend = Pick<LiveSpendLedger, 'begin' | 'noteProviderCalls' | 'complete'>;
 
@@ -96,16 +100,6 @@ interface SketchStudyRow {
   correct: boolean;
   costUsd: number;
 }
-
-const VERDICT_SCHEMA = {
-  type: 'object',
-  additionalProperties: false,
-  properties: {
-    approved: { type: 'boolean' },
-    issues: { type: 'array', maxItems: 8, items: { type: 'string' } },
-  },
-  required: ['approved', 'issues'],
-} as const;
 
 const SKETCH_SCHEMA = {
   type: 'object',
@@ -213,12 +207,12 @@ export async function runLiveVisionAudit(input: {
           max_completion_tokens: 500,
           response_format: {
             type: 'json_schema',
-            json_schema: { name: 'noura_vision_audit', strict: true, schema: VERDICT_SCHEMA },
+            json_schema: { name: 'noura_vision_audit', strict: true, schema: VISION_AUDIT_VERDICT_JSON_SCHEMA },
           },
           messages: [
             {
               role: 'system',
-              content: 'Audit a synthetic educational board raster against its stated intent. Reject semantic mismatches including wrong shading, incorrect values, and reversed arrows. Approve a semantically correct raster. Return JSON only. Deterministic geometry checks have already passed.',
+              content: VISION_AUDIT_EVAL_STATIC_PROMPT,
             },
             {
               role: 'user',
@@ -461,7 +455,8 @@ async function assertDeterministicFixture(
 
 function parseVision(text: string): { approved: boolean; valid: boolean } {
   try {
-    const parsed = DirectorVisionVerdictSchema.parse(JSON.parse(text));
+    const parsed = VisionAuditVerdictSchema.parse(JSON.parse(text));
+    if (parsed.approved && parsed.issues.length > 0) throw new Error('contradictory audit verdict');
     return { approved: parsed.approved, valid: true };
   } catch {
     return { approved: false, valid: false };

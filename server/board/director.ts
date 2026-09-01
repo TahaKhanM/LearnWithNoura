@@ -74,6 +74,9 @@ export type DirectorResult =
     /** A safe orchestration-level fallback that must happen before any step
      * callback. Currently used only to preserve illustrations until M4. */
     fallback?: 'classic_illustration';
+    /** A pre-commit composition/transport failure may make one escalated
+     * retry; semantic audit rejections and post-commit failures may not. */
+    retryable?: boolean;
   };
 
 export interface IllustrationDirectorPort {

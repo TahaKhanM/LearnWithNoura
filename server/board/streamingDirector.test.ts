@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { DirectorSceneRequest } from './director.js';
 import type { DirectorStreamModelPort } from './directorStreamingService.js';
-import { streamVisual } from './streamingDirector.js';
+import { StreamingDirectorPrecommitError, streamVisual } from './streamingDirector.js';
 
 describe('streaming Board Director', () => {
   it('delivers a browser-validated first step before the stream completes', async () => {
@@ -57,6 +57,7 @@ describe('streaming Board Director', () => {
     expect(result).toEqual({
       ok: false,
       reasons: ['Step s2 failed browser preflight: collision'],
+      retryable: false,
     });
     expect(delivered).toEqual(['s1']);
   });
@@ -118,6 +119,23 @@ describe('streaming Board Director', () => {
     });
     expect(onStep).not.toHaveBeenCalled();
   });
+
+  it('records first-op telemetry only after the realtime precommit callback succeeds', async () => {
+    const timings = vi.fn();
+    const result = await streamVisual({
+      model: { streamProposal: () => oneChunk(JSON.stringify(scene())) },
+      validateScene: async () => ({ ok: true }),
+      renderScene: async () => null,
+      composition: { model: 'gpt-5.6-terra', reasoningEffort: 'low' },
+    }, request(), {
+      signal: new AbortController().signal,
+      onFirstValidatedOp: timings,
+      onStep: async () => { throw new StreamingDirectorPrecommitError('duplicate visible scene'); },
+    });
+    expect(result).toMatchObject({ ok: false, retryable: true });
+    expect(timings).not.toHaveBeenCalled();
+  });
+
 });
 
 function scene() {

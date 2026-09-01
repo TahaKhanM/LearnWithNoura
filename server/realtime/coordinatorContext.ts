@@ -5,6 +5,7 @@ import type { DeliveredTask } from '../../shared/lessonTurn.js';
 import type { LessonStage } from '../../shared/pedagogy.js';
 import type { BoardDirector } from '../board/director.js';
 import type { StreamingBoardDirector } from '../board/streamingDirector.js';
+import type { VisionAuditPort } from '../board/visionAudit.js';
 import type { LessonOrchestrationState } from '../lesson/orchestrator.js';
 import type { DomainRepository } from '../store/domain.js';
 import type { SessionTelemetryWriter } from '../session/telemetryWriter.js';
@@ -162,6 +163,8 @@ export interface CoordinatorContext {
    * wired — new-scene requests then fail closed with a clean rejection. */
   readonly directVisual: BoardDirector | null;
   readonly streamVisual: StreamingBoardDirector | null;
+  readonly visionAudit: VisionAuditPort | null;
+  readonly visionAuditBudgetMs: number;
   /** How long one storyboard step may await its visibility confirmation
    * (covers the previous beat's playback plus the draw-on animation). */
   readonly stepRevealTimeoutMs: number;
