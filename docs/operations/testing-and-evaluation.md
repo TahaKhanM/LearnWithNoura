@@ -120,6 +120,39 @@ there or present an offline fixture winner as an adopted model. The completed
 M0 decision is documented in
 `docs/architecture/2026-09-01-drawing-model-bakeoff-decision.md`.
 
+## Drawing M1 paired delivery replay
+
+`npm run test:director-m1-eval` verifies two committed artifacts against the
+pinned M0 Terra-low source:
+
+- `2026-09-01-drawing-m1-pipeline-browser-observations.json` is the raw local
+  browser ledger (atomic verdicts, every cumulative step verdict, render
+  hashes, final loopback origin, and external request count);
+- `2026-09-01-drawing-m1-pipeline-study.json` is the derived 360-row paired
+  delivery report.
+
+The default verifier makes no browser or provider call. It validates source
+hashes, the policy-pinned browser-ledger hash, the full row matrix,
+diagram-only validity tolerance, complete 24/24 blind-grade reuse, exact final
+ops/raster parity, browser observation mappings, and every aggregate.
+
+This is a same-proposal delivery-path comparison, not a generator/model A/B.
+Its latency result is a conservative provider-critical-path readiness cut,
+not actual learner-browser first paint. The report intentionally has
+`m1AcceptancePass: false`: full first-pass validity is 329/360 (91.3889%),
+below the unchanged 95% gate, and actual `ops_presented` latency remains a
+separate acceptance requirement.
+
+Provider-free regeneration accepts only a loopback `/dev/board` URL, aborts
+non-loopback HTTP/WebSocket traffic, verifies the final origin/path, and must
+record `externalRequestCount: 0`:
+
+```bash
+npm run client -- --host 127.0.0.1 --port 5180
+npm run test:director-m1-eval -- --regenerate \
+  --harness-url http://127.0.0.1:5180/dev/board
+```
+
 Voice-interruption unit/integration rows cover short loud noise plus server VAD,
 sustained local energy without server confirmation, adaptive room-noise
 calibration, sustained speech with both detectors, one-turn high-eagerness
