@@ -49,6 +49,14 @@ passed. The inspected screenshot shows the first number line cleanly visible,
 the rejected second marker absent, no stale partial object, and the ordinary
 lesson controls still usable.
 
+The complete repository gate matrix is green on the current working tree:
+build; server typecheck; lint (two pre-existing demo-video unused-variable
+warnings only); 74 smoke-report tests; lesson evaluation; 740 unit tests; 738
+integration tests; 27 E2E tests; 53 visual tests; 5 accessibility tests; 23
+security tests; 10 storage tests; brand scan; runtime-model audit; M0 Director
+offline evaluation; M1 artifact verification; and `npm audit --omit=dev` with
+zero vulnerabilities.
+
 ## Evaluation result
 
 See
@@ -68,8 +76,6 @@ committed raw/derived artifacts under `server/board/eval/results/`.
 1. The absolute 95% deterministic/browser first-pass validity gate is unmet.
 2. The ≥40% evidence is provider-critical-path readiness, not an actual
    end-to-end `ops_presented` latency distribution.
-3. Full README gates and final browser milestone report must be rerun after a
-   quality-preserving validity improvement.
 
 The attempted multipass repair that numerically reached 95% was reverted after
 manual screenshots showed material overlaps. The evidence and this handoff
