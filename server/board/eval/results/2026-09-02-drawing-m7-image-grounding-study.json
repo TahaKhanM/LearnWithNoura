@@ -1,0 +1,1302 @@
+{
+  "schemaVersion": "1.0.0",
+  "evidenceMode": "authorized_synthetic_image_grounding_microstudy",
+  "generatedAt": "2026-09-02T15:54:57.091Z",
+  "fixtureSha256": "221564272447a481f2502988b8756482f869550ac3a7fb2cfcd8aa3753d60833",
+  "model": "gpt-5.6-luna",
+  "reasoningEffort": "low",
+  "plan": {
+    "syntheticItems": 6,
+    "canary": {
+      "proposals": 2,
+      "correctSelfChecks": 2,
+      "seededDefectChecks": 1,
+      "maximumCalls": 5,
+      "conservativeCostUsd": 0.15
+    },
+    "full": {
+      "proposals": 6,
+      "correctSelfChecks": 6,
+      "seededDefectChecks": 5,
+      "maximumCalls": 17,
+      "conservativeCostUsd": 0.51
+    },
+    "capUsd": 0.6,
+    "fits": true
+  },
+  "stoppedAfterCanary": false,
+  "observations": {
+    "proposals": [
+      {
+        "itemId": "axle",
+        "selector": {
+          "type": "FragmentSelector",
+          "unit": "percent",
+          "x": 0.39,
+          "y": 0.4583,
+          "w": 0.22,
+          "h": 0.05
+        },
+        "confidence": 0.99
+      },
+      {
+        "itemId": "fraction-denominator",
+        "selector": {
+          "type": "FragmentSelector",
+          "unit": "percent",
+          "x": 0.728,
+          "y": 0.395,
+          "w": 0.024,
+          "h": 0.055
+        },
+        "confidence": 0.99
+      },
+      {
+        "itemId": "cell-organelle",
+        "selector": {
+          "type": "FragmentSelector",
+          "unit": "percent",
+          "x": 0.542,
+          "y": 0.453,
+          "w": 0.216,
+          "h": 0.195
+        },
+        "confidence": 0.99
+      },
+      {
+        "itemId": "angle-arc",
+        "selector": {
+          "type": "FragmentSelector",
+          "unit": "percent",
+          "x": 0.45,
+          "y": 0.215,
+          "w": 0.1,
+          "h": 0.05
+        },
+        "confidence": 0.99
+      },
+      {
+        "itemId": "timeline-event",
+        "selector": {
+          "type": "FragmentSelector",
+          "unit": "percent",
+          "x": 0.365,
+          "y": 0.373,
+          "w": 0.271,
+          "h": 0.16
+        },
+        "confidence": 0.99
+      },
+      {
+        "itemId": "graph-intersection",
+        "selector": {
+          "type": "PointSelector",
+          "x": 0.51,
+          "y": 0.45
+        },
+        "confidence": 0.99
+      }
+    ],
+    "correctSelfChecks": [
+      {
+        "itemId": "axle",
+        "outcome": "approved"
+      },
+      {
+        "itemId": "fraction-denominator",
+        "outcome": "approved"
+      },
+      {
+        "itemId": "cell-organelle",
+        "outcome": "approved"
+      },
+      {
+        "itemId": "angle-arc",
+        "outcome": "approved"
+      },
+      {
+        "itemId": "timeline-event",
+        "outcome": "approved"
+      },
+      {
+        "itemId": "graph-intersection",
+        "outcome": "approved"
+      }
+    ],
+    "defectSelfChecks": [
+      {
+        "itemId": "axle",
+        "outcome": "rejected"
+      },
+      {
+        "itemId": "fraction-denominator",
+        "outcome": "rejected"
+      },
+      {
+        "itemId": "cell-organelle",
+        "outcome": "approved"
+      },
+      {
+        "itemId": "angle-arc",
+        "outcome": "rejected"
+      },
+      {
+        "itemId": "timeline-event",
+        "outcome": "rejected"
+      }
+    ],
+    "malformedReplies": 0
+  },
+  "report": {
+    "schemaVersion": "1.0.0",
+    "evidenceMode": "authorized_synthetic_image_grounding_microstudy",
+    "syntheticItems": 6,
+    "metrics": {
+      "pointingAccuracy": 0.8333333333333334,
+      "correctSelfCheckFalseRejectRate": 0,
+      "seededDefectCatchRate": 0.8,
+      "tapFallbackRate": 0,
+      "malformedReplyRate": 0
+    },
+    "gates": {
+      "pointingAccuracy": true,
+      "correctSelfCheckFalseRejectRate": true,
+      "seededDefectCatchRate": true,
+      "malformedReplyRate": true
+    },
+    "accepted": true
+  },
+  "ledger": {
+    "schemaVersion": "1.0.0",
+    "runId": "m7-image-grounding-mtka0ki8",
+    "maxSpendUsd": 0.6,
+    "providerCalls": 17,
+    "observedCostUsd": 0.005022,
+    "accountedCostUsd": 0.51,
+    "openReservationUsd": 0,
+    "entries": [
+      {
+        "sequence": 1,
+        "runId": "m7-image-grounding-mtka0ki8",
+        "callId": "m7-image-grounding-mtka0ki8:call-1",
+        "status": "reserved",
+        "phase": "image_grounding",
+        "models": [
+          "gpt-5.6-luna"
+        ],
+        "reserveUsd": 0.03,
+        "providerCallCount": 0,
+        "observedCostUsd": 0,
+        "upperBoundUsd": 0.03,
+        "usage": [],
+        "cumulativeProviderCalls": 0,
+        "cumulativeObservedCostUsd": 0,
+        "cumulativeAccountedCostUsd": 0,
+        "openReservationUsd": 0.03
+      },
+      {
+        "sequence": 2,
+        "runId": "m7-image-grounding-mtka0ki8",
+        "callId": "m7-image-grounding-mtka0ki8:call-1",
+        "status": "started",
+        "phase": "image_grounding",
+        "models": [
+          "gpt-5.6-luna"
+        ],
+        "reserveUsd": 0.03,
+        "providerCallCount": 1,
+        "observedCostUsd": 0,
+        "upperBoundUsd": 0.03,
+        "usage": [],
+        "cumulativeProviderCalls": 1,
+        "cumulativeObservedCostUsd": 0,
+        "cumulativeAccountedCostUsd": 0,
+        "openReservationUsd": 0.03
+      },
+      {
+        "sequence": 3,
+        "runId": "m7-image-grounding-mtka0ki8",
+        "callId": "m7-image-grounding-mtka0ki8:call-1",
+        "status": "completed",
+        "phase": "image_grounding",
+        "models": [
+          "gpt-5.6-luna"
+        ],
+        "reserveUsd": 0.03,
+        "providerCallCount": 1,
+        "observedCostUsd": 0.0003124,
+        "upperBoundUsd": 0.03,
+        "usage": [
+          {
+            "model": "gpt-5.6-luna",
+            "inputTokens": 998,
+            "cachedInputTokens": 0,
+            "cacheWriteTokens": 0,
+            "outputTokens": 94,
+            "usageComplete": true
+          }
+        ],
+        "cumulativeProviderCalls": 1,
+        "cumulativeObservedCostUsd": 0.0003124,
+        "cumulativeAccountedCostUsd": 0.03,
+        "openReservationUsd": 0
+      },
+      {
+        "sequence": 4,
+        "runId": "m7-image-grounding-mtka0ki8",
+        "callId": "m7-image-grounding-mtka0ki8:call-2",
+        "status": "reserved",
+        "phase": "image_grounding",
+        "models": [
+          "gpt-5.6-luna"
+        ],
+        "reserveUsd": 0.03,
+        "providerCallCount": 0,
+        "observedCostUsd": 0,
+        "upperBoundUsd": 0.03,
+        "usage": [],
+        "cumulativeProviderCalls": 1,
+        "cumulativeObservedCostUsd": 0.0003124,
+        "cumulativeAccountedCostUsd": 0.03,
+        "openReservationUsd": 0.03
+      },
+      {
+        "sequence": 5,
+        "runId": "m7-image-grounding-mtka0ki8",
+        "callId": "m7-image-grounding-mtka0ki8:call-2",
+        "status": "started",
+        "phase": "image_grounding",
+        "models": [
+          "gpt-5.6-luna"
+        ],
+        "reserveUsd": 0.03,
+        "providerCallCount": 1,
+        "observedCostUsd": 0,
+        "upperBoundUsd": 0.03,
+        "usage": [],
+        "cumulativeProviderCalls": 2,
+        "cumulativeObservedCostUsd": 0.0003124,
+        "cumulativeAccountedCostUsd": 0.03,
+        "openReservationUsd": 0.03
+      },
+      {
+        "sequence": 6,
+        "runId": "m7-image-grounding-mtka0ki8",
+        "callId": "m7-image-grounding-mtka0ki8:call-2",
+        "status": "completed",
+        "phase": "image_grounding",
+        "models": [
+          "gpt-5.6-luna"
+        ],
+        "reserveUsd": 0.03,
+        "providerCallCount": 1,
+        "observedCostUsd": 0.000256,
+        "upperBoundUsd": 0.03,
+        "usage": [
+          {
+            "model": "gpt-5.6-luna",
+            "inputTokens": 908,
+            "cachedInputTokens": 0,
+            "cacheWriteTokens": 0,
+            "outputTokens": 62,
+            "usageComplete": true
+          }
+        ],
+        "cumulativeProviderCalls": 2,
+        "cumulativeObservedCostUsd": 0.0005684,
+        "cumulativeAccountedCostUsd": 0.06,
+        "openReservationUsd": 0
+      },
+      {
+        "sequence": 7,
+        "runId": "m7-image-grounding-mtka0ki8",
+        "callId": "m7-image-grounding-mtka0ki8:call-3",
+        "status": "reserved",
+        "phase": "image_grounding",
+        "models": [
+          "gpt-5.6-luna"
+        ],
+        "reserveUsd": 0.03,
+        "providerCallCount": 0,
+        "observedCostUsd": 0,
+        "upperBoundUsd": 0.03,
+        "usage": [],
+        "cumulativeProviderCalls": 2,
+        "cumulativeObservedCostUsd": 0.0005684,
+        "cumulativeAccountedCostUsd": 0.06,
+        "openReservationUsd": 0.03
+      },
+      {
+        "sequence": 8,
+        "runId": "m7-image-grounding-mtka0ki8",
+        "callId": "m7-image-grounding-mtka0ki8:call-3",
+        "status": "started",
+        "phase": "image_grounding",
+        "models": [
+          "gpt-5.6-luna"
+        ],
+        "reserveUsd": 0.03,
+        "providerCallCount": 1,
+        "observedCostUsd": 0,
+        "upperBoundUsd": 0.03,
+        "usage": [],
+        "cumulativeProviderCalls": 3,
+        "cumulativeObservedCostUsd": 0.0005684,
+        "cumulativeAccountedCostUsd": 0.06,
+        "openReservationUsd": 0.03
+      },
+      {
+        "sequence": 9,
+        "runId": "m7-image-grounding-mtka0ki8",
+        "callId": "m7-image-grounding-mtka0ki8:call-3",
+        "status": "completed",
+        "phase": "image_grounding",
+        "models": [
+          "gpt-5.6-luna"
+        ],
+        "reserveUsd": 0.03,
+        "providerCallCount": 1,
+        "observedCostUsd": 0.0003216,
+        "upperBoundUsd": 0.03,
+        "usage": [
+          {
+            "model": "gpt-5.6-luna",
+            "inputTokens": 1002,
+            "cachedInputTokens": 0,
+            "cacheWriteTokens": 0,
+            "outputTokens": 101,
+            "usageComplete": true
+          }
+        ],
+        "cumulativeProviderCalls": 3,
+        "cumulativeObservedCostUsd": 0.00089,
+        "cumulativeAccountedCostUsd": 0.09,
+        "openReservationUsd": 0
+      },
+      {
+        "sequence": 10,
+        "runId": "m7-image-grounding-mtka0ki8",
+        "callId": "m7-image-grounding-mtka0ki8:call-4",
+        "status": "reserved",
+        "phase": "image_grounding",
+        "models": [
+          "gpt-5.6-luna"
+        ],
+        "reserveUsd": 0.03,
+        "providerCallCount": 0,
+        "observedCostUsd": 0,
+        "upperBoundUsd": 0.03,
+        "usage": [],
+        "cumulativeProviderCalls": 3,
+        "cumulativeObservedCostUsd": 0.00089,
+        "cumulativeAccountedCostUsd": 0.09,
+        "openReservationUsd": 0.03
+      },
+      {
+        "sequence": 11,
+        "runId": "m7-image-grounding-mtka0ki8",
+        "callId": "m7-image-grounding-mtka0ki8:call-4",
+        "status": "started",
+        "phase": "image_grounding",
+        "models": [
+          "gpt-5.6-luna"
+        ],
+        "reserveUsd": 0.03,
+        "providerCallCount": 1,
+        "observedCostUsd": 0,
+        "upperBoundUsd": 0.03,
+        "usage": [],
+        "cumulativeProviderCalls": 4,
+        "cumulativeObservedCostUsd": 0.00089,
+        "cumulativeAccountedCostUsd": 0.09,
+        "openReservationUsd": 0.03
+      },
+      {
+        "sequence": 12,
+        "runId": "m7-image-grounding-mtka0ki8",
+        "callId": "m7-image-grounding-mtka0ki8:call-4",
+        "status": "completed",
+        "phase": "image_grounding",
+        "models": [
+          "gpt-5.6-luna"
+        ],
+        "reserveUsd": 0.03,
+        "providerCallCount": 1,
+        "observedCostUsd": 0.000205,
+        "upperBoundUsd": 0.03,
+        "usage": [
+          {
+            "model": "gpt-5.6-luna",
+            "inputTokens": 911,
+            "cachedInputTokens": 0,
+            "cacheWriteTokens": 0,
+            "outputTokens": 19,
+            "usageComplete": true
+          }
+        ],
+        "cumulativeProviderCalls": 4,
+        "cumulativeObservedCostUsd": 0.001095,
+        "cumulativeAccountedCostUsd": 0.12,
+        "openReservationUsd": 0
+      },
+      {
+        "sequence": 13,
+        "runId": "m7-image-grounding-mtka0ki8",
+        "callId": "m7-image-grounding-mtka0ki8:call-5",
+        "status": "reserved",
+        "phase": "image_grounding",
+        "models": [
+          "gpt-5.6-luna"
+        ],
+        "reserveUsd": 0.03,
+        "providerCallCount": 0,
+        "observedCostUsd": 0,
+        "upperBoundUsd": 0.03,
+        "usage": [],
+        "cumulativeProviderCalls": 4,
+        "cumulativeObservedCostUsd": 0.001095,
+        "cumulativeAccountedCostUsd": 0.12,
+        "openReservationUsd": 0.03
+      },
+      {
+        "sequence": 14,
+        "runId": "m7-image-grounding-mtka0ki8",
+        "callId": "m7-image-grounding-mtka0ki8:call-5",
+        "status": "started",
+        "phase": "image_grounding",
+        "models": [
+          "gpt-5.6-luna"
+        ],
+        "reserveUsd": 0.03,
+        "providerCallCount": 1,
+        "observedCostUsd": 0,
+        "upperBoundUsd": 0.03,
+        "usage": [],
+        "cumulativeProviderCalls": 5,
+        "cumulativeObservedCostUsd": 0.001095,
+        "cumulativeAccountedCostUsd": 0.12,
+        "openReservationUsd": 0.03
+      },
+      {
+        "sequence": 15,
+        "runId": "m7-image-grounding-mtka0ki8",
+        "callId": "m7-image-grounding-mtka0ki8:call-5",
+        "status": "completed",
+        "phase": "image_grounding",
+        "models": [
+          "gpt-5.6-luna"
+        ],
+        "reserveUsd": 0.03,
+        "providerCallCount": 1,
+        "observedCostUsd": 0.000256,
+        "upperBoundUsd": 0.03,
+        "usage": [
+          {
+            "model": "gpt-5.6-luna",
+            "inputTokens": 908,
+            "cachedInputTokens": 0,
+            "cacheWriteTokens": 0,
+            "outputTokens": 62,
+            "usageComplete": true
+          }
+        ],
+        "cumulativeProviderCalls": 5,
+        "cumulativeObservedCostUsd": 0.001351,
+        "cumulativeAccountedCostUsd": 0.15,
+        "openReservationUsd": 0
+      },
+      {
+        "sequence": 16,
+        "runId": "m7-image-grounding-mtka0ki8",
+        "callId": "m7-image-grounding-mtka0ki8:call-6",
+        "status": "reserved",
+        "phase": "image_grounding",
+        "models": [
+          "gpt-5.6-luna"
+        ],
+        "reserveUsd": 0.03,
+        "providerCallCount": 0,
+        "observedCostUsd": 0,
+        "upperBoundUsd": 0.03,
+        "usage": [],
+        "cumulativeProviderCalls": 5,
+        "cumulativeObservedCostUsd": 0.001351,
+        "cumulativeAccountedCostUsd": 0.15,
+        "openReservationUsd": 0.03
+      },
+      {
+        "sequence": 17,
+        "runId": "m7-image-grounding-mtka0ki8",
+        "callId": "m7-image-grounding-mtka0ki8:call-6",
+        "status": "started",
+        "phase": "image_grounding",
+        "models": [
+          "gpt-5.6-luna"
+        ],
+        "reserveUsd": 0.03,
+        "providerCallCount": 1,
+        "observedCostUsd": 0,
+        "upperBoundUsd": 0.03,
+        "usage": [],
+        "cumulativeProviderCalls": 6,
+        "cumulativeObservedCostUsd": 0.001351,
+        "cumulativeAccountedCostUsd": 0.15,
+        "openReservationUsd": 0.03
+      },
+      {
+        "sequence": 18,
+        "runId": "m7-image-grounding-mtka0ki8",
+        "callId": "m7-image-grounding-mtka0ki8:call-6",
+        "status": "completed",
+        "phase": "image_grounding",
+        "models": [
+          "gpt-5.6-luna"
+        ],
+        "reserveUsd": 0.03,
+        "providerCallCount": 1,
+        "observedCostUsd": 0.0003154,
+        "upperBoundUsd": 0.03,
+        "usage": [
+          {
+            "model": "gpt-5.6-luna",
+            "inputTokens": 1001,
+            "cachedInputTokens": 0,
+            "cacheWriteTokens": 0,
+            "outputTokens": 96,
+            "usageComplete": true
+          }
+        ],
+        "cumulativeProviderCalls": 6,
+        "cumulativeObservedCostUsd": 0.0016664,
+        "cumulativeAccountedCostUsd": 0.18,
+        "openReservationUsd": 0
+      },
+      {
+        "sequence": 19,
+        "runId": "m7-image-grounding-mtka0ki8",
+        "callId": "m7-image-grounding-mtka0ki8:call-7",
+        "status": "reserved",
+        "phase": "image_grounding",
+        "models": [
+          "gpt-5.6-luna"
+        ],
+        "reserveUsd": 0.03,
+        "providerCallCount": 0,
+        "observedCostUsd": 0,
+        "upperBoundUsd": 0.03,
+        "usage": [],
+        "cumulativeProviderCalls": 6,
+        "cumulativeObservedCostUsd": 0.0016664,
+        "cumulativeAccountedCostUsd": 0.18,
+        "openReservationUsd": 0.03
+      },
+      {
+        "sequence": 20,
+        "runId": "m7-image-grounding-mtka0ki8",
+        "callId": "m7-image-grounding-mtka0ki8:call-7",
+        "status": "started",
+        "phase": "image_grounding",
+        "models": [
+          "gpt-5.6-luna"
+        ],
+        "reserveUsd": 0.03,
+        "providerCallCount": 1,
+        "observedCostUsd": 0,
+        "upperBoundUsd": 0.03,
+        "usage": [],
+        "cumulativeProviderCalls": 7,
+        "cumulativeObservedCostUsd": 0.0016664,
+        "cumulativeAccountedCostUsd": 0.18,
+        "openReservationUsd": 0.03
+      },
+      {
+        "sequence": 21,
+        "runId": "m7-image-grounding-mtka0ki8",
+        "callId": "m7-image-grounding-mtka0ki8:call-7",
+        "status": "completed",
+        "phase": "image_grounding",
+        "models": [
+          "gpt-5.6-luna"
+        ],
+        "reserveUsd": 0.03,
+        "providerCallCount": 1,
+        "observedCostUsd": 0.0002672,
+        "upperBoundUsd": 0.03,
+        "usage": [
+          {
+            "model": "gpt-5.6-luna",
+            "inputTokens": 910,
+            "cachedInputTokens": 0,
+            "cacheWriteTokens": 0,
+            "outputTokens": 71,
+            "usageComplete": true
+          }
+        ],
+        "cumulativeProviderCalls": 7,
+        "cumulativeObservedCostUsd": 0.0019336,
+        "cumulativeAccountedCostUsd": 0.21,
+        "openReservationUsd": 0
+      },
+      {
+        "sequence": 22,
+        "runId": "m7-image-grounding-mtka0ki8",
+        "callId": "m7-image-grounding-mtka0ki8:call-8",
+        "status": "reserved",
+        "phase": "image_grounding",
+        "models": [
+          "gpt-5.6-luna"
+        ],
+        "reserveUsd": 0.03,
+        "providerCallCount": 0,
+        "observedCostUsd": 0,
+        "upperBoundUsd": 0.03,
+        "usage": [],
+        "cumulativeProviderCalls": 7,
+        "cumulativeObservedCostUsd": 0.0019336,
+        "cumulativeAccountedCostUsd": 0.21,
+        "openReservationUsd": 0.03
+      },
+      {
+        "sequence": 23,
+        "runId": "m7-image-grounding-mtka0ki8",
+        "callId": "m7-image-grounding-mtka0ki8:call-8",
+        "status": "started",
+        "phase": "image_grounding",
+        "models": [
+          "gpt-5.6-luna"
+        ],
+        "reserveUsd": 0.03,
+        "providerCallCount": 1,
+        "observedCostUsd": 0,
+        "upperBoundUsd": 0.03,
+        "usage": [],
+        "cumulativeProviderCalls": 8,
+        "cumulativeObservedCostUsd": 0.0019336,
+        "cumulativeAccountedCostUsd": 0.21,
+        "openReservationUsd": 0.03
+      },
+      {
+        "sequence": 24,
+        "runId": "m7-image-grounding-mtka0ki8",
+        "callId": "m7-image-grounding-mtka0ki8:call-8",
+        "status": "completed",
+        "phase": "image_grounding",
+        "models": [
+          "gpt-5.6-luna"
+        ],
+        "reserveUsd": 0.03,
+        "providerCallCount": 1,
+        "observedCostUsd": 0.0003354,
+        "upperBoundUsd": 0.03,
+        "usage": [
+          {
+            "model": "gpt-5.6-luna",
+            "inputTokens": 999,
+            "cachedInputTokens": 0,
+            "cacheWriteTokens": 0,
+            "outputTokens": 113,
+            "usageComplete": true
+          }
+        ],
+        "cumulativeProviderCalls": 8,
+        "cumulativeObservedCostUsd": 0.002269,
+        "cumulativeAccountedCostUsd": 0.24,
+        "openReservationUsd": 0
+      },
+      {
+        "sequence": 25,
+        "runId": "m7-image-grounding-mtka0ki8",
+        "callId": "m7-image-grounding-mtka0ki8:call-9",
+        "status": "reserved",
+        "phase": "image_grounding",
+        "models": [
+          "gpt-5.6-luna"
+        ],
+        "reserveUsd": 0.03,
+        "providerCallCount": 0,
+        "observedCostUsd": 0,
+        "upperBoundUsd": 0.03,
+        "usage": [],
+        "cumulativeProviderCalls": 8,
+        "cumulativeObservedCostUsd": 0.002269,
+        "cumulativeAccountedCostUsd": 0.24,
+        "openReservationUsd": 0.03
+      },
+      {
+        "sequence": 26,
+        "runId": "m7-image-grounding-mtka0ki8",
+        "callId": "m7-image-grounding-mtka0ki8:call-9",
+        "status": "started",
+        "phase": "image_grounding",
+        "models": [
+          "gpt-5.6-luna"
+        ],
+        "reserveUsd": 0.03,
+        "providerCallCount": 1,
+        "observedCostUsd": 0,
+        "upperBoundUsd": 0.03,
+        "usage": [],
+        "cumulativeProviderCalls": 9,
+        "cumulativeObservedCostUsd": 0.002269,
+        "cumulativeAccountedCostUsd": 0.24,
+        "openReservationUsd": 0.03
+      },
+      {
+        "sequence": 27,
+        "runId": "m7-image-grounding-mtka0ki8",
+        "callId": "m7-image-grounding-mtka0ki8:call-9",
+        "status": "completed",
+        "phase": "image_grounding",
+        "models": [
+          "gpt-5.6-luna"
+        ],
+        "reserveUsd": 0.03,
+        "providerCallCount": 1,
+        "observedCostUsd": 0.0002046,
+        "upperBoundUsd": 0.03,
+        "usage": [
+          {
+            "model": "gpt-5.6-luna",
+            "inputTokens": 909,
+            "cachedInputTokens": 0,
+            "cacheWriteTokens": 0,
+            "outputTokens": 19,
+            "usageComplete": true
+          }
+        ],
+        "cumulativeProviderCalls": 9,
+        "cumulativeObservedCostUsd": 0.0024736,
+        "cumulativeAccountedCostUsd": 0.27,
+        "openReservationUsd": 0
+      },
+      {
+        "sequence": 28,
+        "runId": "m7-image-grounding-mtka0ki8",
+        "callId": "m7-image-grounding-mtka0ki8:call-10",
+        "status": "reserved",
+        "phase": "image_grounding",
+        "models": [
+          "gpt-5.6-luna"
+        ],
+        "reserveUsd": 0.03,
+        "providerCallCount": 0,
+        "observedCostUsd": 0,
+        "upperBoundUsd": 0.03,
+        "usage": [],
+        "cumulativeProviderCalls": 9,
+        "cumulativeObservedCostUsd": 0.0024736,
+        "cumulativeAccountedCostUsd": 0.27,
+        "openReservationUsd": 0.03
+      },
+      {
+        "sequence": 29,
+        "runId": "m7-image-grounding-mtka0ki8",
+        "callId": "m7-image-grounding-mtka0ki8:call-10",
+        "status": "started",
+        "phase": "image_grounding",
+        "models": [
+          "gpt-5.6-luna"
+        ],
+        "reserveUsd": 0.03,
+        "providerCallCount": 1,
+        "observedCostUsd": 0,
+        "upperBoundUsd": 0.03,
+        "usage": [],
+        "cumulativeProviderCalls": 10,
+        "cumulativeObservedCostUsd": 0.0024736,
+        "cumulativeAccountedCostUsd": 0.27,
+        "openReservationUsd": 0.03
+      },
+      {
+        "sequence": 30,
+        "runId": "m7-image-grounding-mtka0ki8",
+        "callId": "m7-image-grounding-mtka0ki8:call-10",
+        "status": "completed",
+        "phase": "image_grounding",
+        "models": [
+          "gpt-5.6-luna"
+        ],
+        "reserveUsd": 0.03,
+        "providerCallCount": 1,
+        "observedCostUsd": 0.0003666,
+        "upperBoundUsd": 0.03,
+        "usage": [
+          {
+            "model": "gpt-5.6-luna",
+            "inputTokens": 999,
+            "cachedInputTokens": 0,
+            "cacheWriteTokens": 0,
+            "outputTokens": 139,
+            "usageComplete": true
+          }
+        ],
+        "cumulativeProviderCalls": 10,
+        "cumulativeObservedCostUsd": 0.0028402,
+        "cumulativeAccountedCostUsd": 0.3,
+        "openReservationUsd": 0
+      },
+      {
+        "sequence": 31,
+        "runId": "m7-image-grounding-mtka0ki8",
+        "callId": "m7-image-grounding-mtka0ki8:call-11",
+        "status": "reserved",
+        "phase": "image_grounding",
+        "models": [
+          "gpt-5.6-luna"
+        ],
+        "reserveUsd": 0.03,
+        "providerCallCount": 0,
+        "observedCostUsd": 0,
+        "upperBoundUsd": 0.03,
+        "usage": [],
+        "cumulativeProviderCalls": 10,
+        "cumulativeObservedCostUsd": 0.0028402,
+        "cumulativeAccountedCostUsd": 0.3,
+        "openReservationUsd": 0.03
+      },
+      {
+        "sequence": 32,
+        "runId": "m7-image-grounding-mtka0ki8",
+        "callId": "m7-image-grounding-mtka0ki8:call-11",
+        "status": "started",
+        "phase": "image_grounding",
+        "models": [
+          "gpt-5.6-luna"
+        ],
+        "reserveUsd": 0.03,
+        "providerCallCount": 1,
+        "observedCostUsd": 0,
+        "upperBoundUsd": 0.03,
+        "usage": [],
+        "cumulativeProviderCalls": 11,
+        "cumulativeObservedCostUsd": 0.0028402,
+        "cumulativeAccountedCostUsd": 0.3,
+        "openReservationUsd": 0.03
+      },
+      {
+        "sequence": 33,
+        "runId": "m7-image-grounding-mtka0ki8",
+        "callId": "m7-image-grounding-mtka0ki8:call-11",
+        "status": "completed",
+        "phase": "image_grounding",
+        "models": [
+          "gpt-5.6-luna"
+        ],
+        "reserveUsd": 0.03,
+        "providerCallCount": 1,
+        "observedCostUsd": 0.0002394,
+        "upperBoundUsd": 0.03,
+        "usage": [
+          {
+            "model": "gpt-5.6-luna",
+            "inputTokens": 909,
+            "cachedInputTokens": 0,
+            "cacheWriteTokens": 0,
+            "outputTokens": 48,
+            "usageComplete": true
+          }
+        ],
+        "cumulativeProviderCalls": 11,
+        "cumulativeObservedCostUsd": 0.0030796,
+        "cumulativeAccountedCostUsd": 0.33,
+        "openReservationUsd": 0
+      },
+      {
+        "sequence": 34,
+        "runId": "m7-image-grounding-mtka0ki8",
+        "callId": "m7-image-grounding-mtka0ki8:call-12",
+        "status": "reserved",
+        "phase": "image_grounding",
+        "models": [
+          "gpt-5.6-luna"
+        ],
+        "reserveUsd": 0.03,
+        "providerCallCount": 0,
+        "observedCostUsd": 0,
+        "upperBoundUsd": 0.03,
+        "usage": [],
+        "cumulativeProviderCalls": 11,
+        "cumulativeObservedCostUsd": 0.0030796,
+        "cumulativeAccountedCostUsd": 0.33,
+        "openReservationUsd": 0.03
+      },
+      {
+        "sequence": 35,
+        "runId": "m7-image-grounding-mtka0ki8",
+        "callId": "m7-image-grounding-mtka0ki8:call-12",
+        "status": "started",
+        "phase": "image_grounding",
+        "models": [
+          "gpt-5.6-luna"
+        ],
+        "reserveUsd": 0.03,
+        "providerCallCount": 1,
+        "observedCostUsd": 0,
+        "upperBoundUsd": 0.03,
+        "usage": [],
+        "cumulativeProviderCalls": 12,
+        "cumulativeObservedCostUsd": 0.0030796,
+        "cumulativeAccountedCostUsd": 0.33,
+        "openReservationUsd": 0.03
+      },
+      {
+        "sequence": 36,
+        "runId": "m7-image-grounding-mtka0ki8",
+        "callId": "m7-image-grounding-mtka0ki8:call-12",
+        "status": "completed",
+        "phase": "image_grounding",
+        "models": [
+          "gpt-5.6-luna"
+        ],
+        "reserveUsd": 0.03,
+        "providerCallCount": 1,
+        "observedCostUsd": 0.00029,
+        "upperBoundUsd": 0.03,
+        "usage": [
+          {
+            "model": "gpt-5.6-luna",
+            "inputTokens": 1000,
+            "cachedInputTokens": 0,
+            "cacheWriteTokens": 0,
+            "outputTokens": 75,
+            "usageComplete": true
+          }
+        ],
+        "cumulativeProviderCalls": 12,
+        "cumulativeObservedCostUsd": 0.0033696,
+        "cumulativeAccountedCostUsd": 0.36,
+        "openReservationUsd": 0
+      },
+      {
+        "sequence": 37,
+        "runId": "m7-image-grounding-mtka0ki8",
+        "callId": "m7-image-grounding-mtka0ki8:call-13",
+        "status": "reserved",
+        "phase": "image_grounding",
+        "models": [
+          "gpt-5.6-luna"
+        ],
+        "reserveUsd": 0.03,
+        "providerCallCount": 0,
+        "observedCostUsd": 0,
+        "upperBoundUsd": 0.03,
+        "usage": [],
+        "cumulativeProviderCalls": 12,
+        "cumulativeObservedCostUsd": 0.0033696,
+        "cumulativeAccountedCostUsd": 0.36,
+        "openReservationUsd": 0.03
+      },
+      {
+        "sequence": 38,
+        "runId": "m7-image-grounding-mtka0ki8",
+        "callId": "m7-image-grounding-mtka0ki8:call-13",
+        "status": "started",
+        "phase": "image_grounding",
+        "models": [
+          "gpt-5.6-luna"
+        ],
+        "reserveUsd": 0.03,
+        "providerCallCount": 1,
+        "observedCostUsd": 0,
+        "upperBoundUsd": 0.03,
+        "usage": [],
+        "cumulativeProviderCalls": 13,
+        "cumulativeObservedCostUsd": 0.0033696,
+        "cumulativeAccountedCostUsd": 0.36,
+        "openReservationUsd": 0.03
+      },
+      {
+        "sequence": 39,
+        "runId": "m7-image-grounding-mtka0ki8",
+        "callId": "m7-image-grounding-mtka0ki8:call-13",
+        "status": "completed",
+        "phase": "image_grounding",
+        "models": [
+          "gpt-5.6-luna"
+        ],
+        "reserveUsd": 0.03,
+        "providerCallCount": 1,
+        "observedCostUsd": 0.0002706,
+        "upperBoundUsd": 0.03,
+        "usage": [
+          {
+            "model": "gpt-5.6-luna",
+            "inputTokens": 909,
+            "cachedInputTokens": 0,
+            "cacheWriteTokens": 0,
+            "outputTokens": 74,
+            "usageComplete": true
+          }
+        ],
+        "cumulativeProviderCalls": 13,
+        "cumulativeObservedCostUsd": 0.0036402,
+        "cumulativeAccountedCostUsd": 0.39,
+        "openReservationUsd": 0
+      },
+      {
+        "sequence": 40,
+        "runId": "m7-image-grounding-mtka0ki8",
+        "callId": "m7-image-grounding-mtka0ki8:call-14",
+        "status": "reserved",
+        "phase": "image_grounding",
+        "models": [
+          "gpt-5.6-luna"
+        ],
+        "reserveUsd": 0.03,
+        "providerCallCount": 0,
+        "observedCostUsd": 0,
+        "upperBoundUsd": 0.03,
+        "usage": [],
+        "cumulativeProviderCalls": 13,
+        "cumulativeObservedCostUsd": 0.0036402,
+        "cumulativeAccountedCostUsd": 0.39,
+        "openReservationUsd": 0.03
+      },
+      {
+        "sequence": 41,
+        "runId": "m7-image-grounding-mtka0ki8",
+        "callId": "m7-image-grounding-mtka0ki8:call-14",
+        "status": "started",
+        "phase": "image_grounding",
+        "models": [
+          "gpt-5.6-luna"
+        ],
+        "reserveUsd": 0.03,
+        "providerCallCount": 1,
+        "observedCostUsd": 0,
+        "upperBoundUsd": 0.03,
+        "usage": [],
+        "cumulativeProviderCalls": 14,
+        "cumulativeObservedCostUsd": 0.0036402,
+        "cumulativeAccountedCostUsd": 0.39,
+        "openReservationUsd": 0.03
+      },
+      {
+        "sequence": 42,
+        "runId": "m7-image-grounding-mtka0ki8",
+        "callId": "m7-image-grounding-mtka0ki8:call-14",
+        "status": "completed",
+        "phase": "image_grounding",
+        "models": [
+          "gpt-5.6-luna"
+        ],
+        "reserveUsd": 0.03,
+        "providerCallCount": 1,
+        "observedCostUsd": 0.0003154,
+        "upperBoundUsd": 0.03,
+        "usage": [
+          {
+            "model": "gpt-5.6-luna",
+            "inputTokens": 911,
+            "cachedInputTokens": 0,
+            "cacheWriteTokens": 0,
+            "outputTokens": 111,
+            "usageComplete": true
+          }
+        ],
+        "cumulativeProviderCalls": 14,
+        "cumulativeObservedCostUsd": 0.0039556,
+        "cumulativeAccountedCostUsd": 0.42,
+        "openReservationUsd": 0
+      },
+      {
+        "sequence": 43,
+        "runId": "m7-image-grounding-mtka0ki8",
+        "callId": "m7-image-grounding-mtka0ki8:call-15",
+        "status": "reserved",
+        "phase": "image_grounding",
+        "models": [
+          "gpt-5.6-luna"
+        ],
+        "reserveUsd": 0.03,
+        "providerCallCount": 0,
+        "observedCostUsd": 0,
+        "upperBoundUsd": 0.03,
+        "usage": [],
+        "cumulativeProviderCalls": 14,
+        "cumulativeObservedCostUsd": 0.0039556,
+        "cumulativeAccountedCostUsd": 0.42,
+        "openReservationUsd": 0.03
+      },
+      {
+        "sequence": 44,
+        "runId": "m7-image-grounding-mtka0ki8",
+        "callId": "m7-image-grounding-mtka0ki8:call-15",
+        "status": "started",
+        "phase": "image_grounding",
+        "models": [
+          "gpt-5.6-luna"
+        ],
+        "reserveUsd": 0.03,
+        "providerCallCount": 1,
+        "observedCostUsd": 0,
+        "upperBoundUsd": 0.03,
+        "usage": [],
+        "cumulativeProviderCalls": 15,
+        "cumulativeObservedCostUsd": 0.0039556,
+        "cumulativeAccountedCostUsd": 0.42,
+        "openReservationUsd": 0.03
+      },
+      {
+        "sequence": 45,
+        "runId": "m7-image-grounding-mtka0ki8",
+        "callId": "m7-image-grounding-mtka0ki8:call-15",
+        "status": "completed",
+        "phase": "image_grounding",
+        "models": [
+          "gpt-5.6-luna"
+        ],
+        "reserveUsd": 0.03,
+        "providerCallCount": 1,
+        "observedCostUsd": 0.0004064,
+        "upperBoundUsd": 0.03,
+        "usage": [
+          {
+            "model": "gpt-5.6-luna",
+            "inputTokens": 910,
+            "cachedInputTokens": 0,
+            "cacheWriteTokens": 0,
+            "outputTokens": 187,
+            "usageComplete": true
+          }
+        ],
+        "cumulativeProviderCalls": 15,
+        "cumulativeObservedCostUsd": 0.004362,
+        "cumulativeAccountedCostUsd": 0.45,
+        "openReservationUsd": 0
+      },
+      {
+        "sequence": 46,
+        "runId": "m7-image-grounding-mtka0ki8",
+        "callId": "m7-image-grounding-mtka0ki8:call-16",
+        "status": "reserved",
+        "phase": "image_grounding",
+        "models": [
+          "gpt-5.6-luna"
+        ],
+        "reserveUsd": 0.03,
+        "providerCallCount": 0,
+        "observedCostUsd": 0,
+        "upperBoundUsd": 0.03,
+        "usage": [],
+        "cumulativeProviderCalls": 15,
+        "cumulativeObservedCostUsd": 0.004362,
+        "cumulativeAccountedCostUsd": 0.45,
+        "openReservationUsd": 0.03
+      },
+      {
+        "sequence": 47,
+        "runId": "m7-image-grounding-mtka0ki8",
+        "callId": "m7-image-grounding-mtka0ki8:call-16",
+        "status": "started",
+        "phase": "image_grounding",
+        "models": [
+          "gpt-5.6-luna"
+        ],
+        "reserveUsd": 0.03,
+        "providerCallCount": 1,
+        "observedCostUsd": 0,
+        "upperBoundUsd": 0.03,
+        "usage": [],
+        "cumulativeProviderCalls": 16,
+        "cumulativeObservedCostUsd": 0.004362,
+        "cumulativeAccountedCostUsd": 0.45,
+        "openReservationUsd": 0.03
+      },
+      {
+        "sequence": 48,
+        "runId": "m7-image-grounding-mtka0ki8",
+        "callId": "m7-image-grounding-mtka0ki8:call-16",
+        "status": "completed",
+        "phase": "image_grounding",
+        "models": [
+          "gpt-5.6-luna"
+        ],
+        "reserveUsd": 0.03,
+        "providerCallCount": 1,
+        "observedCostUsd": 0.000393,
+        "upperBoundUsd": 0.03,
+        "usage": [
+          {
+            "model": "gpt-5.6-luna",
+            "inputTokens": 909,
+            "cachedInputTokens": 0,
+            "cacheWriteTokens": 0,
+            "outputTokens": 176,
+            "usageComplete": true
+          }
+        ],
+        "cumulativeProviderCalls": 16,
+        "cumulativeObservedCostUsd": 0.004755,
+        "cumulativeAccountedCostUsd": 0.48,
+        "openReservationUsd": 0
+      },
+      {
+        "sequence": 49,
+        "runId": "m7-image-grounding-mtka0ki8",
+        "callId": "m7-image-grounding-mtka0ki8:call-17",
+        "status": "reserved",
+        "phase": "image_grounding",
+        "models": [
+          "gpt-5.6-luna"
+        ],
+        "reserveUsd": 0.03,
+        "providerCallCount": 0,
+        "observedCostUsd": 0,
+        "upperBoundUsd": 0.03,
+        "usage": [],
+        "cumulativeProviderCalls": 16,
+        "cumulativeObservedCostUsd": 0.004755,
+        "cumulativeAccountedCostUsd": 0.48,
+        "openReservationUsd": 0.03
+      },
+      {
+        "sequence": 50,
+        "runId": "m7-image-grounding-mtka0ki8",
+        "callId": "m7-image-grounding-mtka0ki8:call-17",
+        "status": "started",
+        "phase": "image_grounding",
+        "models": [
+          "gpt-5.6-luna"
+        ],
+        "reserveUsd": 0.03,
+        "providerCallCount": 1,
+        "observedCostUsd": 0,
+        "upperBoundUsd": 0.03,
+        "usage": [],
+        "cumulativeProviderCalls": 17,
+        "cumulativeObservedCostUsd": 0.004755,
+        "cumulativeAccountedCostUsd": 0.48,
+        "openReservationUsd": 0.03
+      },
+      {
+        "sequence": 51,
+        "runId": "m7-image-grounding-mtka0ki8",
+        "callId": "m7-image-grounding-mtka0ki8:call-17",
+        "status": "completed",
+        "phase": "image_grounding",
+        "models": [
+          "gpt-5.6-luna"
+        ],
+        "reserveUsd": 0.03,
+        "providerCallCount": 1,
+        "observedCostUsd": 0.000267,
+        "upperBoundUsd": 0.03,
+        "usage": [
+          {
+            "model": "gpt-5.6-luna",
+            "inputTokens": 909,
+            "cachedInputTokens": 0,
+            "cacheWriteTokens": 0,
+            "outputTokens": 71,
+            "usageComplete": true
+          }
+        ],
+        "cumulativeProviderCalls": 17,
+        "cumulativeObservedCostUsd": 0.005022,
+        "cumulativeAccountedCostUsd": 0.51,
+        "openReservationUsd": 0
+      }
+    ]
+  }
+}

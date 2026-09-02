@@ -1,0 +1,469 @@
+{
+  "schemaVersion": "1.0.0",
+  "evidenceMode": "offline_loopback_m7_curriculum_browser",
+  "generatedAt": "2026-09-02T17:01:42.937Z",
+  "accepted": true,
+  "providerCalls": 0,
+  "externalRequestCount": 0,
+  "matrixSha256": "4d137d344c71cd310fc3c83205d62d3db145023ac3ec59c804ee82c01efeb282",
+  "baselineFixturesSha256": "ba30677f41c7f0532be09c4782c0a2724a4b7db4551f9400001ef454469c87f6",
+  "m7FixturesSha256": "19636310b4bbb0b454161ccfcef569b5515b2f972ce30d6436f8ef739372057f",
+  "summary": {
+    "totalRows": 39,
+    "supportedRows": 28,
+    "composableRows": 11,
+    "missingRows": 0,
+    "fixtureRows": 39,
+    "browserAccepted": 39,
+    "maximumFirstPaintMs": 46
+  },
+  "contactSheets": [
+    {
+      "path": "artifacts/evaluation/drawing-m7-curriculum-final/contact-sheet-1.png",
+      "sha256": "7e70edfd8738528b24b6078ba336f3ce893c83249bd7db3a0dd71e10b29cccc7"
+    },
+    {
+      "path": "artifacts/evaluation/drawing-m7-curriculum-final/contact-sheet-2.png",
+      "sha256": "389aeb7d8e94f208c47a912abc1c7b91f773d001c8d3769f41c1b5c794915e0d"
+    },
+    {
+      "path": "artifacts/evaluation/drawing-m7-curriculum-final/contact-sheet-3.png",
+      "sha256": "3c2f89f0c9fb6850a8890aa78687169790255274418c9f82f7425d55323ef889"
+    },
+    {
+      "path": "artifacts/evaluation/drawing-m7-curriculum-final/contact-sheet-4.png",
+      "sha256": "3760fff01797e5ae486875edf286f14a569915565e6ab72ab4596391903d38b2"
+    }
+  ],
+  "rows": [
+    {
+      "rowId": "nvr-shape-codes",
+      "fixtureId": "fixture-nvr-shape-codes",
+      "policyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "firstPaintMs": 46,
+      "rasterSha256": "eacf607ba1ebd5a4afc252b8edd446e1541c0d3c4dc135616dc254d950327dd6",
+      "screenshotPath": "artifacts/evaluation/drawing-m7-curriculum-final/nvr-shape-codes.jpg"
+    },
+    {
+      "rowId": "nvr-hidden-shapes",
+      "fixtureId": "fixture-nvr-hidden-shapes",
+      "policyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "firstPaintMs": 7,
+      "rasterSha256": "7a7aa683fdb9b1d46488ebe306e4cca6d11406ea79ba2e6bc96cbddefc06c612",
+      "screenshotPath": "artifacts/evaluation/drawing-m7-curriculum-final/nvr-hidden-shapes.jpg"
+    },
+    {
+      "rowId": "nvr-combining-shapes",
+      "fixtureId": "fixture-nvr-combining-shapes",
+      "policyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "firstPaintMs": 7,
+      "rasterSha256": "5f2259c30998919969f914c897063bef96f753b9797172b4711d476f5e8bce2b",
+      "screenshotPath": "artifacts/evaluation/drawing-m7-curriculum-final/nvr-combining-shapes.jpg"
+    },
+    {
+      "rowId": "sat-coordinate-geometry",
+      "fixtureId": "fixture-sat-coordinate-geometry",
+      "policyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "firstPaintMs": 13,
+      "rasterSha256": "7874589011dda4688c2ebf19e57872a73003688a1a3c88c064c9cdfab55f2e7a",
+      "screenshotPath": "artifacts/evaluation/drawing-m7-curriculum-final/sat-coordinate-geometry.jpg"
+    },
+    {
+      "rowId": "sat-systems-graphs",
+      "fixtureId": "fixture-sat-systems-graphs",
+      "policyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "firstPaintMs": 7,
+      "rasterSha256": "ce70c8cf8b0aa26c083d733cbc34dc5a79a6feb08f569f9bc1424da9fad771c7",
+      "screenshotPath": "artifacts/evaluation/drawing-m7-curriculum-final/sat-systems-graphs.jpg"
+    },
+    {
+      "rowId": "sat-two-way-tables",
+      "fixtureId": "fixture-sat-two-way-tables",
+      "policyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "firstPaintMs": 6,
+      "rasterSha256": "3cd34e0438784e705739bf8cd71bbdac0be4a645945f97f8e662b0b6c21891ca",
+      "screenshotPath": "artifacts/evaluation/drawing-m7-curriculum-final/sat-two-way-tables.jpg"
+    },
+    {
+      "rowId": "arithmetic-bar-models",
+      "fixtureId": "fixture-arithmetic-bar-models",
+      "policyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "firstPaintMs": 15,
+      "rasterSha256": "0a5de46601453d07d63d6a57227d78a650202bdba54ed6029d212a5cd018a354",
+      "screenshotPath": "artifacts/evaluation/drawing-m7-curriculum-final/arithmetic-bar-models.jpg"
+    },
+    {
+      "rowId": "arithmetic-fraction-strips",
+      "fixtureId": "fixture-arithmetic-fraction-strips",
+      "policyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "firstPaintMs": 8,
+      "rasterSha256": "68a91ca324e327d52a5ae880db44d336c70aa9686549a4a641260834fcbd021c",
+      "screenshotPath": "artifacts/evaluation/drawing-m7-curriculum-final/arithmetic-fraction-strips.jpg"
+    },
+    {
+      "rowId": "arithmetic-fraction-areas",
+      "fixtureId": "fixture-arithmetic-fraction-areas",
+      "policyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "firstPaintMs": 6,
+      "rasterSha256": "af6184d6c19140239454f0245fe5463777139e6727451af519b7f9db9778baa2",
+      "screenshotPath": "artifacts/evaluation/drawing-m7-curriculum-final/arithmetic-fraction-areas.jpg"
+    },
+    {
+      "rowId": "arithmetic-fraction-sets",
+      "fixtureId": "fixture-arithmetic-fraction-sets",
+      "policyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "firstPaintMs": 5,
+      "rasterSha256": "e578860680136c4a45cfc6d7120eaf2acac836e7d77f690e43955fdb967db61e",
+      "screenshotPath": "artifacts/evaluation/drawing-m7-curriculum-final/arithmetic-fraction-sets.jpg"
+    },
+    {
+      "rowId": "arithmetic-ratio-tables",
+      "fixtureId": "fixture-arithmetic-ratio-tables",
+      "policyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "firstPaintMs": 8,
+      "rasterSha256": "5a849930d2d8996572b37462d7f9e592b71f9d1328026c15b57550e4e864e50e",
+      "screenshotPath": "artifacts/evaluation/drawing-m7-curriculum-final/arithmetic-ratio-tables.jpg"
+    },
+    {
+      "rowId": "arithmetic-number-lines",
+      "fixtureId": "fixture-arithmetic-number-lines",
+      "policyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "firstPaintMs": 4,
+      "rasterSha256": "2543478089cc8028efdf63007f04306db7a9ca774c40b0b5efc9fb40837f1fc4",
+      "screenshotPath": "artifacts/evaluation/drawing-m7-curriculum-final/arithmetic-number-lines.jpg"
+    },
+    {
+      "rowId": "science-labelled-processes",
+      "fixtureId": "fixture-science-labelled-processes",
+      "policyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "firstPaintMs": 6,
+      "rasterSha256": "7924f7e3fb329980312b645c2fd68db188cab1beff3e3fec03f8ca8c47d667ec",
+      "screenshotPath": "artifacts/evaluation/drawing-m7-curriculum-final/science-labelled-processes.jpg"
+    },
+    {
+      "rowId": "english-grammar-trees",
+      "fixtureId": "fixture-english-grammar-trees",
+      "policyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "firstPaintMs": 5,
+      "rasterSha256": "67e05b95158cf7db79024a6366be00ce885d9395b58dc319ab11607d47e1f0dc",
+      "screenshotPath": "artifacts/evaluation/drawing-m7-curriculum-final/english-grammar-trees.jpg"
+    },
+    {
+      "rowId": "humanities-timelines",
+      "fixtureId": "fixture-humanities-timelines",
+      "policyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "firstPaintMs": 5,
+      "rasterSha256": "6c6522ff98a6b1d981342ca971aaa1653097d5ab57d5bc9e9486a6f9285c4e4c",
+      "screenshotPath": "artifacts/evaluation/drawing-m7-curriculum-final/humanities-timelines.jpg"
+    },
+    {
+      "rowId": "nvr-shape-sequences",
+      "fixtureId": "fixture-nvr-shape-sequences",
+      "policyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "firstPaintMs": 4,
+      "rasterSha256": "3cf6b81ed6a67a286b93dedb7ae02099b7a3e079b46fca894cb7ea8d79c0972e",
+      "screenshotPath": "artifacts/evaluation/drawing-m7-curriculum-final/nvr-shape-sequences.jpg"
+    },
+    {
+      "rowId": "nvr-shape-matrices",
+      "fixtureId": "fixture-nvr-shape-matrices",
+      "policyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "firstPaintMs": 11,
+      "rasterSha256": "0b8066d572a21ad3a31c913a9f37a77ee080a3c2dbe69576cf626cf8a1ed1d7e",
+      "screenshotPath": "artifacts/evaluation/drawing-m7-curriculum-final/nvr-shape-matrices.jpg"
+    },
+    {
+      "rowId": "nvr-shape-analogies",
+      "fixtureId": "fixture-nvr-shape-analogies",
+      "policyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "firstPaintMs": 5,
+      "rasterSha256": "fcdbb308580a73bc1aa7bbd9811b374177a87ac2c0abce264f66c5833159a375",
+      "screenshotPath": "artifacts/evaluation/drawing-m7-curriculum-final/nvr-shape-analogies.jpg"
+    },
+    {
+      "rowId": "nvr-odd-one-out",
+      "fixtureId": "fixture-nvr-odd-one-out",
+      "policyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "firstPaintMs": 4,
+      "rasterSha256": "529a80d64a7a4a9013f19864eaaba771ac3c9f9d1e87d3342149543ea95d28a5",
+      "screenshotPath": "artifacts/evaluation/drawing-m7-curriculum-final/nvr-odd-one-out.jpg"
+    },
+    {
+      "rowId": "nvr-rotation",
+      "fixtureId": "fixture-nvr-rotation",
+      "policyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "firstPaintMs": 4,
+      "rasterSha256": "2e8fd4ed72b68bcedee158cbfd17f435249e522e840ca6f3b60e52bfa58d5b92",
+      "screenshotPath": "artifacts/evaluation/drawing-m7-curriculum-final/nvr-rotation.jpg"
+    },
+    {
+      "rowId": "nvr-reflection",
+      "fixtureId": "fixture-nvr-reflection",
+      "policyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "firstPaintMs": 5,
+      "rasterSha256": "af9c434b80b7306b00a2f79b7611b957fb42c29a2f7cf23ce7542bf140f5d6ed",
+      "screenshotPath": "artifacts/evaluation/drawing-m7-curriculum-final/nvr-reflection.jpg"
+    },
+    {
+      "rowId": "nvr-paper-fold-hole-punch",
+      "fixtureId": "fixture-nvr-paper-fold-hole-punch",
+      "policyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "firstPaintMs": 5,
+      "rasterSha256": "4bb1534373e0ae4a4993f117f3193004248a2c058806446390dd3f7e068969b8",
+      "screenshotPath": "artifacts/evaluation/drawing-m7-curriculum-final/nvr-paper-fold-hole-punch.jpg"
+    },
+    {
+      "rowId": "nvr-nets-and-cubes",
+      "fixtureId": "fixture-nvr-nets-and-cubes",
+      "policyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "firstPaintMs": 4,
+      "rasterSha256": "2c7700f426e14cd6e8df8e5b66286b031a38f8eb90ed326583312d0aefef9c51",
+      "screenshotPath": "artifacts/evaluation/drawing-m7-curriculum-final/nvr-nets-and-cubes.jpg"
+    },
+    {
+      "rowId": "nvr-rotating-solids",
+      "fixtureId": "fixture-nvr-rotating-solids",
+      "policyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "firstPaintMs": 5,
+      "rasterSha256": "24f98eccfb4eb62c5f52e9463e8406332311213c16be248952884b96ae8772b5",
+      "screenshotPath": "artifacts/evaluation/drawing-m7-curriculum-final/nvr-rotating-solids.jpg"
+    },
+    {
+      "rowId": "nvr-block-building",
+      "fixtureId": "fixture-nvr-block-building",
+      "policyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "firstPaintMs": 6,
+      "rasterSha256": "e0c5cf9409576caca2184c36fbc88041cf61762db692d635e33aee8bd0a4df77",
+      "screenshotPath": "artifacts/evaluation/drawing-m7-curriculum-final/nvr-block-building.jpg"
+    },
+    {
+      "rowId": "nvr-plan-views",
+      "fixtureId": "fixture-nvr-plan-views",
+      "policyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "firstPaintMs": 4,
+      "rasterSha256": "e8fb4a50a206e26866f18571665d07ff633cd28674a3de3ed32c02fcf514e7e2",
+      "screenshotPath": "artifacts/evaluation/drawing-m7-curriculum-final/nvr-plan-views.jpg"
+    },
+    {
+      "rowId": "sat-transform-points-and-shapes",
+      "fixtureId": "fixture-sat-transform-points-and-shapes",
+      "policyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "firstPaintMs": 4,
+      "rasterSha256": "01191d876ef7f3f71520ed59ed2ba1d401f61e5c009d23c6c1b74d9c24fef6e5",
+      "screenshotPath": "artifacts/evaluation/drawing-m7-curriculum-final/sat-transform-points-and-shapes.jpg"
+    },
+    {
+      "rowId": "sat-transform-function-graphs",
+      "fixtureId": "fixture-sat-transform-function-graphs",
+      "policyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "firstPaintMs": 6,
+      "rasterSha256": "87028dcbdd57813e13a71d81f0edf45e67902801759a304177edbfb5c975d993",
+      "screenshotPath": "artifacts/evaluation/drawing-m7-curriculum-final/sat-transform-function-graphs.jpg"
+    },
+    {
+      "rowId": "sat-inequalities",
+      "fixtureId": "fixture-sat-inequalities",
+      "policyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "firstPaintMs": 4,
+      "rasterSha256": "19e47995e36e908609e8529647448b3a935ea9c24a08fcb1d6078ff528dc2218",
+      "screenshotPath": "artifacts/evaluation/drawing-m7-curriculum-final/sat-inequalities.jpg"
+    },
+    {
+      "rowId": "sat-scatterplots",
+      "fixtureId": "fixture-sat-scatterplots",
+      "policyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "firstPaintMs": 5,
+      "rasterSha256": "3986167205cc8af6d5338552f2cdbe3f91a086960340867615f66283c95c5d7a",
+      "screenshotPath": "artifacts/evaluation/drawing-m7-curriculum-final/sat-scatterplots.jpg"
+    },
+    {
+      "rowId": "sat-histograms",
+      "fixtureId": "fixture-sat-histograms",
+      "policyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "firstPaintMs": 4,
+      "rasterSha256": "2a09a22d9fd8eaa9262430361e802b4777994088021e314999382093d4912e13",
+      "screenshotPath": "artifacts/evaluation/drawing-m7-curriculum-final/sat-histograms.jpg"
+    },
+    {
+      "rowId": "sat-boxplots",
+      "fixtureId": "fixture-sat-boxplots",
+      "policyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "firstPaintMs": 5,
+      "rasterSha256": "c5a73bd8ccbf9b51973b8216f398d1580ff3e6e86a0f77320c7187c4e26ba90f",
+      "screenshotPath": "artifacts/evaluation/drawing-m7-curriculum-final/sat-boxplots.jpg"
+    },
+    {
+      "rowId": "annotation-tutor-objects",
+      "fixtureId": "fixture-annotation-tutor-objects",
+      "policyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "firstPaintMs": 5,
+      "rasterSha256": "fc49536b078e7c3ad6fc49baeb0f937581964dc90b60d794192ff96d4d41ba13",
+      "screenshotPath": "artifacts/evaluation/drawing-m7-curriculum-final/annotation-tutor-objects.jpg"
+    },
+    {
+      "rowId": "annotation-subparts",
+      "fixtureId": "fixture-annotation-subparts",
+      "policyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "firstPaintMs": 3,
+      "rasterSha256": "9b843dcc81b643ace7ba2a895f38a073089eacaf32e6066c416ab81bb4f87a3f",
+      "screenshotPath": "artifacts/evaluation/drawing-m7-curriculum-final/annotation-subparts.jpg"
+    },
+    {
+      "rowId": "annotation-learner-strokes",
+      "fixtureId": "fixture-annotation-learner-strokes",
+      "policyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "firstPaintMs": 3,
+      "rasterSha256": "400b1b018ab6a1fd8b204c96e2f678049fa470705aabbbcb24090bdc22d6eebd",
+      "screenshotPath": "artifacts/evaluation/drawing-m7-curriculum-final/annotation-learner-strokes.jpg"
+    },
+    {
+      "rowId": "annotation-image-regions",
+      "fixtureId": "fixture-annotation-image-regions",
+      "policyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "firstPaintMs": 7,
+      "rasterSha256": "a3a208b3bb40274d5529b8520bca80da5ceaa0879f69af5db38c64fe2865cf84",
+      "screenshotPath": "artifacts/evaluation/drawing-m7-curriculum-final/annotation-image-regions.jpg"
+    },
+    {
+      "rowId": "instruments-grid-paper",
+      "fixtureId": "fixture-instruments-grid-paper",
+      "policyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "firstPaintMs": 9,
+      "rasterSha256": "b874a48a617422e15f63f791fc00ebceabcd34d8ca26649fac34d83e0cbc36d8",
+      "screenshotPath": "artifacts/evaluation/drawing-m7-curriculum-final/instruments-grid-paper.jpg"
+    },
+    {
+      "rowId": "instruments-clock",
+      "fixtureId": "fixture-instruments-clock",
+      "policyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "firstPaintMs": 5,
+      "rasterSha256": "abdedc16ae5df54ef4223ae9eb925f6901f8cc72b85a460632f019ffbd80ce7f",
+      "screenshotPath": "artifacts/evaluation/drawing-m7-curriculum-final/instruments-clock.jpg"
+    },
+    {
+      "rowId": "instruments-protractor",
+      "fixtureId": "fixture-instruments-protractor",
+      "policyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "firstPaintMs": 4,
+      "rasterSha256": "ea066987d477acc6283c3828998786c137700af7584cc0fa6c1f20c49b075b4e",
+      "screenshotPath": "artifacts/evaluation/drawing-m7-curriculum-final/instruments-protractor.jpg"
+    }
+  ]
+}

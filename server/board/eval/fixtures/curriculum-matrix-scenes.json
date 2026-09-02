@@ -1,0 +1,178 @@
+{
+  "schemaVersion": "1.0.0",
+  "fixtures": [
+    {
+      "id": "fixture-nvr-shape-codes",
+      "rowId": "nvr-shape-codes",
+      "ops": [
+        { "op": "add", "id": "code-title", "color": "ink", "spec": { "kind": "text", "at": [160, 70], "text": "Shape code key", "size": "big" } },
+        { "op": "add", "id": "code-table", "color": "blue", "spec": { "kind": "table", "at": [160, 150], "rows": [["shape", "code"], ["triangle", "K"], ["circle", "M"], ["square", "P"]], "headerRow": true } },
+        { "op": "add", "id": "code-triangle", "color": "red", "spec": { "kind": "polygon", "points": [[570, 150], [520, 245], [620, 245]], "closed": true, "fill": false } },
+        { "op": "add", "id": "code-circle", "color": "green", "spec": { "kind": "circle", "center": [570, 335], "r": 48, "fill": false } },
+        { "op": "add", "id": "code-square", "color": "amber", "spec": { "kind": "polygon", "points": [[520, 430], [620, 430], [620, 530], [520, 530]], "closed": true, "fill": false } },
+        { "op": "add", "id": "code-k", "color": "ink", "spec": { "kind": "text", "at": [680, 190], "text": "K", "size": "big" } },
+        { "op": "add", "id": "code-m", "color": "ink", "spec": { "kind": "text", "at": [680, 320], "text": "M", "size": "big" } },
+        { "op": "add", "id": "code-p", "color": "ink", "spec": { "kind": "text", "at": [680, 455], "text": "P", "size": "big" } }
+      ]
+    },
+    {
+      "id": "fixture-nvr-hidden-shapes",
+      "rowId": "nvr-hidden-shapes",
+      "ops": [
+        { "op": "add", "id": "hidden-title", "color": "ink", "spec": { "kind": "text", "at": [170, 80], "text": "Find the triangle", "size": "big" } },
+        { "op": "add", "id": "hidden-a", "color": "ink", "spec": { "kind": "line", "from": [180, 450], "to": [470, 150], "width": 3 } },
+        { "op": "add", "id": "hidden-b", "color": "ink", "spec": { "kind": "line", "from": [260, 150], "to": [600, 450], "width": 3 } },
+        { "op": "add", "id": "hidden-c", "color": "ink", "spec": { "kind": "line", "from": [120, 330], "to": [700, 330], "width": 3 } },
+        { "op": "add", "id": "hidden-target", "color": "red", "spec": { "kind": "polygon", "points": [[300, 330], [430, 195], [580, 330]], "closed": true, "fill": false } }
+      ]
+    },
+    {
+      "id": "fixture-nvr-combining-shapes",
+      "rowId": "nvr-combining-shapes",
+      "ops": [
+        { "op": "add", "id": "combine-title", "color": "ink", "spec": { "kind": "text", "at": [160, 80], "text": "Two triangles make a square", "size": "big" } },
+        { "op": "add", "id": "combine-left", "color": "blue", "spec": { "kind": "polygon", "points": [[120, 220], [120, 380], [280, 380]], "closed": true, "fill": true } },
+        { "op": "add", "id": "combine-right", "color": "amber", "spec": { "kind": "polygon", "points": [[320, 220], [480, 220], [480, 380]], "closed": true, "fill": true } },
+        { "op": "add", "id": "combine-arrow", "color": "green", "spec": { "kind": "line", "from": [535, 300], "to": [625, 300], "arrow": "end", "width": 4 } },
+        { "op": "add", "id": "combine-target", "color": "violet", "spec": { "kind": "polygon", "points": [[675, 220], [835, 220], [835, 380], [675, 380]], "closed": true, "fill": false } }
+      ]
+    },
+    {
+      "id": "fixture-sat-coordinate-geometry",
+      "rowId": "sat-coordinate-geometry",
+      "ops": [
+        { "op": "add", "id": "coord-axes", "color": "ink", "spec": { "kind": "axes", "at": [160, 80], "w": 650, "h": 430, "xRange": [-5, 5], "yRange": [-5, 5], "xLabel": "x", "yLabel": "y", "ticks": true } },
+        { "op": "add", "id": "coord-line", "color": "blue", "spec": { "kind": "plot", "axes": "coord-axes", "expr": "0.5*x+2", "label": "line AB" } },
+        { "op": "add", "id": "coord-a", "color": "red", "spec": { "kind": "point", "at": [355, 252], "label": "A(-2,1)" } },
+        { "op": "add", "id": "coord-b", "color": "green", "spec": { "kind": "point", "at": [615, 166], "label": "B(2,3)" } }
+      ]
+    },
+    {
+      "id": "fixture-sat-systems-graphs",
+      "rowId": "sat-systems-graphs",
+      "ops": [
+        { "op": "add", "id": "systems-axes", "color": "ink", "spec": { "kind": "axes", "at": [160, 80], "w": 650, "h": 430, "xRange": [-5, 5], "yRange": [-5, 5], "xLabel": "x", "yLabel": "y", "ticks": true } },
+        { "op": "add", "id": "systems-a", "color": "blue", "spec": { "kind": "plot", "axes": "systems-axes", "expr": "x+1", "label": "y=x+1" } },
+        { "op": "add", "id": "systems-b", "color": "red", "spec": { "kind": "plot", "axes": "systems-axes", "expr": "-x+3", "label": "y=-x+3" } },
+        { "op": "add", "id": "systems-solution", "color": "green", "spec": { "kind": "point", "at": [550, 209], "label": "solution" } }
+      ]
+    },
+    {
+      "id": "fixture-sat-two-way-tables",
+      "rowId": "sat-two-way-tables",
+      "ops": [
+        { "op": "add", "id": "twoway-title", "color": "ink", "spec": { "kind": "text", "at": [180, 100], "text": "Transport by year group", "size": "big" } },
+        { "op": "add", "id": "twoway-table", "color": "blue", "spec": { "kind": "table", "at": [180, 170], "rows": [["", "Bus", "Walk", "Total"], ["Year 7", "18", "12", "30"], ["Year 8", "15", "15", "30"], ["Total", "33", "27", "60"]], "headerRow": true } }
+      ]
+    },
+    {
+      "id": "fixture-arithmetic-bar-models",
+      "rowId": "arithmetic-bar-models",
+      "ops": [
+        { "op": "add", "id": "bar-title", "color": "ink", "spec": { "kind": "text", "at": [180, 90], "text": "Three parts total 60", "size": "big" } },
+        { "op": "add", "id": "bar-a", "color": "blue", "spec": { "kind": "box", "at": [180, 220], "w": 180, "h": 100, "text": "15" } },
+        { "op": "add", "id": "bar-b", "color": "amber", "spec": { "kind": "box", "at": [385, 220], "w": 180, "h": 100, "text": "20" } },
+        { "op": "add", "id": "bar-c", "color": "green", "spec": { "kind": "box", "at": [590, 220], "w": 180, "h": 100, "text": "25" } },
+        { "op": "add", "id": "bar-equation", "color": "ink", "spec": { "kind": "equation", "at": [330, 400], "latex": "15+20+25=60", "size": "big" } }
+      ]
+    },
+    {
+      "id": "fixture-arithmetic-fraction-strips",
+      "rowId": "arithmetic-fraction-strips",
+      "ops": [
+        { "op": "add", "id": "strips-title", "color": "ink", "spec": { "kind": "text", "at": [170, 70], "text": "Three quarters and five eighths", "size": "big" } },
+        { "op": "add", "id": "quarters-1", "color": "blue", "spec": { "kind": "polygon", "points": [[170, 210], [310, 210], [310, 290], [170, 290]], "closed": true, "fill": true } },
+        { "op": "add", "id": "quarters-2", "color": "blue", "spec": { "kind": "polygon", "points": [[318, 210], [458, 210], [458, 290], [318, 290]], "closed": true, "fill": true } },
+        { "op": "add", "id": "quarters-3", "color": "blue", "spec": { "kind": "polygon", "points": [[466, 210], [606, 210], [606, 290], [466, 290]], "closed": true, "fill": true } },
+        { "op": "add", "id": "quarters-4", "color": "ink", "spec": { "kind": "polygon", "points": [[614, 210], [754, 210], [754, 290], [614, 290]], "closed": true, "fill": false } },
+        { "op": "add", "id": "eighths-1", "color": "amber", "spec": { "kind": "polygon", "points": [[170, 370], [236, 370], [236, 450], [170, 450]], "closed": true, "fill": true } },
+        { "op": "add", "id": "eighths-2", "color": "amber", "spec": { "kind": "polygon", "points": [[244, 370], [310, 370], [310, 450], [244, 450]], "closed": true, "fill": true } },
+        { "op": "add", "id": "eighths-3", "color": "amber", "spec": { "kind": "polygon", "points": [[318, 370], [384, 370], [384, 450], [318, 450]], "closed": true, "fill": true } },
+        { "op": "add", "id": "eighths-4", "color": "amber", "spec": { "kind": "polygon", "points": [[392, 370], [458, 370], [458, 450], [392, 450]], "closed": true, "fill": true } },
+        { "op": "add", "id": "eighths-5", "color": "amber", "spec": { "kind": "polygon", "points": [[466, 370], [532, 370], [532, 450], [466, 450]], "closed": true, "fill": true } },
+        { "op": "add", "id": "eighths-6", "color": "ink", "spec": { "kind": "polygon", "points": [[540, 370], [606, 370], [606, 450], [540, 450]], "closed": true, "fill": false } },
+        { "op": "add", "id": "eighths-7", "color": "ink", "spec": { "kind": "polygon", "points": [[614, 370], [680, 370], [680, 450], [614, 450]], "closed": true, "fill": false } },
+        { "op": "add", "id": "eighths-8", "color": "ink", "spec": { "kind": "polygon", "points": [[688, 370], [754, 370], [754, 450], [688, 450]], "closed": true, "fill": false } }
+      ]
+    },
+    {
+      "id": "fixture-arithmetic-fraction-areas",
+      "rowId": "arithmetic-fraction-areas",
+      "ops": [
+        { "op": "add", "id": "area-title", "color": "ink", "spec": { "kind": "text", "at": [170, 90], "text": "Three fifths of the area", "size": "big" } },
+        { "op": "add", "id": "area-one", "color": "blue", "spec": { "kind": "polygon", "points": [[170, 220], [280, 220], [280, 390], [170, 390]], "closed": true, "fill": true } },
+        { "op": "add", "id": "area-two", "color": "blue", "spec": { "kind": "polygon", "points": [[292, 220], [402, 220], [402, 390], [292, 390]], "closed": true, "fill": true } },
+        { "op": "add", "id": "area-three", "color": "blue", "spec": { "kind": "polygon", "points": [[414, 220], [524, 220], [524, 390], [414, 390]], "closed": true, "fill": true } },
+        { "op": "add", "id": "area-four", "color": "ink", "spec": { "kind": "polygon", "points": [[536, 220], [646, 220], [646, 390], [536, 390]], "closed": true, "fill": false } },
+        { "op": "add", "id": "area-five", "color": "ink", "spec": { "kind": "polygon", "points": [[658, 220], [768, 220], [768, 390], [658, 390]], "closed": true, "fill": false } }
+      ]
+    },
+    {
+      "id": "fixture-arithmetic-fraction-sets",
+      "rowId": "arithmetic-fraction-sets",
+      "ops": [
+        { "op": "add", "id": "set-title", "color": "ink", "spec": { "kind": "text", "at": [170, 80], "text": "Three eighths of the set", "size": "big" } },
+        { "op": "add", "id": "set-one", "color": "green", "spec": { "kind": "circle", "center": [220, 220], "r": 42, "fill": true } },
+        { "op": "add", "id": "set-two", "color": "green", "spec": { "kind": "circle", "center": [350, 220], "r": 42, "fill": true } },
+        { "op": "add", "id": "set-three", "color": "green", "spec": { "kind": "circle", "center": [480, 220], "r": 42, "fill": true } },
+        { "op": "add", "id": "set-four", "color": "ink", "spec": { "kind": "circle", "center": [610, 220], "r": 42, "fill": false } },
+        { "op": "add", "id": "set-five", "color": "ink", "spec": { "kind": "circle", "center": [220, 380], "r": 42, "fill": false } },
+        { "op": "add", "id": "set-six", "color": "ink", "spec": { "kind": "circle", "center": [350, 380], "r": 42, "fill": false } },
+        { "op": "add", "id": "set-seven", "color": "ink", "spec": { "kind": "circle", "center": [480, 380], "r": 42, "fill": false } },
+        { "op": "add", "id": "set-eight", "color": "ink", "spec": { "kind": "circle", "center": [610, 380], "r": 42, "fill": false } }
+      ]
+    },
+    {
+      "id": "fixture-arithmetic-ratio-tables",
+      "rowId": "arithmetic-ratio-tables",
+      "ops": [
+        { "op": "add", "id": "ratio-title", "color": "ink", "spec": { "kind": "text", "at": [180, 100], "text": "Flour to water: 3 to 2", "size": "big" } },
+        { "op": "add", "id": "ratio-table", "color": "green", "spec": { "kind": "table", "at": [180, 170], "rows": [["batches", "flour", "water"], ["1", "3", "2"], ["2", "6", "4"], ["4", "12", "8"]], "headerRow": true } }
+      ]
+    },
+    {
+      "id": "fixture-arithmetic-number-lines",
+      "rowId": "arithmetic-number-lines",
+      "ops": [
+        { "op": "add", "id": "numberline-title", "color": "ink", "spec": { "kind": "text", "at": [170, 130], "text": "Zero to ten", "size": "big" } },
+        { "op": "add", "id": "numberline-main", "color": "blue", "spec": { "kind": "numberline", "at": [170, 280], "w": 650, "min": 0, "max": 10, "step": 1, "marks": [{ "value": 5, "label": "five", "color": "red" }] } }
+      ]
+    },
+    {
+      "id": "fixture-science-labelled-processes",
+      "rowId": "science-labelled-processes",
+      "ops": [
+        { "op": "add", "id": "water-a", "color": "blue", "spec": { "kind": "box", "at": [100, 230], "w": 170, "h": 90, "text": "Evaporation" } },
+        { "op": "add", "id": "water-b", "color": "violet", "spec": { "kind": "box", "at": [330, 90], "w": 170, "h": 90, "text": "Condensation" } },
+        { "op": "add", "id": "water-c", "color": "blue", "spec": { "kind": "box", "at": [560, 230], "w": 170, "h": 90, "text": "Precipitation" } },
+        { "op": "add", "id": "water-d", "color": "green", "spec": { "kind": "box", "at": [330, 390], "w": 170, "h": 90, "text": "Collection" } },
+        { "op": "add", "id": "water-ab", "color": "ink", "spec": { "kind": "connector", "from": "water-a", "to": "water-b" } },
+        { "op": "add", "id": "water-bc", "color": "ink", "spec": { "kind": "connector", "from": "water-b", "to": "water-c" } },
+        { "op": "add", "id": "water-cd", "color": "ink", "spec": { "kind": "connector", "from": "water-c", "to": "water-d" } },
+        { "op": "add", "id": "water-da", "color": "ink", "spec": { "kind": "connector", "from": "water-d", "to": "water-a" } }
+      ]
+    },
+    {
+      "id": "fixture-english-grammar-trees",
+      "rowId": "english-grammar-trees",
+      "ops": [
+        { "op": "add", "id": "grammar-root", "color": "violet", "spec": { "kind": "box", "at": [360, 70], "w": 220, "h": 80, "text": "The fox jumped" } },
+        { "op": "add", "id": "grammar-subject", "color": "blue", "spec": { "kind": "box", "at": [170, 280], "w": 220, "h": 90, "text": "Subject: the fox" } },
+        { "op": "add", "id": "grammar-predicate", "color": "green", "spec": { "kind": "box", "at": [550, 280], "w": 220, "h": 90, "text": "Predicate: jumped" } },
+        { "op": "add", "id": "grammar-left", "color": "ink", "spec": { "kind": "connector", "from": "grammar-root", "to": "grammar-subject" } },
+        { "op": "add", "id": "grammar-right", "color": "ink", "spec": { "kind": "connector", "from": "grammar-root", "to": "grammar-predicate" } }
+      ]
+    },
+    {
+      "id": "fixture-humanities-timelines",
+      "rowId": "humanities-timelines",
+      "ops": [
+        { "op": "add", "id": "timeline-title", "color": "ink", "spec": { "kind": "text", "at": [150, 90], "text": "Roman Britain", "size": "big" } },
+        { "op": "add", "id": "timeline-axis", "color": "blue", "spec": { "kind": "line", "from": [150, 300], "to": [850, 300], "arrow": "end", "width": 4 } },
+        { "op": "add", "id": "timeline-a", "color": "red", "spec": { "kind": "point", "at": [260, 300], "label": "43 CE invasion" } },
+        { "op": "add", "id": "timeline-b", "color": "amber", "spec": { "kind": "point", "at": [470, 300], "label": "60 CE revolt" } },
+        { "op": "add", "id": "timeline-c", "color": "green", "spec": { "kind": "point", "at": [690, 300], "label": "122 CE wall" } }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,149 @@
+{
+  "schemaVersion": "1.0.0",
+  "fixtures": [
+    {
+      "id": "fixture-nvr-shape-sequences",
+      "rowId": "nvr-shape-sequences",
+      "existingTutorOps": [], "existingLearnerOps": [],
+      "candidateOps": [{ "op": "add", "id": "sequence", "color": "blue", "spec": { "kind": "panelGrid", "at": [80, 100], "w": 840, "h": 360, "rows": 1, "cols": 4, "panels": [{ "row": 0, "col": 0, "label": "1", "marks": [{ "shape": "triangle", "x": 0.5, "y": 0.55, "rotationDeg": 0, "fill": true }] }, { "row": 0, "col": 1, "label": "2", "marks": [{ "shape": "triangle", "x": 0.5, "y": 0.55, "rotationDeg": 90, "fill": true }] }, { "row": 0, "col": 2, "label": "3", "marks": [{ "shape": "triangle", "x": 0.5, "y": 0.55, "rotationDeg": 180, "fill": true }] }, { "row": 0, "col": 3, "label": "?", "marks": [] }] } }]
+    },
+    {
+      "id": "fixture-nvr-shape-matrices",
+      "rowId": "nvr-shape-matrices",
+      "existingTutorOps": [], "existingLearnerOps": [],
+      "candidateOps": [{ "op": "add", "id": "matrix", "color": "violet", "spec": { "kind": "panelGrid", "at": [230, 50], "w": 540, "h": 500, "rows": 3, "cols": 3, "panels": [{ "row": 0, "col": 0, "marks": [{ "shape": "circle", "x": 0.5, "y": 0.5, "fill": true }] }, { "row": 0, "col": 1, "marks": [{ "shape": "circle", "x": 0.35, "y": 0.5, "fill": true }, { "shape": "circle", "x": 0.65, "y": 0.5, "fill": true }] }, { "row": 0, "col": 2, "marks": [{ "shape": "circle", "x": 0.25, "y": 0.5, "fill": true }, { "shape": "circle", "x": 0.5, "y": 0.5, "fill": true }, { "shape": "circle", "x": 0.75, "y": 0.5, "fill": true }] }, { "row": 1, "col": 0, "marks": [{ "shape": "square", "x": 0.5, "y": 0.5, "fill": true }] }, { "row": 1, "col": 1, "marks": [{ "shape": "square", "x": 0.35, "y": 0.5, "fill": true }, { "shape": "square", "x": 0.65, "y": 0.5, "fill": true }] }, { "row": 1, "col": 2, "marks": [{ "shape": "square", "x": 0.25, "y": 0.5, "fill": true }, { "shape": "square", "x": 0.5, "y": 0.5, "fill": true }, { "shape": "square", "x": 0.75, "y": 0.5, "fill": true }] }, { "row": 2, "col": 0, "marks": [{ "shape": "triangle", "x": 0.5, "y": 0.5, "fill": true }] }, { "row": 2, "col": 1, "marks": [{ "shape": "triangle", "x": 0.35, "y": 0.5, "fill": true }, { "shape": "triangle", "x": 0.65, "y": 0.5, "fill": true }] }, { "row": 2, "col": 2, "label": "?", "marks": [] }] } }]
+    },
+    {
+      "id": "fixture-nvr-shape-analogies",
+      "rowId": "nvr-shape-analogies",
+      "existingTutorOps": [], "existingLearnerOps": [],
+      "candidateOps": [{ "op": "add", "id": "analogy", "color": "green", "spec": { "kind": "panelGrid", "at": [160, 80], "w": 680, "h": 440, "rows": 2, "cols": 2, "panels": [{ "row": 0, "col": 0, "label": "A", "marks": [{ "shape": "circle", "x": 0.5, "y": 0.5 }] }, { "row": 0, "col": 1, "label": "B", "marks": [{ "shape": "circle", "x": 0.5, "y": 0.5, "fill": true }] }, { "row": 1, "col": 0, "label": "C", "marks": [{ "shape": "square", "x": 0.5, "y": 0.5 }] }, { "row": 1, "col": 1, "label": "?", "marks": [] }] } }]
+    },
+    {
+      "id": "fixture-nvr-odd-one-out",
+      "rowId": "nvr-odd-one-out",
+      "existingTutorOps": [], "existingLearnerOps": [],
+      "candidateOps": [{ "op": "add", "id": "odd-grid", "color": "blue", "spec": { "kind": "panelGrid", "at": [70, 150], "w": 860, "h": 260, "rows": 1, "cols": 5, "panels": [{ "row": 0, "col": 0, "marks": [{ "shape": "circle", "x": 0.5, "y": 0.5 }] }, { "row": 0, "col": 1, "marks": [{ "shape": "circle", "x": 0.5, "y": 0.5 }] }, { "row": 0, "col": 2, "marks": [{ "shape": "circle", "x": 0.5, "y": 0.5 }] }, { "row": 0, "col": 3, "marks": [{ "shape": "square", "x": 0.5, "y": 0.5 }] }, { "row": 0, "col": 4, "marks": [{ "shape": "circle", "x": 0.5, "y": 0.5 }] }] } }, { "op": "add", "id": "odd-mark", "color": "red", "spec": { "kind": "annotate", "style": "circle", "target": { "type": "semantic", "objectId": "odd-grid", "anchor": "panel:0:3" } } }]
+    },
+    {
+      "id": "fixture-nvr-rotation",
+      "rowId": "nvr-rotation",
+      "existingTutorOps": [], "existingLearnerOps": [],
+      "candidateOps": [{ "op": "add", "id": "rotation-panels", "color": "ink", "spec": { "kind": "panelGrid", "at": [100, 100], "w": 800, "h": 380, "rows": 1, "cols": 2, "panels": [] } }, { "op": "add", "id": "rotation-source", "color": "blue", "spec": { "kind": "polygon", "points": [[210, 210], [340, 160], [320, 340], [230, 300]] } }, { "op": "add", "id": "rotation-result", "color": "red", "spec": { "kind": "transform", "target": "rotation-source", "operation": { "type": "rotate", "angleDeg": 180, "center": [500, 290] }, "label": "half-turn" } }]
+    },
+    {
+      "id": "fixture-nvr-reflection",
+      "rowId": "nvr-reflection",
+      "existingTutorOps": [], "existingLearnerOps": [],
+      "candidateOps": [{ "op": "add", "id": "mirror-panels", "color": "ink", "spec": { "kind": "panelGrid", "at": [100, 100], "w": 800, "h": 380, "rows": 1, "cols": 2, "panels": [] } }, { "op": "add", "id": "mirror-line", "color": "violet", "spec": { "kind": "line", "from": [500, 90], "to": [500, 500], "dash": true } }, { "op": "add", "id": "mirror-source", "color": "blue", "spec": { "kind": "polygon", "points": [[220, 200], [380, 290], [220, 380]] } }, { "op": "add", "id": "mirror-result", "color": "red", "spec": { "kind": "transform", "target": "mirror-source", "operation": { "type": "reflect", "axis": { "from": [500, 0], "to": [500, 600] } }, "label": "reflection" } }]
+    },
+    {
+      "id": "fixture-nvr-paper-fold-hole-punch",
+      "rowId": "nvr-paper-fold-hole-punch",
+      "existingTutorOps": [], "existingLearnerOps": [],
+      "candidateOps": [{ "op": "add", "id": "fold-sequence", "color": "violet", "spec": { "kind": "paperFoldHolePunch", "at": [70, 120], "w": 860, "h": 330, "folds": ["right", "down"], "holes": [[0.72, 0.35]] } }]
+    },
+    {
+      "id": "fixture-nvr-nets-and-cubes",
+      "rowId": "nvr-nets-and-cubes",
+      "existingTutorOps": [], "existingLearnerOps": [],
+      "candidateOps": [{ "op": "add", "id": "cube-net", "color": "violet", "spec": { "kind": "cubeNet", "at": [300, 80], "cell": 90, "faces": [{ "id": "A", "row": 1, "col": 0, "label": "A" }, { "id": "B", "row": 1, "col": 1, "label": "B" }, { "id": "C", "row": 1, "col": 2, "label": "C" }, { "id": "D", "row": 1, "col": 3, "label": "D" }, { "id": "E", "row": 0, "col": 1, "label": "E" }, { "id": "F", "row": 2, "col": 1, "label": "F" }] } }]
+    },
+    {
+      "id": "fixture-nvr-rotating-solids",
+      "rowId": "nvr-rotating-solids",
+      "existingTutorOps": [], "existingLearnerOps": [],
+      "candidateOps": [{ "op": "add", "id": "solid-before", "color": "blue", "spec": { "kind": "isometricSolid", "at": [280, 420], "unit": 58, "voxels": [[0,0,0],[1,0,0],[2,0,0],[1,0,1],[2,0,1]] } }, { "op": "add", "id": "solid-after", "color": "red", "spec": { "kind": "isometricSolid", "at": [720, 420], "unit": 58, "voxels": [[0,0,0],[0,1,0],[0,2,0],[0,1,1],[0,2,1]] } }]
+    },
+    {
+      "id": "fixture-nvr-block-building",
+      "rowId": "nvr-block-building",
+      "existingTutorOps": [], "existingLearnerOps": [],
+      "candidateOps": [{ "op": "add", "id": "block-tower", "color": "blue", "spec": { "kind": "isometricSolid", "at": [500, 470], "unit": 70, "voxels": [[0,0,0],[1,0,0],[2,0,0],[0,1,0],[1,1,0],[1,0,1],[2,0,1],[2,0,2]] } }]
+    },
+    {
+      "id": "fixture-nvr-plan-views",
+      "rowId": "nvr-plan-views",
+      "existingTutorOps": [], "existingLearnerOps": [],
+      "candidateOps": [{ "op": "add", "id": "plan-solid", "color": "blue", "spec": { "kind": "isometricSolid", "at": [280, 420], "unit": 55, "voxels": [[0,0,0],[1,0,0],[0,1,0],[1,1,0],[0,0,1]] } }, { "op": "add", "id": "top-view", "color": "green", "spec": { "kind": "planView", "at": [620, 150], "cell": 80, "heights": [[2,1],[1,1]] } }]
+    },
+    {
+      "id": "fixture-sat-transform-points-and-shapes",
+      "rowId": "sat-transform-points-and-shapes",
+      "existingTutorOps": [], "existingLearnerOps": [],
+      "candidateOps": [{ "op": "add", "id": "transform-axes", "color": "ink", "spec": { "kind": "axes", "at": [120, 70], "w": 760, "h": 450, "xRange": [-5,5], "yRange": [-5,5] } }, { "op": "add", "id": "transform-triangle", "color": "blue", "spec": { "kind": "polygon", "points": [[260,340],[340,260],[420,340]] } }, { "op": "add", "id": "translated-triangle", "color": "red", "spec": { "kind": "transform", "target": "transform-triangle", "operation": { "type": "translate", "vector": [260,-120] }, "label": "translated" } }]
+    },
+    {
+      "id": "fixture-sat-transform-function-graphs",
+      "rowId": "sat-transform-function-graphs",
+      "existingTutorOps": [], "existingLearnerOps": [],
+      "candidateOps": [{ "op": "add", "id": "function-axes", "color": "ink", "spec": { "kind": "axes", "at": [150,70], "w": 700, "h": 450, "xRange": [-5,5], "yRange": [-2,8] } }, { "op": "add", "id": "function-original", "color": "blue", "spec": { "kind": "plot", "axes": "function-axes", "expr": "x^2", "label": "y=x²" } }, { "op": "add", "id": "function-shifted", "color": "red", "spec": { "kind": "plot", "axes": "function-axes", "expr": "x^2+3", "label": "y=x²+3" } }]
+    },
+    {
+      "id": "fixture-sat-inequalities",
+      "rowId": "sat-inequalities",
+      "existingTutorOps": [], "existingLearnerOps": [],
+      "candidateOps": [{ "op": "add", "id": "inequality-axes", "color": "ink", "spec": { "kind": "axes", "at": [170,70], "w": 650, "h": 430, "xRange": [-5,5], "yRange": [-5,5], "xLabel": "x", "yLabel": "y" } }, { "op": "add", "id": "inequality-region", "color": "blue", "spec": { "kind": "regionFill", "mode": "half_plane", "axes": "inequality-axes", "slope": 0.6, "intercept": 1, "side": "above", "inclusive": false } }]
+    },
+    {
+      "id": "fixture-sat-scatterplots",
+      "rowId": "sat-scatterplots",
+      "existingTutorOps": [], "existingLearnerOps": [],
+      "candidateOps": [{ "op": "add", "id": "scatterplot", "color": "blue", "spec": { "kind": "scatter", "at": [170,100], "w": 640, "h": 360, "xRange": [0,10], "yRange": [0,20], "points": [[1,2],[2,5],[4,7],[5,11],[7,14],[9,18]], "xLabel": "hours", "yLabel": "score" } }]
+    },
+    {
+      "id": "fixture-sat-histograms",
+      "rowId": "sat-histograms",
+      "existingTutorOps": [], "existingLearnerOps": [],
+      "candidateOps": [{ "op": "add", "id": "histogram", "color": "green", "spec": { "kind": "histogram", "at": [170,100], "w": 640, "h": 360, "bins": [{ "from": 0, "to": 5, "frequency": 2 }, { "from": 5, "to": 10, "frequency": 6 }, { "from": 10, "to": 20, "frequency": 4 }], "xLabel": "time", "yLabel": "frequency" } }]
+    },
+    {
+      "id": "fixture-sat-boxplots",
+      "rowId": "sat-boxplots",
+      "existingTutorOps": [], "existingLearnerOps": [],
+      "candidateOps": [{ "op": "add", "id": "boxplot", "color": "violet", "spec": { "kind": "boxplot", "at": [140,300], "w": 720, "min": 1, "q1": 3, "median": 5, "q3": 7, "max": 10, "label": "Scores" } }]
+    },
+    {
+      "id": "fixture-annotation-tutor-objects",
+      "rowId": "annotation-tutor-objects",
+      "existingTutorOps": [{ "op": "add", "id": "existing-box", "color": "blue", "spec": { "kind": "box", "at": [500,300], "w": 260, "h": 120, "text": "Existing idea" } }], "existingLearnerOps": [],
+      "candidateOps": [{ "op": "add", "id": "box-callout", "color": "red", "spec": { "kind": "annotate", "style": "callout", "target": { "type": "semantic", "objectId": "existing-box", "anchor": "center" }, "note": "Use this step" } }]
+    },
+    {
+      "id": "fixture-annotation-subparts",
+      "rowId": "annotation-subparts",
+      "existingTutorOps": [{ "op": "add", "id": "existing-triangle", "color": "ink", "spec": { "kind": "polygon", "points": [[220,430],[500,100],[780,430]] } }], "existingLearnerOps": [],
+      "candidateOps": [{ "op": "add", "id": "apex-circle", "color": "red", "spec": { "kind": "annotate", "style": "circle", "target": { "type": "semantic", "objectId": "existing-triangle", "anchor": "vertex:1" } } }]
+    },
+    {
+      "id": "fixture-annotation-learner-strokes",
+      "rowId": "annotation-learner-strokes",
+      "existingTutorOps": [], "existingLearnerOps": [{ "op": "add", "id": "sketch-segment", "color": "ink", "spec": { "kind": "path", "points": [[200,350],[350,260],[500,340]], "width": 5 } }],
+      "candidateOps": [{ "op": "add", "id": "learner-tick", "color": "green", "spec": { "kind": "annotate", "style": "tick", "target": { "type": "learner_stroke", "strokeId": "sketch-segment", "anchor": "end" } } }]
+    },
+    {
+      "id": "fixture-annotation-image-regions",
+      "rowId": "annotation-image-regions",
+      "existingTutorOps": [{ "op": "add", "id": "machine-image", "spec": { "kind": "image", "assetId": "img-a1b2c3d4", "at": [100,80], "w": 800, "h": 430, "alt": "Synthetic wheel and axle" } }], "existingLearnerOps": [],
+      "candidateOps": [{ "op": "add", "id": "axle-circle", "color": "red", "spec": { "kind": "annotate", "style": "circle", "target": { "type": "image_region", "imageId": "machine-image", "selector": { "type": "FragmentSelector", "unit": "percent", "x": 0.39, "y": 0.43, "w": 0.22, "h": 0.1 } } } }]
+    },
+    {
+      "id": "fixture-instruments-grid-paper",
+      "rowId": "instruments-grid-paper",
+      "existingTutorOps": [], "existingLearnerOps": [],
+      "candidateOps": [{ "op": "add", "id": "dot-grid", "color": "blue", "spec": { "kind": "gridPaper", "at": [140,70], "w": 720, "h": 450, "spacing": 30, "style": "dot", "majorEvery": 5 } }]
+    },
+    {
+      "id": "fixture-instruments-clock",
+      "rowId": "instruments-clock",
+      "existingTutorOps": [], "existingLearnerOps": [],
+      "candidateOps": [{ "op": "add", "id": "clock-a", "color": "ink", "spec": { "kind": "clock", "center": [300,300], "r": 190, "hour": 4, "minute": 25 } }, { "op": "add", "id": "clock-b", "color": "blue", "spec": { "kind": "clock", "center": [740,300], "r": 190, "hour": 5, "minute": 10 } }]
+    },
+    {
+      "id": "fixture-instruments-protractor",
+      "rowId": "instruments-protractor",
+      "existingTutorOps": [], "existingLearnerOps": [],
+      "candidateOps": [{ "op": "add", "id": "protractor", "color": "violet", "spec": { "kind": "protractor", "center": [500,470], "r": 300, "angleDeg": 65, "label": "65°" } }]
+    }
+  ]
+}

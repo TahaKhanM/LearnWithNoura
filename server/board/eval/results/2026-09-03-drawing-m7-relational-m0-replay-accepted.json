@@ -1,0 +1,598 @@
+{
+  "schemaVersion": "1.0.0",
+  "evidenceMode": "offline_m0_representative_relational_replay",
+  "generatedAt": "2026-09-02T17:22:19.533Z",
+  "accepted": true,
+  "providerCalls": 0,
+  "externalRequestCount": 0,
+  "sourceSha256": "e02ccc9f240f72a7937fe192f30867434eb7f857fb6c45a5f8b52fa06507ae79",
+  "selection": "first cold terra-low trial for each of 36 M0 intents",
+  "summary": {
+    "sourceRows": 36,
+    "rows": 34,
+    "rowsWithRelationalPlacement": 34,
+    "originalValidatorAcceptedRows": 32,
+    "relationalRecoveredRows": 2,
+    "acceptedRows": 34,
+    "singleShotConjunctiveValidity": 1,
+    "threshold": 0.95
+  },
+  "rows": [
+    {
+      "intentId": "math-number-line",
+      "sourceTrial": {
+        "conditionId": "terra-low",
+        "cacheState": "cold",
+        "trial": 1
+      },
+      "relationalPlacementCount": 0,
+      "strictValid": true,
+      "originalValidatorPassed": true,
+      "authoredPolicyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "accepted": true
+    },
+    {
+      "intentId": "math-angle-sum",
+      "sourceTrial": {
+        "conditionId": "terra-low",
+        "cacheState": "cold",
+        "trial": 1
+      },
+      "relationalPlacementCount": 1,
+      "strictValid": true,
+      "originalValidatorPassed": true,
+      "authoredPolicyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "accepted": true
+    },
+    {
+      "intentId": "math-unit-circle",
+      "sourceTrial": {
+        "conditionId": "terra-low",
+        "cacheState": "cold",
+        "trial": 1
+      },
+      "relationalPlacementCount": 1,
+      "strictValid": true,
+      "originalValidatorPassed": true,
+      "authoredPolicyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "accepted": true
+    },
+    {
+      "intentId": "math-fraction-strip-holdout",
+      "sourceTrial": {
+        "conditionId": "terra-low",
+        "cacheState": "cold",
+        "trial": 1
+      },
+      "relationalPlacementCount": 1,
+      "strictValid": true,
+      "originalValidatorPassed": true,
+      "authoredPolicyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "accepted": true
+    },
+    {
+      "intentId": "graph-linear",
+      "sourceTrial": {
+        "conditionId": "terra-low",
+        "cacheState": "cold",
+        "trial": 1
+      },
+      "relationalPlacementCount": 1,
+      "strictValid": true,
+      "originalValidatorPassed": true,
+      "authoredPolicyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "accepted": true
+    },
+    {
+      "intentId": "graph-rainfall-bars",
+      "sourceTrial": {
+        "conditionId": "terra-low",
+        "cacheState": "cold",
+        "trial": 1
+      },
+      "relationalPlacementCount": 1,
+      "strictValid": true,
+      "originalValidatorPassed": true,
+      "authoredPolicyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "accepted": true
+    },
+    {
+      "intentId": "graph-slope-points",
+      "sourceTrial": {
+        "conditionId": "terra-low",
+        "cacheState": "cold",
+        "trial": 1
+      },
+      "relationalPlacementCount": 1,
+      "strictValid": true,
+      "originalValidatorPassed": true,
+      "authoredPolicyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "accepted": true
+    },
+    {
+      "intentId": "graph-intersection-holdout",
+      "sourceTrial": {
+        "conditionId": "terra-low",
+        "cacheState": "cold",
+        "trial": 1
+      },
+      "relationalPlacementCount": 1,
+      "strictValid": true,
+      "originalValidatorPassed": true,
+      "authoredPolicyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "accepted": true
+    },
+    {
+      "intentId": "science-cell-membrane",
+      "sourceTrial": {
+        "conditionId": "terra-low",
+        "cacheState": "cold",
+        "trial": 1
+      },
+      "relationalPlacementCount": 1,
+      "strictValid": true,
+      "originalValidatorPassed": true,
+      "authoredPolicyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "accepted": true
+    },
+    {
+      "intentId": "science-series-circuit",
+      "sourceTrial": {
+        "conditionId": "terra-low",
+        "cacheState": "cold",
+        "trial": 1
+      },
+      "relationalPlacementCount": 1,
+      "strictValid": true,
+      "originalValidatorPassed": true,
+      "authoredPolicyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "accepted": true
+    },
+    {
+      "intentId": "science-subduction-holdout",
+      "sourceTrial": {
+        "conditionId": "terra-low",
+        "cacheState": "cold",
+        "trial": 1
+      },
+      "relationalPlacementCount": 1,
+      "strictValid": true,
+      "originalValidatorPassed": true,
+      "authoredPolicyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "accepted": true
+    },
+    {
+      "intentId": "timeline-industrial-causes",
+      "sourceTrial": {
+        "conditionId": "terra-low",
+        "cacheState": "cold",
+        "trial": 1
+      },
+      "relationalPlacementCount": 1,
+      "strictValid": true,
+      "originalValidatorPassed": true,
+      "authoredPolicyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "accepted": true
+    },
+    {
+      "intentId": "timeline-ww1",
+      "sourceTrial": {
+        "conditionId": "terra-low",
+        "cacheState": "cold",
+        "trial": 1
+      },
+      "relationalPlacementCount": 1,
+      "strictValid": true,
+      "originalValidatorPassed": true,
+      "authoredPolicyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "accepted": true
+    },
+    {
+      "intentId": "timeline-butterfly-cycle",
+      "sourceTrial": {
+        "conditionId": "terra-low",
+        "cacheState": "cold",
+        "trial": 1
+      },
+      "relationalPlacementCount": 1,
+      "strictValid": true,
+      "originalValidatorPassed": true,
+      "authoredPolicyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "accepted": true
+    },
+    {
+      "intentId": "timeline-black-death-holdout",
+      "sourceTrial": {
+        "conditionId": "terra-low",
+        "cacheState": "cold",
+        "trial": 1
+      },
+      "relationalPlacementCount": 1,
+      "strictValid": true,
+      "originalValidatorPassed": true,
+      "authoredPolicyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "accepted": true
+    },
+    {
+      "intentId": "grammar-basic-clause",
+      "sourceTrial": {
+        "conditionId": "terra-low",
+        "cacheState": "cold",
+        "trial": 1
+      },
+      "relationalPlacementCount": 1,
+      "strictValid": true,
+      "originalValidatorPassed": true,
+      "authoredPolicyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "accepted": true
+    },
+    {
+      "intentId": "grammar-main-subordinate",
+      "sourceTrial": {
+        "conditionId": "terra-low",
+        "cacheState": "cold",
+        "trial": 1
+      },
+      "relationalPlacementCount": 1,
+      "strictValid": true,
+      "originalValidatorPassed": false,
+      "authoredPolicyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "accepted": true
+    },
+    {
+      "intentId": "grammar-active-passive",
+      "sourceTrial": {
+        "conditionId": "terra-low",
+        "cacheState": "cold",
+        "trial": 1
+      },
+      "relationalPlacementCount": 1,
+      "strictValid": true,
+      "originalValidatorPassed": true,
+      "authoredPolicyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "accepted": true
+    },
+    {
+      "intentId": "grammar-pronoun-holdout",
+      "sourceTrial": {
+        "conditionId": "terra-low",
+        "cacheState": "cold",
+        "trial": 1
+      },
+      "relationalPlacementCount": 1,
+      "strictValid": true,
+      "originalValidatorPassed": true,
+      "authoredPolicyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "accepted": true
+    },
+    {
+      "intentId": "compare-fractions",
+      "sourceTrial": {
+        "conditionId": "terra-low",
+        "cacheState": "cold",
+        "trial": 1
+      },
+      "relationalPlacementCount": 1,
+      "strictValid": true,
+      "originalValidatorPassed": true,
+      "authoredPolicyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "accepted": true
+    },
+    {
+      "intentId": "compare-budget",
+      "sourceTrial": {
+        "conditionId": "terra-low",
+        "cacheState": "cold",
+        "trial": 1
+      },
+      "relationalPlacementCount": 1,
+      "strictValid": true,
+      "originalValidatorPassed": true,
+      "authoredPolicyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "accepted": true
+    },
+    {
+      "intentId": "compare-animal-groups",
+      "sourceTrial": {
+        "conditionId": "terra-low",
+        "cacheState": "cold",
+        "trial": 1
+      },
+      "relationalPlacementCount": 1,
+      "strictValid": true,
+      "originalValidatorPassed": true,
+      "authoredPolicyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "accepted": true
+    },
+    {
+      "intentId": "compare-recipe-holdout",
+      "sourceTrial": {
+        "conditionId": "terra-low",
+        "cacheState": "cold",
+        "trial": 1
+      },
+      "relationalPlacementCount": 1,
+      "strictValid": true,
+      "originalValidatorPassed": true,
+      "authoredPolicyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "accepted": true
+    },
+    {
+      "intentId": "abstract-opportunity-cost",
+      "sourceTrial": {
+        "conditionId": "terra-low",
+        "cacheState": "cold",
+        "trial": 1
+      },
+      "relationalPlacementCount": 1,
+      "strictValid": true,
+      "originalValidatorPassed": true,
+      "authoredPolicyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "accepted": true
+    },
+    {
+      "intentId": "abstract-recursion",
+      "sourceTrial": {
+        "conditionId": "terra-low",
+        "cacheState": "cold",
+        "trial": 1
+      },
+      "relationalPlacementCount": 1,
+      "strictValid": true,
+      "originalValidatorPassed": true,
+      "authoredPolicyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "accepted": true
+    },
+    {
+      "intentId": "abstract-fairness-holdout",
+      "sourceTrial": {
+        "conditionId": "terra-low",
+        "cacheState": "cold",
+        "trial": 1
+      },
+      "relationalPlacementCount": 1,
+      "strictValid": true,
+      "originalValidatorPassed": true,
+      "authoredPolicyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "accepted": true
+    },
+    {
+      "intentId": "abstract-entropy-holdout",
+      "sourceTrial": {
+        "conditionId": "terra-low",
+        "cacheState": "cold",
+        "trial": 1
+      },
+      "relationalPlacementCount": 1,
+      "strictValid": true,
+      "originalValidatorPassed": true,
+      "authoredPolicyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "accepted": true
+    },
+    {
+      "intentId": "mixed-frog-habitat",
+      "sourceTrial": {
+        "conditionId": "terra-low",
+        "cacheState": "cold",
+        "trial": 1
+      },
+      "relationalPlacementCount": 1,
+      "strictValid": true,
+      "originalValidatorPassed": true,
+      "authoredPolicyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "accepted": true
+    },
+    {
+      "intentId": "mixed-solar-eclipse",
+      "sourceTrial": {
+        "conditionId": "terra-low",
+        "cacheState": "cold",
+        "trial": 1
+      },
+      "relationalPlacementCount": 1,
+      "strictValid": true,
+      "originalValidatorPassed": true,
+      "authoredPolicyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "accepted": true
+    },
+    {
+      "intentId": "mixed-aqueduct-holdout",
+      "sourceTrial": {
+        "conditionId": "terra-low",
+        "cacheState": "cold",
+        "trial": 1
+      },
+      "relationalPlacementCount": 1,
+      "strictValid": true,
+      "originalValidatorPassed": false,
+      "authoredPolicyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "accepted": true
+    },
+    {
+      "intentId": "revision-alternative-scale",
+      "sourceTrial": {
+        "conditionId": "terra-low",
+        "cacheState": "cold",
+        "trial": 1
+      },
+      "relationalPlacementCount": 1,
+      "strictValid": true,
+      "originalValidatorPassed": true,
+      "authoredPolicyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "accepted": true
+    },
+    {
+      "intentId": "revision-extend-causal",
+      "sourceTrial": {
+        "conditionId": "terra-low",
+        "cacheState": "cold",
+        "trial": 1
+      },
+      "relationalPlacementCount": 1,
+      "strictValid": true,
+      "originalValidatorPassed": true,
+      "authoredPolicyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "accepted": true
+    },
+    {
+      "intentId": "revision-groundwater-holdout",
+      "sourceTrial": {
+        "conditionId": "terra-low",
+        "cacheState": "cold",
+        "trial": 1
+      },
+      "relationalPlacementCount": 1,
+      "strictValid": true,
+      "originalValidatorPassed": true,
+      "authoredPolicyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "accepted": true
+    },
+    {
+      "intentId": "science-water-cycle",
+      "sourceTrial": {
+        "conditionId": "terra-low",
+        "cacheState": "cold",
+        "trial": 1
+      },
+      "relationalPlacementCount": 1,
+      "strictValid": true,
+      "originalValidatorPassed": true,
+      "authoredPolicyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "accepted": true
+    },
+    {
+      "intentId": "mixed-pollination-holdout",
+      "sourceTrial": {
+        "conditionId": "terra-low",
+        "cacheState": "cold",
+        "trial": 1
+      },
+      "relationalPlacementCount": 1,
+      "strictValid": true,
+      "originalValidatorPassed": true,
+      "authoredPolicyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "accepted": true
+    },
+    {
+      "intentId": "revision-correct-label-holdout",
+      "sourceTrial": {
+        "conditionId": "terra-low",
+        "cacheState": "cold",
+        "trial": 1
+      },
+      "relationalPlacementCount": 0,
+      "strictValid": true,
+      "originalValidatorPassed": true,
+      "authoredPolicyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "accepted": true
+    }
+  ]
+}

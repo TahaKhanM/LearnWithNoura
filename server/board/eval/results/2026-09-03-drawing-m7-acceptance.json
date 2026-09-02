@@ -1,0 +1,108 @@
+{
+  "schemaVersion": "1.0.0",
+  "evidenceMode": "m7_technical_and_process_acceptance_audit",
+  "generatedAt": "2026-09-02T17:54:36.120Z",
+  "technicalAccepted": true,
+  "processCompliant": false,
+  "accepted": false,
+  "blockers": [
+    "provider_spend_process_violation"
+  ],
+  "curriculum": {
+    "totalRows": 39,
+    "supportedRows": 28,
+    "composableRows": 11,
+    "missingRows": 0,
+    "browserAccepted": 39,
+    "maximumFirstPaintMs": 29
+  },
+  "relational": {
+    "rows": 34,
+    "originalAcceptedRows": 32,
+    "recoveredRows": 2,
+    "acceptedRows": 34,
+    "validity": 1,
+    "threshold": 0.95
+  },
+  "grounding": {
+    "pointingAccuracy": 1,
+    "correctSelfCheckFalseRejectRate": 0,
+    "seededDefectCatchRate": 0.8,
+    "tapFallbackRate": 0,
+    "malformedReplyRate": 0,
+    "providerCalls": 17,
+    "observedCostUsd": 0.005022,
+    "conservativeAccountedCostUsd": 0.51,
+    "authorizedHardCapUsd": 0.6
+  },
+  "g4": {
+    "sampleRows": 72,
+    "totalRows": 290,
+    "streamingP50FirstPaintMs": 2789,
+    "classicP50FirstPaintMs": 4754,
+    "streamingP50UiCommitMs": 158,
+    "previousStreamingP50FirstPaintMs": 2818,
+    "previousStreamingP50UiCommitMs": 141,
+    "p50Cut": 0.413336,
+    "noRegression": true,
+    "actualLessonPage": true,
+    "providerCalls": 0,
+    "screenshotsInspected": true
+  },
+  "fastTier": {
+    "thresholdMs": 1000,
+    "thresholdAsserted": true,
+    "zeroVisionCalls": true,
+    "actualLessonE2E": true,
+    "screenshotSha256": "b998ef6b1a06e42fb06f66f989a26580d7c56b278279ea883c8ac957f3b0e806"
+  },
+  "primitives": [
+    "transform",
+    "panelGrid",
+    "regionFill",
+    "scatter",
+    "boxplot",
+    "histogram",
+    "isometricSolid",
+    "cubeNet",
+    "planView",
+    "paperFoldHolePunch",
+    "gridPaper",
+    "clock",
+    "protractor"
+  ],
+  "annotationStyles": [
+    "circle",
+    "underline",
+    "arrow",
+    "tick",
+    "cross",
+    "bracket",
+    "callout",
+    "highlighter"
+  ],
+  "processIncident": {
+    "code": "g4_harness_started_without_fixture_compiler",
+    "syntheticSessions": 6,
+    "minimumCompletedProviderRequests": 11,
+    "exactProviderCalls": null,
+    "exactObservedCostUsd": null,
+    "evidenceExcluded": true,
+    "formalEffect": "M7 formal acceptance is blocked; the violation cannot be repaired retroactively."
+  },
+  "evidenceHashes": {
+    "curriculum": "cf03755c17273e9bf1cabd7b1a657ddd5f817bc44cebb9d18dab48d5b77e5ce7",
+    "relational": "2c34608233398ffaad81b81e964b91df88b74a25c1099d896e12908ee8044466",
+    "grounding": "d22a458f22e566e516a16c20612b39d01cfaf5032362331643a7ec4432174582",
+    "groundingLedger": "71c4e57efe292fd67a5611d10df39927d701e522cdfd3695b93fed4430ca3e52",
+    "g4": "58a762f83473925c20b3849ed7c817e5d9e8ce2aae881be13cfd8a99e154d5e3",
+    "incident": "a5fc906dfc4f98e45210809b57cf0f821d588b83023d3a6a8a38a96482036de8",
+    "fastTierUnitSource": "6d6a98baf6b189f993604b50da04a3a56df8b5fa23cdd3f01c174adf02aac805",
+    "fastTierE2ESource": "a6a99f7208e6e4960395988b490c0fb5bd385518a7412bab9f4b204bfb2aa09b"
+  },
+  "unproven": [
+    "target-device acoustics",
+    "real-child image grounding behavior",
+    "full 290-row post-M7 G4 replay"
+  ]
+}

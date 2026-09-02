@@ -1,0 +1,11 @@
+{
+  "schemaVersion": "1.0.0",
+  "resultSha256": "e54d4aa964996b162f2ce6d6dd8579a114bf5689b4cd663f2c49c11336702e35",
+  "technicalAccepted": true,
+  "accepted": false,
+  "blocker": "provider_spend_process_violation",
+  "curriculumRows": 39,
+  "relationalRows": 34,
+  "g4SampleRows": 72,
+  "groundingProviderCalls": 17
+}
