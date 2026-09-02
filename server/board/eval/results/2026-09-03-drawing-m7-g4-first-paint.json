@@ -1,0 +1,1074 @@
+{
+  "schemaVersion": "1.0.0",
+  "evidenceMode": "offline_actual_lesson_ops_presented_replay",
+  "evidenceBoundary": "Hash-bound M0 provider delays backdate intent acceptance; every candidate traverses the real LessonPage, fake voice transport, runtime cue timeline, BoardSceneCoordinator, React paint, and outgoing ops_presented acknowledgement. No provider or external network request is made.",
+  "providerCalls": 0,
+  "runtimeCostUsd": 0,
+  "realChildData": false,
+  "selection": {
+    "strategy": "deterministic_stratified_index",
+    "sampleRows": 72,
+    "totalRows": 290
+  },
+  "source": {
+    "m0Path": "server/board/eval/results/2026-08-31-drawing-model-bakeoff-raw.json",
+    "m0Sha256": "e02ccc9f240f72a7937fe192f30867434eb7f857fb6c45a5f8b52fa06507ae79",
+    "m1Path": "server/board/eval/results/2026-09-01-drawing-m1-pipeline-study.json",
+    "m1Sha256": "44409bf22112a0e76ed95af0ccb605158f0f1fb01f16600acd5d79b67493d209",
+    "pairedValidDiagramRows": 72
+  },
+  "browserHarness": {
+    "origin": "http://localhost:5173",
+    "finalOrigins": [
+      "http://localhost:5173"
+    ],
+    "engine": "chromium",
+    "externalRequestCount": 0,
+    "fakeVoiceTransport": true,
+    "actualLessonPage": true
+  },
+  "screenshots": {
+    "sourceKey": "grammar-pronoun-holdout:terra-low:warm:5",
+    "streaming": {
+      "path": "artifacts/evaluation/drawing-m7-g4-first-paint/streaming-first-paint.png",
+      "sha256": "5684d642e4a02b0b468897a953bb2511c75a9e6aa367662d80964fdda8baa8f4"
+    },
+    "classic": {
+      "path": "artifacts/evaluation/drawing-m7-g4-first-paint/classic-first-paint.png",
+      "sha256": "c8a0e6d87cafbb5a49c28119e937c41c3cb1a4de1ef91515b94a2e1e47dbae54"
+    }
+  },
+  "summary": {
+    "streaming": {
+      "rows": 72,
+      "p50ProviderDelayMs": 2584,
+      "p50UiCommitMs": 158,
+      "p95UiCommitMs": 281,
+      "p50FirstPaintMs": 2789,
+      "p95FirstPaintMs": 17114
+    },
+    "classic": {
+      "rows": 72,
+      "p50ProviderDelayMs": 4595,
+      "p50UiCommitMs": 169,
+      "p95UiCommitMs": 304,
+      "p50FirstPaintMs": 4754,
+      "p95FirstPaintMs": 19400
+    },
+    "p50Cut": 0.413336,
+    "p50CutAtLeastFortyPercent": true,
+    "streamingWithinFourSeconds": true,
+    "streamingStretchWithinThreeSeconds": true,
+    "accepted": true
+  },
+  "observations": [
+    {
+      "sourceKey": "abstract-entropy-holdout:terra-low:cold:1",
+      "lane": "classic",
+      "providerDelayMs": 5104,
+      "uiCommitMs": 75,
+      "firstPaintMs": 5179
+    },
+    {
+      "sourceKey": "abstract-entropy-holdout:terra-low:cold:1",
+      "lane": "streaming",
+      "providerDelayMs": 2656,
+      "uiCommitMs": 56,
+      "firstPaintMs": 2712
+    },
+    {
+      "sourceKey": "abstract-entropy-holdout:terra-low:cold:5",
+      "lane": "classic",
+      "providerDelayMs": 5080,
+      "uiCommitMs": 72,
+      "firstPaintMs": 5152
+    },
+    {
+      "sourceKey": "abstract-entropy-holdout:terra-low:cold:5",
+      "lane": "streaming",
+      "providerDelayMs": 2358,
+      "uiCommitMs": 54,
+      "firstPaintMs": 2412
+    },
+    {
+      "sourceKey": "abstract-entropy-holdout:terra-low:warm:4",
+      "lane": "classic",
+      "providerDelayMs": 12205,
+      "uiCommitMs": 156,
+      "firstPaintMs": 12361
+    },
+    {
+      "sourceKey": "abstract-entropy-holdout:terra-low:warm:4",
+      "lane": "streaming",
+      "providerDelayMs": 9376,
+      "uiCommitMs": 131,
+      "firstPaintMs": 9507
+    },
+    {
+      "sourceKey": "abstract-fairness-holdout:terra-low:cold:3",
+      "lane": "classic",
+      "providerDelayMs": 6639,
+      "uiCommitMs": 109,
+      "firstPaintMs": 6748
+    },
+    {
+      "sourceKey": "abstract-fairness-holdout:terra-low:cold:3",
+      "lane": "streaming",
+      "providerDelayMs": 4721,
+      "uiCommitMs": 91,
+      "firstPaintMs": 4812
+    },
+    {
+      "sourceKey": "abstract-fairness-holdout:terra-low:warm:2",
+      "lane": "classic",
+      "providerDelayMs": 5012,
+      "uiCommitMs": 68,
+      "firstPaintMs": 5080
+    },
+    {
+      "sourceKey": "abstract-fairness-holdout:terra-low:warm:2",
+      "lane": "streaming",
+      "providerDelayMs": 2364,
+      "uiCommitMs": 185,
+      "firstPaintMs": 2549
+    },
+    {
+      "sourceKey": "abstract-opportunity-cost:terra-low:cold:1",
+      "lane": "classic",
+      "providerDelayMs": 4324,
+      "uiCommitMs": 175,
+      "firstPaintMs": 4499
+    },
+    {
+      "sourceKey": "abstract-opportunity-cost:terra-low:cold:1",
+      "lane": "streaming",
+      "providerDelayMs": 2317,
+      "uiCommitMs": 231,
+      "firstPaintMs": 2548
+    },
+    {
+      "sourceKey": "abstract-opportunity-cost:terra-low:cold:5",
+      "lane": "classic",
+      "providerDelayMs": 3565,
+      "uiCommitMs": 75,
+      "firstPaintMs": 3640
+    },
+    {
+      "sourceKey": "abstract-opportunity-cost:terra-low:cold:5",
+      "lane": "streaming",
+      "providerDelayMs": 2482,
+      "uiCommitMs": 80,
+      "firstPaintMs": 2562
+    },
+    {
+      "sourceKey": "abstract-opportunity-cost:terra-low:warm:4",
+      "lane": "classic",
+      "providerDelayMs": 3859,
+      "uiCommitMs": 195,
+      "firstPaintMs": 4054
+    },
+    {
+      "sourceKey": "abstract-opportunity-cost:terra-low:warm:4",
+      "lane": "streaming",
+      "providerDelayMs": 2295,
+      "uiCommitMs": 84,
+      "firstPaintMs": 2379
+    },
+    {
+      "sourceKey": "abstract-recursion:terra-low:cold:5",
+      "lane": "classic",
+      "providerDelayMs": 13066,
+      "uiCommitMs": 169,
+      "firstPaintMs": 13235
+    },
+    {
+      "sourceKey": "abstract-recursion:terra-low:cold:5",
+      "lane": "streaming",
+      "providerDelayMs": 11854,
+      "uiCommitMs": 165,
+      "firstPaintMs": 12019
+    },
+    {
+      "sourceKey": "abstract-recursion:terra-low:warm:5",
+      "lane": "classic",
+      "providerDelayMs": 20965,
+      "uiCommitMs": 254,
+      "firstPaintMs": 21219
+    },
+    {
+      "sourceKey": "abstract-recursion:terra-low:warm:5",
+      "lane": "streaming",
+      "providerDelayMs": 18343,
+      "uiCommitMs": 78,
+      "firstPaintMs": 18421
+    },
+    {
+      "sourceKey": "compare-animal-groups:terra-low:cold:4",
+      "lane": "classic",
+      "providerDelayMs": 4149,
+      "uiCommitMs": 141,
+      "firstPaintMs": 4290
+    },
+    {
+      "sourceKey": "compare-animal-groups:terra-low:cold:4",
+      "lane": "streaming",
+      "providerDelayMs": 1886,
+      "uiCommitMs": 247,
+      "firstPaintMs": 2133
+    },
+    {
+      "sourceKey": "compare-animal-groups:terra-low:warm:4",
+      "lane": "classic",
+      "providerDelayMs": 6069,
+      "uiCommitMs": 101,
+      "firstPaintMs": 6170
+    },
+    {
+      "sourceKey": "compare-animal-groups:terra-low:warm:4",
+      "lane": "streaming",
+      "providerDelayMs": 5106,
+      "uiCommitMs": 102,
+      "firstPaintMs": 5208
+    },
+    {
+      "sourceKey": "compare-budget:terra-low:cold:4",
+      "lane": "classic",
+      "providerDelayMs": 3646,
+      "uiCommitMs": 171,
+      "firstPaintMs": 3817
+    },
+    {
+      "sourceKey": "compare-budget:terra-low:cold:4",
+      "lane": "streaming",
+      "providerDelayMs": 1583,
+      "uiCommitMs": 82,
+      "firstPaintMs": 1665
+    },
+    {
+      "sourceKey": "compare-budget:terra-low:warm:3",
+      "lane": "classic",
+      "providerDelayMs": 3753,
+      "uiCommitMs": 223,
+      "firstPaintMs": 3976
+    },
+    {
+      "sourceKey": "compare-budget:terra-low:warm:3",
+      "lane": "streaming",
+      "providerDelayMs": 1580,
+      "uiCommitMs": 98,
+      "firstPaintMs": 1678
+    },
+    {
+      "sourceKey": "compare-fractions:terra-low:cold:3",
+      "lane": "classic",
+      "providerDelayMs": 2702,
+      "uiCommitMs": 388,
+      "firstPaintMs": 3090
+    },
+    {
+      "sourceKey": "compare-fractions:terra-low:cold:3",
+      "lane": "streaming",
+      "providerDelayMs": 2327,
+      "uiCommitMs": 216,
+      "firstPaintMs": 2543
+    },
+    {
+      "sourceKey": "compare-fractions:terra-low:warm:2",
+      "lane": "classic",
+      "providerDelayMs": 3956,
+      "uiCommitMs": 235,
+      "firstPaintMs": 4191
+    },
+    {
+      "sourceKey": "compare-fractions:terra-low:warm:2",
+      "lane": "streaming",
+      "providerDelayMs": 2515,
+      "uiCommitMs": 193,
+      "firstPaintMs": 2708
+    },
+    {
+      "sourceKey": "compare-recipe-holdout:terra-low:cold:1",
+      "lane": "classic",
+      "providerDelayMs": 4151,
+      "uiCommitMs": 414,
+      "firstPaintMs": 4565
+    },
+    {
+      "sourceKey": "compare-recipe-holdout:terra-low:cold:1",
+      "lane": "streaming",
+      "providerDelayMs": 2573,
+      "uiCommitMs": 251,
+      "firstPaintMs": 2824
+    },
+    {
+      "sourceKey": "compare-recipe-holdout:terra-low:cold:5",
+      "lane": "classic",
+      "providerDelayMs": 3624,
+      "uiCommitMs": 142,
+      "firstPaintMs": 3766
+    },
+    {
+      "sourceKey": "compare-recipe-holdout:terra-low:cold:5",
+      "lane": "streaming",
+      "providerDelayMs": 1933,
+      "uiCommitMs": 75,
+      "firstPaintMs": 2008
+    },
+    {
+      "sourceKey": "compare-recipe-holdout:terra-low:warm:5",
+      "lane": "classic",
+      "providerDelayMs": 3621,
+      "uiCommitMs": 155,
+      "firstPaintMs": 3776
+    },
+    {
+      "sourceKey": "compare-recipe-holdout:terra-low:warm:5",
+      "lane": "streaming",
+      "providerDelayMs": 1796,
+      "uiCommitMs": 147,
+      "firstPaintMs": 1943
+    },
+    {
+      "sourceKey": "grammar-active-passive:terra-low:cold:4",
+      "lane": "classic",
+      "providerDelayMs": 4662,
+      "uiCommitMs": 321,
+      "firstPaintMs": 4983
+    },
+    {
+      "sourceKey": "grammar-active-passive:terra-low:cold:4",
+      "lane": "streaming",
+      "providerDelayMs": 2734,
+      "uiCommitMs": 161,
+      "firstPaintMs": 2895
+    },
+    {
+      "sourceKey": "grammar-active-passive:terra-low:warm:4",
+      "lane": "classic",
+      "providerDelayMs": 5158,
+      "uiCommitMs": 250,
+      "firstPaintMs": 5408
+    },
+    {
+      "sourceKey": "grammar-active-passive:terra-low:warm:4",
+      "lane": "streaming",
+      "providerDelayMs": 2546,
+      "uiCommitMs": 243,
+      "firstPaintMs": 2789
+    },
+    {
+      "sourceKey": "grammar-basic-clause:terra-low:cold:3",
+      "lane": "classic",
+      "providerDelayMs": 3274,
+      "uiCommitMs": 141,
+      "firstPaintMs": 3415
+    },
+    {
+      "sourceKey": "grammar-basic-clause:terra-low:cold:3",
+      "lane": "streaming",
+      "providerDelayMs": 1948,
+      "uiCommitMs": 114,
+      "firstPaintMs": 2062
+    },
+    {
+      "sourceKey": "grammar-basic-clause:terra-low:warm:2",
+      "lane": "classic",
+      "providerDelayMs": 3089,
+      "uiCommitMs": 204,
+      "firstPaintMs": 3293
+    },
+    {
+      "sourceKey": "grammar-basic-clause:terra-low:warm:2",
+      "lane": "streaming",
+      "providerDelayMs": 1834,
+      "uiCommitMs": 234,
+      "firstPaintMs": 2068
+    },
+    {
+      "sourceKey": "grammar-main-subordinate:terra-low:cold:3",
+      "lane": "classic",
+      "providerDelayMs": 3559,
+      "uiCommitMs": 210,
+      "firstPaintMs": 3769
+    },
+    {
+      "sourceKey": "grammar-main-subordinate:terra-low:cold:3",
+      "lane": "streaming",
+      "providerDelayMs": 2229,
+      "uiCommitMs": 175,
+      "firstPaintMs": 2404
+    },
+    {
+      "sourceKey": "grammar-main-subordinate:terra-low:warm:3",
+      "lane": "classic",
+      "providerDelayMs": 3377,
+      "uiCommitMs": 133,
+      "firstPaintMs": 3510
+    },
+    {
+      "sourceKey": "grammar-main-subordinate:terra-low:warm:3",
+      "lane": "streaming",
+      "providerDelayMs": 1980,
+      "uiCommitMs": 214,
+      "firstPaintMs": 2194
+    },
+    {
+      "sourceKey": "grammar-pronoun-holdout:terra-low:cold:2",
+      "lane": "classic",
+      "providerDelayMs": 3653,
+      "uiCommitMs": 85,
+      "firstPaintMs": 3738
+    },
+    {
+      "sourceKey": "grammar-pronoun-holdout:terra-low:cold:2",
+      "lane": "streaming",
+      "providerDelayMs": 2236,
+      "uiCommitMs": 130,
+      "firstPaintMs": 2366
+    },
+    {
+      "sourceKey": "grammar-pronoun-holdout:terra-low:warm:1",
+      "lane": "classic",
+      "providerDelayMs": 4261,
+      "uiCommitMs": 307,
+      "firstPaintMs": 4568
+    },
+    {
+      "sourceKey": "grammar-pronoun-holdout:terra-low:warm:1",
+      "lane": "streaming",
+      "providerDelayMs": 2644,
+      "uiCommitMs": 282,
+      "firstPaintMs": 2926
+    },
+    {
+      "sourceKey": "grammar-pronoun-holdout:terra-low:warm:5",
+      "lane": "classic",
+      "providerDelayMs": 4067,
+      "uiCommitMs": 224,
+      "firstPaintMs": 4291
+    },
+    {
+      "sourceKey": "grammar-pronoun-holdout:terra-low:warm:5",
+      "lane": "streaming",
+      "providerDelayMs": 2584,
+      "uiCommitMs": 99,
+      "firstPaintMs": 2683
+    },
+    {
+      "sourceKey": "graph-intersection-holdout:terra-low:cold:4",
+      "lane": "classic",
+      "providerDelayMs": 3702,
+      "uiCommitMs": 255,
+      "firstPaintMs": 3957
+    },
+    {
+      "sourceKey": "graph-intersection-holdout:terra-low:cold:4",
+      "lane": "streaming",
+      "providerDelayMs": 2855,
+      "uiCommitMs": 281,
+      "firstPaintMs": 3136
+    },
+    {
+      "sourceKey": "graph-intersection-holdout:terra-low:warm:5",
+      "lane": "classic",
+      "providerDelayMs": 9417,
+      "uiCommitMs": 304,
+      "firstPaintMs": 9721
+    },
+    {
+      "sourceKey": "graph-intersection-holdout:terra-low:warm:5",
+      "lane": "streaming",
+      "providerDelayMs": 8204,
+      "uiCommitMs": 290,
+      "firstPaintMs": 8494
+    },
+    {
+      "sourceKey": "graph-linear:terra-low:warm:2",
+      "lane": "classic",
+      "providerDelayMs": 8485,
+      "uiCommitMs": 219,
+      "firstPaintMs": 8704
+    },
+    {
+      "sourceKey": "graph-linear:terra-low:warm:2",
+      "lane": "streaming",
+      "providerDelayMs": 7496,
+      "uiCommitMs": 227,
+      "firstPaintMs": 7723
+    },
+    {
+      "sourceKey": "graph-rainfall-bars:terra-low:cold:1",
+      "lane": "classic",
+      "providerDelayMs": 3497,
+      "uiCommitMs": 218,
+      "firstPaintMs": 3715
+    },
+    {
+      "sourceKey": "graph-rainfall-bars:terra-low:cold:1",
+      "lane": "streaming",
+      "providerDelayMs": 2312,
+      "uiCommitMs": 242,
+      "firstPaintMs": 2554
+    },
+    {
+      "sourceKey": "graph-rainfall-bars:terra-low:cold:5",
+      "lane": "classic",
+      "providerDelayMs": 2876,
+      "uiCommitMs": 201,
+      "firstPaintMs": 3077
+    },
+    {
+      "sourceKey": "graph-rainfall-bars:terra-low:cold:5",
+      "lane": "streaming",
+      "providerDelayMs": 1838,
+      "uiCommitMs": 188,
+      "firstPaintMs": 2026
+    },
+    {
+      "sourceKey": "graph-rainfall-bars:terra-low:warm:4",
+      "lane": "classic",
+      "providerDelayMs": 2790,
+      "uiCommitMs": 206,
+      "firstPaintMs": 2996
+    },
+    {
+      "sourceKey": "graph-rainfall-bars:terra-low:warm:4",
+      "lane": "streaming",
+      "providerDelayMs": 1772,
+      "uiCommitMs": 158,
+      "firstPaintMs": 1930
+    },
+    {
+      "sourceKey": "graph-slope-points:terra-low:cold:3",
+      "lane": "classic",
+      "providerDelayMs": 4015,
+      "uiCommitMs": 165,
+      "firstPaintMs": 4180
+    },
+    {
+      "sourceKey": "graph-slope-points:terra-low:cold:3",
+      "lane": "streaming",
+      "providerDelayMs": 1969,
+      "uiCommitMs": 143,
+      "firstPaintMs": 2112
+    },
+    {
+      "sourceKey": "graph-slope-points:terra-low:warm:4",
+      "lane": "classic",
+      "providerDelayMs": 6845,
+      "uiCommitMs": 192,
+      "firstPaintMs": 7037
+    },
+    {
+      "sourceKey": "graph-slope-points:terra-low:warm:4",
+      "lane": "streaming",
+      "providerDelayMs": 5521,
+      "uiCommitMs": 217,
+      "firstPaintMs": 5738
+    },
+    {
+      "sourceKey": "math-angle-sum:terra-low:cold:4",
+      "lane": "classic",
+      "providerDelayMs": 3848,
+      "uiCommitMs": 227,
+      "firstPaintMs": 4075
+    },
+    {
+      "sourceKey": "math-angle-sum:terra-low:cold:4",
+      "lane": "streaming",
+      "providerDelayMs": 2448,
+      "uiCommitMs": 110,
+      "firstPaintMs": 2558
+    },
+    {
+      "sourceKey": "math-angle-sum:terra-low:warm:3",
+      "lane": "classic",
+      "providerDelayMs": 5320,
+      "uiCommitMs": 87,
+      "firstPaintMs": 5407
+    },
+    {
+      "sourceKey": "math-angle-sum:terra-low:warm:3",
+      "lane": "streaming",
+      "providerDelayMs": 3765,
+      "uiCommitMs": 92,
+      "firstPaintMs": 3857
+    },
+    {
+      "sourceKey": "math-fraction-strip-holdout:terra-low:cold:2",
+      "lane": "classic",
+      "providerDelayMs": 22643,
+      "uiCommitMs": 189,
+      "firstPaintMs": 22832
+    },
+    {
+      "sourceKey": "math-fraction-strip-holdout:terra-low:cold:2",
+      "lane": "streaming",
+      "providerDelayMs": 19490,
+      "uiCommitMs": 92,
+      "firstPaintMs": 19582
+    },
+    {
+      "sourceKey": "math-fraction-strip-holdout:terra-low:warm:2",
+      "lane": "classic",
+      "providerDelayMs": 4595,
+      "uiCommitMs": 225,
+      "firstPaintMs": 4820
+    },
+    {
+      "sourceKey": "math-fraction-strip-holdout:terra-low:warm:2",
+      "lane": "streaming",
+      "providerDelayMs": 2420,
+      "uiCommitMs": 170,
+      "firstPaintMs": 2590
+    },
+    {
+      "sourceKey": "math-number-line:terra-low:cold:1",
+      "lane": "classic",
+      "providerDelayMs": 4453,
+      "uiCommitMs": 52,
+      "firstPaintMs": 4505
+    },
+    {
+      "sourceKey": "math-number-line:terra-low:cold:1",
+      "lane": "streaming",
+      "providerDelayMs": 4452,
+      "uiCommitMs": 160,
+      "firstPaintMs": 4612
+    },
+    {
+      "sourceKey": "math-number-line:terra-low:cold:5",
+      "lane": "classic",
+      "providerDelayMs": 1938,
+      "uiCommitMs": 210,
+      "firstPaintMs": 2148
+    },
+    {
+      "sourceKey": "math-number-line:terra-low:cold:5",
+      "lane": "streaming",
+      "providerDelayMs": 1482,
+      "uiCommitMs": 175,
+      "firstPaintMs": 1657
+    },
+    {
+      "sourceKey": "math-number-line:terra-low:warm:4",
+      "lane": "classic",
+      "providerDelayMs": 1969,
+      "uiCommitMs": 88,
+      "firstPaintMs": 2057
+    },
+    {
+      "sourceKey": "math-number-line:terra-low:warm:4",
+      "lane": "streaming",
+      "providerDelayMs": 1931,
+      "uiCommitMs": 208,
+      "firstPaintMs": 2139
+    },
+    {
+      "sourceKey": "math-unit-circle:terra-low:warm:1",
+      "lane": "classic",
+      "providerDelayMs": 6104,
+      "uiCommitMs": 208,
+      "firstPaintMs": 6312
+    },
+    {
+      "sourceKey": "math-unit-circle:terra-low:warm:1",
+      "lane": "streaming",
+      "providerDelayMs": 3783,
+      "uiCommitMs": 191,
+      "firstPaintMs": 3974
+    },
+    {
+      "sourceKey": "revision-alternative-scale:terra-low:cold:1",
+      "lane": "classic",
+      "providerDelayMs": 12666,
+      "uiCommitMs": 53,
+      "firstPaintMs": 12719
+    },
+    {
+      "sourceKey": "revision-alternative-scale:terra-low:cold:1",
+      "lane": "streaming",
+      "providerDelayMs": 11401,
+      "uiCommitMs": 41,
+      "firstPaintMs": 11442
+    },
+    {
+      "sourceKey": "revision-alternative-scale:terra-low:cold:5",
+      "lane": "classic",
+      "providerDelayMs": 5532,
+      "uiCommitMs": 194,
+      "firstPaintMs": 5726
+    },
+    {
+      "sourceKey": "revision-alternative-scale:terra-low:cold:5",
+      "lane": "streaming",
+      "providerDelayMs": 4805,
+      "uiCommitMs": 62,
+      "firstPaintMs": 4867
+    },
+    {
+      "sourceKey": "revision-alternative-scale:terra-low:warm:4",
+      "lane": "classic",
+      "providerDelayMs": 9750,
+      "uiCommitMs": 174,
+      "firstPaintMs": 9924
+    },
+    {
+      "sourceKey": "revision-alternative-scale:terra-low:warm:4",
+      "lane": "streaming",
+      "providerDelayMs": 9666,
+      "uiCommitMs": 82,
+      "firstPaintMs": 9748
+    },
+    {
+      "sourceKey": "revision-correct-label-holdout:terra-low:cold:3",
+      "lane": "classic",
+      "providerDelayMs": 2142,
+      "uiCommitMs": 42,
+      "firstPaintMs": 2184
+    },
+    {
+      "sourceKey": "revision-correct-label-holdout:terra-low:cold:3",
+      "lane": "streaming",
+      "providerDelayMs": 2082,
+      "uiCommitMs": 53,
+      "firstPaintMs": 2135
+    },
+    {
+      "sourceKey": "revision-correct-label-holdout:terra-low:warm:2",
+      "lane": "classic",
+      "providerDelayMs": 2218,
+      "uiCommitMs": 66,
+      "firstPaintMs": 2284
+    },
+    {
+      "sourceKey": "revision-correct-label-holdout:terra-low:warm:2",
+      "lane": "streaming",
+      "providerDelayMs": 2164,
+      "uiCommitMs": 49,
+      "firstPaintMs": 2213
+    },
+    {
+      "sourceKey": "revision-extend-causal:terra-low:cold:1",
+      "lane": "classic",
+      "providerDelayMs": 8116,
+      "uiCommitMs": 130,
+      "firstPaintMs": 8246
+    },
+    {
+      "sourceKey": "revision-extend-causal:terra-low:cold:1",
+      "lane": "streaming",
+      "providerDelayMs": 6839,
+      "uiCommitMs": 128,
+      "firstPaintMs": 6967
+    },
+    {
+      "sourceKey": "revision-extend-causal:terra-low:warm:1",
+      "lane": "classic",
+      "providerDelayMs": 5469,
+      "uiCommitMs": 46,
+      "firstPaintMs": 5515
+    },
+    {
+      "sourceKey": "revision-extend-causal:terra-low:warm:1",
+      "lane": "streaming",
+      "providerDelayMs": 4262,
+      "uiCommitMs": 54,
+      "firstPaintMs": 4316
+    },
+    {
+      "sourceKey": "revision-extend-causal:terra-low:warm:5",
+      "lane": "classic",
+      "providerDelayMs": 7555,
+      "uiCommitMs": 137,
+      "firstPaintMs": 7692
+    },
+    {
+      "sourceKey": "revision-extend-causal:terra-low:warm:5",
+      "lane": "streaming",
+      "providerDelayMs": 6806,
+      "uiCommitMs": 228,
+      "firstPaintMs": 7034
+    },
+    {
+      "sourceKey": "revision-groundwater-holdout:terra-low:cold:4",
+      "lane": "classic",
+      "providerDelayMs": 28972,
+      "uiCommitMs": 74,
+      "firstPaintMs": 29046
+    },
+    {
+      "sourceKey": "revision-groundwater-holdout:terra-low:cold:4",
+      "lane": "streaming",
+      "providerDelayMs": 27612,
+      "uiCommitMs": 150,
+      "firstPaintMs": 27762
+    },
+    {
+      "sourceKey": "revision-groundwater-holdout:terra-low:warm:3",
+      "lane": "classic",
+      "providerDelayMs": 25796,
+      "uiCommitMs": 209,
+      "firstPaintMs": 26005
+    },
+    {
+      "sourceKey": "revision-groundwater-holdout:terra-low:warm:3",
+      "lane": "streaming",
+      "providerDelayMs": 24252,
+      "uiCommitMs": 243,
+      "firstPaintMs": 24495
+    },
+    {
+      "sourceKey": "science-cell-membrane:terra-low:cold:3",
+      "lane": "classic",
+      "providerDelayMs": 4655,
+      "uiCommitMs": 99,
+      "firstPaintMs": 4754
+    },
+    {
+      "sourceKey": "science-cell-membrane:terra-low:cold:3",
+      "lane": "streaming",
+      "providerDelayMs": 3577,
+      "uiCommitMs": 213,
+      "firstPaintMs": 3790
+    },
+    {
+      "sourceKey": "science-cell-membrane:terra-low:warm:2",
+      "lane": "classic",
+      "providerDelayMs": 5723,
+      "uiCommitMs": 185,
+      "firstPaintMs": 5908
+    },
+    {
+      "sourceKey": "science-cell-membrane:terra-low:warm:2",
+      "lane": "streaming",
+      "providerDelayMs": 4142,
+      "uiCommitMs": 256,
+      "firstPaintMs": 4398
+    },
+    {
+      "sourceKey": "science-series-circuit:terra-low:cold:2",
+      "lane": "classic",
+      "providerDelayMs": 7062,
+      "uiCommitMs": 194,
+      "firstPaintMs": 7256
+    },
+    {
+      "sourceKey": "science-series-circuit:terra-low:cold:2",
+      "lane": "streaming",
+      "providerDelayMs": 4558,
+      "uiCommitMs": 361,
+      "firstPaintMs": 4919
+    },
+    {
+      "sourceKey": "science-series-circuit:terra-low:warm:1",
+      "lane": "classic",
+      "providerDelayMs": 8200,
+      "uiCommitMs": 198,
+      "firstPaintMs": 8398
+    },
+    {
+      "sourceKey": "science-series-circuit:terra-low:warm:1",
+      "lane": "streaming",
+      "providerDelayMs": 6242,
+      "uiCommitMs": 209,
+      "firstPaintMs": 6451
+    },
+    {
+      "sourceKey": "science-series-circuit:terra-low:warm:5",
+      "lane": "classic",
+      "providerDelayMs": 5742,
+      "uiCommitMs": 185,
+      "firstPaintMs": 5927
+    },
+    {
+      "sourceKey": "science-series-circuit:terra-low:warm:5",
+      "lane": "streaming",
+      "providerDelayMs": 3750,
+      "uiCommitMs": 209,
+      "firstPaintMs": 3959
+    },
+    {
+      "sourceKey": "science-subduction-holdout:terra-low:warm:1",
+      "lane": "classic",
+      "providerDelayMs": 15350,
+      "uiCommitMs": 72,
+      "firstPaintMs": 15422
+    },
+    {
+      "sourceKey": "science-subduction-holdout:terra-low:warm:1",
+      "lane": "streaming",
+      "providerDelayMs": 11993,
+      "uiCommitMs": 239,
+      "firstPaintMs": 12232
+    },
+    {
+      "sourceKey": "science-water-cycle:terra-low:cold:1",
+      "lane": "classic",
+      "providerDelayMs": 4554,
+      "uiCommitMs": 73,
+      "firstPaintMs": 4627
+    },
+    {
+      "sourceKey": "science-water-cycle:terra-low:cold:1",
+      "lane": "streaming",
+      "providerDelayMs": 2409,
+      "uiCommitMs": 75,
+      "firstPaintMs": 2484
+    },
+    {
+      "sourceKey": "science-water-cycle:terra-low:cold:5",
+      "lane": "classic",
+      "providerDelayMs": 4987,
+      "uiCommitMs": 166,
+      "firstPaintMs": 5153
+    },
+    {
+      "sourceKey": "science-water-cycle:terra-low:cold:5",
+      "lane": "streaming",
+      "providerDelayMs": 2199,
+      "uiCommitMs": 281,
+      "firstPaintMs": 2480
+    },
+    {
+      "sourceKey": "science-water-cycle:terra-low:warm:4",
+      "lane": "classic",
+      "providerDelayMs": 4007,
+      "uiCommitMs": 142,
+      "firstPaintMs": 4149
+    },
+    {
+      "sourceKey": "science-water-cycle:terra-low:warm:4",
+      "lane": "streaming",
+      "providerDelayMs": 2094,
+      "uiCommitMs": 155,
+      "firstPaintMs": 2249
+    },
+    {
+      "sourceKey": "timeline-black-death-holdout:terra-low:cold:3",
+      "lane": "classic",
+      "providerDelayMs": 19207,
+      "uiCommitMs": 193,
+      "firstPaintMs": 19400
+    },
+    {
+      "sourceKey": "timeline-black-death-holdout:terra-low:cold:3",
+      "lane": "streaming",
+      "providerDelayMs": 16951,
+      "uiCommitMs": 163,
+      "firstPaintMs": 17114
+    },
+    {
+      "sourceKey": "timeline-black-death-holdout:terra-low:warm:2",
+      "lane": "classic",
+      "providerDelayMs": 11187,
+      "uiCommitMs": 171,
+      "firstPaintMs": 11358
+    },
+    {
+      "sourceKey": "timeline-black-death-holdout:terra-low:warm:2",
+      "lane": "streaming",
+      "providerDelayMs": 8750,
+      "uiCommitMs": 172,
+      "firstPaintMs": 8922
+    },
+    {
+      "sourceKey": "timeline-butterfly-cycle:terra-low:cold:2",
+      "lane": "classic",
+      "providerDelayMs": 17523,
+      "uiCommitMs": 136,
+      "firstPaintMs": 17659
+    },
+    {
+      "sourceKey": "timeline-butterfly-cycle:terra-low:cold:2",
+      "lane": "streaming",
+      "providerDelayMs": 14098,
+      "uiCommitMs": 65,
+      "firstPaintMs": 14163
+    },
+    {
+      "sourceKey": "timeline-butterfly-cycle:terra-low:warm:1",
+      "lane": "classic",
+      "providerDelayMs": 4239,
+      "uiCommitMs": 117,
+      "firstPaintMs": 4356
+    },
+    {
+      "sourceKey": "timeline-butterfly-cycle:terra-low:warm:1",
+      "lane": "streaming",
+      "providerDelayMs": 2809,
+      "uiCommitMs": 154,
+      "firstPaintMs": 2963
+    },
+    {
+      "sourceKey": "timeline-butterfly-cycle:terra-low:warm:5",
+      "lane": "classic",
+      "providerDelayMs": 3979,
+      "uiCommitMs": 155,
+      "firstPaintMs": 4134
+    },
+    {
+      "sourceKey": "timeline-butterfly-cycle:terra-low:warm:5",
+      "lane": "streaming",
+      "providerDelayMs": 2534,
+      "uiCommitMs": 155,
+      "firstPaintMs": 2689
+    },
+    {
+      "sourceKey": "timeline-industrial-causes:terra-low:cold:4",
+      "lane": "classic",
+      "providerDelayMs": 3977,
+      "uiCommitMs": 109,
+      "firstPaintMs": 4086
+    },
+    {
+      "sourceKey": "timeline-industrial-causes:terra-low:cold:4",
+      "lane": "streaming",
+      "providerDelayMs": 2415,
+      "uiCommitMs": 226,
+      "firstPaintMs": 2641
+    },
+    {
+      "sourceKey": "timeline-industrial-causes:terra-low:warm:3",
+      "lane": "classic",
+      "providerDelayMs": 4428,
+      "uiCommitMs": 124,
+      "firstPaintMs": 4552
+    },
+    {
+      "sourceKey": "timeline-industrial-causes:terra-low:warm:3",
+      "lane": "streaming",
+      "providerDelayMs": 2390,
+      "uiCommitMs": 121,
+      "firstPaintMs": 2511
+    },
+    {
+      "sourceKey": "timeline-ww1:terra-low:cold:2",
+      "lane": "classic",
+      "providerDelayMs": 12605,
+      "uiCommitMs": 194,
+      "firstPaintMs": 12799
+    },
+    {
+      "sourceKey": "timeline-ww1:terra-low:cold:2",
+      "lane": "streaming",
+      "providerDelayMs": 10062,
+      "uiCommitMs": 119,
+      "firstPaintMs": 10181
+    },
+    {
+      "sourceKey": "timeline-ww1:terra-low:warm:1",
+      "lane": "classic",
+      "providerDelayMs": 6440,
+      "uiCommitMs": 69,
+      "firstPaintMs": 6509
+    },
+    {
+      "sourceKey": "timeline-ww1:terra-low:warm:1",
+      "lane": "streaming",
+      "providerDelayMs": 3497,
+      "uiCommitMs": 43,
+      "firstPaintMs": 3540
+    }
+  ]
+}

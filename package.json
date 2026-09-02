@@ -30,6 +30,9 @@
     "test:role-adoption": "tsx scripts/evaluate-role-adoption.ts",
     "test:m2-live-smoke": "tsx scripts/verify-m2-live-smoke.ts",
     "test:m3-acceptance": "tsx scripts/evaluate-m3-acceptance.ts",
+    "test:curriculum-matrix": "tsx scripts/evaluate-curriculum-matrix.ts",
+    "test:image-grounding": "tsx scripts/verify-image-grounding-study.ts",
+    "audit:m7-acceptance": "tsx scripts/audit-m7-acceptance.ts",
     "test:smoke-report": "node --test scripts/e2e-live.node-test.mjs",
     "e2e:live": "node scripts/e2e-live.mjs"
   },

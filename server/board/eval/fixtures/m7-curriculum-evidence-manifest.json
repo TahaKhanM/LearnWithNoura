@@ -1,0 +1,17 @@
+{
+  "schemaVersion": "1.0.0",
+  "matrixSha256": "4d137d344c71cd310fc3c83205d62d3db145023ac3ec59c804ee82c01efeb282",
+  "baselineFixturesSha256": "ba30677f41c7f0532be09c4782c0a2724a4b7db4551f9400001ef454469c87f6",
+  "m7FixturesSha256": "19636310b4bbb0b454161ccfcef569b5515b2f972ce30d6436f8ef739372057f",
+  "resultSha256": "cf03755c17273e9bf1cabd7b1a657ddd5f817bc44cebb9d18dab48d5b77e5ce7",
+  "totalRows": 39,
+  "missingRows": 0,
+  "browserAccepted": 39,
+  "contactSheetSha256": [
+    "7e70edfd8738528b24b6078ba336f3ce893c83249bd7db3a0dd71e10b29cccc7",
+    "389aeb7d8e94f208c47a912abc1c7b91f773d001c8d3769f41c1b5c794915e0d",
+    "3c2f89f0c9fb6850a8890aa78687169790255274418c9f82f7425d55323ef889",
+    "c6df9c9da4ade27b8ca7c52c963d7ec4ac099a30084299ca6f2b3f2a008ce8d7"
+  ],
+  "manuallyInspected": true
+}

@@ -1,0 +1,19 @@
+{
+  "schemaVersion": "1.0.0",
+  "m0Sha256": "e02ccc9f240f72a7937fe192f30867434eb7f857fb6c45a5f8b52fa06507ae79",
+  "m1Sha256": "44409bf22112a0e76ed95af0ccb605158f0f1fb01f16600acd5d79b67493d209",
+  "resultSha256": "58a762f83473925c20b3849ed7c817e5d9e8ce2aae881be13cfd8a99e154d5e3",
+  "previousG4Sha256": "c54a2798afb290779fe3c8580ed4c3dd3f01c7361f83156b5fab24db4ae27e5e",
+  "incidentSha256": "a5fc906dfc4f98e45210809b57cf0f821d588b83023d3a6a8a38a96482036de8",
+  "selectionStrategy": "deterministic_stratified_index",
+  "sampleRows": 72,
+  "totalRows": 290,
+  "streamingP50FirstPaintMs": 2789,
+  "classicP50FirstPaintMs": 4754,
+  "p50Cut": 0.413336,
+  "streamingScreenshotSha256": "5684d642e4a02b0b468897a953bb2511c75a9e6aa367662d80964fdda8baa8f4",
+  "classicScreenshotSha256": "c8a0e6d87cafbb5a49c28119e937c41c3cb1a4de1ef91515b94a2e1e47dbae54",
+  "providerCalls": 0,
+  "actualLessonPage": true,
+  "manuallyInspected": true
+}

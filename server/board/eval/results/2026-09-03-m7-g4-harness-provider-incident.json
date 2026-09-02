@@ -1,0 +1,29 @@
+{
+  "schemaVersion": "1.0.0",
+  "incident": "g4_harness_started_without_fixture_compiler",
+  "syntheticOnly": true,
+  "realChildData": false,
+  "itemizedAuthorization": false,
+  "observedLocalState": {
+    "syntheticSessionPrefix": "Synthetic g4-",
+    "sessionsCreated": 6,
+    "compiledLessonsReady": 5,
+    "compiledLessonsPendingAtShutdown": 1
+  },
+  "providerRequestAccounting": {
+    "minimumCompletedRequestsImpliedByState": 11,
+    "basis": "Six session creations completed live goal normalization; five lessons reached ready and therefore completed at least one live authorship request.",
+    "additionalRequestsMayHaveStarted": true,
+    "exactProviderCalls": null,
+    "exactObservedCostUsd": null,
+    "reasonExactUnknown": "Lesson compiler usage and cost are not persisted by the application."
+  },
+  "containment": {
+    "serverStoppedImmediatelyAfterDiscovery": true,
+    "evidenceExcludedFromG4": true,
+    "replacementDataDir": "/tmp/noura-m7-g4",
+    "replacementLessonCompiler": "fixture",
+    "replacementDrawingProviderConstructed": false
+  },
+  "formalEffect": "Provider-spend process compliance is not satisfiable retroactively; M7 technical gates may pass, but milestone acceptance remains blocked."
+}

@@ -1,0 +1,678 @@
+{
+  "schemaVersion": "1.0.0",
+  "evidenceMode": "offline_m0_representative_relational_replay",
+  "generatedAt": "2026-09-02T17:18:26.951Z",
+  "accepted": false,
+  "providerCalls": 0,
+  "externalRequestCount": 0,
+  "sourceSha256": "e02ccc9f240f72a7937fe192f30867434eb7f857fb6c45a5f8b52fa06507ae79",
+  "selection": "first cold terra-low trial for each of 36 M0 intents",
+  "summary": {
+    "sourceRows": 36,
+    "rows": 34,
+    "rowsWithRelationalPlacement": 34,
+    "acceptedRows": 29,
+    "singleShotConjunctiveValidity": 0.8529411764705882,
+    "threshold": 0.95
+  },
+  "rows": [
+    {
+      "intentId": "math-number-line",
+      "sourceTrial": {
+        "conditionId": "terra-low",
+        "cacheState": "cold",
+        "trial": 1
+      },
+      "relationalPlacementCount": 0,
+      "strictValid": true,
+      "authoredPolicyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "accepted": true
+    },
+    {
+      "intentId": "math-angle-sum",
+      "sourceTrial": {
+        "conditionId": "terra-low",
+        "cacheState": "cold",
+        "trial": 1
+      },
+      "relationalPlacementCount": 1,
+      "strictValid": true,
+      "authoredPolicyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "accepted": true
+    },
+    {
+      "intentId": "math-unit-circle",
+      "sourceTrial": {
+        "conditionId": "terra-low",
+        "cacheState": "cold",
+        "trial": 1
+      },
+      "relationalPlacementCount": 1,
+      "strictValid": true,
+      "authoredPolicyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "accepted": true
+    },
+    {
+      "intentId": "math-fraction-strip-holdout",
+      "sourceTrial": {
+        "conditionId": "terra-low",
+        "cacheState": "cold",
+        "trial": 1
+      },
+      "relationalPlacementCount": 1,
+      "strictValid": true,
+      "authoredPolicyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "accepted": true
+    },
+    {
+      "intentId": "graph-linear",
+      "sourceTrial": {
+        "conditionId": "terra-low",
+        "cacheState": "cold",
+        "trial": 1
+      },
+      "relationalPlacementCount": 1,
+      "strictValid": true,
+      "authoredPolicyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "accepted": true
+    },
+    {
+      "intentId": "graph-rainfall-bars",
+      "sourceTrial": {
+        "conditionId": "terra-low",
+        "cacheState": "cold",
+        "trial": 1
+      },
+      "relationalPlacementCount": 1,
+      "strictValid": true,
+      "authoredPolicyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "accepted": true
+    },
+    {
+      "intentId": "graph-slope-points",
+      "sourceTrial": {
+        "conditionId": "terra-low",
+        "cacheState": "cold",
+        "trial": 1
+      },
+      "relationalPlacementCount": 1,
+      "strictValid": true,
+      "authoredPolicyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "accepted": true
+    },
+    {
+      "intentId": "graph-intersection-holdout",
+      "sourceTrial": {
+        "conditionId": "terra-low",
+        "cacheState": "cold",
+        "trial": 1
+      },
+      "relationalPlacementCount": 1,
+      "strictValid": true,
+      "authoredPolicyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "accepted": true
+    },
+    {
+      "intentId": "science-cell-membrane",
+      "sourceTrial": {
+        "conditionId": "terra-low",
+        "cacheState": "cold",
+        "trial": 1
+      },
+      "relationalPlacementCount": 1,
+      "strictValid": true,
+      "authoredPolicyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "accepted": true
+    },
+    {
+      "intentId": "science-series-circuit",
+      "sourceTrial": {
+        "conditionId": "terra-low",
+        "cacheState": "cold",
+        "trial": 1
+      },
+      "relationalPlacementCount": 1,
+      "strictValid": true,
+      "authoredPolicyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "accepted": true
+    },
+    {
+      "intentId": "science-subduction-holdout",
+      "sourceTrial": {
+        "conditionId": "terra-low",
+        "cacheState": "cold",
+        "trial": 1
+      },
+      "relationalPlacementCount": 1,
+      "strictValid": true,
+      "authoredPolicyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "accepted": true
+    },
+    {
+      "intentId": "timeline-industrial-causes",
+      "sourceTrial": {
+        "conditionId": "terra-low",
+        "cacheState": "cold",
+        "trial": 1
+      },
+      "relationalPlacementCount": 1,
+      "strictValid": true,
+      "authoredPolicyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "accepted": true
+    },
+    {
+      "intentId": "timeline-ww1",
+      "sourceTrial": {
+        "conditionId": "terra-low",
+        "cacheState": "cold",
+        "trial": 1
+      },
+      "relationalPlacementCount": 1,
+      "strictValid": true,
+      "authoredPolicyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "accepted": true
+    },
+    {
+      "intentId": "timeline-butterfly-cycle",
+      "sourceTrial": {
+        "conditionId": "terra-low",
+        "cacheState": "cold",
+        "trial": 1
+      },
+      "relationalPlacementCount": 1,
+      "strictValid": true,
+      "authoredPolicyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "accepted": true
+    },
+    {
+      "intentId": "timeline-black-death-holdout",
+      "sourceTrial": {
+        "conditionId": "terra-low",
+        "cacheState": "cold",
+        "trial": 1
+      },
+      "relationalPlacementCount": 1,
+      "strictValid": true,
+      "authoredPolicyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "accepted": true
+    },
+    {
+      "intentId": "grammar-basic-clause",
+      "sourceTrial": {
+        "conditionId": "terra-low",
+        "cacheState": "cold",
+        "trial": 1
+      },
+      "relationalPlacementCount": 1,
+      "strictValid": true,
+      "authoredPolicyAccepted": true,
+      "browserAccepted": false,
+      "reasons": [
+        "stroke_collision:t1:b1"
+      ],
+      "layoutIssues": [
+        {
+          "code": "stroke_collision",
+          "itemId": "t1",
+          "withItemId": "b1",
+          "itemBounds": {
+            "x": 239,
+            "y": 202.5,
+            "w": 70.67198181152344,
+            "h": 35
+          },
+          "withItemBounds": {
+            "x": 24,
+            "y": 185,
+            "w": 230,
+            "h": 70
+          }
+        }
+      ],
+      "accepted": false
+    },
+    {
+      "intentId": "grammar-main-subordinate",
+      "sourceTrial": {
+        "conditionId": "terra-low",
+        "cacheState": "cold",
+        "trial": 1
+      },
+      "relationalPlacementCount": 1,
+      "strictValid": true,
+      "authoredPolicyAccepted": true,
+      "browserAccepted": false,
+      "reasons": [
+        "stroke_collision:l1:b1"
+      ],
+      "layoutIssues": [
+        {
+          "code": "stroke_collision",
+          "itemId": "l1",
+          "withItemId": "b1",
+          "itemBounds": {
+            "x": 229,
+            "y": 166.875,
+            "w": 132.27894592285156,
+            "h": 26.25
+          },
+          "withItemBounds": {
+            "x": 24,
+            "y": 145,
+            "w": 250,
+            "h": 70
+          }
+        }
+      ],
+      "accepted": false
+    },
+    {
+      "intentId": "grammar-active-passive",
+      "sourceTrial": {
+        "conditionId": "terra-low",
+        "cacheState": "cold",
+        "trial": 1
+      },
+      "relationalPlacementCount": 1,
+      "strictValid": true,
+      "authoredPolicyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "accepted": true
+    },
+    {
+      "intentId": "grammar-pronoun-holdout",
+      "sourceTrial": {
+        "conditionId": "terra-low",
+        "cacheState": "cold",
+        "trial": 1
+      },
+      "relationalPlacementCount": 1,
+      "strictValid": true,
+      "authoredPolicyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "accepted": true
+    },
+    {
+      "intentId": "compare-fractions",
+      "sourceTrial": {
+        "conditionId": "terra-low",
+        "cacheState": "cold",
+        "trial": 1
+      },
+      "relationalPlacementCount": 1,
+      "strictValid": true,
+      "authoredPolicyAccepted": true,
+      "browserAccepted": false,
+      "reasons": [
+        "stroke_collision:t1:b1"
+      ],
+      "layoutIssues": [
+        {
+          "code": "stroke_collision",
+          "itemId": "t1",
+          "withItemId": "b1",
+          "itemBounds": {
+            "x": 324,
+            "y": 162.5,
+            "w": 109.36798095703125,
+            "h": 35
+          },
+          "withItemBounds": {
+            "x": 24,
+            "y": 150,
+            "w": 360,
+            "h": 60
+          }
+        }
+      ],
+      "accepted": false
+    },
+    {
+      "intentId": "compare-budget",
+      "sourceTrial": {
+        "conditionId": "terra-low",
+        "cacheState": "cold",
+        "trial": 1
+      },
+      "relationalPlacementCount": 1,
+      "strictValid": true,
+      "authoredPolicyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "accepted": true
+    },
+    {
+      "intentId": "compare-animal-groups",
+      "sourceTrial": {
+        "conditionId": "terra-low",
+        "cacheState": "cold",
+        "trial": 1
+      },
+      "relationalPlacementCount": 1,
+      "strictValid": true,
+      "authoredPolicyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "accepted": true
+    },
+    {
+      "intentId": "compare-recipe-holdout",
+      "sourceTrial": {
+        "conditionId": "terra-low",
+        "cacheState": "cold",
+        "trial": 1
+      },
+      "relationalPlacementCount": 1,
+      "strictValid": true,
+      "authoredPolicyAccepted": true,
+      "browserAccepted": false,
+      "reasons": [
+        "stroke_collision:e1:b1"
+      ],
+      "layoutIssues": [
+        {
+          "code": "stroke_collision",
+          "itemId": "e1",
+          "withItemId": "b1",
+          "itemBounds": {
+            "x": 274,
+            "y": 146.775,
+            "w": 246.54999999999995,
+            "h": 66.45000000000002
+          },
+          "withItemBounds": {
+            "x": 24,
+            "y": 130,
+            "w": 260,
+            "h": 100
+          }
+        }
+      ],
+      "accepted": false
+    },
+    {
+      "intentId": "abstract-opportunity-cost",
+      "sourceTrial": {
+        "conditionId": "terra-low",
+        "cacheState": "cold",
+        "trial": 1
+      },
+      "relationalPlacementCount": 1,
+      "strictValid": true,
+      "authoredPolicyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "accepted": true
+    },
+    {
+      "intentId": "abstract-recursion",
+      "sourceTrial": {
+        "conditionId": "terra-low",
+        "cacheState": "cold",
+        "trial": 1
+      },
+      "relationalPlacementCount": 1,
+      "strictValid": true,
+      "authoredPolicyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "accepted": true
+    },
+    {
+      "intentId": "abstract-fairness-holdout",
+      "sourceTrial": {
+        "conditionId": "terra-low",
+        "cacheState": "cold",
+        "trial": 1
+      },
+      "relationalPlacementCount": 1,
+      "strictValid": true,
+      "authoredPolicyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "accepted": true
+    },
+    {
+      "intentId": "abstract-entropy-holdout",
+      "sourceTrial": {
+        "conditionId": "terra-low",
+        "cacheState": "cold",
+        "trial": 1
+      },
+      "relationalPlacementCount": 1,
+      "strictValid": true,
+      "authoredPolicyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "accepted": true
+    },
+    {
+      "intentId": "mixed-frog-habitat",
+      "sourceTrial": {
+        "conditionId": "terra-low",
+        "cacheState": "cold",
+        "trial": 1
+      },
+      "relationalPlacementCount": 1,
+      "strictValid": true,
+      "authoredPolicyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "accepted": true
+    },
+    {
+      "intentId": "mixed-solar-eclipse",
+      "sourceTrial": {
+        "conditionId": "terra-low",
+        "cacheState": "cold",
+        "trial": 1
+      },
+      "relationalPlacementCount": 1,
+      "strictValid": true,
+      "authoredPolicyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "accepted": true
+    },
+    {
+      "intentId": "mixed-aqueduct-holdout",
+      "sourceTrial": {
+        "conditionId": "terra-low",
+        "cacheState": "cold",
+        "trial": 1
+      },
+      "relationalPlacementCount": 1,
+      "strictValid": true,
+      "authoredPolicyAccepted": true,
+      "browserAccepted": false,
+      "reasons": [
+        "stroke_collision:a8:a2",
+        "stroke_collision:a8:a3"
+      ],
+      "layoutIssues": [
+        {
+          "code": "stroke_collision",
+          "itemId": "a8",
+          "withItemId": "a2",
+          "itemBounds": {
+            "x": 464,
+            "y": 255.15,
+            "w": 472.32500000000005,
+            "h": 57.150000000000006
+          },
+          "withItemBounds": {
+            "x": 230,
+            "y": 270,
+            "w": 280,
+            "h": 60
+          }
+        },
+        {
+          "code": "stroke_collision",
+          "itemId": "a8",
+          "withItemId": "a3",
+          "itemBounds": {
+            "x": 464,
+            "y": 255.15,
+            "w": 472.32500000000005,
+            "h": 57.150000000000006
+          },
+          "withItemBounds": {
+            "x": 230,
+            "y": 260,
+            "w": 280,
+            "h": 62.69999999999999
+          }
+        }
+      ],
+      "accepted": false
+    },
+    {
+      "intentId": "revision-alternative-scale",
+      "sourceTrial": {
+        "conditionId": "terra-low",
+        "cacheState": "cold",
+        "trial": 1
+      },
+      "relationalPlacementCount": 1,
+      "strictValid": true,
+      "authoredPolicyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "accepted": true
+    },
+    {
+      "intentId": "revision-extend-causal",
+      "sourceTrial": {
+        "conditionId": "terra-low",
+        "cacheState": "cold",
+        "trial": 1
+      },
+      "relationalPlacementCount": 1,
+      "strictValid": true,
+      "authoredPolicyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "accepted": true
+    },
+    {
+      "intentId": "revision-groundwater-holdout",
+      "sourceTrial": {
+        "conditionId": "terra-low",
+        "cacheState": "cold",
+        "trial": 1
+      },
+      "relationalPlacementCount": 1,
+      "strictValid": true,
+      "authoredPolicyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "accepted": true
+    },
+    {
+      "intentId": "science-water-cycle",
+      "sourceTrial": {
+        "conditionId": "terra-low",
+        "cacheState": "cold",
+        "trial": 1
+      },
+      "relationalPlacementCount": 1,
+      "strictValid": true,
+      "authoredPolicyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "accepted": true
+    },
+    {
+      "intentId": "mixed-pollination-holdout",
+      "sourceTrial": {
+        "conditionId": "terra-low",
+        "cacheState": "cold",
+        "trial": 1
+      },
+      "relationalPlacementCount": 1,
+      "strictValid": true,
+      "authoredPolicyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "accepted": true
+    },
+    {
+      "intentId": "revision-correct-label-holdout",
+      "sourceTrial": {
+        "conditionId": "terra-low",
+        "cacheState": "cold",
+        "trial": 1
+      },
+      "relationalPlacementCount": 0,
+      "strictValid": true,
+      "authoredPolicyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "accepted": true
+    }
+  ]
+}
