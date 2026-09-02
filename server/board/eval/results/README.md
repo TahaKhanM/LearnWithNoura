@@ -1,5 +1,11 @@
 # Authorized Drawing vNext evaluation results
 
+**Agents: never open the files in this directory** — they are multi-megabyte
+evidence ledgers and will consume enormous context. Decision summaries live in
+`docs/architecture/` decision records with SHA-256 hashes pointing here. If a
+specific figure is needed, extract it with a targeted query
+(`node -e "..."` / `jq '.summary'`) rather than reading a file.
+
 This directory is reserved for raw JSON from an explicitly authorized,
 synthetic live-provider Director bake-off. Offline fixture reports belong in
 `artifacts/evaluation/` and are not decision evidence.
