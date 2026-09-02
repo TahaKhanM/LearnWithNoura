@@ -504,6 +504,7 @@ server.on('upgrade', async (request, socket, head) => {
       ...(streamingBoardDirector ? { streamVisual: streamingBoardDirector } : {}),
       ...(visionAudit ? { visionAudit } : {}),
       ...(imageGroundingProposal ? { imageGroundingProposal } : {}),
+      ...(illustrationService ? { illustrations: illustrationService } : {}),
       log: (line) => console.log(`[realtime] ${line}`),
       onLifecycle: (lifecycle) => proxyLifecycles.register(lifecycle),
     }).catch(() => {

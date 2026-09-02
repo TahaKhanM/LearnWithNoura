@@ -23,7 +23,7 @@ const assertions = [
   ['independent Luna-low audit role', files.config.includes('NOURA_VISION_AUDIT_MODEL') && files.config.includes("'gpt-5.6-luna'") && files.audit.includes('client.chat.completions.create')],
   ['application wiring uses audit role config', files.app.includes('runtimeConfig.visionAuditModel') && files.app.includes('runtimeConfig.visionAuditReasoningEffort')],
   ['legacy text model does not drive Director', !files.config.includes("env.NOURA_DIRECTOR_MODEL || env.OPENAI_MODEL")],
-  ['illustration model', files.config.includes("'gpt-image-1.5'")],
+  ['illustration model', files.config.includes("'gpt-image-2'")],
   ['Realtime sideband endpoint', files.sessionConfig.includes("'wss://api.openai.com/v1/realtime'")],
   ['Realtime calls endpoint', files.callBootstrap.includes("'https://api.openai.com/v1/realtime/calls'")],
   ['fallback Chat Completions', files.fallback.includes('client.chat.completions.create')],

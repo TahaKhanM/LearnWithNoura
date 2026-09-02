@@ -15,6 +15,11 @@ import { streamedStepDuplicateReasons } from './streamingVisualPolicy.js';
 import { finishTool } from './turnFloor.js';
 import type { VisualRequest } from './visualRequests.js';
 import {
+  illustrationBriefFromStreamHeader,
+  markIllustrationOverlaysComplete,
+  startIllustrationLane,
+} from './illustrationLane.js';
+import {
   abandonStaleVisualRequest,
   failDirectedScene,
   recordVisualRequestOutcome,
@@ -25,7 +30,6 @@ type VisualToolCall = { callId: string; responseId: string } | null;
 
 interface StreamingVisualRequestOptions {
   directorHandoff: string;
-  fallbackToClassic(sectionId: string): void;
 }
 
 export function visionAuditTelemetryInput(
@@ -135,6 +139,19 @@ export function startStreamingDirectedScene(
           objectIds: parsed.ops.map((op) => op.id),
           ops: parsed.ops,
         };
+        if (parsed.header.representation === 'illustration' && parsed.header.illustration && !state.pendingIllustration) {
+          startIllustrationLane(ctx, {
+            runId,
+            groupId: sectionId,
+            groupLabel: parsed.header.groupLabel,
+            overlayOps: parsed.cumulativeOps,
+            overlayComplete: false,
+            brief: illustrationBriefFromStreamHeader(parsed.header.illustration),
+            epoch,
+          });
+        } else if (state.pendingIllustration?.runId === runId) {
+          state.pendingIllustration.overlayOps = parsed.cumulativeOps;
+        }
         if (!intakeStarted) {
           intakeStarted = true;
           state.visualPlanState = 'rendering';
@@ -180,7 +197,9 @@ export function startStreamingDirectedScene(
               budgetMs: ctx.visionAuditBudgetMs,
             });
           }
-          ctx.sendClient({ type: 'illustration_status', status: 'ready' });
+          if (parsed.header.representation !== 'illustration') {
+            ctx.sendClient({ type: 'illustration_status', status: 'ready' });
+          }
           return;
         }
         if (!appendStoryboardRunStep(ctx, runId, step)) {
@@ -189,13 +208,6 @@ export function startStreamingDirectedScene(
       },
     });
     if (!result.ok) {
-      if (result.fallback === 'classic_illustration' && !intakeStarted && ctx.directVisual) {
-        if (state.activeVisualRequestAbortController === controller) {
-          state.activeVisualRequestAbortController = null;
-        }
-        options.fallbackToClassic(sectionId);
-        return;
-      }
       controller.abort('streamed composition failed before terminal scene');
       recordOutcome('director_rejected', result.reasons);
       if (intakeStarted && state.storyboardRun?.runId === runId) {
@@ -223,8 +235,11 @@ export function startStreamingDirectedScene(
     }
     await ctx.repo.addEvent(ctx.sessionId, 'directed_scene', { runId, scene: result.scene });
     if (isStale()) throw abortError();
-    if (!closeStoryboardRunIntake(ctx, runId)) {
-      throw new Error('The incremental storyboard could not close after stream completion.');
+    if (result.illustrationBrief) markIllustrationOverlaysComplete(ctx, runId);
+    if (state.storyboardRun?.runId === runId && state.storyboardRun.streamOpen) {
+      if (!closeStoryboardRunIntake(ctx, runId)) {
+        throw new Error('The incremental storyboard could not close after stream completion.');
+      }
     }
     recordOutcome('ready');
   })().catch((error) => {

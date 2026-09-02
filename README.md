@@ -23,7 +23,7 @@ The application runtime baseline remains unchanged:
 - `gpt-4o-mini-transcribe` for input transcription;
 - `gpt-5.6-terra` through the existing Chat Completions path for captions-only fallback, parent summaries, the session-creation lesson compiler (`NOURA_COMPILER_MODEL`, reasoning effort `NOURA_COMPILER_REASONING_EFFORT`, default `medium`) and the live Board Director for mid-lesson scene requests (`NOURA_DIRECTOR_MODEL`, reasoning effort `NOURA_DIRECTOR_REASONING_EFFORT`; default `low` for streaming and `medium` for classic);
 - `gpt-5.6-luna` at `low` effort for the independently configured streaming reveal audit (`NOURA_VISION_AUDIT_MODEL`, `NOURA_VISION_AUDIT_REASONING_EFFORT`), selected by M0 audit-role evidence rather than by the composition study;
-- `gpt-image-1.5` (`NOURA_ILLUSTRATION_MODEL`) for Director-chosen educational illustrations. Set `NOURA_ILLUSTRATIONS=off` to disable the path; the Director then authors vector/asset diagrams only.
+- `gpt-image-2` (`NOURA_ILLUSTRATION_MODEL`) for Director-chosen educational illustrations. Set `NOURA_ILLUSTRATIONS=off` to disable the path; the Director then authors vector/asset diagrams only.
 
 `NOURA_DIRECTOR_PIPELINE=streaming|classic` selects the temporary Drawing vNext delivery path. Unset local and Preview environments now use step-structured `streaming` at low effort; Production retains `classic` at medium effort until its separately authorized smoke. `classic` is the documented rollback, not a second long-term architecture.
 

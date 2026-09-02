@@ -15,7 +15,7 @@ import {
   YieldingTelemetryRepository,
   type SessionTelemetryRepository,
 } from '../session/telemetryRepository.js';
-import type { BoardDirector } from '../board/director.js';
+import type { BoardDirector, IllustrationDirectorPort } from '../board/director.js';
 import type { StreamingBoardDirector } from '../board/streamingDirector.js';
 import { VISION_AUDIT_BUDGET_MS, type VisionAuditPort } from '../board/visionAudit.js';
 import type { ImageGroundingProposalPort } from '../board/imageGrounding.js';
@@ -69,6 +69,7 @@ export interface ProxyOptions {
   streamVisual?: StreamingBoardDirector;
   visionAudit?: VisionAuditPort;
   imageGroundingProposal?: ImageGroundingProposalPort;
+  illustrations?: IllustrationDirectorPort | null;
   visionAuditBudgetMs?: number;
   /** How long one storyboard step may await visibility confirmation. */
   stepRevealTimeoutMs?: number;
@@ -136,6 +137,8 @@ function createCoordinatorState(goal: string): CoordinatorState {
     lastCompletedResponseId: null,
     beatResponses: new Set(),
     storyboardRun: null,
+    pendingIllustration: null,
+    illustrationGenerationsUsed: 0,
   };
 }
 
@@ -236,6 +239,7 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
     streamVisual: options.streamVisual ?? null,
     visionAudit: options.visionAudit ?? null,
     imageGroundingProposal: options.imageGroundingProposal ?? null,
+    illustrations: options.illustrations ?? null,
     visionAuditBudgetMs: options.visionAuditBudgetMs ?? VISION_AUDIT_BUDGET_MS,
     stepRevealTimeoutMs: options.stepRevealTimeoutMs ?? 45_000,
     state,

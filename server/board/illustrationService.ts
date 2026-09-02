@@ -90,13 +90,14 @@ export function createLiveIllustrationService(options: LiveIllustrationOptions):
   return {
     enabled: options.enabled,
     store: options.store,
-    prepare: (brief: IllustrationBrief, hooks?: IllustrationHooks): Promise<IllustrationPrepareResult> =>
+    prepare: (brief: IllustrationBrief, hooks?: IllustrationHooks, prepareOptions?: { generationBudgetRemaining?: number }): Promise<IllustrationPrepareResult> =>
       prepareIllustration({
         generate,
         vision,
         store: options.store,
         model: options.imageModel,
         enabled: options.enabled,
+        generationBudgetRemaining: prepareOptions?.generationBudgetRemaining,
       }, brief, hooks),
     persist: (result: IllustrationPrepareOk, owner?: { parentId?: string; sessionId?: string }) =>
       persistIllustrationRecord(options.store, result, owner),

@@ -20,7 +20,7 @@ export function anchorGroupId(ctx: CoordinatorContext): string | null {
 
 /** Resolves when the browser has confirmed every staged checkpoint is
  * actually on screen (`ops_shown`), or fails closed on rejection/timeout. */
-function waitForCheckpointVisibility(ctx: CoordinatorContext, eventIds: number[]): Promise<boolean> {
+export function waitForCheckpointVisibility(ctx: CoordinatorContext, eventIds: number[]): Promise<boolean> {
   if (eventIds.length === 0) return Promise.resolve(true);
   return new Promise((resolve) => {
     let remaining = eventIds.length;
@@ -229,3 +229,48 @@ export function stageAndConfirmPlan(ctx: CoordinatorContext, callId: string, res
   });
   ctx.trackSideEffect(stagingTask);
 }
+
+/**
+ * Server-initiated late illustration arrival after the overlay storyboard
+ * has already finished. Uses the ordinary semantic_scene → board_ops →
+ * ops_shown protocol, without a tool call to finish.
+ */
+export async function stageServerInitiatedCheckpoint(ctx: CoordinatorContext, input: {
+  ops: BoardOp[];
+  groupId: string;
+  groupLabel: string;
+  checkpointId: string;
+  reveal: SemanticCheckpoint['reveal'];
+}): Promise<boolean> {
+  const { state } = ctx;
+  const eventId = await ctx.repo.addEvent(ctx.sessionId, 'semantic_scene', {
+    ops: input.ops,
+    checkpointId: input.checkpointId,
+    reveal: input.reveal,
+    semanticObjectId: input.groupId,
+    groupLabel: input.groupLabel,
+  }, false);
+  state.pendingBoardOps.set(eventId, {
+    ops: input.ops,
+    semanticGroupId: input.groupId,
+    groupLabel: input.groupLabel,
+  });
+  for (const op of input.ops) if (op.op === 'add') state.objectsCreatedThisTurn.add(op.id);
+  ctx.sendClient({
+    type: 'board_ops',
+    ops: input.ops,
+    event_id: eventId,
+    groupLabel: input.groupLabel,
+    checkpoint: input.reveal,
+  }, state.clientIdentity, {
+    visualCueId: input.checkpointId,
+    semanticObjectId: input.groupId,
+  });
+  const visible = await waitForCheckpointVisibility(ctx, [eventId]);
+  if (!visible) {
+    state.pendingBoardOps.delete(eventId);
+    return false;
+  }
+  return true;
+}
+
