@@ -1,0 +1,1220 @@
+{
+  "schemaVersion": "1.0.0",
+  "evidenceMode": "offline_local_browser_layout_failure_feedback",
+  "providerCalls": 0,
+  "runtimeCostUsd": 0,
+  "source": {
+    "m0Sha256": "e02ccc9f240f72a7937fe192f30867434eb7f857fb6c45a5f8b52fa06507ae79",
+    "m1BrowserSha256": "a8847373ff3a9d3aa8bdd1c34fa5f4dcb99e4bc617ce23459ccdebd67767017a",
+    "failureRows": 31
+  },
+  "browserHarness": {
+    "origin": "http://localhost:5180",
+    "path": "/dev/board",
+    "finalOrigin": "http://localhost:5180",
+    "finalPath": "/dev/board",
+    "externalRequestCount": 0
+  },
+  "rows": [
+    {
+      "sourceKey": "abstract-recursion:terra-low:cold:2",
+      "intentId": "abstract-recursion",
+      "proposalSha256": "398436f504916df6fd1f0ca49a1c635da245a26fec386cce8c3c6587ea724380",
+      "failingStepIndex": 3,
+      "failingStepId": "s4",
+      "priorOpsSha256": "2fdbbfa627d127f482d86ee9a4e1dce12c1fab32addf0313c6bb68e149cf2f31",
+      "rejectedOpsSha256": "d334e0369893c79a0df0911c88bed7e18bccdeb7a54edb4b6b7cc6a72069abac",
+      "cumulativeOpsSha256": "0ab2c8a5173de23d9fdb41555601b9c2f569f922ca9378eb5de0e2497f080614",
+      "reasons": [
+        "collision:e5:e3"
+      ],
+      "layoutIssues": [
+        {
+          "code": "collision",
+          "itemId": "e5",
+          "withItemId": "e3",
+          "itemBounds": {
+            "x": 650,
+            "y": 365.54999999999995,
+            "w": 160.5,
+            "h": 66.44999999999999
+          },
+          "withItemBounds": {
+            "x": 650,
+            "y": 340,
+            "w": 197.07500000000005,
+            "h": 66.44999999999999
+          }
+        }
+      ]
+    },
+    {
+      "sourceKey": "abstract-recursion:terra-low:cold:4",
+      "intentId": "abstract-recursion",
+      "proposalSha256": "c3b9f53f4e4761f32ae4e8b1f9a9890ef693fefd7f8c8f5d7b77db162ce71393",
+      "failingStepIndex": 2,
+      "failingStepId": "s3",
+      "priorOpsSha256": "12c4ecb54c006f54eb07521d65fd03dd84f318794cb8b723b8e1b09260d6e99e",
+      "rejectedOpsSha256": "e85be6b7947f51207485f99a78d6d4122bdcc688fb625b68310a6708ff066759",
+      "cumulativeOpsSha256": "904fdd3fed2ac71db8c0827c05302bd41408e10b2fd9159b4f720970bdf41ed1",
+      "reasons": [
+        "stroke_collision:r4:b1"
+      ],
+      "layoutIssues": [
+        {
+          "code": "stroke_collision",
+          "itemId": "r4",
+          "withItemId": "b1",
+          "itemBounds": {
+            "x": 254,
+            "y": 52,
+            "w": 103.51593017578125,
+            "h": 35
+          },
+          "withItemBounds": {
+            "x": 24,
+            "y": 72.5,
+            "w": 260,
+            "h": 55
+          }
+        }
+      ]
+    },
+    {
+      "sourceKey": "abstract-recursion:terra-low:warm:3",
+      "intentId": "abstract-recursion",
+      "proposalSha256": "ba7b3d3f787322fb492674d7dcaf66db410038ff72f5ada760923597b0f361e3",
+      "failingStepIndex": 1,
+      "failingStepId": "s2",
+      "priorOpsSha256": "42a6d7ad232b0938212afb3a10188d54bf2462ce80e73abc33115c3032d220bd",
+      "rejectedOpsSha256": "50d439dcf1ccf0377b24dd3764c5f6b642be79dada64260b5a6939795e276318",
+      "cumulativeOpsSha256": "1ae94def4802bf485ad9171ecce6327f777ad9bda08213fd4b1245e14e44d182",
+      "reasons": [
+        "stroke_collision:t1:b1"
+      ],
+      "layoutIssues": [
+        {
+          "code": "stroke_collision",
+          "itemId": "t1",
+          "withItemId": "b1",
+          "itemBounds": {
+            "x": 256,
+            "y": 128,
+            "w": 113.62391662597656,
+            "h": 35
+          },
+          "withItemBounds": {
+            "x": 24,
+            "y": 82.5,
+            "w": 280,
+            "h": 45
+          }
+        }
+      ]
+    },
+    {
+      "sourceKey": "compare-animal-groups:terra-low:warm:1",
+      "intentId": "compare-animal-groups",
+      "proposalSha256": "706a799c43866bc69ddae660755d664e2780e5ae16f89e707de516cab04b218e",
+      "failingStepIndex": 1,
+      "failingStepId": "s2",
+      "priorOpsSha256": "1ef4b9eef73c21ad3ad66849f818a7e64099c24af4e710710812fb9f2ef5dfcb",
+      "rejectedOpsSha256": "8f0da1e57814b47cdaca85e740723dce93974820143bd36620bbf88bea8b7804",
+      "cumulativeOpsSha256": "ec9a993cb9236c92037c4c2a6108203acba0fdda77389862fc72df46ce4f5cf2",
+      "reasons": [
+        "stroke_collision:m2:b1"
+      ],
+      "layoutIssues": [
+        {
+          "code": "stroke_collision",
+          "itemId": "m2",
+          "withItemId": "b1",
+          "itemBounds": {
+            "x": 180,
+            "y": 321,
+            "w": 110.75395202636719,
+            "h": 26.25
+          },
+          "withItemBounds": {
+            "x": 50,
+            "y": 24,
+            "w": 200,
+            "h": 300
+          }
+        }
+      ]
+    },
+    {
+      "sourceKey": "compare-budget:terra-low:cold:3",
+      "intentId": "compare-budget",
+      "proposalSha256": "4881bd4365190bf7f2386124aef4616184f077ca680f00d2ece5ba91268df616",
+      "failingStepIndex": 1,
+      "failingStepId": "s2",
+      "priorOpsSha256": "6aa763a49d812340c8ebc0c5f43dd6f552ae72665ad3b320491229dda6b1af54",
+      "rejectedOpsSha256": "835db6d9d40e59cab774fffa9d1d2954317a2e98e274d44d4de1425948445677",
+      "cumulativeOpsSha256": "5b42fa156dcee1465b4245d3b2672b748e958540dd755e84ada0922d97abfa03",
+      "reasons": [
+        "collision:b3:b1"
+      ],
+      "layoutIssues": [
+        {
+          "code": "collision",
+          "itemId": "b3",
+          "withItemId": "b1",
+          "itemBounds": {
+            "x": 204.5,
+            "y": 160,
+            "w": 95,
+            "h": 120
+          },
+          "withItemBounds": {
+            "x": 24,
+            "y": 160,
+            "w": 380,
+            "h": 120
+          }
+        }
+      ]
+    },
+    {
+      "sourceKey": "compare-budget:terra-low:warm:5",
+      "intentId": "compare-budget",
+      "proposalSha256": "f54278cc31643d941e5bc00a2c52293ca7373784246ba68aaed5695c6993eb00",
+      "failingStepIndex": 1,
+      "failingStepId": "s2",
+      "priorOpsSha256": "6e9ee6681478ab0dc4e92d0d2498f15394ed2ead2bccfeb0ba6f8cef898e3ae8",
+      "rejectedOpsSha256": "9f5b336a5fb8ac05e3a0b15c587b6865fec2320741e67681cff836125759ff15",
+      "cumulativeOpsSha256": "afb7621c80cecadbc501b139c352c647fe235bdaa650a47041144e23a7a1a49c",
+      "reasons": [
+        "stroke_collision:v1:b1"
+      ],
+      "layoutIssues": [
+        {
+          "code": "stroke_collision",
+          "itemId": "v1",
+          "withItemId": "b1",
+          "itemBounds": {
+            "x": 394.74735260009766,
+            "y": 227,
+            "w": 104.50529479980469,
+            "h": 35
+          },
+          "withItemBounds": {
+            "x": 24,
+            "y": 90,
+            "w": 420,
+            "h": 180
+          }
+        }
+      ]
+    },
+    {
+      "sourceKey": "compare-recipe-holdout:terra-low:warm:2",
+      "intentId": "compare-recipe-holdout",
+      "proposalSha256": "3a828196089dc08b6f00e65b11e0408377d95f269f43daec612dc5e618057117",
+      "failingStepIndex": 2,
+      "failingStepId": "s3",
+      "priorOpsSha256": "b7dfddc11392bf055e24da13544904cafc340c8a7e7445c73c86f9db198e44bc",
+      "rejectedOpsSha256": "4a38d7d3bf0e038658a6ff9b9ca85474274fd681c0669f1f3d261a226ba0b935",
+      "cumulativeOpsSha256": "9212af8c0ded858df55dca3a081c028e6afa14387ac02fe7bb6151f171d12761",
+      "reasons": [
+        "stroke_collision:t1:b2"
+      ],
+      "layoutIssues": [
+        {
+          "code": "stroke_collision",
+          "itemId": "t1",
+          "withItemId": "b2",
+          "itemBounds": {
+            "x": 620,
+            "y": 110,
+            "w": 239.84786987304688,
+            "h": 35
+          },
+          "withItemBounds": {
+            "x": 360,
+            "y": 120,
+            "w": 360,
+            "h": 120
+          }
+        }
+      ]
+    },
+    {
+      "sourceKey": "grammar-active-passive:terra-low:warm:2",
+      "intentId": "grammar-active-passive",
+      "proposalSha256": "28e5fc227d0a749d1bdf3acd452c6c1c641cee6511d9f01bc52f2afc3e7c29de",
+      "failingStepIndex": 2,
+      "failingStepId": "s3",
+      "priorOpsSha256": "7d470f39ec58f89be7cd032c435622ba25d62938b79f760b2e6aaf1c1b43f262",
+      "rejectedOpsSha256": "bcf209ee12b1f205d875a1193a4e348a5a28d38e97104c7d921e3eddd6cdf92c",
+      "cumulativeOpsSha256": "611c68f9e319293d606ec3f0d7ab06e5af707d01406be3f7816dded31c110542",
+      "reasons": [
+        "stroke_collision:t1:b1",
+        "stroke_collision:t1:b2"
+      ],
+      "layoutIssues": [
+        {
+          "code": "stroke_collision",
+          "itemId": "t1",
+          "withItemId": "b1",
+          "itemBounds": {
+            "x": 80,
+            "y": 72,
+            "w": 108.303955078125,
+            "h": 35
+          },
+          "withItemBounds": {
+            "x": 24,
+            "y": 110,
+            "w": 140,
+            "h": 60
+          }
+        },
+        {
+          "code": "stroke_collision",
+          "itemId": "t1",
+          "withItemId": "b2",
+          "itemBounds": {
+            "x": 80,
+            "y": 72,
+            "w": 108.303955078125,
+            "h": 35
+          },
+          "withItemBounds": {
+            "x": 180,
+            "y": 110,
+            "w": 140,
+            "h": 60
+          }
+        }
+      ]
+    },
+    {
+      "sourceKey": "grammar-main-subordinate:terra-low:cold:1",
+      "intentId": "grammar-main-subordinate",
+      "proposalSha256": "f6972e4ded4934dca55a9a680e60ade6cd7b95a087c688c9b563ea509fc6d028",
+      "failingStepIndex": 3,
+      "failingStepId": "s4",
+      "priorOpsSha256": "634ed78b9d1407a2138b1f48aeb7e3cfdaa44e2d88db714659e437da84341e23",
+      "rejectedOpsSha256": "406da0bf9f865a9a813c070d609d8fa163e8c3927ff950d0d10b5924a0631d03",
+      "cumulativeOpsSha256": "ec660117c5e2cd9f44f897bc969a49977e2f987c2b5aa89b436c309fd2eff2fe",
+      "reasons": [
+        "stroke_collision:l1:c1"
+      ],
+      "layoutIssues": [
+        {
+          "code": "stroke_collision",
+          "itemId": "l1",
+          "withItemId": "c1",
+          "itemBounds": {
+            "x": 152,
+            "y": 259,
+            "w": 132.27894592285156,
+            "h": 26.25
+          },
+          "withItemBounds": {
+            "x": 43.741022949218745,
+            "y": 223,
+            "w": 107.65897705078126,
+            "h": 84
+          }
+        }
+      ]
+    },
+    {
+      "sourceKey": "grammar-main-subordinate:terra-low:cold:2",
+      "intentId": "grammar-main-subordinate",
+      "proposalSha256": "8ea943c5aaaeb02b7358ffa8defb91b64a5764d121c5f6ff104242099ff96a5e",
+      "failingStepIndex": 1,
+      "failingStepId": "s2",
+      "priorOpsSha256": "ad965330a53661003a298557d4309d74c4f7f6e1f6c380fd3c89bd16e9363c0d",
+      "rejectedOpsSha256": "e0880449019ef51e40d62595dfb48ea3621047ce1a58933f8f8d7d6d3e0378ed",
+      "cumulativeOpsSha256": "2e1f001dcf6cb6bb70378784c46ff2143a27e9eb1670f1d2222bb522cac308bb",
+      "reasons": [
+        "stroke_collision:t2:b2"
+      ],
+      "layoutIssues": [
+        {
+          "code": "stroke_collision",
+          "itemId": "t2",
+          "withItemId": "b2",
+          "itemBounds": {
+            "x": 267.0220260620117,
+            "y": 302,
+            "w": 109.95594787597656,
+            "h": 35
+          },
+          "withItemBounds": {
+            "x": 24,
+            "y": 310,
+            "w": 300,
+            "h": 100
+          }
+        }
+      ]
+    },
+    {
+      "sourceKey": "grammar-main-subordinate:terra-low:warm:1",
+      "intentId": "grammar-main-subordinate",
+      "proposalSha256": "a6a9a5c5c5a4f0ef5cbe41a88a73336a20ef20d007fc879f9f442cc60f3dc947",
+      "failingStepIndex": 1,
+      "failingStepId": "s2",
+      "priorOpsSha256": "c0220f4a95ba9f836d323c7cb61ecf44a6169e43557eaac3e5da7d4917c73980",
+      "rejectedOpsSha256": "f825f5d2e1f489122940ee03904b2da6f6ec48e45e3fbf3126eabfbfc32be749",
+      "cumulativeOpsSha256": "e42dba604d44085a5f9e50f569e57bb4d2b89c9b907d79dabf9adf34fe71b459",
+      "reasons": [
+        "stroke_collision:t1:b2",
+        "stroke_collision:t2:b2"
+      ],
+      "layoutIssues": [
+        {
+          "code": "stroke_collision",
+          "itemId": "t1",
+          "withItemId": "b2",
+          "itemBounds": {
+            "x": 278.78202056884766,
+            "y": 164,
+            "w": 114.43595886230469,
+            "h": 35
+          },
+          "withItemBounds": {
+            "x": 24,
+            "y": 80,
+            "w": 280,
+            "h": 80
+          }
+        },
+        {
+          "code": "stroke_collision",
+          "itemId": "t2",
+          "withItemId": "b2",
+          "itemBounds": {
+            "x": 294.20404052734375,
+            "y": 52,
+            "w": 179.5919189453125,
+            "h": 35
+          },
+          "withItemBounds": {
+            "x": 24,
+            "y": 80,
+            "w": 280,
+            "h": 80
+          }
+        }
+      ]
+    },
+    {
+      "sourceKey": "graph-intersection-holdout:terra-low:cold:5",
+      "intentId": "graph-intersection-holdout",
+      "proposalSha256": "6d7a891954e3af68571a0f4337550151882a7d5225721c74ed0a5834b9cac7f2",
+      "failingStepIndex": 1,
+      "failingStepId": "s2",
+      "priorOpsSha256": "bab72e1a5e2d5ca5c799a747056e13e73bf51bb3cc39ebbd20e6eee98234de36",
+      "rejectedOpsSha256": "8b4fffbf67d60be1d00d73ef0c34153d3cf1899f4c4d6bb013f417cd72c5e2b0",
+      "cumulativeOpsSha256": "172c4e8a445cc887ad5f0d73076fa7c59a69b660d431cbb3e90e49b909ccf984",
+      "reasons": [
+        "stroke_collision:t1:a1"
+      ],
+      "layoutIssues": [
+        {
+          "code": "stroke_collision",
+          "itemId": "t1",
+          "withItemId": "a1",
+          "itemBounds": {
+            "x": 378,
+            "y": 256,
+            "w": 55.99993896484375,
+            "h": 35
+          },
+          "withItemBounds": {
+            "x": 74,
+            "y": 45,
+            "w": 476,
+            "h": 482.25
+          }
+        }
+      ]
+    },
+    {
+      "sourceKey": "graph-intersection-holdout:terra-low:warm:2",
+      "intentId": "graph-intersection-holdout",
+      "proposalSha256": "59504a7d47ba359fad09dc82132f450cd63ed0271b8598edd439a566b012b920",
+      "failingStepIndex": 1,
+      "failingStepId": "s2",
+      "priorOpsSha256": "127387c41ccef626ee86df63a899d328672d0223ea58bb2df03ab8f9f640df0b",
+      "rejectedOpsSha256": "0350e69280e1d538feb96185ba52d08a6440aa7c20d83a0e8722619c1d9bfb4e",
+      "cumulativeOpsSha256": "86ff9614dff6bbdf9904f051ceec4eb7e0af93138fcbfe68ac632234059b3478",
+      "reasons": [
+        "stroke_collision:t1:a1"
+      ],
+      "layoutIssues": [
+        {
+          "code": "stroke_collision",
+          "itemId": "t1",
+          "withItemId": "a1",
+          "itemBounds": {
+            "x": 325,
+            "y": 217,
+            "w": 55.99993896484375,
+            "h": 35
+          },
+          "withItemBounds": {
+            "x": 94,
+            "y": 65,
+            "w": 416,
+            "h": 442.25
+          }
+        }
+      ]
+    },
+    {
+      "sourceKey": "graph-linear:terra-low:cold:2",
+      "intentId": "graph-linear",
+      "proposalSha256": "09ab04e88d86984a91db6fa374c35a55c27748f30a474d3655a3264010b81d1b",
+      "failingStepIndex": 1,
+      "failingStepId": "s2",
+      "priorOpsSha256": "f717f8609aad340e9ef744a641cc5666e075cc34dd69fc25bd9da096a1f6cd42",
+      "rejectedOpsSha256": "03618876bac395f7d120567f0417d50124d7f41349aad5a47e282d8005bc0b62",
+      "cumulativeOpsSha256": "3154de6733fe3332f2dc27cf721cd3a7e401a5277382f6c6981eaaf0ff76948f",
+      "reasons": [
+        "bounds:p2"
+      ],
+      "layoutIssues": [
+        {
+          "code": "bounds",
+          "itemId": "p2",
+          "itemBounds": {
+            "x": 24,
+            "y": 4,
+            "w": 64.86595153808594,
+            "h": 29
+          }
+        }
+      ]
+    },
+    {
+      "sourceKey": "graph-linear:terra-low:cold:5",
+      "intentId": "graph-linear",
+      "proposalSha256": "94468704a4e1a987e1ad823cfb6c40be75820c73f280a29052d96670d1f5fd34",
+      "failingStepIndex": 1,
+      "failingStepId": "s2",
+      "priorOpsSha256": "125cdbf3d3b10e283715bceb5bbdc0ae7ffd1dffc62d1f05070e2c8f3b3dd97e",
+      "rejectedOpsSha256": "f8124b5fb4aea892fc4271f1cf7dca3a77667ed75ebda2a7723504c90c4b6801",
+      "cumulativeOpsSha256": "d8b9e17b9c5ebb0cb4ae6b89750625da05c5a6e638105dfcd6c32ac0dfddbea5",
+      "reasons": [
+        "stroke_collision:l1:a1"
+      ],
+      "layoutIssues": [
+        {
+          "code": "stroke_collision",
+          "itemId": "l1",
+          "withItemId": "a1",
+          "itemBounds": {
+            "x": 330,
+            "y": 344,
+            "w": 90.04792785644531,
+            "h": 26.25
+          },
+          "withItemBounds": {
+            "x": 74,
+            "y": 45,
+            "w": 476,
+            "h": 481
+          }
+        }
+      ]
+    },
+    {
+      "sourceKey": "graph-linear:terra-low:warm:1",
+      "intentId": "graph-linear",
+      "proposalSha256": "0aa14cab78982319cdee850ef9741f237b95a6c60a30706ff1aad4e7605b0295",
+      "failingStepIndex": 2,
+      "failingStepId": "s3",
+      "priorOpsSha256": "10e6c804553882cb18dcbd26c89d42c2c7f765e8f1628dc6212df180d54fe545",
+      "rejectedOpsSha256": "33c79b524ffd5d09a82fa9271164319599c2421353fbf669d742b6ed1f808aa3",
+      "cumulativeOpsSha256": "73fc2de647b5d143802ed0b81221d3f52857189974d485ed475d0e724e2cbaa7",
+      "reasons": [
+        "bounds:pt1"
+      ],
+      "layoutIssues": [
+        {
+          "code": "bounds",
+          "itemId": "pt1",
+          "itemBounds": {
+            "x": 24,
+            "y": 4,
+            "w": 57.26396179199219,
+            "h": 29
+          }
+        }
+      ]
+    },
+    {
+      "sourceKey": "graph-slope-points:terra-low:warm:2",
+      "intentId": "graph-slope-points",
+      "proposalSha256": "f375119f702ac4a7701db9bfd5a1a8bf1083731387b7e036fd0a6bc0e2eb245b",
+      "failingStepIndex": 1,
+      "failingStepId": "s2",
+      "priorOpsSha256": "dd3ab9f6fe92cde17113cc8d0b76b6ee3fc6a592cb4a27beb357399e974130ee",
+      "rejectedOpsSha256": "4291e867653c886c42b1e0c27f82a2fedb3fa528eeb1ff585d527d53fba2e014",
+      "cumulativeOpsSha256": "0343611dbcfa17add4dd213b9fe9e9035f0c90ceb689333ce393678539da59f7",
+      "reasons": [
+        "stroke_collision:t1:a1",
+        "stroke_collision:t2:a1"
+      ],
+      "layoutIssues": [
+        {
+          "code": "stroke_collision",
+          "itemId": "t1",
+          "withItemId": "a1",
+          "itemBounds": {
+            "x": 185,
+            "y": 394,
+            "w": 41.99995422363281,
+            "h": 26.25
+          },
+          "withItemBounds": {
+            "x": 80.30001831054688,
+            "y": 65,
+            "w": 429.6999816894531,
+            "h": 475.25
+          }
+        },
+        {
+          "code": "stroke_collision",
+          "itemId": "t2",
+          "withItemId": "a1",
+          "itemBounds": {
+            "x": 320,
+            "y": 261,
+            "w": 42.29396057128906,
+            "h": 26.25
+          },
+          "withItemBounds": {
+            "x": 80.30001831054688,
+            "y": 65,
+            "w": 429.6999816894531,
+            "h": 475.25
+          }
+        }
+      ]
+    },
+    {
+      "sourceKey": "graph-slope-points:terra-low:warm:3",
+      "intentId": "graph-slope-points",
+      "proposalSha256": "e10a9e0aa21ee0946ee9ac08c34ed97c4696f3052214d17165f67e4bdf6b69f5",
+      "failingStepIndex": 1,
+      "failingStepId": "s2",
+      "priorOpsSha256": "25b10732a1c2ef47bbce9bb4b349199cbbecfefec4d41b85ce11c112544b78b2",
+      "rejectedOpsSha256": "760dbefd3d90e45af9a9a4f6c8f045d33565854c7d3c5de76ee15cd46324cd21",
+      "cumulativeOpsSha256": "cb2281ffa62d750329d3a669fcbb34df866c0c1d028718f9b22b4dc39856c20c",
+      "reasons": [
+        "stroke_collision:t1:a1",
+        "stroke_collision:t2:a1"
+      ],
+      "layoutIssues": [
+        {
+          "code": "stroke_collision",
+          "itemId": "t1",
+          "withItemId": "a1",
+          "itemBounds": {
+            "x": 146.0000228881836,
+            "y": 337,
+            "w": 41.99995422363281,
+            "h": 26.25
+          },
+          "withItemBounds": {
+            "x": 80.30001831054688,
+            "y": 65,
+            "w": 429.6999816894531,
+            "h": 475.25
+          }
+        },
+        {
+          "code": "stroke_collision",
+          "itemId": "t2",
+          "withItemId": "a1",
+          "itemBounds": {
+            "x": 278.85301971435547,
+            "y": 271,
+            "w": 42.29396057128906,
+            "h": 26.25
+          },
+          "withItemBounds": {
+            "x": 80.30001831054688,
+            "y": 65,
+            "w": 429.6999816894531,
+            "h": 475.25
+          }
+        }
+      ]
+    },
+    {
+      "sourceKey": "math-fraction-strip-holdout:terra-low:cold:5",
+      "intentId": "math-fraction-strip-holdout",
+      "proposalSha256": "4e36fff1ba05108a8bd35cdf2048bd02781dd124ad625219dd46fe2b06257889",
+      "failingStepIndex": 1,
+      "failingStepId": "s2",
+      "priorOpsSha256": "2142501393ecec47cc94c25213ba79c7b10dd27008ca6f99c99ce60ac90d2e2d",
+      "rejectedOpsSha256": "63e4deac6cbb01207168fff37694968b6b8b58025e7dc535f0668857979458d0",
+      "cumulativeOpsSha256": "eaff589c0d94c3c2e106fcb3b5d423c7383c8d6cee44c83bcbdf98ce7298b79f",
+      "reasons": [
+        "stroke_collision:a4:b1",
+        "stroke_collision:a4:b2"
+      ],
+      "layoutIssues": [
+        {
+          "code": "stroke_collision",
+          "itemId": "a4",
+          "withItemId": "b1",
+          "itemBounds": {
+            "x": 80,
+            "y": 265,
+            "w": 34.14129638671875,
+            "h": 35
+          },
+          "withItemBounds": {
+            "x": 24,
+            "y": 258,
+            "w": 245,
+            "h": 120
+          }
+        },
+        {
+          "code": "stroke_collision",
+          "itemId": "a4",
+          "withItemId": "b2",
+          "itemBounds": {
+            "x": 80,
+            "y": 265,
+            "w": 34.14129638671875,
+            "h": 35
+          },
+          "withItemBounds": {
+            "x": 24,
+            "y": 182,
+            "w": 262.5,
+            "h": 120
+          }
+        }
+      ]
+    },
+    {
+      "sourceKey": "math-unit-circle:terra-low:cold:2",
+      "intentId": "math-unit-circle",
+      "proposalSha256": "d50720609f6412448f26bcee132f6de1b128ae2187c8212e8f9b229f1274580d",
+      "failingStepIndex": 1,
+      "failingStepId": "s2",
+      "priorOpsSha256": "0f71647ca2c82d61fdaeccc28b3b988ca1ac7938f7dbab5ef18cb9490a73bb9d",
+      "rejectedOpsSha256": "d6aae113683bbd828d63526cfff142cea7790fbd1b716cf073cc3d9c140ff98f",
+      "cumulativeOpsSha256": "c4eeb0dc3185b8bfe18d17e7dd2b50bbd7f1eed6e54cff5f68f4ce1c90095784",
+      "reasons": [
+        "stroke_collision:e1:a1",
+        "stroke_collision:e2:a1"
+      ],
+      "layoutIssues": [
+        {
+          "code": "stroke_collision",
+          "itemId": "e1",
+          "withItemId": "a1",
+          "itemBounds": {
+            "x": 620,
+            "y": 180,
+            "w": 323.32500000000005,
+            "h": 74.625
+          },
+          "withItemBounds": {
+            "x": 294,
+            "y": 135,
+            "w": 416,
+            "h": 441
+          }
+        },
+        {
+          "code": "stroke_collision",
+          "itemId": "e2",
+          "withItemId": "a1",
+          "itemBounds": {
+            "x": 620,
+            "y": 300,
+            "w": 294.67499999999995,
+            "h": 69.64999999999998
+          },
+          "withItemBounds": {
+            "x": 294,
+            "y": 135,
+            "w": 416,
+            "h": 441
+          }
+        }
+      ]
+    },
+    {
+      "sourceKey": "math-unit-circle:terra-low:cold:4",
+      "intentId": "math-unit-circle",
+      "proposalSha256": "5183d0a5a68fca346c04d24d9209e89df4eb7c8d4eee23f19f184f30cbb56be4",
+      "failingStepIndex": 1,
+      "failingStepId": "s2",
+      "priorOpsSha256": "54aaeb6a01c6c6da32449c0473bfd523b1acc8cda2acb4acf10de2006ac8e849",
+      "rejectedOpsSha256": "572ed5876facf096d702491dddac19ed17a20f491ca2e65208277ddf9f7ef61d",
+      "cumulativeOpsSha256": "f9f9157aa3965066bf25568bec45ca313d3b36f4edc2d12f9d7268d302433050",
+      "reasons": [
+        "stroke_collision:e1:a1",
+        "stroke_collision:e2:a1"
+      ],
+      "layoutIssues": [
+        {
+          "code": "stroke_collision",
+          "itemId": "e1",
+          "withItemId": "a1",
+          "itemBounds": {
+            "x": 620,
+            "y": 180,
+            "w": 323.32500000000005,
+            "h": 74.625
+          },
+          "withItemBounds": {
+            "x": 294,
+            "y": 95,
+            "w": 456,
+            "h": 481
+          }
+        },
+        {
+          "code": "stroke_collision",
+          "itemId": "e2",
+          "withItemId": "a1",
+          "itemBounds": {
+            "x": 620,
+            "y": 300,
+            "w": 294.67499999999995,
+            "h": 69.64999999999998
+          },
+          "withItemBounds": {
+            "x": 294,
+            "y": 95,
+            "w": 456,
+            "h": 481
+          }
+        }
+      ]
+    },
+    {
+      "sourceKey": "math-unit-circle:terra-low:cold:5",
+      "intentId": "math-unit-circle",
+      "proposalSha256": "3fca6099d1e68f52aefcd079e4f138da63b62cccccaefb7d109a1d7b94e60a5c",
+      "failingStepIndex": 2,
+      "failingStepId": "s3",
+      "priorOpsSha256": "ad4d0af38d898e688d52bb1ccf54815a42139b0b21d61ebea5b0decf6596dd6e",
+      "rejectedOpsSha256": "51ebbfa790dfb212e7dd7de2c6d3369d30b71a251e48f21bf48b5e4aaa492af9",
+      "cumulativeOpsSha256": "13cbf37e714cfdae9da301be38c39db3b0d47abe9c7d6449443d14dc0805dc74",
+      "reasons": [
+        "stroke_collision:l2:a1"
+      ],
+      "layoutIssues": [
+        {
+          "code": "stroke_collision",
+          "itemId": "l2",
+          "withItemId": "a1",
+          "itemBounds": {
+            "x": 229.17001342773438,
+            "y": 196,
+            "w": 25.829986572265625,
+            "h": 26.25
+          },
+          "withItemBounds": {
+            "x": 94,
+            "y": 65,
+            "w": 416,
+            "h": 441
+          }
+        }
+      ]
+    },
+    {
+      "sourceKey": "math-unit-circle:terra-low:warm:2",
+      "intentId": "math-unit-circle",
+      "proposalSha256": "3cd38ba8504d6bc3f0288bd5b2c98875caf82ff91a2cf57cdea9d2e72a863f79",
+      "failingStepIndex": 0,
+      "failingStepId": "s1",
+      "priorOpsSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "rejectedOpsSha256": "78bc73a49c4726a12d85d2d26801a4c00209832ab4e3625ba71001c6cc0c768b",
+      "cumulativeOpsSha256": "78bc73a49c4726a12d85d2d26801a4c00209832ab4e3625ba71001c6cc0c768b",
+      "reasons": [
+        "stroke_collision:t1:a1"
+      ],
+      "layoutIssues": [
+        {
+          "code": "stroke_collision",
+          "itemId": "t1",
+          "withItemId": "a1",
+          "itemBounds": {
+            "x": 620,
+            "y": 152,
+            "w": 94.94793701171875,
+            "h": 35
+          },
+          "withItemBounds": {
+            "x": 304,
+            "y": 135,
+            "w": 416,
+            "h": 441
+          }
+        }
+      ]
+    },
+    {
+      "sourceKey": "mixed-aqueduct-holdout:terra-low:cold:1",
+      "intentId": "mixed-aqueduct-holdout",
+      "proposalSha256": "e4fc05b276b6ddd87f733fc5263249da6302adb4a4c915f85cfdcb934f236f28",
+      "failingStepIndex": 1,
+      "failingStepId": "s2",
+      "priorOpsSha256": "e0d22fe175621e9218631e6de5d0c648009494158ee4abdfe8decb60707b339e",
+      "rejectedOpsSha256": "f64f375b30ea1e8e7c4a36599c7bd462bc45cdadb91ae870e42193f4ebf21f0e",
+      "cumulativeOpsSha256": "71fc63baa43fea9245bd49694cd301e58ba911a36bfc2666afa0c4403d7e70ad",
+      "reasons": [
+        "stroke_collision:a8:a2",
+        "stroke_collision:a8:a3"
+      ],
+      "layoutIssues": [
+        {
+          "code": "stroke_collision",
+          "itemId": "a8",
+          "withItemId": "a2",
+          "itemBounds": {
+            "x": 464,
+            "y": 255.15,
+            "w": 472.32500000000005,
+            "h": 57.150000000000006
+          },
+          "withItemBounds": {
+            "x": 230,
+            "y": 270,
+            "w": 280,
+            "h": 60
+          }
+        },
+        {
+          "code": "stroke_collision",
+          "itemId": "a8",
+          "withItemId": "a3",
+          "itemBounds": {
+            "x": 464,
+            "y": 255.15,
+            "w": 472.32500000000005,
+            "h": 57.150000000000006
+          },
+          "withItemBounds": {
+            "x": 230,
+            "y": 260,
+            "w": 280,
+            "h": 62.69999999999999
+          }
+        }
+      ]
+    },
+    {
+      "sourceKey": "revision-extend-causal:terra-low:cold:4",
+      "intentId": "revision-extend-causal",
+      "proposalSha256": "3526cf1a71d46d14814b30556d8c8a68cae8dbf2896fbae4539ed55fc4c70822",
+      "failingStepIndex": 1,
+      "failingStepId": "s2",
+      "priorOpsSha256": "01daac532e8a0812ba9f6d404d18051a438c4fd878362a89954a67758db7bf7d",
+      "rejectedOpsSha256": "9f86e8113988620a14a5f159c52d54260efed28dc6279a16bb708c6ccf89bc1e",
+      "cumulativeOpsSha256": "847ee39ea442ab74f76e7928c2e2b3e3beca88af1c9833baf09c53516c993afd",
+      "reasons": [
+        "bounds:c1",
+        "bounds:c3"
+      ],
+      "layoutIssues": [
+        {
+          "code": "bounds",
+          "itemId": "c1",
+          "itemBounds": {
+            "x": 0,
+            "y": 0,
+            "w": 0,
+            "h": 0
+          }
+        },
+        {
+          "code": "bounds",
+          "itemId": "c3",
+          "itemBounds": {
+            "x": 0,
+            "y": 0,
+            "w": 0,
+            "h": 0
+          }
+        }
+      ]
+    },
+    {
+      "sourceKey": "science-cell-membrane:terra-low:cold:2",
+      "intentId": "science-cell-membrane",
+      "proposalSha256": "8f57529542d3dbc1d3bcb0efb0eaa9734dc86fa2d14f0e0c9124926c3ffb4d59",
+      "failingStepIndex": 2,
+      "failingStepId": "s3",
+      "priorOpsSha256": "113d5f16f47ba93395aa9ffe8b2175996ccdb6e2c68942c931d0daaa26c89020",
+      "rejectedOpsSha256": "520ae71386b538d5cec0d5075cccab58aaab10b7301c5898eb3517a33201eda4",
+      "cumulativeOpsSha256": "da1dc87f716ed0bfd97aed83ff15d11335085420acef379affcec5f0e34cfac7",
+      "reasons": [
+        "bounds:e1"
+      ],
+      "layoutIssues": [
+        {
+          "code": "bounds",
+          "itemId": "e1",
+          "itemBounds": {
+            "x": 596,
+            "y": 500,
+            "w": 404,
+            "h": 57.14999999999998
+          }
+        }
+      ]
+    },
+    {
+      "sourceKey": "science-cell-membrane:terra-low:warm:3",
+      "intentId": "science-cell-membrane",
+      "proposalSha256": "97329d6283712e71542d0179f049904e0eb417aa137c9b378a0d670f3af1e174",
+      "failingStepIndex": 1,
+      "failingStepId": "s2",
+      "priorOpsSha256": "a94625c13125ef983253860da539dda754477842065f9ef020cfc5ac47f110af",
+      "rejectedOpsSha256": "5d4f043964acc2e49d68b7189553ece49cf8ade0108fa7db1480880b77c0a5c7",
+      "cumulativeOpsSha256": "9055b266b9c0faa735e8c6d24ca1d266beb62d5308b58b61ad448d2d6db7c0ed",
+      "reasons": [
+        "bounds:e1"
+      ],
+      "layoutIssues": [
+        {
+          "code": "bounds",
+          "itemId": "e1",
+          "itemBounds": {
+            "x": 596,
+            "y": 470,
+            "w": 404,
+            "h": 57.14999999999998
+          }
+        }
+      ]
+    },
+    {
+      "sourceKey": "science-subduction-holdout:terra-low:cold:3",
+      "intentId": "science-subduction-holdout",
+      "proposalSha256": "eb9ba660b10d066d4b7de707e28aa881b3542d852fd26ab05ebf1075594c0779",
+      "failingStepIndex": 2,
+      "failingStepId": "s3",
+      "priorOpsSha256": "d5dcd9a39ac003339fdb12335c7575cfaf0a6a753522e8daf1b73d30b0d7565a",
+      "rejectedOpsSha256": "36c016b3fbdf6ef701258868b014f857a7d5bf7f4654b6a0fbcfea67caa6534b",
+      "cumulativeOpsSha256": "626dbf5cb51485451970bf3b69a6a1e82bf4f2a4a74d5152c8e91cdedf4bddd4",
+      "reasons": [
+        "crossings:2>1"
+      ],
+      "layoutIssues": [
+        {
+          "code": "connector_crossing",
+          "itemId": "c3",
+          "withItemId": "c1",
+          "itemBounds": {
+            "x": 458,
+            "y": 347.9,
+            "w": 162,
+            "h": 87.10000000000002
+          },
+          "withItemBounds": {
+            "x": 405,
+            "y": 195,
+            "w": 215,
+            "h": 230
+          }
+        },
+        {
+          "code": "connector_crossing",
+          "itemId": "c3",
+          "withItemId": "c2",
+          "itemBounds": {
+            "x": 458,
+            "y": 347.9,
+            "w": 162,
+            "h": 87.10000000000002
+          },
+          "withItemBounds": {
+            "x": 485,
+            "y": 315,
+            "w": 135,
+            "h": 135
+          }
+        }
+      ]
+    },
+    {
+      "sourceKey": "science-subduction-holdout:terra-low:cold:4",
+      "intentId": "science-subduction-holdout",
+      "proposalSha256": "c5c9219ae6dcb0f43629a65571c7c4a9b05752b9324398c37351b6f374706ecf",
+      "failingStepIndex": 2,
+      "failingStepId": "s3",
+      "priorOpsSha256": "af0c0e0c0cb7c64bf6eddf89c8a5217a84218ef6976fcfa0f83848927ea09aa1",
+      "rejectedOpsSha256": "d8eb7e644a9dc9cf03d3dfc405fe32d7c513310c792d9bc4ce1749ec8d403678",
+      "cumulativeOpsSha256": "9f449349de0cd3e3fdc35e9ee4e9997141d7657313f284e5aa7723009f703e5d",
+      "reasons": [
+        "crossings:2>1"
+      ],
+      "layoutIssues": [
+        {
+          "code": "connector_crossing",
+          "itemId": "c3",
+          "withItemId": "c1",
+          "itemBounds": {
+            "x": 450,
+            "y": 330,
+            "w": 150,
+            "h": 91.60000000000002
+          },
+          "withItemBounds": {
+            "x": 500,
+            "y": 220,
+            "w": 102.20000000000005,
+            "h": 220
+          }
+        },
+        {
+          "code": "connector_crossing",
+          "itemId": "c3",
+          "withItemId": "c2",
+          "itemBounds": {
+            "x": 450,
+            "y": 330,
+            "w": 150,
+            "h": 91.60000000000002
+          },
+          "withItemBounds": {
+            "x": 500,
+            "y": 320,
+            "w": 100.89999999999998,
+            "h": 145
+          }
+        }
+      ]
+    },
+    {
+      "sourceKey": "science-subduction-holdout:terra-low:warm:2",
+      "intentId": "science-subduction-holdout",
+      "proposalSha256": "6a62ffd7d2e21ff59f17689bcfb209e20dd7b6668e0a38df59b0d191b7e9d17d",
+      "failingStepIndex": 1,
+      "failingStepId": "s2",
+      "priorOpsSha256": "776121bf7f3dec7f0b7ed2dad5d76f4cceb0581f52c6fe46f2f971ad06e81900",
+      "rejectedOpsSha256": "afad2778193af844b6001b863f69d63ca2734e94b90bad901e8c267e9c585c5a",
+      "cumulativeOpsSha256": "07fa010ccea04da4ac090485582241fb03baf9a2813da7de542a29152cb954b4",
+      "reasons": [
+        "stroke_collision:l1:p2",
+        "stroke_collision:l1:c1"
+      ],
+      "layoutIssues": [
+        {
+          "code": "stroke_collision",
+          "itemId": "l1",
+          "withItemId": "p2",
+          "itemBounds": {
+            "x": 548,
+            "y": 262,
+            "w": 362.5438232421875,
+            "h": 35
+          },
+          "withItemBounds": {
+            "x": 350,
+            "y": 220,
+            "w": 190,
+            "h": 210
+          }
+        },
+        {
+          "code": "stroke_collision",
+          "itemId": "l1",
+          "withItemId": "c1",
+          "itemBounds": {
+            "x": 548,
+            "y": 262,
+            "w": 362.5438232421875,
+            "h": 35
+          },
+          "withItemBounds": {
+            "x": 500,
+            "y": 293.1,
+            "w": 120,
+            "h": 18.899999999999977
+          }
+        }
+      ]
+    },
+    {
+      "sourceKey": "timeline-black-death-holdout:terra-low:warm:4",
+      "intentId": "timeline-black-death-holdout",
+      "proposalSha256": "8f6b0018aa2ce47961bb68d1942a65fa88f4ae3820c2c7e0052d58eb2a34026d",
+      "failingStepIndex": 1,
+      "failingStepId": "s2",
+      "priorOpsSha256": "a9827635c1229dbe21b7d12cc925330708887451d7718aec553df2fa86b516df",
+      "rejectedOpsSha256": "a31cba94813937a6ea6740d45465efa2ec847ff41272d3238a9c83bf7368d196",
+      "cumulativeOpsSha256": "990408694e161314ca32d1c76cc9b969c2630c74c1e24b6de8b32e0cca797c5f",
+      "reasons": [
+        "collision:b4:t1",
+        "stroke_collision:t1:b4",
+        "stroke_collision:t1:c2"
+      ],
+      "layoutIssues": [
+        {
+          "code": "collision",
+          "itemId": "b4",
+          "withItemId": "t1",
+          "itemBounds": {
+            "x": 605,
+            "y": 106,
+            "w": 190,
+            "h": 80
+          },
+          "withItemBounds": {
+            "x": 524,
+            "y": 150,
+            "w": 220.11721801757812,
+            "h": 35
+          }
+        },
+        {
+          "code": "stroke_collision",
+          "itemId": "t1",
+          "withItemId": "b4",
+          "itemBounds": {
+            "x": 524,
+            "y": 150,
+            "w": 220.11721801757812,
+            "h": 35
+          },
+          "withItemBounds": {
+            "x": 605,
+            "y": 106,
+            "w": 190,
+            "h": 80
+          }
+        },
+        {
+          "code": "stroke_collision",
+          "itemId": "t1",
+          "withItemId": "c2",
+          "itemBounds": {
+            "x": 524,
+            "y": 150,
+            "w": 220.11721801757812,
+            "h": 35
+          },
+          "withItemBounds": {
+            "x": 488,
+            "y": 105.96658118588383,
+            "w": 109,
+            "h": 31.033418814116175
+          }
+        }
+      ]
+    }
+  ]
+}
