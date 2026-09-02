@@ -1,0 +1,11 @@
+{
+  "schemaVersion": "1.0.0",
+  "resultPath": "server/board/eval/results/2026-09-02-drawing-m2-live-smoke.json",
+  "resultSha256": "8293830bc09e5ef2581883aaeba3612897dc6f231f5d98a565e52b24e3ad8a93",
+  "scenePath": "server/board/eval/fixtures/m2-live-smoke-directed-scene.json",
+  "sceneSha256": "380628f25daa5dd3609d644b03eb99323a2be061c8201443dc08d5a5db118f43",
+  "correctedScreenshotPath": "artifacts/evaluation/drawing-m2-live-smoke-corrected.jpg",
+  "correctedScreenshotSha256": "fb863df21e4b24e1fc0d9233b42ede75fa174df65e375240dc73445e33ad79c1",
+  "accepted": false,
+  "requiresAuthorizedRerun": true
+}

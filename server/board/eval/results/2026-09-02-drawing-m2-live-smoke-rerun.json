@@ -1,0 +1,142 @@
+{
+  "schemaVersion": "1.0.0",
+  "evidenceMode": "authorized_live_synthetic_lesson_corrected_rerun",
+  "generatedAt": "2026-09-02T12:19:00.000Z",
+  "accepted": true,
+  "acceptanceScope": "adopted_role_configuration_and_second_board_change",
+  "authorization": {
+    "hardCapUsd": 0.85,
+    "maximumConservativeReserveUsd": 0.8,
+    "maximumOperations": {
+      "realtimeConnections": 1,
+      "terraLowCompositionCalls": 1,
+      "lunaLowAuditCalls": 1,
+      "terraMediumRecoveryCalls": 1,
+      "compilerCalls": 0,
+      "imageCalls": 0,
+      "targetedCorrectionCalls": 0
+    },
+    "syntheticOnly": true
+  },
+  "journey": {
+    "fixtureCompiler": true,
+    "elapsedMs": 46310,
+    "firstBoardObserved": true,
+    "secondBoardChangeObserved": true,
+    "secondSectionOpened": true,
+    "secondRequestRoute": "streaming_generative",
+    "browserConsoleErrors": 0,
+    "sectionSwitches": 1,
+    "reconnects": 0,
+    "tutorObjectDisappearances": 0,
+    "telemetryGaps": 0,
+    "directorFirstOpMs": 3667,
+    "directorFirstPaintMs": 14050,
+    "auditDurationMs": 1850,
+    "auditBudgetMs": 3000,
+    "auditOutcome": "approved",
+    "recoveryUsed": false,
+    "liveObservedStoryboardSteps": 2,
+    "terminalStoryboardSteps": 3,
+    "thirdRevealLiveStatus": "not_observed_before_smoke_end"
+  },
+  "providerUsage": {
+    "providerCalls": 3,
+    "counts": {
+      "realtime": 1,
+      "composition": 1,
+      "visionAudit": 1,
+      "recovery": 0,
+      "layoutCorrection": 0
+    },
+    "realtime": {
+      "model": "gpt-realtime-2.1",
+      "inputTextTokens": 20387,
+      "cachedTextTokens": 3008,
+      "inputAudioTokens": 0,
+      "cachedAudioTokens": 0,
+      "inputImageTokens": 0,
+      "cachedImageTokens": 0,
+      "outputTextTokens": 508,
+      "outputAudioTokens": 725,
+      "estimatedCostUsd": 0.1293112
+    },
+    "composition": {
+      "model": "gpt-5.6-terra",
+      "reasoningEffort": "low",
+      "inputTokens": 3602,
+      "cachedInputTokens": 0,
+      "outputTokens": 374,
+      "estimatedCostUsd": 0.011692
+    },
+    "visionAudit": {
+      "model": "gpt-5.6-luna",
+      "reasoningEffort": "low",
+      "inputTokens": 860,
+      "cachedInputTokens": 0,
+      "outputTokens": 71,
+      "estimatedCostUsd": 0.0002572
+    },
+    "estimatedObservedCostUsd": 0.1412604,
+    "accountedUpperBoundUsd": 0.68,
+    "hardCapHeadroomUsd": 0.17,
+    "providerBillingSurfaceCostUsd": null,
+    "costClaim": "token_meter_estimate_plus_conservative_upper_bound"
+  },
+  "pricingBasis": {
+    "source": "https://developers.openai.com/api/docs/models/gpt-realtime-2.1",
+    "realtimePerMillionTokensUsd": {
+      "inputText": 4,
+      "cachedInputText": 0.4,
+      "outputText": 24,
+      "inputAudio": 32,
+      "cachedInputAudio": 0.4,
+      "outputAudio": 64,
+      "inputImage": 5,
+      "cachedInputImage": 0.5
+    }
+  },
+  "quality": {
+    "liveObservedFramesInspected": true,
+    "liveObservedFramesPassed": true,
+    "connectorLabelOverlapPresent": false,
+    "fullTerminalSceneBrowserAcceptedOffline": true,
+    "fullTerminalSceneInspectedOffline": true,
+    "semanticContentPassed": true,
+    "liveStep2Screenshot": {
+      "path": "artifacts/evaluation/drawing-m2-live-smoke-rerun-step2.png",
+      "sha256": "6379c6ac6fc17b9c8a8a62c4df810144288e2de98385924f9c7808122f00c740"
+    },
+    "liveStep3Screenshot": {
+      "path": "artifacts/evaluation/drawing-m2-live-smoke-rerun-step3.png",
+      "sha256": "4ffdcc6a0fc62b1519616f10f312e17cd8b5cc2a742e208db3f43f6ba175ff5e"
+    },
+    "fullTerminalSceneScreenshot": {
+      "path": "artifacts/evaluation/drawing-m2-live-smoke-rerun-full.jpg",
+      "sha256": "d8b89a5d6754a329a61cf35eb9b806a491cd9790f6a8d0b7747e2a2a205eb0cb"
+    }
+  },
+  "directedScene": {
+    "path": "server/board/eval/fixtures/m2-live-smoke-rerun-directed-scene.json",
+    "sha256": "8d85c7aca89071a7d09717fe7b78b198018b8c4ccdc71396dd5fda7d4bded8f2"
+  },
+  "evidenceBoundary": {
+    "provenLive": [
+      "one adopted-config Realtime lesson",
+      "Terra-low streaming composition",
+      "Luna-low approved audit within the 3000 ms budget",
+      "second board section creation and navigation",
+      "two incremental reveals without overlap",
+      "zero telemetry gaps and tutor-object disappearance"
+    ],
+    "provenOfflineFromLiveOutput": [
+      "terminal six-object scene passes the corrected production-browser compiler and preflight",
+      "complete two-way evaporation and condensation semantics are visually legible"
+    ],
+    "notProven": [
+      "third storyboard reveal on the live LessonPage before session end",
+      "target-device acoustic behavior",
+      "real-child behavior"
+    ]
+  }
+}
