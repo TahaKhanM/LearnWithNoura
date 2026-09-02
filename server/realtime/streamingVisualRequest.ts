@@ -1,3 +1,5 @@
+import type { GenerationIdentity } from '../../shared/runtimeProtocol.js';
+import type { VisionAuditEvent } from '../board/visionAudit.js';
 import { StreamingDirectorPrecommitError } from '../board/streamingDirector.js';
 import { currentStage } from '../lesson/orchestrator.js';
 import { createAdaptiveVisionAuditGate, type AdaptiveVisionAuditGate } from './adaptiveVisionAuditGate.js';
@@ -24,6 +26,19 @@ type VisualToolCall = { callId: string; responseId: string } | null;
 interface StreamingVisualRequestOptions {
   directorHandoff: string;
   fallbackToClassic(sectionId: string): void;
+}
+
+export function visionAuditTelemetryInput(
+  event: VisionAuditEvent,
+  identity: GenerationIdentity | null,
+) {
+  return {
+    startedAtMs: event.startedAtMs,
+    model: event.model,
+    reasoningEffort: event.reasoningEffort,
+    outcome: event.outcome,
+    identity,
+  };
 }
 
 /**
@@ -94,7 +109,9 @@ export function startStreamingDirectedScene(
           semanticGroupId: sectionId,
           groupLabel: request.idea.slice(0, 160),
         });
-        return verdict.accepted ? { ok: true } : { ok: false, issues: verdict.reasons };
+        return verdict.accepted
+          ? { ok: true }
+          : { ok: false, issues: verdict.reasons, layoutIssues: verdict.layoutIssues };
       },
       renderScene: (ops, semanticGroupId) => renderWithClient(ctx, ops, semanticGroupId),
     }, {
@@ -159,7 +176,7 @@ export function startStreamingDirectedScene(
               parentSignal: controller.signal,
               abortComposition: () => controller.abort('vision audit rejected the streamed scene'),
               onRejected: () => { auditRejected = true; },
-              onOutcome: (event) => recordVisionAuditOutcome(ctx, { ...event, identity: timingIdentity }),
+              onOutcome: (event) => recordVisionAuditOutcome(ctx, visionAuditTelemetryInput(event, timingIdentity)),
               budgetMs: ctx.visionAuditBudgetMs,
             });
           }

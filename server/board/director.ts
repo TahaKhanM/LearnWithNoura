@@ -2,6 +2,7 @@ import type { BoardOp } from '../../shared/boardOps.js';
 import type { SceneValidator } from '../lesson/compiler.js';
 import type { SceneRenderer } from '../lesson/headlessSceneValidator.js';
 import { directorProposePrompt, DIRECTOR_VISION_PROMPT } from './directorPrompts.js';
+import { closedVisionAuditIssues } from './visionAudit.js';
 import {
   persistIllustrationRecord,
   type IllustrationBrief,
@@ -139,7 +140,7 @@ export async function directVisual(deps: BoardDirectorDeps, request: DirectorSce
         }
         illustration = await deps.illustrations.prepare(proposal.illustration, request.illustrationHooks);
         lastIllustration = illustration;
-        if (!illustration.ok) {
+        if (illustration.ok === false) {
           feedback = [...illustration.reasons, 'Design a vector or asset diagram instead of an illustration.'];
           continue;
         }
@@ -158,7 +159,7 @@ export async function directVisual(deps: BoardDirectorDeps, request: DirectorSce
           density: request.density,
           visibleObjectIds: request.visibleObjectIds,
         });
-      if (!policy.ok) {
+      if (policy.ok === false) {
         feedback = policy.reasons;
         continue;
       }
@@ -178,7 +179,7 @@ export async function directVisual(deps: BoardDirectorDeps, request: DirectorSce
       continue;
     }
     const verdict = await validateScene(scene.ops);
-    if (!verdict.ok) {
+    if (verdict.ok === false) {
       feedback = verdict.issues.map((issue) => `Deterministic layout validation rejected the scene: ${issue}`);
       continue;
     }
@@ -194,10 +195,9 @@ export async function directVisual(deps: BoardDirectorDeps, request: DirectorSce
     try {
       const vision = DirectorVisionVerdictSchema.parse(JSON.parse(visionReply ?? ''));
       approved = vision.approved;
-      if (!approved) feedback = vision.issues.map((issue) => `Rendered inspection found: ${issue}`);
-      if (!approved && vision.issues.length === 0) feedback = ['Rendered inspection rejected the scene without naming issues.'];
-    } catch (error) {
-      feedback = [`The vision inspection reply was invalid: ${describeError(error)}`];
+      if (!approved) feedback = closedVisionAuditIssues('rejected').map((issue) => `vision_audit:${issue}`);
+    } catch {
+      feedback = closedVisionAuditIssues('invalid').map((issue) => `vision_audit:${issue}`);
     }
     if (approved) {
       if (lastIllustration?.ok) {

@@ -2,6 +2,7 @@ import type { RuntimeEventEnvelope } from '../../shared/runtimeProtocol.js';
 import { recordVisualClientEventTiming } from './visualTelemetry.js';
 import { MetricInputSchema, TELEMETRY_SCHEMA_VERSION } from '../../shared/sessionTelemetry.js';
 import { BoardSubmissionSchema } from '../../shared/lessonTurn.js';
+import { LayoutIssueSchema } from '../../shared/layoutFeedback.js';
 import { evaluateBoardSubmissionCheck } from './manipulativeSubmission.js';
 import { reduceLesson } from '../lesson/orchestrator.js';
 import { metricContextFromIdentity } from '../session/telemetryRecorder.js';
@@ -10,9 +11,24 @@ import type { CoordinatorContext } from './coordinatorContext.js';
 import { addBounded, identityForResponse } from './responseRegistry.js';
 import { refreshBoardInstructions } from './sessionConfig.js';
 import { conversationContext, learnerBoardOps, safeBoardImage } from './sessionRestore.js';
-import { advanceStoryboardRun, noteStoryboardPlaybackStopped, noteStoryboardStepPresented, pauseStoryboardRun } from './storyboardRunner.js';
-import { isAllowedClientMetric, MAX_PENDING_VOICE_BARGE_INS, recordClientPlaybackStop, trustedClientResponseId } from './telemetryGlue.js';
+import {
+  advanceStoryboardRun,
+  noteStoryboardPlaybackStopped,
+  noteStoryboardStepPresented,
+  pauseStoryboardRun,
+} from './storyboardRunner.js';
+import {
+  isAllowedClientMetric,
+  MAX_PENDING_VOICE_BARGE_INS,
+  recordClientPlaybackStop,
+  trustedClientResponseId,
+} from './telemetryGlue.js';
 import { requestModelResponse, setEndpointingEagerness } from './turnFloor.js';
+import { handleImageRegionTap } from './imageGroundingRequest.js';
+import {
+  prepareExplicitLearnerVisualRequest,
+  scheduleExplicitLearnerVisualRequest,
+} from './visualRequests.js';
 
 /** Dispatches one accepted browser envelope into the coordinator. */
 
@@ -90,7 +106,19 @@ export async function handleClientEvent(
         type: 'conversation.item.create',
         item: { type: 'message', role: 'user', content: [{ type: 'input_text', text }] },
       });
-      requestModelResponse(ctx, 'user', `user-text-${idempotencyKey}`);
+      // Refresh at a turn boundary, never mid-response. This gives the next
+      // model call the first-paint-authoritative board without a session
+      // rewrite racing tool continuation speech.
+      refreshBoardInstructions(ctx);
+      const visualRequest = prepareExplicitLearnerVisualRequest(
+        ctx,
+        text,
+        idempotencyKey,
+      );
+      const responseRequested = requestModelResponse(ctx, 'user', `user-text-${idempotencyKey}`);
+      if (responseRequested && visualRequest) {
+        scheduleExplicitLearnerVisualRequest(ctx, visualRequest);
+      }
       break;
     }
 
@@ -176,6 +204,11 @@ export async function handleClientEvent(
         // paused storyboard build may continue.
         if (!open) advanceStoryboardRun(ctx);
       }
+      break;
+    }
+
+    case 'image_region_tap': {
+      handleImageRegionTap(ctx, message);
       break;
     }
 
@@ -279,9 +312,16 @@ export async function handleClientEvent(
     case 'visual_preflight_result': {
       const preflightId = String(message.preflight_id ?? '');
       const resolver = state.pendingPreflights.get(preflightId);
+      const layoutIssues = Array.isArray(message.layout_issues)
+        ? message.layout_issues.slice(0, 8).flatMap((issue) => {
+            const parsed = LayoutIssueSchema.safeParse(issue);
+            return parsed.success ? [parsed.data] : [];
+          })
+        : [];
       if (resolver) resolver({
         accepted: message.accepted === true,
         reasons: Array.isArray(message.reasons) ? message.reasons.filter((reason): reason is string => typeof reason === 'string').map((reason) => reason.slice(0, 200)).slice(0, 8) : [],
+        layoutIssues,
       });
       break;
     }

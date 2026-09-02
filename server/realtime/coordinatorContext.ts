@@ -1,17 +1,20 @@
-import type { BoardOp } from '../../shared/boardOps.js';
+import type { AnnotationStyle, BoardOp } from '../../shared/boardOps.js';
 import type { CompiledLesson } from '../../shared/compiledLesson.js';
 import type { GenerationIdentity, RuntimeEventEnvelope } from '../../shared/runtimeProtocol.js';
+import type { LayoutPreflightResult } from '../../shared/layoutFeedback.js';
 import type { DeliveredTask } from '../../shared/lessonTurn.js';
 import type { LessonStage } from '../../shared/pedagogy.js';
 import type { BoardDirector } from '../board/director.js';
 import type { StreamingBoardDirector } from '../board/streamingDirector.js';
 import type { VisionAuditPort } from '../board/visionAudit.js';
+import type { ImageGroundingProposalPort } from '../board/imageGrounding.js';
 import type { LessonOrchestrationState } from '../lesson/orchestrator.js';
 import type { DomainRepository } from '../store/domain.js';
 import type { SessionTelemetryWriter } from '../session/telemetryWriter.js';
 import type { SessionTelemetryRepository } from '../session/telemetryRepository.js';
 import type { BoardContextTracker } from './boardContext.js';
 import type { StoryboardRunState } from './storyboardRunner.js';
+import type { VisualRequest } from './visualRequests.js';
 
 /**
  * Shared mutable state and wiring for one lesson's realtime coordination.
@@ -30,6 +33,15 @@ export interface PendingBoardOpsEntry {
   semanticGroupId?: string;
   groupLabel?: string;
   replacesGroup?: string;
+}
+
+export interface PendingImageGrounding {
+  requestId: string;
+  imageId: string;
+  hint: string;
+  style: AnnotationStyle;
+  note?: string;
+  semanticGroupId?: string;
 }
 
 export interface CoordinatorState {
@@ -66,6 +78,7 @@ export interface CoordinatorState {
   /** Responses whose client-reported playback duration was already recorded. */
   reportedPlaybackResponses: Set<string>;
   pendingBoardOps: Map<number, PendingBoardOpsEntry>;
+  pendingImageGroundings: Map<string, PendingImageGrounding>;
   activeResponseId: string | null;
   speechInProgress: boolean;
   endpointingEagerness: 'medium' | 'high';
@@ -81,7 +94,7 @@ export interface CoordinatorState {
   /** A task the model proposed but has not yet finished speaking. */
   pendingDeliveredTask: DeliveredTask | null;
   preflightCounter: number;
-  pendingPreflights: Map<string, (result: { accepted: boolean; reasons: string[] }) => void>;
+  pendingPreflights: Map<string, (result: LayoutPreflightResult) => void>;
   visualRenderCounter: number;
   /** Pending canonical scene renders delegated to the connected learner
    * browser. The browser is the production render authority; a server-side
@@ -104,6 +117,10 @@ export interface CoordinatorState {
   /** Request ids whose stale completion was already abandoned — the honest
    * "will not appear" note must fire at most once per request. */
   abandonedVisualRequests: Set<string>;
+  /** A spoken visual request whose transcript arrived before VAD released
+   * the learner's turn. The server schedules it after the turn reset so the
+   * request cannot be lost to prompt compliance or an older storyboard. */
+  pendingExplicitVisualRequest: VisualRequest | null;
   planStagedThisTurn: boolean;
   /** A failed plan may retry once with a simpler plan; never more. */
   planAttemptsThisTurn: number;
@@ -164,6 +181,7 @@ export interface CoordinatorContext {
   readonly directVisual: BoardDirector | null;
   readonly streamVisual: StreamingBoardDirector | null;
   readonly visionAudit: VisionAuditPort | null;
+  readonly imageGroundingProposal: ImageGroundingProposalPort | null;
   readonly visionAuditBudgetMs: number;
   /** How long one storyboard step may await its visibility confirmation
    * (covers the previous beat's playback plus the draw-on animation). */

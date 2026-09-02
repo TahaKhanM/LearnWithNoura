@@ -2,6 +2,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { CharacterAttentionController, attentionPriority } from '../src/lesson/characterAttention.js';
 import { ResponseCueTimeline, type ResponseCue } from '../src/lesson/responseTimeline.js';
+import { ResponseCaptionTimeline } from '../src/lesson/captionTimeline.js';
 
 const outputDir = resolve(process.argv[2] ?? 'artifacts/evaluation');
 mkdirSync(outputDir, { recursive: true });
@@ -12,14 +13,15 @@ const identity = { sessionId: 'offline-eval', connectionEpoch: 1, turnId: 'turn-
 const seededContract = { responseStartMs: 120, captionMs: 280, visualMs: 340, responseCompleteMs: 780, detectorMs: 1000 };
 const samples = synthesizeWaveform(2_000, 120, 1_020, seededContract.detectorMs);
 const timeline = new ResponseCueTimeline();
+const captions = new ResponseCaptionTimeline();
 const attention = new CharacterAttentionController(identity);
-const toSample = (absoluteMs: number) => Math.round(((absoluteMs - seededContract.responseStartMs) / 1000) * RATE);
-
-timeline.enqueue(caption('caption-1', toSample(seededContract.captionMs), 1, 'one teaching phrase'));
-timeline.enqueue(visual('visual-1', toSample(seededContract.visualMs), 2));
-timeline.enqueue({ kind: 'final', cueId: 'final-1', responseId: 'response-1', startSample: 0, endSample: toSample(seededContract.responseCompleteMs), sequence: 3, identity, text: 'One teaching phrase.' });
-timeline.enqueue(caption('caption-future', toSample(1_120), 4, 'future speech'));
-timeline.enqueue(visual('visual-future', toSample(1_160), 5));
+captions.registerResponse('response-1', true);
+timeline.enqueue(visual('visual-1', 'visual-1-boundary', 2));
+timeline.enqueue(visual('visual-future', 'visual-future-boundary', 5));
+const visualReleaseAt = new Map([
+  ['visual-1-boundary', seededContract.visualMs],
+  ['visual-future-boundary', 1_160],
+]);
 
 type ObservedEvent = { type: string; ms: number; cueId?: string };
 type RuntimeFrame = { ms: number; gazeTarget: string; mouthEnergy: number; pendingCues: number };
@@ -27,20 +29,43 @@ const observedEvents: ObservedEvent[] = [];
 const frames: RuntimeFrame[] = [];
 let cancelled = false;
 let staleCueWriteAccepted = 0;
+let captionDeltaSent = false;
+let responseFinalized = false;
+let captionVisible = false;
 
 for (let frame = 0, ms = 0; ms <= 2_000; frame += 1, ms = frame * FRAME_MS) {
   if (!cancelled && ms >= seededContract.detectorMs) {
     cancelled = true;
     observedEvents.push({ type: 'detector', ms });
     timeline.cancel(identity);
+    captions.interrupt('response-1');
     attention.cancelGeneration(identity);
     attention.offer({ ...identity, targetType: 'interruption', priority: attentionPriority('interruption'), startTime: ms, expiryTime: ms + 900, smoothingProfile: 'immediate', permittedInReducedMotion: true });
-    if (timeline.enqueue(caption('stale-after-cancel', toSample(1_240), 6, 'stale'))) staleCueWriteAccepted += 1;
+    if (timeline.enqueue(visual('stale-after-cancel', 'stale-boundary', 6))) staleCueWriteAccepted += 1;
     observedEvents.push({ type: 'cancel_applied', ms });
   }
 
-  const playedSamples = Math.max(0, Math.round(((ms - seededContract.responseStartMs) / 1000) * RATE));
-  for (const cue of timeline.drain(() => playedSamples)) {
+  if (ms >= seededContract.responseStartMs && !captionVisible) {
+    captions.playbackStarted('response-1', ms);
+  }
+  if (ms >= seededContract.captionMs && !captionDeltaSent) {
+    captionDeltaSent = true;
+    captions.pushDelta('response-1', 'one teaching phrase. ', ms, true);
+  }
+  if (ms >= seededContract.responseCompleteMs && !responseFinalized) {
+    responseFinalized = true;
+    captions.finishTranscript('response-1', 'One teaching phrase.', ms, true);
+    captions.playbackFinished('response-1');
+    observedEvents.push({ type: 'final', ms, cueId: 'final-1' });
+  }
+  captions.advance(ms);
+  if (!captionVisible && captions.lines().some((line) => line.responseId === 'response-1')) {
+    captionVisible = true;
+    observedEvents.push({ type: 'caption', ms, cueId: 'caption-1' });
+  }
+
+  for (const cue of timeline.drain((responseId) =>
+    ms >= (visualReleaseAt.get(responseId) ?? Infinity) ? 'finished' : 'pending')) {
     observedEvents.push({ type: cue.kind, ms, cueId: cue.cueId });
     if (cue.kind === 'visual') attention.offer({
       ...identity, targetType: 'tutor_pen', boardCoordinates: [620, 260], priority: attentionPriority('tutor_pen'),
@@ -83,12 +108,8 @@ const ok = Object.values(gateResults).every(Boolean) && negativeControls.allIsol
 console.log(JSON.stringify({ ok, wavPath, reportPath, metrics, gateResults, negativeControls }, null, 2));
 if (!ok) process.exit(1);
 
-function caption(cueId: string, endSample: number, sequence: number, delta: string): ResponseCue {
-  return { kind: 'caption', cueId, responseId: 'response-1', startSample: Math.max(0, endSample - 2_400), endSample, sequence, identity, delta };
-}
-
-function visual(cueId: string, endSample: number, sequence: number): ResponseCue {
-  return { kind: 'visual', cueId, responseId: 'response-1', startSample: endSample, endSample, sequence, identity, ops: [], eventId: sequence, visualCueId: 'semantic-group-1', semanticObjectId: 'semantic-group-1' };
+function visual(cueId: string, responseId: string, sequence: number): ResponseCue {
+  return { kind: 'visual', cueId, responseId, sequence, identity, ops: [], eventId: sequence, visualCueId: 'semantic-group-1', semanticObjectId: 'semantic-group-1', awaitNarration: true };
 }
 
 function deriveMetrics(trace: typeof sourceTrace, waveform: Int16Array) {

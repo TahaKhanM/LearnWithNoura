@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { createSyntheticSession, installFakeRealtime, setLessonCapability } from '../helpers';
+import { createSyntheticSession, installFakeRealtime, setLessonCapability, waitForFakeRealtimeStart } from '../helpers';
 
 async function emitManipulateTask(page: import('@playwright/test').Page) {
   await page.evaluate(() => {
@@ -54,7 +54,7 @@ test('drag-check feedback and Done-only submit for manipulate tasks', async ({ p
   await setLessonCapability(page, session.id, lessonCapability);
   await page.goto(`/lesson/${session.id}`);
   await page.getByRole('button', { name: 'Begin' }).click();
-  await expect(page.getByText(/Type below — Noura is ready|Listening/)).toBeVisible();
+  await waitForFakeRealtimeStart(page);
 
   await emitManipulateTask(page);
 
@@ -99,7 +99,7 @@ test('reconnect replays persisted manipulative marker position', async ({ page, 
   await setLessonCapability(page, session.id, lessonCapability);
   await page.goto(`/lesson/${session.id}`);
   await page.getByRole('button', { name: 'Begin' }).click();
-  await expect(page.getByText(/Type below — Noura is ready|Listening/)).toBeVisible();
+  await waitForFakeRealtimeStart(page);
   await emitManipulateTask(page);
 
   await dragMarkerOntoThreeQuarters(page);

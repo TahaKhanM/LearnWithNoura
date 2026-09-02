@@ -728,6 +728,50 @@ test('any telemetry gap fails the deterministic smoke gate', () => {
   assert(report.smokeGate.missingObservationIds.includes('telemetry_gaps_present'));
 });
 
+test('an observed autoplay failure fails the deterministic smoke gate', () => {
+  const fixture = telemetryFixture();
+  fixture.log.timeline.push({
+    eventId: 6,
+    ts: 6,
+    name: 'media_playback_outcome',
+    unit: 'count',
+    value: 1,
+    dimensions: { outcome: 'autoplay_blocked' },
+  });
+  const result = runScript([
+    '--report-fixture',
+    writeFixture('media-playback-failure', fixture),
+    '--text-only',
+  ]);
+
+  assert.equal(result.status, 1, result.stderr);
+  const report = parseReport(result);
+  assert.equal(report.smokeGate.passed, false);
+  assert(report.smokeGate.missingObservationIds.includes('media_playback_failures_present'));
+  assert.deepEqual(report.mediaPlaybackOutcomes, ['autoplay_blocked']);
+});
+
+test('a deliberately suppressed response can be not_played without failing the smoke gate', () => {
+  const fixture = telemetryFixture();
+  fixture.log.timeline.push({
+    eventId: 6,
+    ts: 6,
+    name: 'media_playback_outcome',
+    unit: 'count',
+    value: 1,
+    dimensions: { outcome: 'not_played' },
+  });
+  const result = runScript([
+    '--report-fixture',
+    writeFixture('media-playback-suppressed', fixture),
+    '--text-only',
+  ]);
+
+  const report = parseReport(result);
+  assert(!report.smokeGate.missingObservationIds.includes('media_playback_failures_present'));
+  assert.deepEqual(report.mediaPlaybackOutcomes, ['not_played']);
+});
+
 test('WAV fixture fails when speech metrics and provider usage are absent', () => {
   const emptyUsage = Object.fromEntries(Object.keys(providerUsage).map((key) => [key, 0]));
   const fixture = telemetryFixture();
@@ -810,6 +854,9 @@ test('retained report serializes counts and hardcoded labels without raw browser
     tutorCaptionLineCount: 3,
     learnerLineCount: 2,
     boardItemCount: 4,
+    captionMutationCount: 0,
+    adjacentDuplicateCaptionCount: 0,
+    distinctCaptionCount: 0,
     browserConsoleErrorCount: 7,
   });
 });

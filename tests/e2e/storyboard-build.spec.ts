@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { createSyntheticSession, installFakeRealtime, setLessonCapability, startFakePlayback, stopFakePlayback } from '../helpers';
+import { createSyntheticSession, installFakeRealtime, setLessonCapability, startFakePlayback, stopFakePlayback, waitForFakeRealtimeStart } from '../helpers';
 
 /**
  * The interleaved reveal-narrate contract from the child's seat, fully
@@ -57,7 +57,7 @@ test('the anchor builds step by step between narration beats and survives an int
   await setLessonCapability(page, session.id, lessonCapability);
   await page.goto(`/lesson/${session.id}`);
   await page.getByRole('button', { name: 'Begin' }).click();
-  await expect(page.getByText(/Type below — Noura is ready|Listening/)).toBeVisible();
+  await waitForFakeRealtimeStart(page);
 
   const scale = page.locator('[data-item="anchor-scale"]');
   const mark = page.locator('[data-item="anchor-mark"]');

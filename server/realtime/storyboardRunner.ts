@@ -22,6 +22,10 @@ import { recordVisualSceneComplete } from './visualTelemetry.js';
  * floor or handoff state. After the last beat, one ordinary (unmarked)
  * handoff response delivers the stage's check/task through the existing
  * delivered-task contract.
+ *
+ * This remains one cohesive scheduling state machine because reveal holds,
+ * streamed intake, persistence, floor ownership, and abandonment mutate the
+ * same run atomically; splitting those transitions would duplicate ownership.
  */
 
 const MAX_TRACKED_BEATS = 64;
@@ -30,7 +34,7 @@ const MAX_TRACKED_BEATS = 64;
  * because it must finish a tool call plus the spoken task. */
 const BEAT_MAX_OUTPUT_TOKENS = 1_200;
 
-export type StoryboardSource = 'anchor' | 'director';
+export type StoryboardSource = 'anchor' | 'template' | 'director';
 
 export interface StoryboardRunStep {
   id: string;

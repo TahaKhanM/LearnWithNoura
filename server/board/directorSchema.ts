@@ -79,6 +79,13 @@ export function applyDirectorBoardPolicy(rawOps: unknown, policy: DirectorPolicy
   if (collisions.length > 0) {
     return { ok: false, reasons: [`New object ids collide with objects already on the board: ${collisions.slice(0, 8).join(', ')}. Choose fresh ids; never redraw visible objects.`] };
   }
+  const availableAnchors = new Set(policy.visibleObjectIds);
+  for (const op of adds) {
+    if (op.place && !availableAnchors.has(op.place.anchor)) {
+      return { ok: false, reasons: [`Relational anchor ${op.place.anchor} must be visible or structurally earlier than ${op.id}.`] };
+    }
+    availableAnchors.add(op.id);
+  }
   return { ok: true, ops: adds, strippedOps };
 }
 

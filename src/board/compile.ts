@@ -5,14 +5,18 @@
  * rather than trusted from the model.
  */
 
-import { BOARD_W, BOARD_H, PALETTE, type Vec, type ShapeSpec, type AxesSpec } from '../../shared/boardOps';
+import { BOARD_W, BOARD_H, PALETTE, type Vec, type ShapeSpec, type AxesSpec, type AnnotateSpec } from '../../shared/boardOps';
 import { compileExpression } from '../../shared/expr';
 import { compileArc, compileCurve } from './compileCurves';
+import { isCenterArc } from '../../shared/authoredSpecs';
 import { compileAsset } from './compileAssets';
 import { compileImage, imageLabelBands, type ImageNode } from './compileImages';
 import { compileDraggable, compileSnapZone, compileTappable } from './compileManipulatives';
 import { measureText, wrapText, TEXT_SIZES } from './measure';
 import type { SceneItem } from './scene';
+import { anchorsForItem, resolveAnchorRef, type CompiledAnchors } from './anchors';
+import { compileCurriculumSpec } from './compileCurriculum';
+import type { TransformSpec } from '../../shared/curriculumSpecs';
 
 export interface PathNode {
   type: 'path';
@@ -72,6 +76,7 @@ export interface CompiledItem {
   revision: number;
   nodes: RenderNode[];
   bbox: BBox;
+  anchors: CompiledAnchors;
 }
 
 const INK = PALETTE.ink;
@@ -278,6 +283,7 @@ function axesMap(spec: AxesSpec): AxesMap {
 interface CompileContext {
   bboxes: Map<string, BBox>;
   axes: Map<string, AxesMap>;
+  anchors: Map<string, CompiledAnchors>;
   /** All occupied boxes so far, for label collision avoidance. */
   occupied: BBox[];
   items: SceneItem[];
@@ -807,6 +813,7 @@ function compileSpec(
         });
       }
 
+      const markLabelBounds: BBox[] = [];
       for (const mark of spec.marks ?? []) {
         if (mark.value < min || mark.value > max) continue;
         const px = toX(mark.value);
@@ -819,15 +826,21 @@ function compileSpec(
           fill: markColor,
         });
         if (mark.label) {
+          const w = measureText(mark.label, size);
+          const labelBounds = { x: px - w / 2, y: y - 26 - size, w, h: size * 1.25 };
+          while (markLabelBounds.some((box) => boxesIntersect(labelBounds, box))) {
+            labelBounds.y -= size * 1.5;
+          }
+          markLabelBounds.push({ ...labelBounds });
           nodes.push({
             type: 'text',
             x: px,
-            y: y - 26,
+            y: labelBounds.y + size,
             text: mark.label,
             size,
             color: markColor,
             anchor: 'middle',
-            w: measureText(mark.label, size),
+            w,
           });
         }
       }
@@ -916,6 +929,21 @@ function compileSpec(
           w,
         });
       }
+      break;
+    }
+
+    case 'annotate': {
+      nodes.push(...compileAnnotation(spec, color, ctx));
+      break;
+    }
+
+    case 'transform': {
+      nodes.push(...compileTransform(spec, item, ctx));
+      break;
+    }
+
+    case 'panelGrid': case 'regionFill': case 'scatter': case 'boxplot': case 'histogram': case 'isometricSolid': case 'cubeNet': case 'planView': case 'paperFoldHolePunch': case 'gridPaper': case 'clock': case 'protractor': {
+      nodes.push(...compileCurriculumSpec(spec, color, ctx.axes));
       break;
     }
 
@@ -1026,6 +1054,174 @@ function compileSpec(
   return nodes;
 }
 
+function compileTransform(spec: TransformSpec, item: SceneItem, ctx: CompileContext): RenderNode[] {
+  const source = ctx.items.find((candidate) => candidate.id === spec.target);
+  const sourceBounds = ctx.bboxes.get(spec.target);
+  if (!source || !sourceBounds || source.id === item.id) return [];
+  const fallbackCenter: Vec = [sourceBounds.x + sourceBounds.w / 2, sourceBounds.y + sourceBounds.h / 2];
+  const map = transformPointMapper(spec, fallbackCenter);
+  const transformed = source.spec.kind === 'isometricSolid'
+    ? transformedIsometricSolid(source.spec, spec, map)
+    : transformedSpec(source.spec, map, spec.operation.type === 'enlarge' ? spec.operation.scale : 1);
+  if (!transformed) return [];
+  const nodes = compileSpec({ ...item, id: `${item.id}-geometry`, spec: transformed }, ctx);
+  if (spec.label && nodes.length > 0) {
+    const bounds = unionBBox(nodes.map(nodeBBox));
+    const size = TEXT_SIZES.small;
+    nodes.push({ type: 'text', x: bounds.x + bounds.w / 2, y: bounds.y + bounds.h + size + 12, text: spec.label, size, color: item.color ?? PALETTE.red, anchor: 'middle', w: measureText(spec.label, size) });
+  }
+  return nodes;
+}
+
+function transformPointMapper(spec: TransformSpec, fallbackCenter: Vec): (point: Vec) => Vec {
+  const operation = spec.operation;
+  if (operation.type === 'translate') {
+    const [dx, dy] = operation.vector;
+    return ([x, y]) => [x + dx, y + dy];
+  }
+  if (operation.type === 'reflect') {
+    const [a, b] = [operation.axis.from, operation.axis.to];
+    const dx = b[0] - a[0]; const dy = b[1] - a[1]; const lengthSquared = dx * dx + dy * dy;
+    return ([x, y]) => {
+      const projection = ((x - a[0]) * dx + (y - a[1]) * dy) / lengthSquared;
+      const px = a[0] + projection * dx; const py = a[1] + projection * dy;
+      return [2 * px - x, 2 * py - y];
+    };
+  }
+  const center = operation.center ?? fallbackCenter;
+  if (operation.type === 'enlarge') {
+    const scale = operation.scale;
+    return ([x, y]) => [center[0] + (x - center[0]) * scale, center[1] + (y - center[1]) * scale];
+  }
+  const radians = operation.angleDeg * Math.PI / 180; const cosine = Math.cos(radians); const sine = Math.sin(radians);
+  return ([x, y]) => [center[0] + (x - center[0]) * cosine - (y - center[1]) * sine, center[1] + (x - center[0]) * sine + (y - center[1]) * cosine];
+}
+
+function transformedIsometricSolid(
+  source: Extract<ShapeSpec, { kind: 'isometricSolid' }>,
+  transform: TransformSpec,
+  map: (point: Vec) => Vec,
+): ShapeSpec | null {
+  if (transform.operation.type === 'translate') return { ...source, at: map(source.at) };
+  if (transform.operation.type === 'enlarge') return { ...source, at: map(source.at), unit: source.unit * transform.operation.scale };
+  let voxels = source.voxels.map((voxel): [number, number, number] => [...voxel]);
+  if (transform.operation.type === 'rotate') {
+    const turns = Math.round(transform.operation.angleDeg / 90);
+    if (Math.abs(transform.operation.angleDeg - turns * 90) > 1e-6) return null;
+    for (let turn = 0; turn < ((turns % 4) + 4) % 4; turn += 1) voxels = voxels.map(([x, y, z]) => [-y, x, z]);
+  } else {
+    const axis = transform.operation.axis;
+    const vertical = Math.abs(axis.to[1] - axis.from[1]) >= Math.abs(axis.to[0] - axis.from[0]);
+    voxels = voxels.map(([x, y, z]) => vertical ? [-x, y, z] : [x, -y, z]);
+  }
+  const minX = Math.min(...voxels.map((voxel) => voxel[0])); const minY = Math.min(...voxels.map((voxel) => voxel[1]));
+  return { ...source, voxels: voxels.map(([x, y, z]) => [x - minX, y - minY, z]) };
+}
+
+function transformedSpec(spec: ShapeSpec, map: (point: Vec) => Vec, scale: number): ShapeSpec | null {
+  switch (spec.kind) {
+    case 'line': return { ...spec, from: map(spec.from), to: map(spec.to), ...(spec.width ? { width: spec.width * scale } : {}) };
+    case 'polygon': return { ...spec, points: spec.points.map(map) };
+    case 'circle': return { ...spec, center: map(spec.center), r: spec.r * scale };
+    case 'ellipse': {
+      const points = Array.from({ length: 40 }, (_, index): Vec => {
+        const angle = index / 40 * Math.PI * 2;
+        return map([spec.center[0] + Math.cos(angle) * spec.rx, spec.center[1] + Math.sin(angle) * spec.ry]);
+      });
+      return { kind: 'polygon', points, fill: spec.fill };
+    }
+    case 'point': return { ...spec, at: map(spec.at) };
+    case 'angle': return { ...spec, vertex: map(spec.vertex), from: map(spec.from), to: map(spec.to), ...(spec.radius ? { radius: spec.radius * scale } : {}) };
+    case 'path': return { ...spec, points: spec.points.map(map), ...(spec.width ? { width: spec.width * scale } : {}) };
+    case 'curve': return { ...spec, points: spec.points.map(map), ...(spec.width ? { width: spec.width * scale } : {}) };
+    case 'arc': {
+      if (!isCenterArc(spec)) return { ...spec, from: map(spec.from), through: map(spec.through), to: map(spec.to) };
+      const points = Array.from({ length: 33 }, (_, index): Vec => {
+        const degrees = spec.startDeg + (spec.endDeg - spec.startDeg) * index / 32;
+        const radians = degrees * Math.PI / 180;
+        return map([spec.center[0] + Math.cos(radians) * spec.r, spec.center[1] + Math.sin(radians) * spec.r]);
+      });
+      return { kind: 'polygon', points, closed: false };
+    }
+    default: return null;
+  }
+}
+
+function compileAnnotation(spec: AnnotateSpec, color: string, ctx: CompileContext): RenderNode[] {
+  const refs = Array.isArray(spec.target) ? spec.target : [spec.target];
+  const resolved = refs.map((ref) => resolveAnchorRef(ref, ctx.items, ctx.anchors, ctx.bboxes));
+  if (resolved.some((anchor) => anchor === null)) return [];
+  const anchors = resolved.filter((anchor) => anchor !== null);
+  if (anchors.length === 0) return [];
+  const target = unionAnchorBounds(anchors);
+  const center: Vec = [target.x + target.w / 2, target.y + target.h / 2];
+  const padded = { x: target.x - 10, y: target.y - 10, w: Math.max(20, target.w + 20), h: Math.max(20, target.h + 20) };
+  const path = (points: Vec[], width = 4, fill?: string): PathNode => ({
+    type: 'path', d: polylinePath(points), color, width, length: polylineLength(points), ...(fill ? { fill } : {}),
+  });
+  switch (spec.style) {
+    case 'circle': {
+      const rx = padded.w / 2;
+      const ry = padded.h / 2;
+      const h = ((rx - ry) ** 2) / ((rx + ry) ** 2);
+      return [{
+        type: 'path',
+        d: `M ${center[0] + rx} ${center[1]} A ${rx} ${ry} 0 1 1 ${center[0] - rx} ${center[1]} A ${rx} ${ry} 0 1 1 ${center[0] + rx} ${center[1]}`,
+        color, width: 4, length: Math.PI * (rx + ry) * (1 + (3 * h) / (10 + Math.sqrt(4 - 3 * h))), bbox: padded,
+      }];
+    }
+    case 'underline':
+      return [path([[padded.x, padded.y + padded.h + 5], [padded.x + padded.w, padded.y + padded.h + 5]])];
+    case 'arrow': {
+      const start: Vec = [Math.max(24, padded.x - 55), Math.max(24, padded.y - 45)];
+      const line = path([start, center]);
+      const head = arrowHead(center, start);
+      return [line, { type: 'path', d: head.d, color, width: 4, length: head.length }];
+    }
+    case 'tick': {
+      const point = anchors[0].point;
+      return [path([[point[0] - 14, point[1]], [point[0] - 4, point[1] + 12], [point[0] + 18, point[1] - 16]], 5)];
+    }
+    case 'cross':
+      return [
+        path([[padded.x, padded.y], [padded.x + padded.w, padded.y + padded.h]], 5),
+        path([[padded.x + padded.w, padded.y], [padded.x, padded.y + padded.h]], 5),
+      ];
+    case 'bracket': {
+      const x = padded.x - 8;
+      return [path([[x + 14, padded.y], [x, padded.y], [x, padded.y + padded.h], [x + 14, padded.y + padded.h]])];
+    }
+    case 'highlighter':
+      return [{
+        type: 'path', d: polylinePath([[padded.x, center[1]], [padded.x + padded.w, center[1]]]),
+        color: wash(color), width: Math.max(16, padded.h * 0.55), length: padded.w,
+        bbox: { x: padded.x, y: center[1] - Math.max(16, padded.h * 0.55) / 2, w: padded.w, h: Math.max(16, padded.h * 0.55) },
+      }];
+    case 'callout': {
+      if (!spec.note) return [];
+      const size = TEXT_SIZES.small;
+      const w = measureText(spec.note, size);
+      const preferred = { x: padded.x + padded.w + 45, y: padded.y - 35, w, h: size * 1.25 };
+      const placed = placeNear(preferred, center, ctx.occupied);
+      const labelPoint: Vec = [placed.x, placed.y + placed.h / 2];
+      const line = path([labelPoint, center], 3);
+      const head = arrowHead(center, labelPoint);
+      return [
+        line,
+        { type: 'path', d: head.d, color, width: 3, length: head.length },
+        { type: 'text', x: placed.x, y: placed.y + size, text: spec.note, size, color, anchor: 'start', w },
+      ];
+    }
+  }
+}
+
+function unionAnchorBounds(anchors: Array<{ point: Vec; bounds: BBox }>): BBox {
+  const boxes = anchors.map((anchor) => anchor.bounds.w > 0 || anchor.bounds.h > 0
+    ? anchor.bounds
+    : { x: anchor.point[0], y: anchor.point[1], w: 0, h: 0 });
+  return unionBBox(boxes);
+}
+
 /** Catmull-Rom style smoothing for learner freehand strokes. */
 function smoothPath(points: Vec[]): string {
   if (points.length < 3) return polylinePath(points);
@@ -1117,6 +1313,12 @@ function placeNear(preferred: BBox, anchor: Vec, occupied: BBox[]): BBox {
     { ...preferred, x: anchor[0] - preferred.w - 12, y: preferred.y },
     { ...preferred, y: preferred.y - preferred.h - 14 },
     { ...preferred, x: anchor[0] - preferred.w / 2, y: anchor[1] + 16 },
+    ...[32, 56, 80, 112, 144].flatMap((distance) => [
+      { ...preferred, x: anchor[0] - preferred.w / 2, y: anchor[1] - preferred.h - distance },
+      { ...preferred, x: anchor[0] - preferred.w / 2, y: anchor[1] + distance },
+      { ...preferred, x: anchor[0] - preferred.w - distance, y: anchor[1] - preferred.h / 2 },
+      { ...preferred, x: anchor[0] + distance, y: anchor[1] - preferred.h / 2 },
+    ]),
   ];
   for (const candidate of candidates) {
     const clamped = clampBox(candidate);
@@ -1169,21 +1371,23 @@ function clampBox(box: BBox): BBox {
  * far (render-inspect-repair, done eagerly at compile time).
  */
 export function compileScene(items: SceneItem[]): CompiledItem[] {
-  const ctx: CompileContext = { bboxes: new Map(), axes: new Map(), occupied: [], items };
+  const ctx: CompileContext = { bboxes: new Map(), axes: new Map(), anchors: new Map(), occupied: [], items };
   const compiled: CompiledItem[] = [];
   for (const item of items) {
     const nodes = compileSpec(item, ctx);
     const bbox = unionBBox(nodes.map(nodeBBox));
+    const anchors = anchorsForItem(item, bbox);
     ctx.bboxes.set(item.id, bbox);
+    ctx.anchors.set(item.id, anchors);
     // Text-bearing nodes claim their space so later labels avoid them.
     for (const node of nodes) {
       if (node.type !== 'path') ctx.occupied.push(nodeBBox(node));
     }
     // Solid/container geometry participates in node-label and edge-label
     // spacing. Stroke-only diagrams remain available for nearby annotations.
-    if (['box', 'table', 'bars', 'asset', 'image'].includes(item.spec.kind)) ctx.occupied.push(bbox);
+    if (['box', 'table', 'bars', 'asset', 'image', 'panelGrid', 'regionFill', 'scatter', 'boxplot', 'histogram', 'isometricSolid', 'cubeNet', 'planView', 'paperFoldHolePunch', 'gridPaper', 'clock', 'protractor'].includes(item.spec.kind)) ctx.occupied.push(bbox);
     if (item.spec.kind === 'image') ctx.occupied.push(...imageLabelBands(item.spec));
-    compiled.push({ id: item.id, owner: item.owner, revision: item.revision, nodes, bbox });
+    compiled.push({ id: item.id, owner: item.owner, revision: item.revision, nodes, bbox, anchors });
   }
   return compiled;
 }

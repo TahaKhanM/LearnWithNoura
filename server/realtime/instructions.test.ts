@@ -42,11 +42,14 @@ const conversation: LessonBlueprint = {
 };
 
 describe('lessonExecutionContext', () => {
-  it('tells the tutor to draw with board_ops in a conversation-led lesson', () => {
+  it('routes new conversation-led representations through the Board Director', () => {
     const brief = lessonExecutionContext(conversation, conversation.stages[0], null);
     expect(brief).toContain('allowed board mutation: none');
-    expect(brief).toMatch(/does not forbid drawing/i);
+    expect(brief).toMatch(/does not forbid a useful visual/i);
+    expect(brief).toContain('request_visual');
+    expect(brief).toContain('Board Director');
     expect(brief).toContain('board_ops');
-    expect(brief).toMatch(/never say you cannot draw/i);
+    expect(brief).toMatch(/never tell the learner you cannot draw/i);
+    expect(brief).toMatch(/already visible/i);
   });
 });

@@ -57,6 +57,57 @@ describe('adaptive realtime vision audit gate', () => {
     expect(harness.upstreamText()).not.toContain('untrusted free-form text');
   });
 
+  it('terminates a post-budget rejection when the client never paints', async () => {
+    vi.useFakeTimers();
+    const harness = gateHarness({ stepRevealTimeoutMs: 40 });
+    let resolveAudit!: (value: { outcome: 'rejected'; issues: string[] }) => void;
+    const audit = new Promise<{ outcome: 'rejected'; issues: string[] }>((resolve) => { resolveAudit = resolve; });
+    const gate = createAdaptiveVisionAuditGate({
+      ...harness.input,
+      port: port(() => audit),
+      raster: Promise.resolve('data:image/jpeg;base64,YXVkaXQ='),
+      budgetMs: 10,
+    });
+    let terminal: Awaited<typeof gate.terminal> | null = null;
+    void gate.terminal.then((result) => { terminal = result; });
+
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(10);
+    resolveAudit({ outcome: 'rejected', issues: ['untrusted free-form text'] });
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(39);
+    expect(terminal).toBeNull();
+    await vi.advanceTimersByTimeAsync(1);
+
+    expect(terminal).toMatchObject({ safe: false, aborted: false, outcome: 'rejected' });
+    expect(harness.aborted).toBe(true);
+    expect(harness.ctx.state.storyboardRun).toBeNull();
+    expect(harness.upstreamText()).not.toContain('untrusted free-form text');
+  });
+
+  it('resolves a pending late rejection when reconnect abandons the run', async () => {
+    vi.useFakeTimers();
+    const harness = gateHarness();
+    let resolveAudit!: (value: { outcome: 'rejected'; issues: string[] }) => void;
+    const audit = new Promise<{ outcome: 'rejected'; issues: string[] }>((resolve) => { resolveAudit = resolve; });
+    const gate = createAdaptiveVisionAuditGate({
+      ...harness.input,
+      port: port(() => audit),
+      raster: Promise.resolve('data:image/jpeg;base64,YXVkaXQ='),
+      budgetMs: 10,
+    });
+
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(10);
+    resolveAudit({ outcome: 'rejected', issues: ['untrusted reconnect text'] });
+    await Promise.resolve();
+    harness.run.onAbandoned?.();
+
+    await expect(gate.terminal).resolves.toMatchObject({ safe: false, aborted: false, outcome: 'rejected' });
+    expect(harness.aborted).toBe(true);
+    expect(harness.upstreamText()).not.toContain('untrusted reconnect text');
+  });
+
   it('times out at the real next-reveal boundary and aborts only the audit request', async () => {
     vi.useFakeTimers();
     const harness = gateHarness();
@@ -105,13 +156,14 @@ describe('adaptive realtime vision audit gate', () => {
   });
 });
 
-function gateHarness() {
+function gateHarness(options: { stepRevealTimeoutMs?: number } = {}) {
   const run = openRun();
   const sentUpstream: unknown[] = [];
   const outcomes: string[] = [];
   let aborted = false;
   const ctx = {
     sessionId: 'session',
+    stepRevealTimeoutMs: options.stepRevealTimeoutMs ?? 45_000,
     state: {
       storyboardRun: run,
       visualPlanState: 'rendering',

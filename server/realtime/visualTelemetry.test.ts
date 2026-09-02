@@ -5,6 +5,7 @@ import {
   type MetricInput,
 } from '../../shared/sessionTelemetry.js';
 import type { CoordinatorContext } from './coordinatorContext.js';
+import { visionAuditTelemetryInput } from './streamingVisualRequest.js';
 import {
   recordDirectorStreamFirstOp,
   recordVisionAuditOutcome,
@@ -142,6 +143,25 @@ describe('Drawing vNext runtime telemetry', () => {
         },
       }),
     ]);
+  });
+
+  it('strips free-form audit issues at the streaming event boundary', () => {
+    const input = visionAuditTelemetryInput({
+      startedAtMs: 18_000,
+      model: 'gpt-5.6-luna',
+      reasoningEffort: 'low',
+      outcome: 'rejected',
+      issues: ['PRIVATE FREE-FORM JUDGE TEXT'],
+    }, identity);
+
+    expect(input).toEqual({
+      startedAtMs: 18_000,
+      model: 'gpt-5.6-luna',
+      reasoningEffort: 'low',
+      outcome: 'rejected',
+      identity,
+    });
+    expect(JSON.stringify(input)).not.toContain('PRIVATE FREE-FORM JUDGE TEXT');
   });
 
   it('attributes a late audit completion to the identity captured at dispatch', () => {

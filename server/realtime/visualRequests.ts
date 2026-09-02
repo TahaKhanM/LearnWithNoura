@@ -1,10 +1,12 @@
 import { z } from 'zod';
 import type { BoardOp } from '../../shared/boardOps.js';
 import { currentStage } from '../lesson/orchestrator.js';
-import { startAnchorStoryboard } from './anchorStoryboard.js';
+import { startAnchorStoryboard, startTemplateStoryboard } from './anchorStoryboard.js';
 import { anchorGroupId, preflightWithClient, renderWithClient, stageAndConfirmPlan } from './boardStaging.js';
+import { extractIntentTemplateScene } from '../board/templateLane.js';
 import type { CoordinatorContext } from './coordinatorContext.js';
 import {
+  abandonStoryboardRun,
   startStoryboardRun,
   storyboardRunSteps,
 } from './storyboardRunner.js';
@@ -41,6 +43,95 @@ export const VisualRequestSchema = z.object({
   noBoardReason: z.string().max(300).optional(),
 });
 export type VisualRequest = z.infer<typeof VisualRequestSchema>;
+
+const EXPLICIT_VISUAL_NOUN = /\b(?:number\s*line|graph|diagram|picture|drawing|sketch|shape|triangle|circle|polygon|chart|table|timeline|fraction\s*(?:bar|strip|model)|array|ten[- ]frame|coordinate\s*(?:plane|grid)|axis|axes|model)\b/i;
+const EXPLICIT_VISUAL_VERB = /\b(?:draw|sketch|plot|diagram|illustrate|visuali[sz]e)\b/i;
+const REQUESTED_VISUAL_VERB = /(?:^|\b)(?:please\s+)?(?:can|could|would|will)\s+(?:you\s+)?(?:please\s+)?(?:draw|sketch|plot|show|make|create|add|put)|\bplease\s+(?:draw|sketch|plot|show|make|create|add|put)\b|(?:^|[.!?;:—-]\s*)(?:please\s+)?(?:draw|sketch|plot|show|make|create|add|put)\b/i;
+const REQUESTED_VISUAL_DESIRE = /\b(?:i\s+(?:want|need|would\s+like)|we\s+(?:want|need))\b/i;
+const SECONDARY_VISUAL = /\b(?:second|another|alternative|instead|compare|beside|side[- ]by[- ]side)\b/i;
+
+/**
+ * Conservative command routing for an explicit learner-requested picture.
+ * This is deliberately narrower than general visual helpfulness: it catches
+ * direct requests for a structural representation while ordinary pedagogy
+ * remains with the realtime tutor. Once matched, the application—not prompt
+ * compliance—owns creating a tracked, validated Director request.
+ */
+export function explicitVisualRequestFromText(
+  text: string,
+  requestKey: string,
+  boardHasVisibleObjects: boolean,
+): VisualRequest | null {
+  const clean = text.replace(/\s+/g, ' ').trim().slice(0, 2_000);
+  if (!clean) return null;
+  const visualNoun = EXPLICIT_VISUAL_NOUN.test(clean);
+  const directVisualVerb = EXPLICIT_VISUAL_VERB.test(clean);
+  const requested = REQUESTED_VISUAL_VERB.test(clean)
+    || (REQUESTED_VISUAL_DESIRE.test(clean) && visualNoun);
+  if (!requested || (!visualNoun && !directVisualVerb)) return null;
+  const action = boardHasVisibleObjects || SECONDARY_VISUAL.test(clean)
+    ? 'compare' as const
+    : 'establish' as const;
+  return {
+    schemaVersion: '3.0.0',
+    requestId: `learner-${requestKey}`.replace(/[^A-Za-z0-9_-]/g, '-').slice(0, 120),
+    action,
+    purpose: 'Honor the learner’s explicit request for a visual representation.',
+    idea: clean.slice(0, 300),
+    constraints: clean.slice(0, 300),
+    targetObjectIds: [],
+    density: 'standard',
+  };
+}
+
+/** Records and contextualizes an explicit command before response.create.
+ * Any older storyboard is superseded, but its revealed marks remain. */
+export function prepareExplicitLearnerVisualRequest(
+  ctx: CoordinatorContext,
+  text: string,
+  requestKey: string,
+): VisualRequest | null {
+  const request = explicitVisualRequestFromText(
+    text,
+    requestKey,
+    ctx.state.boardContext.visibleObjectIdList().length > 0,
+  );
+  if (!request) return null;
+  if (ctx.state.storyboardRun) abandonStoryboardRun(ctx, { injectNote: false });
+  const persisted = Promise.resolve(ctx.repo.addEvent(ctx.sessionId, 'learner_visual_request', {
+    requestId: request.requestId,
+    action: request.action,
+    text: text.slice(0, 2_000),
+    status: 'accepted',
+  })).then(() => undefined).catch((error) => {
+    ctx.log(`session ${ctx.sessionId}: learner visual request audit failed ${String(error).slice(0, 160)}`);
+  });
+  ctx.trackSideEffect(persisted);
+  ctx.sendUpstream({
+    type: 'conversation.item.create',
+    item: {
+      type: 'message',
+      role: 'system',
+      content: [{
+        type: 'input_text',
+        text: `[The learner explicitly requested this visual: “${text.slice(0, 300)}”] The application accepted it and is preparing a new validated board section. Acknowledge the learner briefly and keep teaching with what is visible. Do not call request_visual for this request, do not resume an older storyboard, and do not claim the new picture is visible until the application prompts its narration beats.`,
+      }],
+    },
+  });
+  return request;
+}
+
+/** Starts the application-owned Director request after the genuine learner
+ * turn reset. No model tool call is required or synthesized. */
+export function scheduleExplicitLearnerVisualRequest(
+  ctx: CoordinatorContext,
+  request: VisualRequest,
+): void {
+  if (ctx.state.storyboardRun) abandonStoryboardRun(ctx, { injectNote: false });
+  if (ctx.state.planStagedThisTurn || ctx.state.planAttemptsThisTurn >= 2) return;
+  const anchor = anchorGroupId(ctx) ?? 'lesson-anchor';
+  startDirectedScene(ctx, null, request, anchor);
+}
 
 export async function handleVisualRequest(
   ctx: CoordinatorContext,
@@ -137,16 +228,6 @@ export async function handleVisualRequest(
     });
     return;
   }
-  if (!state.lessonState.blueprint) {
-    finishTool(ctx, callId, responseId, {
-      ok: false,
-      accepted: false,
-      reason: 'This lesson has no blueprint loaded; teach conversationally and use small board_ops increments only.',
-      board: state.boardContext.toolSnapshot(),
-    });
-    return;
-  }
-
   const anchor = anchorGroupId(ctx) ?? 'lesson-anchor';
   if (request.action === 'establish') {
     if (state.boardContext.hasGroup(anchor)) {
@@ -190,6 +271,19 @@ function startDirectedScene(
   request: VisualRequest,
   anchor: string,
 ): void {
+  const templateSectionId = request.action === 'establish'
+    ? anchor
+    : `${anchor}-alt${ctx.state.comparisonSectionCounter + 1}`;
+  const templateScene = extractIntentTemplateScene({
+    idea: request.idea,
+    constraints: request.constraints ?? null,
+    sectionId: templateSectionId,
+  });
+  if (templateScene) {
+    if (request.action === 'compare') ctx.state.comparisonSectionCounter += 1;
+    startTemplateStoryboard(ctx, tool, request, templateScene, directorHandoff());
+    return;
+  }
   if (ctx.streamVisual) {
     startStreamingDirectedScene(ctx, tool, request, anchor, {
       directorHandoff: directorHandoff(),
@@ -298,7 +392,9 @@ function startClassicDirectedScene(
           groupLabel: request.idea.slice(0, 160),
         });
         if (result.accepted) acceptedPreflightFingerprint = JSON.stringify(ops);
-        return result.accepted ? { ok: true } : { ok: false, issues: result.reasons };
+        return result.accepted
+          ? { ok: true }
+          : { ok: false, issues: result.reasons, layoutIssues: result.layoutIssues };
       },
       renderScene: (ops, semanticGroupId) => renderWithClient(ctx, ops, semanticGroupId),
     });

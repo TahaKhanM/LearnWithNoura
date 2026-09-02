@@ -1,5 +1,6 @@
 import { compileScene } from './compile';
-import { countAvoidableConnectorCrossings, inspectScene } from './inspection';
+import { avoidableConnectorCrossings, inspectScene } from './inspection';
+import type { LayoutIssue } from '../../shared/layoutFeedback';
 import type { SceneState } from './scene';
 
 export interface BoardQualityReport {
@@ -9,6 +10,7 @@ export interface BoardQualityReport {
   textCharacters: number;
   connectorCrossings: number;
   reasons: string[];
+  layoutIssues: LayoutIssue[];
 }
 
 const MAX_ITEMS = 30;
@@ -25,7 +27,8 @@ export function evaluateBoardQuality(scene: SceneState): BoardQualityReport {
   const tutorItemCount = tutorIds.size;
   const tutorIssues = inspection.issues.filter((issue) => tutorIds.has(issue.itemId));
   const textCharacters = compiled.filter((item) => tutorIds.has(item.id)).reduce((total, item) => total + item.nodes.reduce((sum, node) => sum + (node.type === 'text' ? node.text.length : node.type === 'katex' ? node.latex.length : 0), 0), 0);
-  const connectorCrossings = countAvoidableConnectorCrossings(scene);
+  const crossingIssues = avoidableConnectorCrossings(scene);
+  const connectorCrossings = crossingIssues.length;
   const reasons = tutorIssues.map((issue) => `${issue.kind}:${issue.itemId}${issue.withItemId ? `:${issue.withItemId}` : ''}`);
   const assetCount = scene.items.filter((item) => item.owner === 'tutor' && item.spec.kind === 'asset').length;
   const imagesBySection = new Map<string, number>();
@@ -40,6 +43,16 @@ export function evaluateBoardQuality(scene: SceneState): BoardQualityReport {
   if (crowdedIllustration) reasons.push(`illustration_density:>${MAX_IMAGES_PER_SECTION}`);
   if (textCharacters > MAX_TEXT_CHARACTERS) reasons.push(`text_density:${textCharacters}>${MAX_TEXT_CHARACTERS}`);
   if (connectorCrossings > MAX_CONNECTOR_CROSSINGS) reasons.push(`crossings:${connectorCrossings}>${MAX_CONNECTOR_CROSSINGS}`);
+  const layoutIssues: LayoutIssue[] = [
+    ...tutorIssues.map((issue) => ({
+      code: issue.code,
+      itemId: issue.itemId,
+      ...(issue.withItemId ? { withItemId: issue.withItemId } : {}),
+      ...(issue.itemBounds ? { itemBounds: issue.itemBounds } : {}),
+      ...(issue.withItemBounds ? { withItemBounds: issue.withItemBounds } : {}),
+    })),
+    ...(connectorCrossings > MAX_CONNECTOR_CROSSINGS ? crossingIssues : []),
+  ];
   const score = Math.max(0, 100 - tutorIssues.length * 22 - Math.max(0, tutorItemCount - 18) * 2 - Math.max(0, textCharacters - 420) * 0.04 - connectorCrossings * 12);
   return {
     accepted: reasons.length === 0,
@@ -48,5 +61,6 @@ export function evaluateBoardQuality(scene: SceneState): BoardQualityReport {
     textCharacters,
     connectorCrossings,
     reasons,
+    layoutIssues,
   };
 }

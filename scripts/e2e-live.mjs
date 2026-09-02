@@ -13,9 +13,14 @@ const MILESTONE_LABELS = new Set([
   'synthetic_learner_created',
   'lesson_page_loaded',
   'lesson_started',
+  'first_audio_playback_observed',
   'first_caption_observed',
   'first_board_mark_observed',
   'first_board_mark_absent_after_40s',
+  'second_caption_observed',
+  'second_caption_absent_after_30s',
+  'second_board_change_observed',
+  'second_board_change_absent_after_40s',
   'synthetic_speech_transcript_observed',
   'synthetic_speech_transcript_absent_after_45s',
   'synthetic_text_interruption_sent',
@@ -327,33 +332,64 @@ async function runLiveJourney(url, { textOnly, wavPath }, vercelProtectionBypass
 
     await page.fill(
       '[data-testid=goal-input]',
-      'Why do the angles of a triangle add up to 180 degrees?',
+      'Compare one half and three quarters on a number line.',
     );
     await page.click('[data-testid=start-session]');
     await page.waitForURL(
       (lessonUrl) => /^\/lesson\/[^/]+\/?$/.test(lessonUrl.pathname),
       { timeout: 45_000 },
     );
-    await page.waitForSelector('[data-testid=start-lesson]:not([disabled])', { timeout: 60_000 });
+    // Strong lesson compilation is deliberately ahead of the call and can
+    // reach one minute on a cold provider path. The live run measured
+    // 59.6 s, so a 60 s wall made the smoke race the correct ready state.
+    await page.waitForSelector('[data-testid=start-lesson]:not([disabled])', { timeout: 120_000 });
     const sessionId = sessionIdFromLessonUrl(page.url());
     mark('lesson_page_loaded');
     await page.screenshot({ path: `${shots}/e2e-prestart.png` });
 
+    await page.evaluate(() => {
+      const state = {
+        last: '', mutations: 0, adjacentDuplicates: 0, distinct: [],
+      };
+      const sample = () => {
+        const text = document.querySelector(
+          '.lesson__caption:not(.lesson__caption--placeholder)',
+        )?.textContent?.trim() ?? '';
+        if (!text || text === state.last) return;
+        state.last = text;
+        state.mutations += 1;
+        if (!state.distinct.includes(text)) state.distinct.push(text);
+      };
+      new MutationObserver(sample).observe(document.body, {
+        childList: true, subtree: true, characterData: true,
+      });
+      globalThis.__nouraSmokeCaptionStats = state;
+    });
     await page.click('[data-testid=start-lesson]');
     mark('lesson_started');
+    await page.waitForFunction(() => [...document.querySelectorAll(
+      '.lesson__caption, .lesson__status',
+    )].some((element) => element.textContent?.trim() === 'Speaking'), undefined, {
+      timeout: 30_000,
+    });
+    mark('first_audio_playback_observed');
     await page.waitForSelector('.lesson__caption:not(.lesson__caption--placeholder)', {
       timeout: 30_000,
     });
     mark('first_caption_observed');
+    const firstCaption = await page.locator(
+      '.lesson__caption:not(.lesson__caption--placeholder)',
+    ).textContent();
 
+    let firstBoardItemCount = 0;
     try {
       await page.waitForSelector('.board__item', { timeout: 40_000 });
       mark('first_board_mark_observed');
+      firstBoardItemCount = await page.locator('.board__item').count();
     } catch {
       mark('first_board_mark_absent_after_40s');
     }
 
-    await page.waitForTimeout(6_000);
     await page.screenshot({ path: `${shots}/e2e-teaching-1.png` });
 
     if (wavPath) {
@@ -364,23 +400,57 @@ async function runLiveJourney(url, { textOnly, wavPath }, vercelProtectionBypass
         mark('synthetic_speech_transcript_absent_after_45s');
       }
     } else {
+      await page.waitForFunction(() => [...document.querySelectorAll(
+        '.lesson__caption, .lesson__status',
+      )].some((element) => element.textContent?.trim() === 'Speaking'), undefined, {
+        timeout: 20_000,
+      });
       await page.fill(
         '.lesson__ask input',
-        'Wait — what does a straight line have to do with it?',
+        process.env.NOURA_SMOKE_SECOND_REQUEST?.trim()
+          || 'Wait — please add a second number line from zero to ten and mark five.',
       );
       await page.click('.lesson__ask button');
       mark('synthetic_text_interruption_sent');
+      try {
+        await page.waitForSelector('.lesson__child-line', { timeout: 10_000 });
+        await page.waitForFunction((previous) => {
+          const current = document.querySelector(
+            '.lesson__caption:not(.lesson__caption--placeholder)',
+          )?.textContent?.trim() ?? '';
+          return Boolean(current && current !== previous);
+        }, firstCaption?.trim() ?? '', { timeout: 30_000 });
+        mark('second_caption_observed');
+      } catch {
+        mark('second_caption_absent_after_30s');
+      }
+      try {
+        await page.waitForFunction((previousCount) =>
+          document.querySelectorAll('.board__item').length > previousCount,
+        firstBoardItemCount, { timeout: 40_000 });
+        mark('second_board_change_observed');
+        const openNewSection = page.getByRole('button', { name: 'Open it' });
+        if (await openNewSection.count()) await openNewSection.click();
+      } catch {
+        mark('second_board_change_absent_after_40s');
+      }
     }
 
     await page.waitForTimeout(9_000);
     await page.screenshot({ path: `${shots}/e2e-teaching-2.png` });
-    const journeyState = await page.evaluate(() => ({
-      tutorCaptionLineCount: document.querySelectorAll(
-        '.lesson__caption:not(.lesson__caption--placeholder)',
-      ).length,
-      learnerLineCount: document.querySelectorAll('.lesson__child-line').length,
-      boardItemCount: document.querySelectorAll('.board__item').length,
-    }));
+    const journeyState = await page.evaluate(() => {
+      const stats = globalThis.__nouraSmokeCaptionStats ?? {};
+      return {
+        tutorCaptionLineCount: document.querySelectorAll(
+          '.lesson__caption:not(.lesson__caption--placeholder)',
+        ).length,
+        learnerLineCount: document.querySelectorAll('.lesson__child-line').length,
+        boardItemCount: document.querySelectorAll('.board__item').length,
+        captionMutationCount: Number(stats.mutations ?? 0),
+        adjacentDuplicateCaptionCount: Number(stats.adjacentDuplicates ?? 0),
+        distinctCaptionCount: Array.isArray(stats.distinct) ? stats.distinct.length : 0,
+      };
+    });
 
     await page.waitForTimeout(8_000);
     await page.screenshot({ path: `${shots}/e2e-teaching-3.png` });
@@ -450,6 +520,15 @@ function buildReport({
   const audioRows = log.timeline.filter(
     (entry) => entry.name === 'tutor_audio_output_duration',
   );
+  const mediaPlaybackRows = log.timeline.filter(
+    (entry) => entry.name === 'media_playback_outcome',
+  );
+  const mediaPlaybackFailures = mediaPlaybackRows.filter(
+    // A deliberately interrupted response may correctly produce not_played:
+    // its suppressed late audio must stay silent. Autoplay and connection
+    // failures are the actual smoke failures.
+    (entry) => ['autoplay_blocked', 'connection_failed'].includes(entry.dimensions?.outcome),
+  );
   const hasProviderUsage = providerUsageRows.length > 0
     && log.summary.providerUsage.totalTokens > 0;
   const providerTokenUsage = hasProviderUsage
@@ -461,10 +540,26 @@ function buildReport({
   );
   const hasTelemetryGaps = Object.values(log.summary.telemetryGaps)
     .some((value) => value > 0);
+  const milestoneLabels = new Set(
+    (Array.isArray(projected.milestones) ? projected.milestones : [])
+      .map((entry) => entry?.label),
+  );
+  const journeyState = isRecord(projected.journeyState) ? projected.journeyState : {};
+  const liveJourneyFailures = offlineFixture ? [] : [
+    ...(!milestoneLabels.has('first_audio_playback_observed') ? ['missing_first_audio_playback'] : []),
+    ...(!milestoneLabels.has('first_caption_observed') ? ['missing_first_caption'] : []),
+    ...(!milestoneLabels.has('first_board_mark_observed') ? ['missing_first_board_mark'] : []),
+    ...(scenario === 'text_only' && !milestoneLabels.has('second_caption_observed') ? ['missing_second_caption'] : []),
+    ...(scenario === 'text_only' && !milestoneLabels.has('second_board_change_observed') ? ['missing_second_board_change'] : []),
+    ...(scenario === 'text_only' && Number(journeyState.distinctCaptionCount ?? 0) < 2 ? ['insufficient_distinct_captions'] : []),
+    ...(Number(projected.browserConsoleErrorCount ?? 0) > 0 ? ['browser_console_errors_present'] : []),
+  ];
   const missingObservationIds = [
     ...missingDurationNames.map((name) => `missing_${name}`),
     ...(!hasProviderUsage ? ['missing_provider_usage'] : []),
     ...(hasTelemetryGaps ? ['telemetry_gaps_present'] : []),
+    ...(mediaPlaybackFailures.length > 0 ? ['media_playback_failures_present'] : []),
+    ...liveJourneyFailures,
   ];
   const requiresAuthorizedLiveVerification = [
     verificationEntry(
@@ -524,6 +619,7 @@ function buildReport({
     totalTutorAudioOutputDurationMs: audioRows.length > 0
       ? audioRows.reduce((total, entry) => total + entry.value, 0)
       : null,
+    mediaPlaybackOutcomes: mediaPlaybackRows.map((entry) => entry.dimensions?.outcome),
     providerTokenUsage,
     providerTokenUsageSource: hasProviderUsage
       ? offlineFixture
@@ -643,6 +739,9 @@ function buildJourneyReport(observation) {
     tutorCaptionLineCount: boundedCount(state.tutorCaptionLineCount),
     learnerLineCount: boundedCount(state.learnerLineCount),
     boardItemCount: boundedCount(state.boardItemCount),
+    captionMutationCount: boundedCount(state.captionMutationCount),
+    adjacentDuplicateCaptionCount: boundedCount(state.adjacentDuplicateCaptionCount),
+    distinctCaptionCount: boundedCount(state.distinctCaptionCount),
     browserConsoleErrorCount: boundedCount(observation.browserConsoleErrorCount),
   };
 }

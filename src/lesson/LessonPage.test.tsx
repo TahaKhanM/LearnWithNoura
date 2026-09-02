@@ -60,7 +60,7 @@ vi.mock('./realtimeSession', () => {
     onGenerationActivated: (generation: GenerationIdentity, reason: 'interruption' | 'ordinary') => void = () => {};
     onCaptionQuestion: (generation: GenerationIdentity) => void = () => {};
     onSubmissionResult: (submissionId: string, accepted: boolean, error?: string) => void = () => {};
-    onVisualPreflight: () => { accepted: boolean; reasons: string[] } = () => ({ accepted: true, reasons: [] });
+    onVisualPreflight: () => { accepted: boolean; reasons: string[]; layoutIssues: [] } = () => ({ accepted: true, reasons: [], layoutIssues: [] });
     onVisualRender: () => Promise<string | null> | string | null = () => null;
     onEnded: () => void = () => {};
     recordSectionNavigation = vi.fn();
@@ -71,6 +71,7 @@ vi.mock('./realtimeSession', () => {
     beginLearnerActivity = vi.fn();
     sendText = vi.fn();
     setMuted = vi.fn();
+    resumeAudio = vi.fn(async () => {});
     end = vi.fn();
     start = vi.fn(async () => {});
     getIdentity = () => identity;
@@ -80,6 +81,7 @@ vi.mock('./realtimeSession', () => {
       identity,
       micAvailable: false,
       micDenied: false,
+      audioBlocked: false,
       muted: false,
       captions: [],
       lessonState: {},

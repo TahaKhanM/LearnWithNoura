@@ -12,6 +12,12 @@ import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_DATA_DIR = join(here, '..', '..', 'data');
+// Local lessons have two SQLite connections by design: the synchronous
+// domain repository and the telemetry worker. WAL permits concurrent reads,
+// but SQLite still serializes writers. Node's default busy timeout is zero,
+// which turned ordinary overlapping writes into dropped turns. Give both
+// connections the same bounded wait so the short writer wins are serialized.
+export const SQLITE_BUSY_TIMEOUT_MS = 5_000;
 
 export interface DatabaseLocation {
   dataDir: string;
@@ -27,7 +33,7 @@ export function getDb(env: NodeJS.ProcessEnv = process.env): DatabaseSync {
   if (db) return db;
   const location = prepareDatabaseLocation(env);
   activeDatabasePath = location.databasePath;
-  db = new DatabaseSync(location.databasePath);
+  db = new DatabaseSync(location.databasePath, { timeout: SQLITE_BUSY_TIMEOUT_MS });
   db.exec('PRAGMA journal_mode = WAL');
   db.exec('PRAGMA foreign_keys = ON');
   migrate(db);

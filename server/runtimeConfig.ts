@@ -1,4 +1,7 @@
+import type { OpenAiTelemetryModel } from '../shared/sessionTelemetry.js';
+
 export const EVENT_SCHEMA_VERSION = '1.0.0';
+type RuntimeReasoningEffort = 'low' | 'medium' | 'high';
 export const CANONICAL_ORIGIN = process.env.NOURA_CANONICAL_ORIGIN ?? 'https://learnwithnoura.com';
 
 export type DeploymentMode = 'local-synthetic' | 'preview-synthetic' | 'production-v0' | 'production';
@@ -18,8 +21,10 @@ export interface RuntimeConfig {
   compilerModel: string;
   compilerReasoningEffort: 'low' | 'medium' | 'high';
   directorModel: string;
-  directorReasoningEffort: 'low' | 'medium' | 'high';
+  directorReasoningEffort: RuntimeReasoningEffort;
   directorPipeline: 'classic' | 'streaming';
+  visionAuditModel: OpenAiTelemetryModel;
+  visionAuditReasoningEffort: RuntimeReasoningEffort;
   illustrationModel: string;
   illustrationsEnabled: boolean;
   buildSha: string;
@@ -42,12 +47,17 @@ export function readRuntimeConfig(env: NodeJS.ProcessEnv = process.env): Runtime
       : 'local-synthetic';
   const production = deploymentMode === 'production' || deploymentMode === 'production-v0';
   const v0 = deploymentMode === 'production-v0';
-  const directorPipeline = env.NOURA_DIRECTOR_PIPELINE === 'streaming' ? 'streaming' : 'classic';
-  const directorReasoningEffort = env.NOURA_DIRECTOR_REASONING_EFFORT === 'low' ||
-    env.NOURA_DIRECTOR_REASONING_EFFORT === 'medium' ||
-    env.NOURA_DIRECTOR_REASONING_EFFORT === 'high'
-    ? env.NOURA_DIRECTOR_REASONING_EFFORT
-    : directorPipeline === 'streaming' ? 'low' : 'medium';
+  const directorPipeline = env.NOURA_DIRECTOR_PIPELINE === 'classic'
+    ? 'classic'
+    : env.NOURA_DIRECTOR_PIPELINE === 'streaming'
+      ? 'streaming'
+      : production ? 'classic' : 'streaming';
+  const directorReasoningEffort = reasoningEffort(
+    env.NOURA_DIRECTOR_REASONING_EFFORT,
+    directorPipeline === 'streaming' ? 'low' : 'medium',
+  );
+  const visionAuditModel = telemetryModel(env.NOURA_VISION_AUDIT_MODEL, 'gpt-5.6-luna');
+  const visionAuditReasoningEffort = reasoningEffort(env.NOURA_VISION_AUDIT_REASONING_EFFORT, 'low');
 
   return {
     deploymentMode,
@@ -65,14 +75,26 @@ export function readRuntimeConfig(env: NodeJS.ProcessEnv = process.env): Runtime
     compilerReasoningEffort: env.NOURA_COMPILER_REASONING_EFFORT === 'low' || env.NOURA_COMPILER_REASONING_EFFORT === 'high'
       ? env.NOURA_COMPILER_REASONING_EFFORT
       : 'medium',
-    directorModel: env.NOURA_DIRECTOR_MODEL || env.OPENAI_MODEL || 'gpt-5.6-terra',
+    directorModel: env.NOURA_DIRECTOR_MODEL || 'gpt-5.6-terra',
     directorReasoningEffort,
     directorPipeline,
+    visionAuditModel,
+    visionAuditReasoningEffort,
     illustrationModel: env.NOURA_ILLUSTRATION_MODEL || 'gpt-image-1.5',
     illustrationsEnabled: env.NOURA_ILLUSTRATIONS !== 'off',
     buildSha: env.NOURA_BUILD_SHA || env.VERCEL_GIT_COMMIT_SHA || 'local-uncommitted',
     environment: env.VERCEL_ENV || deploymentMode,
   };
+}
+
+function reasoningEffort(value: string | undefined, fallback: RuntimeReasoningEffort): RuntimeReasoningEffort {
+  return value === 'low' || value === 'medium' || value === 'high' ? value : fallback;
+}
+
+function telemetryModel(value: string | undefined, fallback: OpenAiTelemetryModel): OpenAiTelemetryModel {
+  if (!value) return fallback;
+  if (value === 'gpt-5.6-terra' || value === 'gpt-5.6-luna') return value;
+  throw new Error(`Unsupported vision-audit model: ${value}`);
 }
 
 export function productionReadinessErrors(config: RuntimeConfig, env: NodeJS.ProcessEnv = process.env): string[] {

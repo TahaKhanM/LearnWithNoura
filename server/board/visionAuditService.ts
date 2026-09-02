@@ -1,6 +1,8 @@
 import type OpenAI from 'openai';
+import type { M2SmokeAccounting } from './m2SmokeBudget.js';
 import { z } from 'zod';
-import type { DirectorReasoningEffort, OpenAiTelemetryModel } from '../../shared/sessionTelemetry.js';
+import type { OpenAiTelemetryModel } from '../../shared/sessionTelemetry.js';
+import type { DirectorStreamUsage } from './directorStreamingService.js';
 import type { VisionAuditInput, VisionAuditPort } from './visionAudit.js';
 
 export const VisionAuditVerdictSchema = z.object({
@@ -29,38 +31,65 @@ export const VISION_AUDIT_INCREMENTAL_STATIC_PROMPT = [
   'Return only the strict JSON verdict.',
 ].join('\n');
 
+export function createVisionAuditForPipeline<T>(
+  pipeline: 'classic' | 'streaming',
+  create: () => T,
+): T | null {
+  return pipeline === 'streaming' ? create() : null;
+}
+
 export function createOpenAIVisionAuditPort(options: {
   client: OpenAI;
   model: OpenAiTelemetryModel;
-  reasoningEffort: DirectorReasoningEffort;
+  reasoningEffort: 'low' | 'medium' | 'high';
+  smokeAccounting?: M2SmokeAccounting;
+  onUsage?: (usage: DirectorStreamUsage) => void;
 }): VisionAuditPort {
   return {
     model: options.model,
     reasoningEffort: options.reasoningEffort,
     async inspect(input, runtime) {
-      const response = await options.client.chat.completions.create({
-        model: options.model,
-        reasoning_effort: options.reasoningEffort,
-        max_completion_tokens: 500,
-        response_format: {
-          type: 'json_schema',
-          json_schema: { name: 'noura_vision_audit', strict: true, schema: VISION_AUDIT_VERDICT_JSON_SCHEMA },
-        },
-        prompt_cache_key: `noura-vision-audit:${options.model}:${options.reasoningEffort}`,
-        messages: visionAuditMessages(input),
-      }, { signal: runtime.signal });
-      const text = response.choices[0]?.message?.content ?? '';
-      let decoded: unknown;
-      try { decoded = JSON.parse(text); }
-      catch { return { outcome: 'invalid', issues: ['Vision audit returned malformed JSON.'] }; }
-      const parsed = VisionAuditVerdictSchema.safeParse(decoded);
-      if (!parsed.success) return { outcome: 'invalid', issues: ['Vision audit violated its strict verdict schema.'] };
-      if (parsed.data.approved && parsed.data.issues.length > 0) {
-        return { outcome: 'invalid', issues: ['Vision audit returned a contradictory approval.'] };
+      const callId = options.smokeAccounting?.begin('vision_audit', options.model, options.reasoningEffort);
+      try {
+        const response = await options.client.chat.completions.create({
+          model: options.model,
+          reasoning_effort: options.reasoningEffort,
+          max_completion_tokens: 500,
+          response_format: {
+            type: 'json_schema',
+            json_schema: { name: 'noura_vision_audit', strict: true, schema: VISION_AUDIT_VERDICT_JSON_SCHEMA },
+          },
+          prompt_cache_key: `noura-vision-audit:${options.model}:${options.reasoningEffort}`,
+          messages: visionAuditMessages(input),
+        }, { signal: runtime.signal });
+        if (response.usage) {
+          const usage = {
+            inputTokens: response.usage.prompt_tokens,
+            cachedInputTokens: response.usage.prompt_tokens_details?.cached_tokens ?? 0,
+            cacheWriteTokens: response.usage.prompt_tokens_details?.cache_write_tokens ?? 0,
+            outputTokens: response.usage.completion_tokens,
+          };
+          if (callId) options.smokeAccounting?.recordUsage(callId, usage);
+          options.onUsage?.(usage);
+        } else if (callId) {
+          options.smokeAccounting?.markCompleted(callId);
+        }
+        const text = response.choices[0]?.message?.content ?? '';
+        let decoded: unknown;
+        try { decoded = JSON.parse(text); }
+        catch { return { outcome: 'invalid', issues: ['Vision audit returned malformed JSON.'] }; }
+        const parsed = VisionAuditVerdictSchema.safeParse(decoded);
+        if (!parsed.success) return { outcome: 'invalid', issues: ['Vision audit violated its strict verdict schema.'] };
+        if (parsed.data.approved && parsed.data.issues.length > 0) {
+          return { outcome: 'invalid', issues: ['Vision audit returned a contradictory approval.'] };
+        }
+        return parsed.data.approved
+          ? { outcome: 'approved', issues: parsed.data.issues }
+          : { outcome: 'rejected', issues: parsed.data.issues.length > 0 ? parsed.data.issues : ['Vision audit rejected without a reason.'] };
+      } catch (error) {
+        if (callId) options.smokeAccounting?.markFailed(callId);
+        throw error;
       }
-      return parsed.data.approved
-        ? { outcome: 'approved', issues: parsed.data.issues }
-        : { outcome: 'rejected', issues: parsed.data.issues.length > 0 ? parsed.data.issues : ['Vision audit rejected without a reason.'] };
     },
   };
 }

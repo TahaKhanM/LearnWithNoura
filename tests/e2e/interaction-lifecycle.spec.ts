@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { createSyntheticSession, installFakeRealtime, setLessonCapability } from '../helpers';
+import { createSyntheticSession, installFakeRealtime, setLessonCapability, waitForFakeRealtimeStart } from '../helpers';
 
 test('released AI drawing survives normal re-renders, animation, and learner drawing', async ({ page, request }) => {
   const { session, lessonCapability } = await createSyntheticSession(request, `board-life-${Date.now().toString(36)}`);
@@ -7,7 +7,7 @@ test('released AI drawing survives normal re-renders, animation, and learner dra
   await setLessonCapability(page, session.id, lessonCapability);
   await page.goto(`/lesson/${session.id}`);
   await page.getByRole('button', { name: 'Begin' }).click();
-  await expect(page.getByText(/Type below — Noura is ready|Listening/)).toBeVisible();
+  await waitForFakeRealtimeStart(page);
 
   await page.evaluate(() => {
     type AnimationTrace = {
@@ -92,7 +92,7 @@ test('multi-stroke drawing with long pauses submits exactly once, on Done', asyn
   await setLessonCapability(page, session.id, lessonCapability);
   await page.goto(`/lesson/${session.id}`);
   await page.getByRole('button', { name: 'Begin' }).click();
-  await expect(page.getByText(/Type below — Noura is ready|Listening/)).toBeVisible();
+  await waitForFakeRealtimeStart(page);
 
   await page.getByRole('button', { name: 'Draw on the board' }).click();
   const board = page.locator('.board__svg');
@@ -161,7 +161,7 @@ test('a delivered drawing task shows a persistent banner and yields to the learn
   await setLessonCapability(page, session.id, lessonCapability);
   await page.goto(`/lesson/${session.id}`);
   await page.getByRole('button', { name: 'Begin' }).click();
-  await expect(page.getByText(/Type below — Noura is ready|Listening/)).toBeVisible();
+  await waitForFakeRealtimeStart(page);
 
   await page.evaluate(() => {
     const socket = (window as typeof window & { __nouraFakeSocket: { emit(type: string, payload: Record<string, unknown>, optional?: Record<string, unknown>): void } }).__nouraFakeSocket;
@@ -187,7 +187,7 @@ test('durable board replay renders once as committed state without animation', a
   await setLessonCapability(page, session.id, lessonCapability);
   await page.goto(`/lesson/${session.id}`);
   await page.getByRole('button', { name: 'Begin' }).click();
-  await expect(page.getByText(/Type below — Noura is ready|Listening/)).toBeVisible();
+  await waitForFakeRealtimeStart(page);
 
   await page.evaluate(() => {
     const socket = (window as typeof window & { __nouraFakeSocket: { emit(type: string, payload: Record<string, unknown>): void } }).__nouraFakeSocket;
@@ -216,7 +216,7 @@ test('back-to-back drawing checkpoints stay ordered and never remount', async ({
   await setLessonCapability(page, session.id, lessonCapability);
   await page.goto(`/lesson/${session.id}`);
   await page.getByRole('button', { name: 'Begin' }).click();
-  await expect(page.getByText(/Type below — Noura is ready|Listening/)).toBeVisible();
+  await waitForFakeRealtimeStart(page);
 
   await page.evaluate(() => {
     type Trace = Record<string, { firstDashOffset: string | null; removals: number; present: boolean }>;
@@ -276,7 +276,7 @@ test('speech stop immediately exposes a thinking state before reply audio', asyn
   await setLessonCapability(page, session.id, lessonCapability);
   await page.goto(`/lesson/${session.id}`);
   await page.getByRole('button', { name: 'Begin' }).click();
-  await expect(page.getByText(/Type below — Noura is ready|Listening/)).toBeVisible();
+  await waitForFakeRealtimeStart(page);
 
   await page.evaluate(() => {
     const socket = (window as typeof window & { __nouraFakeSocket: { emit(type: string, payload: Record<string, unknown>, optional?: Record<string, unknown>): void } }).__nouraFakeSocket;
@@ -301,7 +301,7 @@ test('raw explanatory text is moved away from triangle strokes instead of accept
   await setLessonCapability(page, session.id, lessonCapability);
   await page.goto(`/lesson/${session.id}`);
   await page.getByRole('button', { name: 'Begin' }).click();
-  await expect(page.getByText(/Type below — Noura is ready|Listening/)).toBeVisible();
+  await waitForFakeRealtimeStart(page);
 
   await page.evaluate(() => {
     const socket = (window as typeof window & { __nouraFakeSocket: { emit(type: string, payload: Record<string, unknown>, optional?: Record<string, unknown>): void } }).__nouraFakeSocket;
@@ -346,7 +346,7 @@ test('a new tutor section never hides the current board: it is announced and rea
   await setLessonCapability(page, session.id, lessonCapability);
   await page.goto(`/lesson/${session.id}`);
   await page.getByRole('button', { name: 'Begin' }).click();
-  await expect(page.getByText(/Type below — Noura is ready|Listening/)).toBeVisible();
+  await waitForFakeRealtimeStart(page);
 
   await page.evaluate(() => {
     const socket = (window as typeof window & { __nouraFakeSocket: { emit(type: string, payload: Record<string, unknown>, optional?: Record<string, unknown>): void } }).__nouraFakeSocket;
@@ -425,4 +425,120 @@ test('a new tutor section never hides the current board: it is announced and rea
   await expect(page.locator('[data-item^="sketch-"]')).toHaveCount(1);
   await picker.selectOption('group-one');
   await expect(page.locator('[data-item^="sketch-"]')).toHaveCount(1);
+});
+
+test('image grounding tap fallback persists a normalized selector and renders its annotation', async ({ page, request }, testInfo) => {
+  const { session, lessonCapability } = await createSyntheticSession(request, `image-ground-${Date.now().toString(36)}`);
+  await page.route('**/api/board-assets/img-a1b2c3d4', async (route) => route.fulfill({
+    status: 200,
+    contentType: 'image/svg+xml',
+    body: '<svg xmlns="http://www.w3.org/2000/svg" width="700" height="400"><rect width="700" height="400" fill="#eef4ff"/><rect x="70" y="80" width="560" height="240" rx="24" fill="#fff" stroke="#2c5be0" stroke-width="6"/><circle cx="385" cy="180" r="46" fill="#f0a227"/><path d="M300 180h170" stroke="#26231f" stroke-width="18"/><text x="350" y="290" text-anchor="middle" font-size="34">Synthetic axle diagram</text></svg>',
+  }));
+  await installFakeRealtime(page);
+  await setLessonCapability(page, session.id, lessonCapability);
+  await page.goto(`/lesson/${session.id}`);
+  await page.getByRole('button', { name: 'Begin' }).click();
+  await waitForFakeRealtimeStart(page);
+  await page.evaluate(() => {
+    const socket = (window as typeof window & { __nouraFakeSocket: { emit(type: string, payload: Record<string, unknown>, optional?: Record<string, unknown>): void } }).__nouraFakeSocket;
+    socket.emit('board_replay', { batches: [{
+      semanticObjectId: 'image-board', groupLabel: 'Synthetic machine',
+      ops: [{ op: 'add', id: 'worksheet-image', spec: { kind: 'image', assetId: 'img-a1b2c3d4', at: [150, 100], w: 700, h: 400, alt: 'Synthetic axle worksheet' } }],
+    }] });
+    socket.emit('image_region_tap_request', {
+      request_id: 'tap-image-1', image_id: 'worksheet-image', hint: 'Tap the axle in the middle',
+    });
+  });
+  await expect(page.getByTestId('image-grounding-tap')).toContainText('Tap the axle in the middle');
+  const clientPoint = await page.locator('.board__svg').evaluate((svg: SVGSVGElement) => {
+    const point = svg.createSVGPoint();
+    point.x = 535;
+    point.y = 280;
+    const mapped = point.matrixTransform(svg.getScreenCTM()!);
+    return { x: mapped.x, y: mapped.y };
+  });
+  await page.mouse.click(clientPoint.x, clientPoint.y);
+  await expect.poll(() => page.evaluate(() => {
+    const socket = (window as typeof window & { __nouraFakeSocket: { sent: Array<{ type: string; payload?: Record<string, unknown> }> } }).__nouraFakeSocket;
+    return socket.sent.find((event) => event.type === 'image_region_tap')?.payload?.selector ?? null;
+  })).not.toBeNull();
+  const submitted = await page.evaluate(() => {
+    const socket = (window as typeof window & { __nouraFakeSocket: { sent: Array<{ type: string; payload?: Record<string, unknown> }> } }).__nouraFakeSocket;
+    return socket.sent.find((event) => event.type === 'image_region_tap')?.payload?.selector as { type: string; x: number; y: number };
+  });
+  expect(submitted).toMatchObject({ type: 'PointSelector' });
+  expect(submitted.x).toBeCloseTo(0.55, 2);
+  expect(submitted.y).toBeCloseTo(0.45, 2);
+  await page.evaluate((pointSelector) => {
+    const socket = (window as typeof window & { __nouraFakeSocket: { emit(type: string, payload: Record<string, unknown>, optional?: Record<string, unknown>): void } }).__nouraFakeSocket;
+    socket.emit('board_ops', {
+      response_id: 'grounded-response', event_id: 1801, groupLabel: 'Synthetic machine',
+      ops: [{ op: 'add', id: 'grounded-axle', color: '#E14B3C', spec: { kind: 'annotate', style: 'circle', target: { type: 'image_region', imageId: 'worksheet-image', selector: pointSelector } } }],
+    }, { visualCueId: 'grounded-image-cue', semanticObjectId: 'image-board', providerResponseId: 'grounded-response' });
+  }, submitted);
+  await expect(page.locator('[data-item="grounded-axle"] path')).toHaveCount(1);
+  await expect.poll(() => page.evaluate(() => {
+    const socket = (window as typeof window & { __nouraFakeSocket: { sent: Array<{ type: string; payload?: Record<string, unknown> }> } }).__nouraFakeSocket;
+    return socket.sent.some((event) => event.type === 'ops_shown' && event.payload?.event_id === 1801);
+  })).toBe(true);
+  await expect(page.getByTestId('image-grounding-tap')).toHaveCount(0);
+  await page.screenshot({ path: 'artifacts/evaluation/drawing-m7-image-tap-fallback.png' });
+  await testInfo.attach('m7-image-tap-fallback', { body: await page.screenshot(), contentType: 'image/png' });
+});
+
+test('fast annotations resolve semantic sub-anchors and learner strokes without vision', async ({ page, request }, testInfo) => {
+  const { session, lessonCapability } = await createSyntheticSession(request, `anchor-ref-${Date.now().toString(36)}`);
+  await installFakeRealtime(page);
+  await setLessonCapability(page, session.id, lessonCapability);
+  await page.goto(`/lesson/${session.id}`);
+  await page.getByRole('button', { name: 'Begin' }).click();
+  await waitForFakeRealtimeStart(page);
+
+  await page.evaluate(() => {
+    const socket = (window as typeof window & { __nouraFakeSocket: { emit(type: string, payload: Record<string, unknown>, optional?: Record<string, unknown>): void } }).__nouraFakeSocket;
+    socket.emit('board_replay', { batches: [{
+      semanticObjectId: 'annotation-board', groupLabel: 'Anchor references',
+      ops: [{ op: 'add', id: 'anchor-triangle', spec: { kind: 'polygon', points: [[220, 420], [500, 120], [780, 420]] } }],
+    }] });
+    socket.emit('learner_board_replay', { batches: [{
+      semanticObjectId: 'annotation-board',
+      ops: [{ op: 'add', id: 'sketch-anchor-stroke', spec: { kind: 'path', points: [[280, 330], [340, 370], [400, 335]], width: 5 } }],
+    }] });
+  });
+  await expect(page.locator('[data-item="anchor-triangle"]')).toHaveCount(1);
+  await expect(page.locator('[data-item="sketch-anchor-stroke"]')).toHaveCount(1);
+
+  await page.evaluate(() => {
+    (window as typeof window & { __m7AnnotationStartedAt?: number }).__m7AnnotationStartedAt = performance.now();
+    const socket = (window as typeof window & { __nouraFakeSocket: { emit(type: string, payload: Record<string, unknown>, optional?: Record<string, unknown>): void } }).__nouraFakeSocket;
+    socket.emit('response_started', { response_id: 'annotation-response' });
+    socket.emit('board_ops', {
+      response_id: 'annotation-response', event_id: 1701, groupLabel: 'Anchor references',
+      ops: [
+        { op: 'add', id: 'apex-annotation', color: 'red', spec: { kind: 'annotate', style: 'circle', target: { type: 'semantic', objectId: 'anchor-triangle', anchor: 'vertex:1' } } },
+        { op: 'add', id: 'stroke-annotation', color: 'green', spec: { kind: 'annotate', style: 'tick', target: { type: 'learner_stroke', strokeId: 'sketch-anchor-stroke', anchor: 'end' } } },
+      ],
+    }, { visualCueId: 'annotation-cue', semanticObjectId: 'annotation-board', providerResponseId: 'annotation-response' });
+  });
+
+  await expect(page.locator('[data-item="apex-annotation"] path')).toHaveCount(1);
+  await expect(page.locator('[data-item="stroke-annotation"] path')).toHaveCount(1);
+  await expect(page.locator('[data-item="anchor-triangle"]')).toHaveCount(1);
+  await expect(page.locator('[data-item="sketch-anchor-stroke"]')).toHaveCount(1);
+  const annotationFirstPaint = () => page.evaluate(() => {
+    const host = window as typeof window & {
+      __m7AnnotationStartedAt?: number;
+      __nouraFakeSocket: { sent: Array<{ type: string; payload?: Record<string, unknown>; sentAtMs: number }> };
+    };
+    const presented = host.__nouraFakeSocket.sent.find((event) => event.type === 'ops_presented' && event.payload?.event_id === 1701);
+    return presented ? presented.sentAtMs - Number(host.__m7AnnotationStartedAt) : null;
+  });
+  await expect.poll(annotationFirstPaint).not.toBeNull();
+  expect(Number(await annotationFirstPaint())).toBeLessThan(1_000);
+  await expect.poll(() => page.evaluate(() => {
+    const socket = (window as typeof window & { __nouraFakeSocket: { sent: Array<{ type: string; payload?: Record<string, unknown> }> } }).__nouraFakeSocket;
+    return socket.sent.some((event) => event.type === 'ops_shown' && event.payload?.event_id === 1701);
+  })).toBe(true);
+  await page.screenshot({ path: 'artifacts/evaluation/drawing-m7-fast-annotations.png' });
+  await testInfo.attach('m7-fast-annotations', { body: await page.screenshot(), contentType: 'image/png' });
 });

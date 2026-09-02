@@ -10,7 +10,7 @@ import type { CoordinatorContext } from './coordinatorContext.js';
 import type { GenerationIdentity } from '../../shared/runtimeProtocol.js';
 
 type VisualTimingRun = {
-  source: 'anchor' | 'director';
+  source: 'anchor' | 'template' | 'director';
   pendingStepEventId: number | null;
   visualIntentStartedAtMs: number | null;
   firstPaintRecorded: boolean;

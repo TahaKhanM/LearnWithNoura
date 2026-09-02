@@ -208,7 +208,10 @@ describe('fallback generation coordinator', () => {
   it('uses semantic checkpoints and never injects a question after a plain explanation', async () => {
     const { repo, session } = fixture();
     let call = 0;
-    const provider = client(async () => {
+    const advertisedTools: string[][] = [];
+    const provider = client(async (body) => {
+      advertisedTools.push(((body as { tools?: Array<{ function?: { name?: string } }> }).tools ?? [])
+        .map((tool) => tool.function?.name ?? ''));
       call += 1;
       if (call === 1) return {
         choices: [{ message: { role: 'assistant', content: null, tool_calls: [{
@@ -230,6 +233,7 @@ describe('fallback generation coordinator', () => {
       'The marks share one scale.',
     ]);
     expect(events.some((event) => event.type === 'safe_question')).toBe(false);
+    expect(advertisedTools[0]).toContain('semantic_visual_plan');
     expect(call).toBe(2);
   });
 

@@ -23,6 +23,7 @@ export function isAllowedClientMetric(input: MetricInput): boolean {
     case 'board_reveal_to_narration':
     case 'section_navigation':
     case 'tutor_object_disappearance':
+    case 'media_playback_outcome':
       return true;
     case 'barge_in_gate_outcome':
       return input.dimensions.outcome === 'local_only_rejected' ||

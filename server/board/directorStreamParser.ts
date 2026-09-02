@@ -58,7 +58,7 @@ export class IncrementalDirectorStreamParser {
     if (raw.steps.length !== this.emittedSteps) {
       throw new Error('Director stream finished before every step was emitted and validated.');
     }
-    return parseDirectorStreamProposal(this.text, this.input.density);
+    return parseDirectorStreamProposal(this.text, this.input.density, this.input.visibleObjectIds);
   }
 
   snapshot(): { text: string; emittedSteps: number; cumulativeOps: AddOp[] } {

@@ -307,3 +307,58 @@ describe('authored-tier generated illustrations', () => {
     expect(spec.crop?.x).toBe(0);
   });
 });
+
+describe('M7 curriculum primitives', () => {
+  const specs = [
+    { kind: 'transform', target: 'triangle', operation: { type: 'rotate', angleDeg: 90 } },
+    { kind: 'panelGrid', at: [80, 60], w: 840, h: 440, rows: 2, cols: 3, panels: [{ row: 0, col: 0, label: 'A', marks: [{ shape: 'circle', x: 0.5, y: 0.5 }] }] },
+    { kind: 'regionFill', mode: 'venn', at: [200, 120], w: 520, h: 300, operation: 'intersection', labels: ['A', 'B'] },
+    { kind: 'scatter', at: [100, 80], w: 500, h: 360, xRange: [0, 10], yRange: [0, 20], points: [[1, 2], [5, 11], [9, 17]], xLabel: 'hours', yLabel: 'score' },
+    { kind: 'boxplot', at: [100, 260], w: 700, min: 1, q1: 3, median: 5, q3: 7, max: 10, label: 'Scores' },
+    { kind: 'histogram', at: [100, 80], w: 600, h: 380, bins: [{ from: 0, to: 5, frequency: 2 }, { from: 5, to: 10, frequency: 6 }], xLabel: 'Time', yLabel: 'Frequency' },
+    { kind: 'isometricSolid', at: [500, 360], unit: 46, voxels: [[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]] },
+    { kind: 'cubeNet', at: [300, 100], cell: 70, faces: [{ id: 'a', row: 1, col: 0 }, { id: 'b', row: 1, col: 1 }, { id: 'c', row: 1, col: 2 }, { id: 'd', row: 1, col: 3 }, { id: 'e', row: 0, col: 1 }, { id: 'f', row: 2, col: 1 }] },
+    { kind: 'planView', at: [200, 100], cell: 64, heights: [[1, 0, 2], [3, 1, 0], [0, 2, 1]] },
+    { kind: 'paperFoldHolePunch', at: [80, 100], w: 840, h: 320, folds: ['right', 'down'], holes: [[0.72, 0.35], [0.82, 0.65]] },
+    { kind: 'gridPaper', at: [100, 80], w: 700, h: 420, spacing: 30, style: 'grid', majorEvery: 5 },
+    { kind: 'clock', center: [500, 300], r: 180, hour: 10, minute: 10 },
+    { kind: 'protractor', center: [500, 430], r: 260, angleDeg: 65, label: '65°' },
+  ];
+
+  it('accepts all code-owned primitives on the authored tier and rejects them on fast board_ops', () => {
+    const raw = specs.map((spec, index) => ({ op: 'add', id: `curriculum-${index}`, spec }));
+    const authored = validateOps(raw, { tier: 'authored' });
+    expect(authored.rejected).toEqual([]);
+    expect(authored.ops.map((op) => op.op === 'add' ? op.spec.kind : '')).toEqual(specs.map((spec) => spec.kind));
+    const fast = validateOps(raw, { tier: 'fast' });
+    expect(fast.ops).toEqual([]);
+    expect(fast.rejected).toHaveLength(specs.length);
+  });
+
+  it('accepts relational placement only on the authored tier', () => {
+    const raw = [{
+      op: 'add', id: 'placed-note',
+      place: { anchor: 'target-box', side: 'right', gap: 24, align: 'center' },
+      spec: { kind: 'text', at: [0, 0], text: 'Related note' },
+    }];
+    const authored = validateOps(raw, { tier: 'authored' });
+    expect(authored.rejected).toEqual([]);
+    expect(authored.ops[0]).toMatchObject({ place: { anchor: 'target-box', side: 'right', gap: 24, align: 'center' } });
+    const fast = validateOps(raw, { tier: 'fast' });
+    expect(fast.ops).toEqual([]);
+    expect(fast.rejected[0].reason).toMatch(/relational placement.*authored/i);
+    expect(validateOps([{ ...raw[0], place: { anchor: '', side: 'near' } }], { tier: 'authored' }).ops).toEqual([]);
+  });
+
+  it('rejects parameter sets that would require the compiler to guess', () => {
+    const invalid = validateOps([
+      { op: 'add', id: 'bad-transform', spec: { kind: 'transform', target: 'shape', operation: { type: 'enlarge', scale: 0 } } },
+      { op: 'add', id: 'bad-region', spec: { kind: 'regionFill', mode: 'fraction', at: [100, 100], w: 300, h: 80, numerator: 5, denominator: 4 } },
+      { op: 'add', id: 'bad-boxplot', spec: { kind: 'boxplot', at: [100, 200], w: 500, min: 1, q1: 8, median: 5, q3: 7, max: 10 } },
+      { op: 'add', id: 'bad-net', spec: { kind: 'cubeNet', at: [100, 100], cell: 60, faces: Array.from({ length: 6 }, (_, index) => ({ id: String(index), row: index * 2, col: 0 })) } },
+      { op: 'add', id: 'bad-clock', spec: { kind: 'clock', center: [500, 300], r: 180, hour: 12, minute: 90 } },
+    ], { tier: 'authored' });
+    expect(invalid.ops).toEqual([]);
+    expect(invalid.rejected).toHaveLength(5);
+  });
+});

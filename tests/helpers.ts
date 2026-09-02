@@ -39,14 +39,17 @@ export async function installFakeRealtime(page: Page) {
       onerror: ((event: Event) => void) | null = null;
       identity: Identity | null = null;
       sequence = 0;
-      sent: Array<Identity & { type: string; payload?: Record<string, unknown> }> = [];
+      sent: Array<Identity & { type: string; payload?: Record<string, unknown>; sentAtMs: number }> = [];
       constructor() {
         (window as typeof window & { __nouraFakeSocket?: FakeRealtimeSocket }).__nouraFakeSocket = this;
         setTimeout(() => { this.readyState = 1; this.onopen?.(new Event('open')); }, 0);
       }
       send(raw: string) {
         const event = JSON.parse(raw) as Identity & { type: string };
-        this.sent.push(event as Identity & { type: string; payload?: Record<string, unknown> });
+        this.sent.push({
+          ...event,
+          sentAtMs: performance.now(),
+        } as Identity & { type: string; payload?: Record<string, unknown>; sentAtMs: number });
         const changed = !this.identity || event.connectionEpoch !== this.identity.connectionEpoch || event.turnId !== this.identity.turnId || event.generationId !== this.identity.generationId;
         this.identity = { sessionId: event.sessionId, connectionEpoch: event.connectionEpoch, turnId: event.turnId, generationId: event.generationId };
         if (changed) this.sequence = 0;
@@ -87,6 +90,13 @@ export async function installFakeRealtime(page: Page) {
         this.handlers.onStateChange('connected');
         return Promise.resolve();
       }
+      noteResponse(_responseId: string): void {}
+      suppressResponse(_responseId: string): void {}
+      resumePlayback(): Promise<boolean> {
+        this.state = 'connected';
+        this.handlers.onStateChange('connected');
+        return Promise.resolve(true);
+      }
       setMicMuted(muted: boolean): void { this.micMuted = muted; }
       playingResponseId(): string | null { return this.active; }
       playedMs(): number { return this.active ? this.playedSoFarMs : 0; }
@@ -113,12 +123,33 @@ export async function installFakeRealtime(page: Page) {
         }
         this.handlers.onPlaybackBoundary(boundary, responseId, playedMs);
       }
+      block(responseId: string): void {
+        this.state = 'blocked';
+        const extended = this.handlers as VoiceHandlers & {
+          onPlaybackFailure?: (responseId: string | null, reason: string) => void;
+        };
+        extended.onPlaybackFailure?.(responseId, 'autoplay_blocked');
+        this.handlers.onStateChange('blocked');
+      }
     }
     (window as typeof window & { __nouraVoiceTransport?: (input: { handlers: VoiceHandlers }) => FakePageVoice }).__nouraVoiceTransport = (input) => {
       const voice = new FakePageVoice(input.handlers);
       (window as typeof window & { __nouraFakeVoice?: FakePageVoice }).__nouraFakeVoice = voice;
       return voice;
     };
+  });
+}
+
+/** The fake socket deliberately does not invent an opening tutor response.
+ * Tests that manually drive provider events should synchronize on the real
+ * client `start` envelope rather than a UI phase that only a response can
+ * change from Thinking to Listening. */
+export async function waitForFakeRealtimeStart(page: Page): Promise<void> {
+  await page.waitForFunction(() => {
+    const socket = (window as typeof window & {
+      __nouraFakeSocket?: { sent: Array<{ type: string }> };
+    }).__nouraFakeSocket;
+    return socket?.sent.some((event) => event.type === 'start') === true;
   });
 }
 

@@ -2,6 +2,7 @@ import {
   applyUpdate,
   type BoardOp,
   type ShapeSpec,
+  type RelationalPlace,
 } from '../../shared/boardOps';
 import { isCenterArc } from '../../shared/authoredSpecs';
 import { isManipulativeSpec, manipulativeLearnerProps, applyManipulativeProps } from '../../shared/manipulativeSpecs';
@@ -15,6 +16,7 @@ export interface SceneItem {
   semanticGroupId?: string;
   color?: string;
   spec: ShapeSpec;
+  place?: RelationalPlace;
   /** Bumped on update so the renderer knows to recompile without replaying. */
   revision: number;
 }
@@ -62,6 +64,7 @@ export function applyOps(
             ? { semanticGroupId: semanticGroupId ?? op.semanticGroupId ?? previous?.semanticGroupId }
             : {}),
           ...(op.color ? { color: op.color } : {}),
+          ...(op.place ? { place: op.place } : {}),
         };
         if (index === -1) {
           items = [...items, item];
@@ -119,6 +122,12 @@ function dependsOn(spec: ShapeSpec, id: string): boolean {
   if (spec.kind === 'label') return spec.target === id;
   if (spec.kind === 'plot') return spec.axes === id;
   if (spec.kind === 'connector') return spec.from === id || spec.to === id;
+  if (spec.kind === 'transform') return spec.target === id;
+  if (spec.kind === 'regionFill' && spec.mode === 'half_plane') return spec.axes === id;
+  if (spec.kind === 'annotate') return (Array.isArray(spec.target) ? spec.target : [spec.target]).some((target) =>
+    target.type === 'semantic' ? target.objectId === id
+      : target.type === 'learner_stroke' ? target.strokeId === id
+        : target.type === 'image_region' ? target.imageId === id : false);
   return false;
 }
 
@@ -127,7 +136,9 @@ function dependsOn(spec: ShapeSpec, id: string): boolean {
  * learner turns so the tutor can refer back to what is already drawn.
  */
 export function describeScene(scene: SceneState): string {
-  if (scene.items.length === 0) return 'The board is empty.';
+  if (scene.items.length === 0) {
+    return 'The board is blank and ready. Do not mention that it is empty to the learner.';
+  }
   const lines = scene.items.slice(-60).map((item) => {
     const s = item.spec;
     const who = item.owner === 'learner' ? ' (drawn by the learner)' : '';
@@ -183,6 +194,34 @@ export function describeScene(scene: SceneState): string {
         return `${item.id}${group}: snap zone ${s.shape} at (${s.at})${who}`;
       case 'tappable':
         return `${item.id}${group}: tap target at (${s.at})${s.selected ? ' [selected]' : ''}${s.label ? ` "${s.label}"` : ''}${who}`;
+      case 'annotate':
+        return `${item.id}${group}: ${s.style} annotation${s.note ? ` "${s.note}"` : ''} on ${JSON.stringify(s.target)}${who}`;
+      case 'transform':
+        return `${item.id}${group}: ${s.operation.type} transform of ${s.target}${who}`;
+      case 'panelGrid':
+        return `${item.id}${group}: ${s.rows} by ${s.cols} panel grid${who}`;
+      case 'regionFill':
+        return `${item.id}${group}: ${s.mode} region fill${who}`;
+      case 'scatter':
+        return `${item.id}${group}: scatter plot with ${s.points.length} points${who}`;
+      case 'boxplot':
+        return `${item.id}${group}: box plot ${s.min}, ${s.q1}, ${s.median}, ${s.q3}, ${s.max}${who}`;
+      case 'histogram':
+        return `${item.id}${group}: histogram with ${s.bins.length} bins${who}`;
+      case 'isometricSolid':
+        return `${item.id}${group}: isometric solid with ${s.voxels.length} cubes${who}`;
+      case 'cubeNet':
+        return `${item.id}${group}: cube net with ${s.faces.length} faces${who}`;
+      case 'planView':
+        return `${item.id}${group}: plan view ${s.heights.length} by ${s.heights[0]?.length ?? 0}${who}`;
+      case 'paperFoldHolePunch':
+        return `${item.id}${group}: paper-fold sequence with ${s.folds.length} folds and ${s.holes.length} holes${who}`;
+      case 'gridPaper':
+        return `${item.id}${group}: ${s.style} paper ${s.w} by ${s.h}${who}`;
+      case 'clock':
+        return `${item.id}${group}: clock showing ${s.hour}:${String(s.minute).padStart(2, '0')}${who}`;
+      case 'protractor':
+        return `${item.id}${group}: protractor${s.angleDeg === undefined ? '' : ` showing ${s.angleDeg} degrees`}${who}`;
     }
   });
   return `Objects on the board now:\n${lines.join('\n')}`;

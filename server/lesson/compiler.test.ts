@@ -123,6 +123,25 @@ describe('compileLesson', () => {
     expect(lesson.blueprint.stages[0].checks?.[0].questionOrTask).toContain('widest');
   });
 
+  it('canonicalizes out-of-contract board policy wording at the application boundary', async () => {
+    const invalidStages = [
+      { id: 'orient', kind: 'orient', objective: 'Meet the triangle', boardPurpose: 'introduce_visual', allowedBoardMutation: 'draw_anchor', learnerOpportunity: 'Point at one corner', evidenceExpected: 'recall', checks: [{ id: 'orient-check', questionOrTask: 'Which corner looks widest?', responseMode: 'voice' }] },
+      { id: 'model', kind: 'model', objective: 'Relate the angles', boardPurpose: 'model_relation', allowedBoardMutation: 'add_details', learnerOpportunity: 'Predict the total', evidenceExpected: 'reasoning' },
+      { id: 'check', kind: 'guided_check', objective: 'Check the sum', boardPurpose: 'guided_practice', allowedBoardMutation: 'highlight_answer', learnerOpportunity: 'Find the missing angle', evidenceExpected: 'application' },
+    ];
+    const scripted = scriptedClient([authoredDraft({ stages: invalidStages })]);
+    const built = deps(scripted.client, [{ ok: true }]);
+
+    const lesson = await compileLesson(built.deps, input);
+
+    expect(lesson.blueprint.stages.map((stage) => [stage.boardPurpose, stage.allowedBoardMutation])).toEqual([
+      ['establish_anchor', 'establish'],
+      ['reveal_relation', 'extend'],
+      ['elicit_learner_work', 'emphasize'],
+    ]);
+    expect(scripted.calls).toHaveLength(1);
+  });
+
   it('feeds scene rejections back and accepts the corrected second attempt', async () => {
     const scripted = scriptedClient([authoredDraft(), authoredDraft()]);
     const built = deps(scripted.client, [

@@ -1,15 +1,16 @@
-import { validateOps } from '../../shared/boardOps.js';
+import { anchorRefTargetIds, validateOps } from '../../shared/boardOps.js';
 import { ResponseTaxonomySchema, TeachingMoveSchema, type ResponseTaxonomy, type TeachingMove } from '../../shared/pedagogy.js';
 import { DeliveredTaskSchema, submitPolicyForMode, type DeliveredTask } from '../../shared/lessonTurn.js';
 import type { Confidence, Verdict } from '../store/repo.js';
 import { currentStage, reduceLesson } from '../lesson/orchestrator.js';
 import type { CoordinatorContext } from './coordinatorContext.js';
-import { anchorGroupId } from './boardStaging.js';
+import { anchorGroupId, waitForCheckpointPresentation } from './boardStaging.js';
 import { schedulePlannedDetour } from './detourPlanning.js';
 import { identityForResponse } from './responseRegistry.js';
 import { refreshBoardInstructions } from './sessionConfig.js';
 import { finishTool } from './turnFloor.js';
 import { handleVisualRequest } from './visualRequests.js';
+import { handleGroundImageRegionTool } from './imageGroundingRequest.js';
 
 /**
  * Tool-call execution. Board operations are validated before a single mark
@@ -40,6 +41,11 @@ export async function handleToolCall(ctx: CoordinatorContext, name: string, rawA
 
     case 'request_visual': {
       await handleVisualRequest(ctx, args, callId, responseId);
+      break;
+    }
+
+    case 'ground_image_region': {
+      await handleGroundImageRegionTool(ctx, args, callId, responseId);
       break;
     }
 
@@ -112,6 +118,7 @@ export async function handleToolCall(ctx: CoordinatorContext, name: string, rawA
     }
 
     case 'board_ops': {
+      const startedAt = Date.now();
       const validated = validateOps(args.ops, { tier: 'fast' });
       // Raw destructive clears are not available to the model: visible
       // tutor work never disappears during the ordinary lesson flow.
@@ -127,32 +134,102 @@ export async function handleToolCall(ctx: CoordinatorContext, name: string, rawA
         validated.ops = validated.ops.filter((op) => !(op.op === 'erase' && state.objectsCreatedThisTurn.has(op.id)));
         validated.rejected.push({ reason: `erase rejected for objects created this turn (${sameTurnErases.map((op) => op.op === 'erase' ? op.id : '').join(', ')}); visible work persists through the next learner opportunity`, raw: { op: 'erase' } });
       }
+      for (const op of validated.ops) {
+        if (op.op === 'add' && op.spec.kind === 'annotate') {
+          const missingTargets = anchorRefTargetIds(op.spec.target).filter((id) => !state.boardContext.hasObject(id));
+          if (missingTargets.length > 0) validated.rejected.push({
+            reason: `annotate requires visible target ids; missing ${missingTargets.join(', ')}`,
+            raw: op,
+          });
+        }
+        if (op.op === 'add' || op.op === 'clear' || state.boardContext.hasObject(op.id)) continue;
+        validated.rejected.push({ reason: `${op.op} requires a visible object id; ${op.id} is not on the board`, raw: op });
+      }
+      if (validated.rejected.length > 0) {
+        const reasons = validated.rejected.map((entry) => entry.reason).slice(0, 5);
+        await recordBoardToolOutcome(ctx, {
+          status: 'rejected', requested: Array.isArray(args.ops) ? args.ops.length : 0,
+          applied: 0, reasons, latencyMs: Date.now() - startedAt,
+        });
+        // A drawing batch is atomic. Partial acceptance made the tool say
+        // `ok:false` after putting half a diagram on screen, which encouraged
+        // the model to claim the drawing system had failed while leaving an
+        // incoherent picture behind.
+        finishTool(ctx, callId, responseId, {
+          ok: false,
+          status: 'rejected',
+          applied: 0,
+          retryable: true,
+          rejected: reasons,
+          guidance: 'Nothing from this batch was drawn. Correct the rejected fields and retry once, or request a new visual by intent.',
+          board: state.boardContext.toolSnapshot(),
+        });
+        break;
+      }
       // Raw increments join the active section or the lesson anchor; they
       // never open a fresh freeform section once an anchor exists.
       const semanticGroupId = state.lessonState.activeSemanticObjectId ?? anchorGroupId(ctx) ?? `freeform-${identityForResponse(ctx, responseId)?.turnId ?? 'board'}`;
       const novel = state.boardContext.novelTutorOps(validated.ops, semanticGroupId);
       const { ops } = novel;
-      if (ops.length > 0) {
-        for (const op of ops) if (op.op === 'add') state.objectsCreatedThisTurn.add(op.id);
-        const eventId = await ctx.repo.addEvent(ctx.sessionId, 'board_ops', {
-          ops,
-          semanticObjectId: semanticGroupId,
-          groupLabel: state.lessonState.microObjective || 'Working board',
-        }, false);
-        state.pendingBoardOps.set(eventId, { ops, semanticGroupId, groupLabel: state.lessonState.microObjective || 'Working board' });
-        ctx.sendClient({
-          type: 'board_ops',
-          ops,
-          response_id: responseId,
-          event_id: eventId,
-          groupLabel: state.lessonState.microObjective || 'Working board',
-        }, identityForResponse(ctx, responseId), { semanticObjectId: semanticGroupId });
+      if (ops.length === 0) {
+        await recordBoardToolOutcome(ctx, {
+          status: 'no_change', requested: validated.ops.length, applied: 0,
+          reasons: [], latencyMs: Date.now() - startedAt,
+        });
+        finishTool(ctx, callId, responseId, {
+          ok: true,
+          status: 'no_change',
+          applied: 0,
+          ...(novel.duplicates.length > 0 ? { skippedEquivalentRedraws: novel.duplicates } : {}),
+          board: state.boardContext.toolSnapshot(),
+        });
+        break;
       }
+      for (const op of ops) if (op.op === 'add') state.objectsCreatedThisTurn.add(op.id);
+      const groupLabel = state.lessonState.microObjective || 'Working board';
+      const eventId = await ctx.repo.addEvent(ctx.sessionId, 'board_ops', {
+        ops,
+        semanticObjectId: semanticGroupId,
+        groupLabel,
+      }, false);
+      state.pendingBoardOps.set(eventId, { ops, semanticGroupId, groupLabel });
+      ctx.sendClient({
+        type: 'board_ops',
+        ops,
+        response_id: responseId,
+        event_id: eventId,
+        groupLabel,
+      }, identityForResponse(ctx, responseId), { semanticObjectId: semanticGroupId });
+      const presented = await waitForCheckpointPresentation(ctx, [eventId]);
+      if (!presented) {
+        state.pendingBoardOps.delete(eventId);
+        await recordBoardToolOutcome(ctx, {
+          status: 'not_presented', requested: validated.ops.length, applied: 0,
+          reasons: ['first paint was not confirmed'], latencyMs: Date.now() - startedAt,
+        });
+        finishTool(ctx, callId, responseId, {
+          ok: false,
+          status: 'not_presented',
+          applied: 0,
+          retryable: true,
+          guidance: 'The browser did not confirm first paint. Do not describe these marks as visible.',
+          board: state.boardContext.toolSnapshot(),
+        });
+        break;
+      }
+      const justDrawn = ops.filter((op) => op.op === 'add').map((op) => op.id);
+      await recordBoardToolOutcome(ctx, {
+        status: 'visible', requested: validated.ops.length, applied: ops.length,
+        reasons: [], latencyMs: Date.now() - startedAt,
+      });
       finishTool(ctx, callId, responseId, {
-        ok: validated.rejected.length === 0,
+        ok: true,
+        status: 'visible',
         applied: ops.length,
-        ...(validated.rejected.length > 0
-          ? { rejected: validated.rejected.map((r) => r.reason).slice(0, 5) }
+        visible: ops.length > 0,
+        ...(justDrawn.length > 0 ? { justDrawn } : {}),
+        ...(ops.length > 0
+          ? { guidance: 'These marks are on the learner\'s screen now. Speak about the idea, not about whether you can see them. Never say the board is empty.' }
           : {}),
         ...(novel.duplicates.length > 0 ? { skippedEquivalentRedraws: novel.duplicates } : {}),
         board: state.boardContext.toolSnapshot(),
@@ -252,6 +329,24 @@ export async function handleToolCall(ctx: CoordinatorContext, name: string, rawA
   }
 }
 
+async function recordBoardToolOutcome(
+  ctx: CoordinatorContext,
+  payload: { status: string; requested: number; applied: number; reasons: string[]; latencyMs: number },
+): Promise<void> {
+  try {
+    await ctx.repo.addEvent(ctx.sessionId, 'board_tool_outcome', {
+      status: payload.status,
+      requested: Math.max(0, payload.requested),
+      applied: Math.max(0, payload.applied),
+      rejectionCategories: payload.reasons.map((reason) => reason.split(':', 1)[0].slice(0, 120)),
+      latencyMs: Math.max(0, payload.latencyMs),
+    });
+  } catch (error) {
+    // Observability must never become another reason a drawing tool stalls.
+    ctx.log(`session ${ctx.sessionId}: board tool outcome write failed ${String(error).slice(0, 160)}`);
+  }
+}
+
 function taxonomyFromLegacyVerdict(value: unknown): ResponseTaxonomy {
   if (value === 'misconception') return 'confident_misconception';
   if (value === 'struggling') return 'incorrect';
@@ -265,6 +360,7 @@ function taskFromMove(
   stage: ReturnType<typeof currentStage> = null,
 ): DeliveredTask | null {
   if (!move.questionOrTask?.trim()) return null;
+  if (!['question', 'wait', 'practice'].includes(move.proposedAction)) return null;
   const responseMode = move.responseMode ?? 'voice';
   const stageCheck = stage?.checks?.find((check) => check.id === move.taskId);
   const parsed = DeliveredTaskSchema.safeParse({

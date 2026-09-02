@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { PALETTE } from '../../shared/boardOps';
 import type { SceneValidationResult } from '../lesson/compiler';
+import { applyDirectorBoardPolicy } from './directorSchema';
 import {
   directVisual,
   type BoardDirectorDeps,
@@ -108,6 +109,36 @@ function deps(
 }
 
 describe('the Board Director pipeline', () => {
+  it('uses the connected lesson render authority instead of its optional server harness', async () => {
+    const scripted = scriptedClient([validProposal(), approval]);
+    const serverValidation = async (): Promise<SceneValidationResult> => ({
+      ok: false,
+      issues: ['server harness must not be used for a connected live lesson'],
+    });
+    const serverRender = async () => null;
+    const clientValidations: unknown[] = [];
+    const clientRenders: Array<{ groupId?: string }> = [];
+    const result = await directVisual(deps(scripted.client, {
+      validateScene: serverValidation,
+      renderScene: serverRender,
+    }), request({
+      validateScene: async (ops) => {
+        clientValidations.push(ops);
+        return { ok: true };
+      },
+      renderScene: async (_ops, groupId) => {
+        clientRenders.push({ ...(groupId ? { groupId } : {}) });
+        return groupId ? CANDIDATE_IMAGE : BOARD_IMAGE;
+      },
+    }));
+
+    expect(result.ok).toBe(true);
+    expect(clientValidations).toHaveLength(1);
+    expect(clientRenders).toEqual([{}, { groupId: 'lesson-anchor-alt1' }]);
+    expect(userImages(scripted.calls[0])).toEqual([BOARD_IMAGE]);
+    expect(userImages(scripted.calls[1])).toEqual([CANDIDATE_IMAGE]);
+  });
+
   it('accepts a valid proposal on the first try after render and vision checks', async () => {
     const scripted = scriptedClient([validProposal(), approval]);
     const directorDeps = deps(scripted.client);
@@ -157,7 +188,8 @@ describe('the Board Director pipeline', () => {
 
     expect(result.ok).toBe(true);
     expect(scripted.calls).toHaveLength(4);
-    expect(userText(scripted.calls[2])).toContain('Rendered inspection found: the label sits outside the board');
+    expect(userText(scripted.calls[2])).toContain('vision_audit:semantic_mismatch');
+    expect(userText(scripted.calls[2])).not.toContain('the label sits outside the board');
   });
 
   it('fails closed with reasons after persistent invalid proposals', async () => {
@@ -250,6 +282,17 @@ describe('the Board Director pipeline', () => {
     expect(userText(scripted.calls[1])).toContain('collide with objects already on the board: anchor-scale');
   });
 
+  it('requires relational anchors to be visible or structurally earlier', () => {
+    const misplaced = { op: 'add', id: 'note', place: { anchor: 'later', side: 'below', gap: 20, align: 'center' }, spec: { kind: 'text', at: [0, 0], text: 'Note' } };
+    const anchor = { op: 'add', id: 'later', spec: { kind: 'box', at: [500, 300], text: 'Anchor' } };
+    expect(applyDirectorBoardPolicy([misplaced, anchor], { density: 'minimal', visibleObjectIds: [] })).toMatchObject({
+      ok: false,
+      reasons: [expect.stringMatching(/relational anchor.*earlier/i)],
+    });
+    expect(applyDirectorBoardPolicy([anchor, misplaced], { density: 'minimal', visibleObjectIds: [] })).toMatchObject({ ok: true });
+    expect(applyDirectorBoardPolicy([misplaced], { density: 'minimal', visibleObjectIds: ['later'] })).toMatchObject({ ok: true });
+  });
+
   it('fails closed when the candidate cannot be rendered for inspection', async () => {
     const scripted = scriptedClient([validProposal(), validProposal(), validProposal()]);
     const result = await directVisual(deps(scripted.client, {
@@ -271,7 +314,8 @@ describe('the Board Director pipeline', () => {
 
     expect(result.ok).toBe(true);
     expect(userImages(scripted.calls[0])).toEqual([]);
-    expect(userText(scripted.calls[2])).toContain('The vision inspection reply was invalid');
+    expect(userText(scripted.calls[2])).toContain('vision_audit:invalid_verdict');
+    expect(userText(scripted.calls[2])).not.toContain('The vision inspection reply was invalid');
   });
 
   it('places a generated illustration under exact overlay BoardOps and never trusts the image for labels', async () => {

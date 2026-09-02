@@ -188,7 +188,19 @@ describe('sideband event semantics', () => {
     const releasedOps = () => repo.listEvents(session.id)
       .filter((event) => event.type === 'board_ops' && event.released).length;
     expect(releasedOps()).toBe(0);
-    client.emit('message', JSON.stringify(createRuntimeEvent(active, 1, 'ops_shown', { event_id: eventId })));
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 1, 'ops_presented', { event_id: eventId })));
+    await flushProxy();
+    const output = upstream.sentOfType('conversation.item.create')
+      .find((event) => (event.item as { call_id?: string } | undefined)?.call_id === 'ops-call');
+    expect(JSON.parse(String((output?.item as { output?: string } | undefined)?.output ?? '{}'))).toMatchObject({
+      ok: true,
+      status: 'visible',
+      board: { visibleObjectIds: ['shown-line'] },
+    });
+    // First paint makes the tool result truthful but does not release the
+    // durable event until the draw-on transaction completes.
+    expect(releasedOps()).toBe(0);
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 2, 'ops_shown', { event_id: eventId })));
     await flushProxy();
     expect(releasedOps()).toBe(1);
   });

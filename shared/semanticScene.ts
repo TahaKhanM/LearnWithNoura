@@ -3,7 +3,7 @@ import { validateOps, type BoardOp, type Vec } from './boardOps.js';
 
 export const VISUAL_PLAN_VERSION = '2.0.0' as const;
 export const VisualTemplateSchema = z.enum([
-  'pythagorean_area_proof', 'triangle_angle_sum', 'unit_circle_projection', 'fraction_comparison',
+  'pythagorean_area_proof', 'triangle_angle_sum', 'unit_circle_projection', 'number_line', 'fraction_comparison',
   'slope_comparison', 'causal_cycle', 'argument_structure', 'cause_effect',
   'grammar_structure', 'relationship_map', 'worked_steps', 'comparison', 'part_whole',
   'table', 'timeline', 'no_board',
@@ -138,8 +138,9 @@ function opsForGroup(group: SemanticScenePlan['groups'][number]): BoardOp[] {
     case 'pythagorean_area_proof': return pythagoreanProof(prefix);
     case 'triangle_angle_sum': return triangleAngleSum(prefix);
     case 'unit_circle_projection': return unitCircle(prefix, numberParam(group.parameters, 'angleDegrees', 60));
-    case 'fraction_comparison': return fractionComparison(prefix, numberArray(group.parameters.values, [2 / 3, 3 / 5]), stringArray(group.parameters.labels, ['2/3', '3/5']));
-    case 'slope_comparison': return slopeComparison(prefix, numberArray(group.parameters.slopes, [1, 2, -1]));
+    case 'number_line': return exactNumberLine(prefix, group.parameters);
+    case 'fraction_comparison': return fractionComparison(prefix, group.parameters);
+    case 'slope_comparison': return slopeComparison(prefix, group.parameters);
     case 'causal_cycle': return layeredGraph(prefix, stringArray(group.parameters.labels, ['Stage 1', 'Stage 2', 'Stage 3', 'Stage 4']), true);
     case 'argument_structure': return layeredGraph(prefix, stringArray(group.parameters.labels, ['Claim', 'Evidence', 'Reasoning']), false);
     case 'cause_effect': return layeredGraph(prefix, stringArray(group.parameters.labels, ['Cause', 'Event', 'Effect']), false);
@@ -239,14 +240,81 @@ function unitCircle(prefix: string, degrees: number): BoardOp[] {
   ];
 }
 
-function fractionComparison(prefix: string, values: number[], labels: string[]): BoardOp[] {
+function exactNumberLine(prefix: string, parameters: Record<string, unknown>): BoardOp[] {
+  const min = parameters.min;
+  const max = parameters.max;
+  const step = parameters.step;
+  if (typeof min !== 'number' || !Number.isFinite(min) ||
+      typeof max !== 'number' || !Number.isFinite(max) || max <= min ||
+      typeof step !== 'number' || !Number.isFinite(step) || step <= 0) {
+    throw new Error('number_line requires exact finite min, max, and positive step parameters');
+  }
+  const marks = (Array.isArray(parameters.marks) ? parameters.marks : []).slice(0, 15).map((raw) => {
+    if (typeof raw !== 'object' || raw === null) throw new Error('number_line marks require exact objects');
+    const mark = raw as { value?: unknown; label?: unknown; color?: unknown };
+    if (typeof mark.value !== 'number' || !Number.isFinite(mark.value) || mark.value < min || mark.value > max) {
+      throw new Error('number_line mark values must be finite and inside the exact range');
+    }
+    const label = typeof mark.label === 'string' && mark.label.trim() ? mark.label.trim().slice(0, 20) : undefined;
+    const color = typeof mark.color === 'string' && mark.color.trim() ? mark.color.trim() : undefined;
+    return { value: mark.value, ...(label ? { label } : {}), ...(color ? { color } : {}) };
+  });
+  return [{
+    op: 'add', id: `${prefix}-scale`, color: 'blue',
+    spec: { kind: 'numberline', at: [150, 320], w: 700, min, max, step, ...(marks.length > 0 ? { marks } : {}) },
+  }];
+}
+
+function fractionComparison(prefix: string, parameters: Record<string, unknown>): BoardOp[] {
+  const values = numberArray(parameters.values, [2 / 3, 3 / 5]);
+  const labels = stringArray(parameters.labels, ['2/3', '3/5']);
+  const fractions = fractionRecords(parameters.fractions);
+  if (parameters.representation === 'strips' && fractions.length === values.length) {
+    const colors = ['blue', 'red', 'green', 'amber'] as const;
+    const ops: BoardOp[] = [];
+    fractions.forEach((fraction, row) => {
+      const y = 180 + row * (280 / Math.max(1, fractions.length - 1));
+      const gap = 4;
+      const width = (700 - (fraction.denominator - 1) * gap) / fraction.denominator;
+      ops.push({ op: 'add', id: `${prefix}-fraction-label-${row}`, color: colors[row], spec: { kind: 'text', at: [90, y + 45], text: labels[row] ?? `${fraction.numerator}/${fraction.denominator}`, align: 'middle' } });
+      for (let part = 0; part < fraction.denominator; part += 1) {
+        const x = 150 + part * (width + gap);
+        ops.push({
+          op: 'add', id: `${prefix}-strip-${row}-${part}`, color: colors[row],
+          spec: { kind: 'polygon', points: [[x, y], [x + width, y], [x + width, y + 90], [x, y + 90]], closed: true, fill: part < fraction.numerator },
+        });
+      }
+    });
+    return ops;
+  }
   return [{ op: 'add', id: `${prefix}-scale`, spec: { kind: 'numberline', at: [130, 300], w: 740, min: 0, max: 1, step: 0.1, marks: values.slice(0, 4).map((value, index) => ({ value, label: labels[index] ?? String(value), color: index === 0 ? 'blue' : index === 1 ? 'red' : 'green' })) } }];
 }
 
-function slopeComparison(prefix: string, slopes: number[]): BoardOp[] {
+function slopeComparison(prefix: string, parameters: Record<string, unknown>): BoardOp[] {
   const colors = ['blue', 'red', 'green'] as const;
+  const supplied = linearRecords(parameters.lines);
+  const lines = supplied.length > 0
+    ? supplied.map((line) => ({ ...line, expr: `${line.slope}*x+${line.intercept}` }))
+    : numberArray(parameters.slopes, [1, 2, -1]).map((slope) => ({ slope, intercept: 0, label: `y = ${slope}x`, expr: `${slope}*x` }));
   const ops: BoardOp[] = [{ op: 'add', id: `${prefix}-axes`, spec: { kind: 'axes', at: [190, 70], w: 620, h: 470, xRange: [-5, 5], yRange: [-5, 5], xLabel: 'x', yLabel: 'y' } }];
-  slopes.slice(0, 3).forEach((slope, index) => ops.push({ op: 'add', id: `${prefix}-line-${index}`, color: colors[index], spec: { kind: 'plot', axes: `${prefix}-axes`, expr: `${slope}*x`, label: `y = ${slope}x` } }));
+  lines.slice(0, 3).forEach((line, index) => ops.push({
+    op: 'add', id: `${prefix}-line-${index}`, color: colors[index],
+    spec: { kind: 'plot', axes: `${prefix}-axes`, expr: line.expr, label: line.label },
+  }));
+  if (parameters.markIntersection === true && lines.length === 2 && lines[0].slope !== lines[1].slope) {
+    const x = (lines[1].intercept - lines[0].intercept) / (lines[0].slope - lines[1].slope);
+    const y = lines[0].slope * x + lines[0].intercept;
+    if (Number.isFinite(x) && Number.isFinite(y) && x >= -5 && x <= 5 && y >= -5 && y <= 5) {
+      ops.push({
+        op: 'add', id: `${prefix}-intersection`, color: 'green',
+        spec: {
+          kind: 'point',
+          at: [190 + ((x + 5) / 10) * 620, 70 + ((5 - y) / 10) * 470],
+          label: `(${formatPartValue(x)}, ${formatPartValue(y)})`,
+        },
+      });
+    }
+  }
   return ops;
 }
 
@@ -271,7 +339,7 @@ function layeredGraph(prefix: string, labels: string[], cycle: boolean): BoardOp
 function timeline(prefix: string, labels: string[]): BoardOp[] {
   const ops: BoardOp[] = [{ op: 'add', id: `${prefix}-line`, spec: { kind: 'line', from: [130, 300], to: [870, 300], arrow: 'end' } }];
   labels.slice(0, 6).forEach((label, index, all) => {
-    const x = 160 + index * (680 / Math.max(1, all.length - 1));
+    const x = 200 + index * (600 / Math.max(1, all.length - 1));
     ops.push({ op: 'add', id: `${prefix}-point-${index}`, color: index === all.length - 1 ? 'green' : 'blue', spec: { kind: 'point', at: [x, 300], label } });
   });
   return ops;
@@ -347,6 +415,33 @@ function partWhole(prefix: string, parameters: Record<string, unknown>): BoardOp
   });
   ops.push({ op: 'add', id: `${prefix}-total`, color: 'green', spec: { kind: 'equation', at: [400, 430], latex: `${parts.map((part) => formatPartValue(part.value)).join('+')}=${formatPartValue(total)}`, size: 'big' } });
   return ops;
+}
+
+function fractionRecords(value: unknown): Array<{ numerator: number; denominator: number }> {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 4).flatMap((raw) => {
+    if (typeof raw !== 'object' || raw === null) return [];
+    const fraction = raw as { numerator?: unknown; denominator?: unknown };
+    if (!Number.isInteger(fraction.numerator) || !Number.isInteger(fraction.denominator)) return [];
+    const numerator = fraction.numerator as number;
+    const denominator = fraction.denominator as number;
+    if (numerator < 0 || denominator < 1 || denominator > 24 || numerator > denominator) return [];
+    return [{ numerator, denominator }];
+  });
+}
+
+function linearRecords(value: unknown): Array<{ slope: number; intercept: number; label: string }> {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 3).flatMap((raw) => {
+    if (typeof raw !== 'object' || raw === null) return [];
+    const line = raw as { slope?: unknown; intercept?: unknown; label?: unknown };
+    if (typeof line.slope !== 'number' || !Number.isFinite(line.slope) ||
+        typeof line.intercept !== 'number' || !Number.isFinite(line.intercept)) return [];
+    const label = typeof line.label === 'string' && line.label.trim()
+      ? line.label.trim().slice(0, 60)
+      : `y=${line.slope}x${line.intercept < 0 ? '' : '+'}${line.intercept}`;
+    return [{ slope: line.slope, intercept: line.intercept, label }];
+  });
 }
 
 interface RelationshipNode { id: string; label: string }
