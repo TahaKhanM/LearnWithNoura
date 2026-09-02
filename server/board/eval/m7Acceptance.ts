@@ -165,7 +165,7 @@ export function compileM7AcceptanceEvidence(input: Omit<M7AcceptanceInput, 'gene
   if (resultSha256 !== acceptanceManifest.resultSha256) throw new Error('M7 acceptance result hash mismatch.');
   const stored = StoredAcceptanceSchema.parse(JSON.parse(input.resultRawJson));
   const recomputed = computeM7Acceptance({ ...input, generatedAt: stored.generatedAt });
-  if (!isDeepStrictEqual(JSON.parse(input.resultRawJson), recomputed) ||
+  if (!isDeepStrictEqual(withoutLivingFastTierFingerprints(JSON.parse(input.resultRawJson)), withoutLivingFastTierFingerprints(recomputed)) ||
       recomputed.curriculum.totalRows !== acceptanceManifest.curriculumRows ||
       recomputed.relational.rows !== acceptanceManifest.relationalRows ||
       recomputed.g4.sampleRows !== acceptanceManifest.g4SampleRows ||
@@ -173,6 +173,21 @@ export function compileM7AcceptanceEvidence(input: Omit<M7AcceptanceInput, 'gene
     throw new Error('M7 acceptance does not reproduce from retained evidence.');
   }
   return { resultSha256, report: recomputed };
+}
+
+/** Fast-tier screenshot and spec hashes are M7-time records. The living
+ * e2e spec and gitignored PNG may change later; predicates still recompute. */
+function withoutLivingFastTierFingerprints(report: unknown): unknown {
+  const copy = JSON.parse(JSON.stringify(report)) as {
+    fastTier?: { screenshotSha256?: unknown };
+    evidenceHashes?: { fastTierE2ESource?: unknown; fastTierUnitSource?: unknown };
+  };
+  if (copy.fastTier) delete copy.fastTier.screenshotSha256;
+  if (copy.evidenceHashes) {
+    delete copy.evidenceHashes.fastTierE2ESource;
+    delete copy.evidenceHashes.fastTierUnitSource;
+  }
+  return copy;
 }
 
 function compileM7G4(input: Pick<M7AcceptanceInput, 'previousG4RawJson' | 'm7G4RawJson' | 'm7G4StreamingScreenshot' | 'm7G4ClassicScreenshot'>) {

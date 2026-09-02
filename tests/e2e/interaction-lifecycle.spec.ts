@@ -482,8 +482,7 @@ test('image grounding tap fallback persists a normalized selector and renders it
     return socket.sent.some((event) => event.type === 'ops_shown' && event.payload?.event_id === 1801);
   })).toBe(true);
   await expect(page.getByTestId('image-grounding-tap')).toHaveCount(0);
-  await page.screenshot({ path: 'artifacts/evaluation/drawing-m7-image-tap-fallback.png' });
-  await testInfo.attach('m7-image-tap-fallback', { body: await page.screenshot(), contentType: 'image/png' });
+  await page.screenshot({ path: testInfo.outputPath('m7-image-tap-fallback.png') });
 });
 
 test('fast annotations resolve semantic sub-anchors and learner strokes without vision', async ({ page, request }, testInfo) => {
@@ -539,6 +538,5 @@ test('fast annotations resolve semantic sub-anchors and learner strokes without 
     const socket = (window as typeof window & { __nouraFakeSocket: { sent: Array<{ type: string; payload?: Record<string, unknown> }> } }).__nouraFakeSocket;
     return socket.sent.some((event) => event.type === 'ops_shown' && event.payload?.event_id === 1701);
   })).toBe(true);
-  await page.screenshot({ path: 'artifacts/evaluation/drawing-m7-fast-annotations.png' });
-  await testInfo.attach('m7-fast-annotations', { body: await page.screenshot(), contentType: 'image/png' });
+  await page.screenshot({ path: testInfo.outputPath('m7-fast-annotations.png') });
 });
