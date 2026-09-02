@@ -1,0 +1,11 @@
+{
+  "schemaVersion": "1.0.0",
+  "resultPath": "server/board/eval/results/2026-09-02-drawing-m3-mechanism-acceptance.json",
+  "resultSha256": "299c3b7a07a98114795c3cf760b98ad3ab4230cb7e31ac58b22e82fedb53a758",
+  "browserResultSha256": "079554a67026654a4d32d992b5ec17b9572de9b93daa165fed02974c3cdceab1",
+  "scope": "mechanism_only",
+  "exemplarTemplates": ["number_line", "fraction_comparison", "slope_comparison"],
+  "openSetRows": 40,
+  "openSetDelivered": 40,
+  "blendedFirstPassGate": "deferred_to_m8"
+}

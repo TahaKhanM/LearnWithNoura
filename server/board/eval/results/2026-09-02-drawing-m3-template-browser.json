@@ -1,0 +1,128 @@
+{
+  "schemaVersion": "1.1.0",
+  "evidenceMode": "offline_loopback_template_mechanism_browser",
+  "scope": "mechanism_only",
+  "generatedAt": "2026-09-02T14:07:44.592Z",
+  "accepted": true,
+  "providerCalls": 0,
+  "externalRequestCount": 0,
+  "fixtureSha256": "ba4739968be0eb3fd42d2978058e151817cf9b40c387c6e0aa841daa569cbae4",
+  "matrixSha256": "bad84b66a673df27841c19fd6c20d921c9c084c190618b3492adea941d13664a",
+  "summary": {
+    "fixtureRows": 3,
+    "uniqueTemplates": 3,
+    "browserAccepted": 3,
+    "maximumFirstPaintMs": 36,
+    "p50FirstPaintMs": 12,
+    "p95FirstPaintMs": 36,
+    "firstPaintThresholdMs": 2000,
+    "falseHoldoutCaptures": 0,
+    "corpusCapturedIntents": 7
+  },
+  "matrixInformedRows": [
+    "arithmetic-number-lines",
+    "arithmetic-fraction-strips",
+    "sat-coordinate-geometry",
+    "sat-systems-graphs"
+  ],
+  "retainedCompletedExtractors": [
+    "unit_circle_projection",
+    "pythagorean_area_proof",
+    "triangle_angle_sum",
+    "causal_cycle",
+    "timeline",
+    "grammar_structure"
+  ],
+  "deferredExtractorPolicy": "No additional extractor is in M3 scope; future catalogue work is pulled matrix-row-by-row no earlier than M8.",
+  "rows": [
+    {
+      "fixtureId": "number-line",
+      "template": "number_line",
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "firstPaintMs": 36,
+      "rasterSha256": "a7095fc2dbc809456a4d69240b3106045e913ad4a0f317d7b922cf08e6e4dad1",
+      "screenshotPath": "artifacts/evaluation/drawing-m3-templates/number-line.jpg"
+    },
+    {
+      "fixtureId": "fraction-strips",
+      "template": "fraction_comparison",
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "firstPaintMs": 12,
+      "rasterSha256": "1861799da4f1c373d8209fb6cbf940919823cf7b004914f4370275a1d1f20356",
+      "screenshotPath": "artifacts/evaluation/drawing-m3-templates/fraction-strips.jpg"
+    },
+    {
+      "fixtureId": "plotted-graph",
+      "template": "slope_comparison",
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "firstPaintMs": 9,
+      "rasterSha256": "24dc04503269021f54df2f9bb472eca2ee1e98f2b15f23548673832e5994c160",
+      "screenshotPath": "artifacts/evaluation/drawing-m3-templates/plotted-graph.jpg"
+    }
+  ],
+  "corpusRows": [
+    {
+      "intentId": "math-number-line",
+      "template": "number_line",
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "rasterSha256": "beb577225c6f20fb7a77383591180cc609dc852e5c1ec37984e452d2f5e922f4"
+    },
+    {
+      "intentId": "math-unit-circle",
+      "template": "unit_circle_projection",
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "rasterSha256": "6554c155fad7a7c91854c18457679f36b38e535d732a56a50e5795c359658b2e"
+    },
+    {
+      "intentId": "math-fraction-strip-holdout",
+      "template": "fraction_comparison",
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "rasterSha256": "1861799da4f1c373d8209fb6cbf940919823cf7b004914f4370275a1d1f20356"
+    },
+    {
+      "intentId": "graph-linear",
+      "template": "slope_comparison",
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "rasterSha256": "46eb4f8d895d39290e085351afe2905705a464bd158943e2452e2421229e2a19"
+    },
+    {
+      "intentId": "graph-intersection-holdout",
+      "template": "slope_comparison",
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "rasterSha256": "24dc04503269021f54df2f9bb472eca2ee1e98f2b15f23548673832e5994c160"
+    },
+    {
+      "intentId": "grammar-main-subordinate",
+      "template": "grammar_structure",
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "rasterSha256": "da7c45e4b65e4abbaf5b486d3bad2433e1b5bff82c527ad7b9c6656e90864eae"
+    },
+    {
+      "intentId": "compare-fractions",
+      "template": "fraction_comparison",
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "rasterSha256": "fabbad6d092e5f8bfac9bf0ffe3db959fba40fec4ed38a1f3a26ea2ad8514cdc"
+    }
+  ],
+  "openSetCaptures": []
+}
