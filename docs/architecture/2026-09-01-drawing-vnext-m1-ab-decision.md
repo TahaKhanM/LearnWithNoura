@@ -74,3 +74,28 @@ npm run client -- --host 127.0.0.1 --port 5180
 npm run test:director-m1-eval -- --regenerate \
   --harness-url http://127.0.0.1:5180/dev/board
 ```
+
+## Architecture-owner addendum: M1 accepted under corrected layered gates
+
+The `false` decision above remains the faithful result of the original
+mis-specified 95% conjunctive gate and is not edited. The architecture owner
+replaced it, before recomputation, with the layered G1–G5 contract in
+[`2026-09-01-drawing-vnext-m1-acceptance-and-continuation-prompt.md`](2026-09-01-drawing-vnext-m1-acceptance-and-continuation-prompt.md).
+Under that corrected contract M1 is accepted:
+
+- G1: 360/360 structured-valid single shots (100%, threshold 95%).
+- G2: 329/360 production-authority conjunctive first passes (91.3889%,
+  threshold 90%). A fresh zero-provider Chromium replay is byte-identical to
+  the pinned browser ledger.
+- G3: 350/360 delivered with the evidence-selected Terra-medium recovery
+  (97.2222%, threshold 97%); 14 blind grades average 3.9643.
+- G4: actual Lesson-page `ops_presented` p50 2,818 ms streaming versus 4,909 ms
+  classic, a 42.5952% cut, over 290 paired-valid diagrams with zero external
+  requests. Exact first-paint screenshots were personally inspected.
+- G5: permanence/replay coverage and every README gate pass.
+
+Canonical corrected acceptance:
+`server/board/eval/results/2026-09-01-drawing-m1-corrected-acceptance.json`,
+SHA-256 `72e12e65eed3361e169e29dabedbb87d26f83542022db8f7c21903360409c2e7`.
+The historical paired report continues to verify as `false`; it is an input to,
+not a replacement for, this corrected decision.

@@ -1,0 +1,10 @@
+{
+  "schemaVersion": "1.0.0",
+  "resultPath": "server/board/eval/results/2026-09-01-drawing-g4-first-paint.json",
+  "resultSha256": "c54a2798afb290779fe3c8580ed4c3dd3f01c7361f83156b5fab24db4ae27e5e",
+  "m0SourceSha256": "e02ccc9f240f72a7937fe192f30867434eb7f857fb6c45a5f8b52fa06507ae79",
+  "m1ReportSha256": "44409bf22112a0e76ed95af0ccb605158f0f1fb01f16600acd5d79b67493d209",
+  "pairedRows": 290,
+  "streamingScreenshotSha256": "3f8732e22456912517697e1f9a21067e9024fe961525d0b3b42ecaaf07ab6070",
+  "classicScreenshotSha256": "18fe8fad9f4f3ecdd21047c1197fe1debcda0a2ab961f61356f6fb58292908d0"
+}

@@ -1,0 +1,14 @@
+{
+  "schemaVersion": "1.0.0",
+  "resultPath": "server/board/eval/results/2026-09-01-drawing-f9-recovery-study.json",
+  "resultSha256": "54201d05481fa871abe1708c644a6f009183908a463ee1da5dc97f38e21d76ed",
+  "sourceEvidenceSha256": "e02ccc9f240f72a7937fe192f30867434eb7f857fb6c45a5f8b52fa06507ae79",
+  "m1BrowserObservationSha256": "a8847373ff3a9d3aa8bdd1c34fa5f4dcb99e4bc617ce23459ccdebd67767017a",
+  "layoutFeedbackSha256": "89f0a4ae51ff52031830890ed5038f5e73b4769380da47fc5a97eab65aa488e0",
+  "providerCalls": 53,
+  "accountedCostUsd": 0.2692976,
+  "maxSpendUsd": 3.25,
+  "winner": "medium_escalation",
+  "minimumRecoveries": 21,
+  "qualityFloor": 2.7292
+}

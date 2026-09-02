@@ -124,3 +124,36 @@ harness.
 Official provider references used for the run: [model comparison and
 pricing](https://developers.openai.com/api/docs/models/compare), [GPT-5.6 Luna](https://developers.openai.com/api/docs/models/gpt-5.6-luna), and [prompt
 caching](https://developers.openai.com/api/docs/guides/prompt-caching).
+
+## Architecture-owner addendum: corrected M1 gates and evidence conclusions
+
+This addendum does not rewrite the pre-registered M0 decision above. The gate
+ambiguity and corrected layered M1 acceptance criteria were recorded before
+recomputation in
+[`2026-09-01-drawing-vnext-m1-acceptance-and-continuation-prompt.md`](2026-09-01-drawing-vnext-m1-acceptance-and-continuation-prompt.md).
+The original M0 statement that no composition arm cleared its then-binding 95%
+conjunctive gate remains historically true; Terra-low is not relabelled an M0
+winner.
+
+The sketch conclusion is corrected from “negative” to **uninformative**. Both
+models returned the constant answer “straight line” across the 30-item corpus,
+and exact-string grading was applied to a non-enum field. Assistance remains
+off, but this study is not evidence that assistance cannot work. M5 owns an
+enum-constrained, human-verifiable corpus rebuild with realistic stroke sizes;
+no additional sketch spend was made here.
+
+The hedge rejection stands: it had lower validity and quality than Terra-low
+at higher cost. Evidence bloat is also acknowledged: approximately $12.72 of
+the old $30 ceiling funded discarded diagnostics. New work uses fit-before-
+launch, canary-first, early-stop studies and retains derived reports plus
+hashes; raw ledgers are retained only when a decision record names and hashes
+them.
+
+The authorized F9 conditional recovery study is new corrected-gate evidence,
+not an M0 winner selection. It used 53 calls and accounted $0.2692976 under a
+$3.25 ceiling. Terra-medium escalation recovered 21/24 screened failures,
+reaching 350/360 delivered scenes (97.2222%) with mean blind grade 3.9643.
+Targeted low-effort correction recovered 2/13; correction then escalation did
+not improve on medium alone. Therefore Terra-medium escalation alone is the
+cheapest qualifying recovery default. The retained result SHA-256 is
+`54201d05481fa871abe1708c644a6f009183908a463ee1da5dc97f38e21d76ed`.
