@@ -12,6 +12,11 @@ import { recordTerminalResponseTelemetry } from './telemetryGlue.js';
 import { handleToolCall } from './toolHandling.js';
 import { MAX_TOOL_CONTINUES, noteResponseCreateSettled, requestModelResponse, sendResponseCreate, setEndpointingEagerness } from './turnFloor.js';
 import { replayBoard } from './sessionRestore.js';
+import { refreshBoardInstructions } from './sessionConfig.js';
+import {
+  prepareExplicitLearnerVisualRequest,
+  scheduleExplicitLearnerVisualRequest,
+} from './visualRequests.js';
 
 /**
  * Dispatches one sideband provider event into the coordinator. Audio itself
@@ -110,6 +115,16 @@ export async function handleUpstreamEvent(ctx: CoordinatorContext, event: Upstre
         ctx.sendClient({ type: 'user_transcript', text });
         try { state.lessonState = reduceLesson(state.lessonState, { type: 'LEARNER_RESPONSE_RECEIVED' }); }
         catch { /* unsolicited learner turns are still valid input; the next move re-orients */ }
+        const identity = state.clientIdentity;
+        const visualRequest = prepareExplicitLearnerVisualRequest(
+          ctx,
+          text,
+          `voice-${identity?.connectionEpoch ?? 0}-${identity?.turnId ?? state.voiceTurnCounter}`,
+        );
+        if (visualRequest) {
+          if (state.speechInProgress) state.pendingExplicitVisualRequest = visualRequest;
+          else scheduleExplicitLearnerVisualRequest(ctx, visualRequest);
+        }
       }
       break;
     }
@@ -138,7 +153,13 @@ export async function handleUpstreamEvent(ctx: CoordinatorContext, event: Upstre
       // response created by their explicit Done.
       if (!state.draftOpen) {
         state.childHoldsFloor = false;
-        requestModelResponse(ctx, 'voice', `voice-turn-${++state.voiceTurnCounter}`);
+        refreshBoardInstructions(ctx);
+        const pendingVisual = state.pendingExplicitVisualRequest;
+        state.pendingExplicitVisualRequest = null;
+        const responseRequested = requestModelResponse(ctx, 'voice', `voice-turn-${++state.voiceTurnCounter}`);
+        if (responseRequested && pendingVisual) {
+          scheduleExplicitLearnerVisualRequest(ctx, pendingVisual);
+        }
       }
       break;
 

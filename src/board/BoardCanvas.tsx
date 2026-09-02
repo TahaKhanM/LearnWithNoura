@@ -39,6 +39,8 @@ interface BoardCanvasProps {
   onLearnerActivityStart?: () => void;
   onTutorPen?: (position: PenPosition | null) => void;
   onLearnerAttention?: (position: Vec, kind: 'drawing' | 'pointer' | 'focus') => void;
+  tapRequested?: boolean;
+  onBoardTap?: (position: Vec) => void;
   longDescription?: string;
   /** Lets the lesson own generation-scoped animation transactions. */
   animatorRef?: (animator: BoardAnimator) => void;
@@ -215,6 +217,8 @@ export function BoardCanvas({
   onLearnerActivityStart,
   onTutorPen,
   onLearnerAttention,
+  tapRequested = false,
+  onBoardTap,
   longDescription,
   animatorRef,
   focusSemanticObjectId,
@@ -379,7 +383,13 @@ export function BoardCanvas({
 
   const onPointerDown = useCallback(
     (e: React.PointerEvent<SVGSVGElement>) => {
-      if (!interactive || tool !== 'draw' || e.button !== 0) return;
+      if (!interactive || e.button !== 0) return;
+      if (tapRequested && onBoardTap) {
+        e.preventDefault();
+        onBoardTap(boardPoint(e.clientX, e.clientY));
+        return;
+      }
+      if (tool !== 'draw') return;
       e.preventDefault();
       onLearnerActivityStart?.();
       svgRef.current?.setPointerCapture?.(e.pointerId);
@@ -387,7 +397,7 @@ export function BoardCanvas({
       strokeRef.current = [start];
       setLiveStroke([start]);
     },
-    [interactive, tool, boardPoint, onLearnerActivityStart],
+    [interactive, tapRequested, onBoardTap, tool, boardPoint, onLearnerActivityStart],
   );
 
   const onPointerMove = useCallback(
@@ -441,7 +451,8 @@ export function BoardCanvas({
     <div className="board__a11y-wrap">
     <svg
       ref={svgRef}
-      className={`board__svg board__svg--${tool}`}
+      className={`board__svg board__svg--${tool}${tapRequested ? ' board__svg--tap-target' : ''}`}
+      data-tap-requested={tapRequested ? 'true' : undefined}
       data-fonts-ready={fontsReady}
       data-animation-request={animationRequest?.id ?? ''}
       viewBox={`${camera.x} ${camera.y} ${camera.w} ${camera.h}`}

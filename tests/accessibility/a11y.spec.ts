@@ -2,7 +2,7 @@ import AxeBuilder from '@axe-core/playwright';
 import { expect, test } from '@playwright/test';
 import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { createSyntheticSession, installFakeRealtime, setLessonCapability } from '../helpers';
+import { createSyntheticSession, installFakeRealtime, setLessonCapability, waitForFakeRealtimeStart } from '../helpers';
 
 test('Home has no serious or critical automated accessibility violations', async ({ page }) => {
   await page.goto('/');
@@ -41,6 +41,11 @@ test('actual Lesson start, listening, thinking, speaking/visual, reduced-motion 
   expect(focusOrder).toContain('Begin');
 
   await page.getByRole('button', { name: 'Begin' }).click();
+  await waitForFakeRealtimeStart(page);
+  await page.evaluate(() => {
+    const socket = (window as typeof window & { __nouraFakeSocket: { emit(type: string, payload: Record<string, unknown>): void } }).__nouraFakeSocket;
+    socket.emit('safe_question', { text: '' });
+  });
   await expect(page.getByText(/Type below — Noura is ready|Listening/)).toBeVisible();
   await assertNoSeriousAxe(page);
 
@@ -105,7 +110,10 @@ test('actual Lesson start, listening, thinking, speaking/visual, reduced-motion 
     const voice = (window as typeof window & { __nouraFakeVoice: { emitBoundary(boundary: string, responseId: string | null, playedMs?: number): void } }).__nouraFakeVoice;
     voice.emitBoundary('started', 'fake-response');
     const socket = (window as typeof window & { __nouraFakeSocket: { emit(type: string, payload: Record<string, unknown>, optional?: Record<string, unknown>): void } }).__nouraFakeSocket;
-    socket.emit('board_ops', { response_id: 'fake-response', ops: [{ op: 'add', id: 'fraction-scale-future', spec: { kind: 'text', at: [500, 180], text: 'future label' } }] }, { visualCueId: 'future-cue', semanticObjectId: 'fraction-scale', providerResponseId: 'fake-response' });
+    socket.emit('board_ops', {
+      response_id: 'fake-response', await_narration: true,
+      ops: [{ op: 'add', id: 'fraction-scale-future', spec: { kind: 'text', at: [500, 180], text: 'future label' } }],
+    }, { visualCueId: 'future-cue', semanticObjectId: 'fraction-scale', providerResponseId: 'fake-response' });
   });
   await page.getByRole('button', { name: 'Draw on the board' }).click();
   const boardBox = await page.locator('.board__svg').boundingBox();

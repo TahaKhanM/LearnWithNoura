@@ -37,6 +37,11 @@ describe('runtime character attention integration', () => {
   it('keeps semantic state in reduced motion while removing smoothing', () => {
     const controller = new CharacterAttentionController(identity, true);
     expect(controller.offer({ ...identity, targetType: 'semantic_object', semanticObjectId: 'fraction-scale', boardCoordinates: [750, 300], priority: attentionPriority('semantic_object'), startTime: 0, expiryTime: 500, smoothingProfile: 'responsive', permittedInReducedMotion: true })).toBe(true);
-    expect(controller.frame(16)).toMatchObject({ targetType: 'semantic_object', semanticObjectId: 'fraction-scale', x: 0.5 });
+    const frame = controller.frame(16);
+    expect(frame).toMatchObject({ targetType: 'semantic_object', semanticObjectId: 'fraction-scale' });
+    // Reduced motion removes interpolation; it does not change the docked
+    // avatar origin used to project board coordinates.
+    expect(frame.x).toBeCloseTo(-0.26, 5);
+    expect(frame.y).toBe(-0.78);
   });
 });

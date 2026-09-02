@@ -1,5 +1,6 @@
 import type { Browser, Page } from 'playwright';
 import type { BoardOp } from '../../shared/boardOps.js';
+import type { LayoutPreflightResult } from '../../shared/layoutFeedback.js';
 import type { SceneValidationResult, SceneValidator } from './compiler.js';
 
 /**
@@ -30,7 +31,7 @@ export interface HeadlessSceneValidatorHandle {
 }
 
 interface HarnessHost {
-  nouraPreflightScene?: (ops: BoardOp[], semanticGroupId?: string) => Promise<{ accepted: boolean; reasons: string[] }>;
+  nouraPreflightScene?: (ops: BoardOp[], semanticGroupId?: string) => Promise<LayoutPreflightResult>;
   nouraRenderScene?: (ops: BoardOp[], semanticGroupId?: string) => Promise<string | null>;
 }
 
@@ -66,7 +67,9 @@ export function createHeadlessSceneValidator(options: HeadlessSceneValidatorOpti
         },
         { ops, groupId: options.semanticGroupId },
       );
-      return verdict.accepted ? { ok: true } : { ok: false, issues: verdict.reasons };
+      return verdict.accepted
+        ? { ok: true }
+        : { ok: false, issues: verdict.reasons, layoutIssues: verdict.layoutIssues };
     } catch (error) {
       // Fail closed: an unreachable validator never lets a scene through.
       return { ok: false, issues: [`Headless scene validation unavailable: ${String(error instanceof Error ? error.message : error).slice(0, 200)}`] };

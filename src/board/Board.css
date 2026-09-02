@@ -17,6 +17,11 @@
   touch-action: none;
 }
 
+.board__svg--tap-target {
+  cursor: crosshair;
+  touch-action: manipulation;
+}
+
 .board__stroke,
 .board__text {
   pointer-events: none;

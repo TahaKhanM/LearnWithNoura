@@ -19,6 +19,8 @@ const LIFECYCLE_NAMES = new Set([
   'section_navigation',
   'session_reconnect',
   'tutor_object_disappearance',
+  'storyboard_outcome',
+  'media_playback_outcome',
 ]);
 const GAP_REASONS = [
   'server_queue_overflow',
@@ -227,6 +229,26 @@ function projectTimelineEntry(value, label) {
     }
     return { eventId, ts, name, value: valueNumber, dimensions };
   }
+  if (name === 'illustration_generation') {
+    if (entry.unit !== 'ms') throw new Error(`${label}.unit is invalid.`);
+    const dimensions = requireRecord(entry.dimensions, `${label}.dimensions`);
+    assertExactKeys(dimensions, ['cache', 'outcome', 'imageCount', 'totalTokens'], `${label}.dimensions`);
+    if (!['hit', 'miss'].includes(dimensions.cache) || !['accepted', 'failed', 'refused'].includes(dimensions.outcome)) {
+      throw new Error(`${label}.dimensions is invalid.`);
+    }
+    return {
+      eventId,
+      ts,
+      name,
+      value: readSafeNonNegativeInteger(entry.value, `${label}.value`),
+      dimensions: {
+        cache: dimensions.cache,
+        outcome: dimensions.outcome,
+        imageCount: readSafeNonNegativeInteger(dimensions.imageCount, `${label}.dimensions.imageCount`),
+        totalTokens: readSafeNonNegativeInteger(dimensions.totalTokens, `${label}.dimensions.totalTokens`),
+      },
+    };
+  }
   if (name === 'telemetry_gap') {
     if (entry.unit !== 'count') throw new Error(`${label}.unit is invalid.`);
     const dimensions = requireRecord(entry.dimensions, `${label}.dimensions`);
@@ -310,7 +332,7 @@ function projectLifecycleDimensions(name, value, label) {
     );
     readBoundedString(dimensions.previousSemanticGroupId, `${label}.previousSemanticGroupId`);
     readBoundedString(dimensions.nextSemanticGroupId, `${label}.nextSemanticGroupId`);
-    if (!['initial_anchor', 'notice_open', 'picker', 'draft_restore'].includes(dimensions.cause)) {
+    if (!['initial_anchor', 'notice_open', 'picker', 'draft_restore', 'arrow', 'task_focus', 'tutor_announce'].includes(dimensions.cause)) {
       throw new Error(`${label}.cause is invalid.`);
     }
     return {
@@ -318,6 +340,21 @@ function projectLifecycleDimensions(name, value, label) {
       nextSemanticGroupId: dimensions.nextSemanticGroupId,
       cause: dimensions.cause,
     };
+  } else if (name === 'media_playback_outcome') {
+    assertExactKeys(dimensions, ['outcome'], label);
+    if (!['autoplay_blocked', 'resumed', 'connection_failed', 'not_played'].includes(dimensions.outcome)) {
+      throw new Error(`${label}.outcome is invalid.`);
+    }
+    return { outcome: dimensions.outcome };
+  } else if (name === 'storyboard_outcome') {
+    assertExactKeys(dimensions, ['outcome', 'source', 'revealedSteps', 'totalSteps'], label);
+    if (!['completed', 'abandoned'].includes(dimensions.outcome) || !['anchor', 'director'].includes(dimensions.source)) {
+      throw new Error(`${label} is invalid.`);
+    }
+    const revealedSteps = readSafeNonNegativeInteger(dimensions.revealedSteps, `${label}.revealedSteps`);
+    const totalSteps = readSafeNonNegativeInteger(dimensions.totalSteps, `${label}.totalSteps`);
+    if (revealedSteps > totalSteps) throw new Error(`${label}.revealedSteps is invalid.`);
+    return { outcome: dimensions.outcome, source: dimensions.source, revealedSteps, totalSteps };
   } else {
     assertExactKeys(dimensions, ['objectId', 'cause'], label);
     readBoundedString(dimensions.objectId, `${label}.objectId`);

@@ -1,18 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { BoardOp } from '../../shared/boardOps';
+import type { LayoutPreflightResult } from '../../shared/layoutFeedback';
 import { adaptSemanticScene, VISUAL_PLAN_VERSION, type SemanticScenePlan } from '../../shared/semanticScene';
 import { BoardCanvas, type BoardHighlight } from '../board/BoardCanvas';
 import { registerKatexMeasurer } from '../board/compile';
-import { measureKatexInDom } from '../board/domKatexMeasurer';
+import { measureKatexInDom, prepareDomBoardMeasurement } from '../board/domKatexMeasurer';
 import { deriveSemanticViewports } from '../board/semanticViewport';
 import { BoardSceneCoordinator } from '../board/sceneCoordinator';
 import { sceneForGroup } from '../board/sceneGroups';
 import { renderSceneImage } from '../board/snapshot';
+import { resolveRelationalPlacements } from '../board/relationalPlacement';
 import type { BoardAnimator } from '../board/animator';
 import { describeScene, applyOps, emptyScene, type SceneState } from '../board/scene';
 import './BoardHarness.css';
 
-export interface ScenePreflightVerdict { accepted: boolean; reasons: string[] }
+export type ScenePreflightVerdict = LayoutPreflightResult;
 
 declare global {
   interface Window {
@@ -24,11 +26,20 @@ declare global {
      * real render pipeline and returns the canonical board JPEG data URL
      * (the Board Director's eyes), or null when rendering fails. */
     nouraRenderScene?: (ops: BoardOp[], semanticGroupId?: string) => Promise<string | null>;
+    nouraPreflightSceneWithContext?: (input: ContextSceneInput) => Promise<ScenePreflightVerdict>;
+    nouraRenderSceneWithContext?: (input: ContextSceneInput) => Promise<string | null>;
   }
 }
 
+interface ContextSceneInput {
+  existingTutorOps: BoardOp[];
+  existingLearnerOps: BoardOp[];
+  candidateOps: BoardOp[];
+  semanticGroupId: string;
+}
+
 async function preflightScene(ops: BoardOp[], semanticGroupId?: string): Promise<ScenePreflightVerdict> {
-  await document.fonts.ready;
+  await prepareDomBoardMeasurement(ops);
   registerKatexMeasurer(measureKatexInDom);
   try {
     return new BoardSceneCoordinator().preflightTutorOps(ops, semanticGroupId);
@@ -38,11 +49,38 @@ async function preflightScene(ops: BoardOp[], semanticGroupId?: string): Promise
 }
 
 async function renderSceneToImage(ops: BoardOp[], semanticGroupId?: string): Promise<string | null> {
-  await document.fonts.ready;
+  await prepareDomBoardMeasurement(ops);
   registerKatexMeasurer(measureKatexInDom);
   try {
     const applied = applyOps(emptyScene, ops, 'tutor', semanticGroupId);
     return await renderSceneImage(sceneForGroup(applied.scene, semanticGroupId));
+  } finally {
+    registerKatexMeasurer(null);
+  }
+}
+
+async function preflightSceneWithContext(input: ContextSceneInput): Promise<ScenePreflightVerdict> {
+  await prepareDomBoardMeasurement([...input.existingTutorOps, ...input.candidateOps]);
+  registerKatexMeasurer(measureKatexInDom);
+  try {
+    const board = new BoardSceneCoordinator();
+    board.applyReplay(input.existingTutorOps, 'tutor', input.semanticGroupId);
+    board.applyLearner(input.existingLearnerOps, input.semanticGroupId);
+    return board.preflightTutorOps(input.candidateOps, input.semanticGroupId);
+  } finally {
+    registerKatexMeasurer(null);
+  }
+}
+
+async function renderSceneWithContext(input: ContextSceneInput): Promise<string | null> {
+  await prepareDomBoardMeasurement([...input.existingTutorOps, ...input.candidateOps]);
+  registerKatexMeasurer(measureKatexInDom);
+  try {
+    const board = new BoardSceneCoordinator();
+    board.applyReplay(input.existingTutorOps, 'tutor', input.semanticGroupId);
+    board.applyLearner(input.existingLearnerOps, input.semanticGroupId);
+    if (!board.applyTutorCheckpoint(input.candidateOps, input.semanticGroupId)) return null;
+    return renderSceneImage(sceneForGroup(board.current, input.semanticGroupId));
   } finally {
     registerKatexMeasurer(null);
   }
@@ -107,6 +145,45 @@ const SCENES: Record<string, BoardOp[]> = {
     { op: 'add', id: 'reed-label', spec: { kind: 'text', at: [720, 540], text: 'reeds' } },
     { op: 'add', id: 'arrow', spec: { kind: 'line', from: [220, 520], to: [260, 360], arrow: 'end' }, color: 'amber' },
   ],
+  annotations: [
+    { op: 'add', id: 'annotation-box', spec: { kind: 'box', at: [250, 190], w: 220, h: 90, text: 'Key idea' }, color: 'blue' },
+    { op: 'add', id: 'annotation-triangle', spec: { kind: 'polygon', points: [[520, 350], [680, 120], [840, 350]] } },
+    { op: 'add', id: 'annotation-scale', spec: { kind: 'numberline', at: [150, 470], w: 700, min: 0, max: 10, step: 1 }, color: 'ink' },
+    { op: 'add', id: 'annotation-circle', spec: { kind: 'annotate', style: 'circle', target: { type: 'semantic', objectId: 'annotation-box', anchor: 'center' } }, color: 'red' },
+    { op: 'add', id: 'annotation-bracket', spec: { kind: 'annotate', style: 'bracket', target: { type: 'semantic', objectId: 'annotation-triangle', anchor: 'center' } }, color: 'violet' },
+    { op: 'add', id: 'annotation-tick', spec: { kind: 'annotate', style: 'tick', target: { type: 'semantic', objectId: 'annotation-scale', anchor: 'tick:5' } }, color: 'green' },
+    { op: 'add', id: 'annotation-callout', spec: { kind: 'annotate', style: 'callout', target: { type: 'semantic', objectId: 'annotation-triangle', anchor: 'vertex:1' }, note: 'Check the apex' }, color: '#F0A227' },
+  ],
+  'm7-data': [
+    { op: 'add', id: 'm7-scatter', spec: { kind: 'scatter', at: [55, 80], w: 250, h: 220, xRange: [0, 10], yRange: [0, 20], points: [[1, 2], [3, 8], [5, 11], [7, 15], [9, 17]], xLabel: 'hours', yLabel: 'score' }, color: '#2C5BE0' },
+    { op: 'add', id: 'm7-boxplot', spec: { kind: 'boxplot', at: [360, 205], w: 270, min: 1, q1: 3, median: 5, q3: 7, max: 10, label: 'Scores' }, color: '#7A4DD8' },
+    { op: 'add', id: 'm7-histogram', spec: { kind: 'histogram', at: [690, 80], w: 250, h: 220, bins: [{ from: 0, to: 5, frequency: 2 }, { from: 5, to: 10, frequency: 6 }, { from: 10, to: 15, frequency: 4 }], xLabel: 'time', yLabel: 'frequency' }, color: '#14A07A' },
+  ],
+  'm7-spatial': [
+    { op: 'add', id: 'm7-solid', spec: { kind: 'isometricSolid', at: [140, 455], unit: 54, voxels: [[0, 0, 0], [1, 0, 0], [2, 0, 0], [1, 0, 1], [2, 0, 1], [2, 0, 2]] }, color: '#2C5BE0' },
+    { op: 'add', id: 'm7-net', spec: { kind: 'cubeNet', at: [340, 90], cell: 70, faces: [{ id: 'A', row: 1, col: 0 }, { id: 'B', row: 1, col: 1 }, { id: 'C', row: 1, col: 2 }, { id: 'D', row: 1, col: 3 }, { id: 'E', row: 0, col: 1 }, { id: 'F', row: 2, col: 1 }] }, color: '#7A4DD8' },
+    { op: 'add', id: 'm7-plan', spec: { kind: 'planView', at: [755, 120], cell: 55, heights: [[1, 0, 2], [3, 1, 0], [0, 2, 1]] }, color: '#14A07A' },
+  ],
+  'm7-relations': [
+    { op: 'add', id: 'm7-panels', spec: { kind: 'panelGrid', at: [45, 55], w: 390, h: 230, rows: 2, cols: 2, panels: [{ row: 0, col: 0, label: '1', marks: [{ shape: 'circle', x: 0.4, y: 0.55, fill: true }] }, { row: 0, col: 1, label: '2', marks: [{ shape: 'circle', x: 0.35, y: 0.55, fill: true }, { shape: 'circle', x: 0.65, y: 0.55, fill: true }] }, { row: 1, col: 0, label: '3', marks: [{ shape: 'triangle', x: 0.5, y: 0.55, fill: true }] }] }, color: '#2C5BE0' },
+    { op: 'add', id: 'm7-placed-pattern-note', place: { anchor: 'm7-panels', side: 'below', gap: 18, align: 'center' }, spec: { kind: 'text', at: [0, 0], text: 'Pattern grows by one', size: 'small' }, color: '#2C5BE0' },
+    { op: 'add', id: 'm7-source-shape', spec: { kind: 'polygon', points: [[500, 220], [575, 80], [650, 220]] }, color: '#26231F' },
+    { op: 'add', id: 'm7-transformed-shape', spec: { kind: 'transform', target: 'm7-source-shape', operation: { type: 'translate', vector: [210, 0] }, label: 'translated' }, color: '#E14B3C' },
+    { op: 'add', id: 'm7-venn', spec: { kind: 'regionFill', mode: 'venn', at: [500, 290], w: 410, h: 220, operation: 'intersection', labels: ['A', 'B'] }, color: '#7A4DD8' },
+    { op: 'add', id: 'm7-fraction-fill', spec: { kind: 'regionFill', mode: 'fraction', at: [65, 390], w: 350, h: 85, numerator: 3, denominator: 5 }, color: '#14A07A' },
+  ],
+  'm7-regions': [
+    { op: 'add', id: 'm7-region-axes', spec: { kind: 'axes', at: [170, 70], w: 650, h: 430, xRange: [-5, 5], yRange: [-5, 5], xLabel: 'x', yLabel: 'y' }, color: '#26231F' },
+    { op: 'add', id: 'm7-half-plane', spec: { kind: 'regionFill', mode: 'half_plane', axes: 'm7-region-axes', slope: 0.6, intercept: 1, side: 'above', inclusive: false }, color: '#2C5BE0' },
+  ],
+  'm7-paper': [
+    { op: 'add', id: 'm7-paper-fold', spec: { kind: 'paperFoldHolePunch', at: [70, 120], w: 860, h: 330, folds: ['right', 'down'], holes: [[0.72, 0.35]] }, color: '#7A4DD8' },
+  ],
+  'm7-instruments': [
+    { op: 'add', id: 'm7-grid', spec: { kind: 'gridPaper', at: [55, 70], w: 420, h: 440, spacing: 28, style: 'grid', majorEvery: 5 }, color: '#2C5BE0' },
+    { op: 'add', id: 'm7-clock', spec: { kind: 'clock', center: [265, 285], r: 155, hour: 10, minute: 10 }, color: '#26231F' },
+    { op: 'add', id: 'm7-protractor', spec: { kind: 'protractor', center: [735, 455], r: 215, angleDeg: 65, label: '65°' }, color: '#7A4DD8' },
+  ],
 };
 
 const GROUPED_SCENES: Record<string, { groups: Array<{ id: string; ops: BoardOp[] }>; camera: string }> = {
@@ -138,6 +215,13 @@ const SCENE_GROUPS: Record<string, string> = {
   assets: 'group-assets',
   'arc-curve': 'group-arc-curve',
   illustration: 'group-illustration',
+  annotations: 'group-annotations',
+  'm7-data': 'group-m7-data',
+  'm7-spatial': 'group-m7-spatial',
+  'm7-relations': 'group-m7-relations',
+  'm7-regions': 'group-m7-regions',
+  'm7-paper': 'group-m7-paper',
+  'm7-instruments': 'group-m7-instruments',
   'two-regions': 'region-two',
 };
 
@@ -164,9 +248,9 @@ export function BoardHarness() {
       let next = applyOps(previous, [{ op: 'clear' }], 'tutor').scene;
       if (grouped) {
         for (const group of grouped.groups) next = applyOps(next, group.ops, 'tutor', group.id).scene;
-        return next;
+        return resolveRelationalPlacements(next);
       }
-      return applyOps(next, ops, 'tutor', ['handwritten', 'assets', 'arc-curve', 'illustration'].includes(name) ? SCENE_GROUPS[name] : undefined).scene;
+      return resolveRelationalPlacements(applyOps(next, ops, 'tutor', ['handwritten', 'assets', 'arc-curve', 'illustration', 'annotations'].includes(name) || name.startsWith('m7-') ? SCENE_GROUPS[name] : undefined).scene);
     });
   }, []);
 
@@ -178,9 +262,13 @@ export function BoardHarness() {
   useEffect(() => {
     window.nouraPreflightScene = preflightScene;
     window.nouraRenderScene = renderSceneToImage;
+    window.nouraPreflightSceneWithContext = preflightSceneWithContext;
+    window.nouraRenderSceneWithContext = renderSceneWithContext;
     return () => {
       delete window.nouraPreflightScene;
       delete window.nouraRenderScene;
+      delete window.nouraPreflightSceneWithContext;
+      delete window.nouraRenderSceneWithContext;
     };
   }, []);
 

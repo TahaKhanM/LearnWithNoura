@@ -1,4 +1,4 @@
-import { applyUpdate, validateOps, type BoardOp, type ShapeSpec } from '../../shared/boardOps.js';
+import { applyUpdate, validateOps, type BoardOp, type RelationalPlace, type ShapeSpec } from '../../shared/boardOps.js';
 import { isCenterArc } from '../../shared/authoredSpecs.js';
 import { applyManipulativeProps, isManipulativeSpec, manipulativeLearnerProps } from '../../shared/manipulativeSpecs.js';
 import type { ManipulativeSceneItem } from '../../shared/manipulativeCheck.js';
@@ -15,6 +15,7 @@ interface BoardContextItem {
   semanticGroupLabel?: string;
   spec: ShapeSpec;
   color?: string;
+  place?: RelationalPlace;
 }
 
 /**
@@ -43,6 +44,7 @@ export class BoardContextTracker {
           ...(group ? { semanticGroupId: group } : {}),
           ...((semanticGroupLabel ?? existing?.semanticGroupLabel) ? { semanticGroupLabel: semanticGroupLabel ?? existing?.semanticGroupLabel } : {}),
           ...(op.color ? { color: op.color } : {}),
+          ...(op.place ? { place: op.place } : {}),
         };
         const index = this.items.findIndex((item) => item.id === op.id);
         if (index < 0) this.items.push(next);
@@ -69,7 +71,7 @@ export class BoardContextTracker {
     const signatures = new Map(
       this.items
         .filter((item) => item.owner === 'tutor' && (!semanticGroupId || !item.semanticGroupId || item.semanticGroupId === semanticGroupId))
-        .map((item) => [itemSignature(item.spec, item.color), item.id]),
+        .map((item) => [itemSignature(item.spec, item.color, item.place), item.id]),
     );
     const accepted: BoardOp[] = [];
     const duplicates: Array<{ requestedId: string; existingId: string }> = [];
@@ -78,7 +80,7 @@ export class BoardContextTracker {
         accepted.push(op);
         continue;
       }
-      const signature = itemSignature(op.spec, op.color);
+      const signature = itemSignature(op.spec, op.color, op.place);
       const existingId = signatures.get(signature);
       if (existingId) {
         duplicates.push({ requestedId: op.id, existingId });
@@ -113,6 +115,7 @@ export class BoardContextTracker {
       id: item.id,
       spec: item.spec,
       ...(item.color ? { color: item.color } : {}),
+      ...(item.place ? { place: item.place } : {}),
       ...(item.semanticGroupId ? { semanticGroupId: item.semanticGroupId } : {}),
     }));
   }
@@ -132,6 +135,15 @@ export class BoardContextTracker {
 
   hasObject(id: string): boolean {
     return this.items.some((item) => item.id === id);
+  }
+
+  visibleImage(id: string): { semanticGroupId?: string; spec: Extract<ShapeSpec, { kind: 'image' }> } | null {
+    const item = this.items.find((candidate) => candidate.id === id && candidate.spec.kind === 'image');
+    if (!item || item.spec.kind !== 'image') return null;
+    return {
+      ...(item.semanticGroupId ? { semanticGroupId: item.semanticGroupId } : {}),
+      spec: item.spec,
+    };
   }
 
   /** Draggable/tappable ids the learner may update on Done. */
@@ -208,7 +220,9 @@ export class BoardContextTracker {
   }
 
   private summary(items: BoardContextItem[] = this.items): string {
-    if (items.length === 0) return 'The board is empty.';
+    if (items.length === 0) {
+      return 'The board is blank and ready. Do not mention that it is empty to the learner.';
+    }
     const regionIds = [...new Set(items.map((item) => item.semanticGroupId).filter((id): id is string => Boolean(id)))];
     const lines = items.slice(-60).map((item) => {
       const region = item.semanticGroupId
@@ -255,14 +269,20 @@ export async function loadReleasedBoardContext(repo: DomainRepository, sessionId
   return tracker;
 }
 
-function itemSignature(spec: ShapeSpec, color?: string): string {
-  return JSON.stringify({ spec, color: color ?? null });
+function itemSignature(spec: ShapeSpec, color?: string, place?: RelationalPlace): string {
+  return JSON.stringify({ spec, color: color ?? null, place: place ?? null });
 }
 
 function dependsOn(spec: ShapeSpec, id: string): boolean {
   if (spec.kind === 'label') return spec.target === id;
   if (spec.kind === 'plot') return spec.axes === id;
   if (spec.kind === 'connector') return spec.from === id || spec.to === id;
+  if (spec.kind === 'transform') return spec.target === id;
+  if (spec.kind === 'regionFill' && spec.mode === 'half_plane') return spec.axes === id;
+  if (spec.kind === 'annotate') return (Array.isArray(spec.target) ? spec.target : [spec.target]).some((target) =>
+    target.type === 'semantic' ? target.objectId === id
+      : target.type === 'learner_stroke' ? target.strokeId === id
+        : target.type === 'image_region' ? target.imageId === id : false);
   return false;
 }
 
@@ -294,5 +314,19 @@ function describeSpec(spec: ShapeSpec): string {
     case 'draggable': return `draggable ${spec.handle} at (${spec.at})${spec.label ? ` labelled “${spec.label}”` : ''}`;
     case 'snapZone': return `snap zone ${spec.shape} at (${spec.at})`;
     case 'tappable': return `tap target at (${spec.at})${spec.selected ? ' [selected]' : ''}${spec.label ? ` labelled “${spec.label}”` : ''}`;
+    case 'annotate': return `${spec.style} annotation on ${JSON.stringify(spec.target)}${spec.note ? ` “${spec.note}”` : ''}`;
+    case 'transform': return `${spec.operation.type} transform of ${spec.target}`;
+    case 'panelGrid': return `${spec.rows} by ${spec.cols} panel grid`;
+    case 'regionFill': return `${spec.mode} region fill`;
+    case 'scatter': return `scatter plot with ${spec.points.length} points`;
+    case 'boxplot': return `box plot ${spec.min}, ${spec.q1}, ${spec.median}, ${spec.q3}, ${spec.max}`;
+    case 'histogram': return `histogram with ${spec.bins.length} bins`;
+    case 'isometricSolid': return `isometric solid with ${spec.voxels.length} cubes`;
+    case 'cubeNet': return `cube net with ${spec.faces.length} faces`;
+    case 'planView': return `plan view ${spec.heights.length} by ${spec.heights[0]?.length ?? 0}`;
+    case 'paperFoldHolePunch': return `paper-fold sequence with ${spec.folds.length} folds and ${spec.holes.length} holes`;
+    case 'gridPaper': return `${spec.style} paper ${spec.w} by ${spec.h}`;
+    case 'clock': return `clock showing ${spec.hour}:${String(spec.minute).padStart(2, '0')}`;
+    case 'protractor': return `protractor${spec.angleDeg === undefined ? '' : ` showing ${spec.angleDeg} degrees`}`;
   }
 }

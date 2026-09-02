@@ -5,6 +5,7 @@ import { createRuntimeEvent, type GenerationIdentity, type RuntimeEventEnvelope 
 import type { MetricObservation } from '../../shared/sessionTelemetry';
 import type { BoardDirector, DirectorSceneRequest } from '../board/director';
 import { streamVisual as runStreamingDirector, type StreamingBoardDirector } from '../board/streamingDirector';
+import type { LayoutCorrectionPort } from '../board/layoutCorrection';
 import { openTestDb } from '../store/db';
 import { Repo } from '../store/repo';
 import { connectRealtimeProxy, type ProxyOptions } from './proxy';
@@ -468,7 +469,7 @@ describe('the storyboard runner', () => {
     expect(directorRequest).toMatchObject({
       sectionId: 'lesson-anchor-alt1',
       stageBrief: expect.stringContaining('orient'),
-      boardSummary: expect.stringContaining('board is empty'),
+      boardSummary: expect.stringContaining('blank and ready'),
     });
     // Covering speech waits until the acknowledgement response finishes.
     harness.upstream.emit({ type: 'response.done', response: { id: 'cover-response', status: 'completed', output: [{ type: 'function_call' }] } });
@@ -576,6 +577,103 @@ describe('the storyboard runner', () => {
     expect(harness.progressEvents().at(-1)).toMatchObject({ totalSteps: 2, status: 'active' });
   });
 
+  it('carries structured browser feedback through targeted correction before staging', async () => {
+    const proposal = {
+      template: null,
+      groupLabel: 'Corrected stream',
+      representation: 'diagram',
+      illustration: null,
+      steps: [{
+        id: 'corrected-step', reveal: 'outline', narration: 'The corrected box appears.',
+        ops: [{ op: 'add', id: 'moving-box', color: 'blue', spec: { kind: 'box', at: [500, 300], w: 220, h: 100, text: 'Move me' } }],
+      }],
+    };
+    const layoutCorrection: LayoutCorrectionPort = {
+      async *streamPlacements() {
+        yield '{"placements":[{"id":"moving-box","dx":0,"dy":120,"side":null}]}';
+      },
+    };
+    const streamVisual: StreamingBoardDirector = (request, runtime) => runStreamingDirector({
+      model: { streamPropose: () => (async function* () { yield JSON.stringify(proposal); })() },
+      validateScene: async () => ({ ok: false, issues: ['request browser port required'] }),
+      renderScene: async () => null,
+      layoutCorrection,
+    }, request, runtime);
+    const auditInputs: unknown[] = [];
+    const harness = await connectBoardLed({
+      streamVisual,
+      visionAudit: {
+        model: 'gpt-5.6-luna',
+        reasoningEffort: 'low',
+        inspect: async (input) => {
+          auditInputs.push(input);
+          return { outcome: 'approved', issues: [] };
+        },
+      },
+    });
+    harness.upstream.emit({ type: 'response.created', response: { id: 'cover-correction' } });
+    harness.upstream.emit({
+      type: 'response.function_call_arguments.done', response_id: 'cover-correction', call_id: 'correction-call', name: 'request_visual',
+      arguments: JSON.stringify({
+        schemaVersion: '3.0.0', requestId: 'correction-case', action: 'compare',
+        purpose: 'Separate two ideas', idea: 'two boxes with clear spacing', density: 'minimal',
+      }),
+    });
+    await flushProxy();
+
+    const first = harness.client.sent.find((event) => event.type === 'visual_preflight');
+    expect(first?.payload).toMatchObject({
+      ops: [expect.objectContaining({ id: 'moving-box', spec: expect.objectContaining({ at: [500, 300] }) })],
+    });
+    harness.emitClient('visual_preflight_result', {
+      preflight_id: (first!.payload as { preflight_id?: string }).preflight_id,
+      accepted: false,
+      reasons: ['collision:moving-box:fixed-box'],
+      layout_issues: [{
+        code: 'collision', itemId: 'moving-box', withItemId: 'fixed-box',
+        itemBounds: { x: 390, y: 250, w: 220, h: 100 },
+        withItemBounds: { x: 390, y: 245, w: 220, h: 100 },
+      }],
+    });
+    await flushProxy();
+
+    const preflights = harness.client.sent.filter((event) => event.type === 'visual_preflight');
+    expect(preflights).toHaveLength(2);
+    expect(preflights[1].payload).toMatchObject({
+      ops: [expect.objectContaining({ id: 'moving-box', spec: expect.objectContaining({ at: [500, 420] }) })],
+    });
+    harness.emitClient('visual_preflight_result', {
+      preflight_id: (preflights[1].payload as { preflight_id?: string }).preflight_id,
+      accepted: true,
+      reasons: [],
+      layout_issues: [],
+    });
+    await flushProxy();
+    const render = harness.client.sent.find((event) => event.type === 'visual_render');
+    expect(render?.payload).toMatchObject({
+      ops: [expect.objectContaining({ id: 'moving-box', spec: expect.objectContaining({ at: [500, 420] }) })],
+    });
+    harness.emitClient('visual_render_result', {
+      render_id: (render!.payload as { render_id?: string }).render_id,
+      image_data_url: 'data:image/jpeg;base64,YXVkaXQ=',
+    });
+    await flushProxy();
+    await flushProxy();
+    harness.upstream.emit({
+      type: 'response.done',
+      response: { id: 'cover-correction', status: 'completed', output: [{ type: 'function_call' }] },
+    });
+    await flushProxy();
+    await settleUnscopedCreate(harness, 'cover-correction-followup');
+
+    expect(auditInputs).toHaveLength(1);
+    expect(harness.boardCues()).toHaveLength(1);
+    expect(harness.boardCues()[0].payload).toMatchObject({
+      ops: [expect.objectContaining({ id: 'moving-box', spec: expect.objectContaining({ at: [500, 420] }) })],
+    });
+    expect(harness.repo.listEvents(harness.session.id).filter((event) => event.type === 'directed_scene')).toHaveLength(1);
+  });
+
   it('cancels a queued unrevealed step when the Director tail fails', async () => {
     const firstOp = {
       op: 'add' as const,
@@ -618,6 +716,38 @@ describe('the storyboard runner', () => {
       status: 'abandoned', revealedSteps: 0, totalSteps: 1,
     });
     expect(harness.repo.listEvents(harness.session.id).some((event) => event.type === 'directed_scene')).toBe(false);
+  });
+
+  it('routes an exact number-line intent through the template lane before streaming', async () => {
+    const streamVisual = vi.fn(async () => { throw new Error('streaming Director must not run'); });
+    const harness = await connectBoardLed({ streamVisual: streamVisual as StreamingBoardDirector });
+    harness.upstream.emit({ type: 'response.created', response: { id: 'cover-template' } });
+    harness.upstream.emit({
+      type: 'response.function_call_arguments.done', response_id: 'cover-template', call_id: 'template-call', name: 'request_visual',
+      arguments: JSON.stringify({
+        schemaVersion: '3.0.0', requestId: 'template-case', action: 'compare',
+        purpose: 'Place a value on an exact scale', idea: 'Show a number line from zero to ten and mark five.', density: 'minimal',
+      }),
+    });
+    await flushProxy();
+
+    expect(streamVisual).not.toHaveBeenCalled();
+    const preflight = harness.client.sent.find((event) => event.type === 'visual_preflight');
+    expect(preflight?.payload).toMatchObject({
+      semanticObjectId: 'lesson-anchor-alt1',
+      ops: [expect.objectContaining({ spec: expect.objectContaining({ kind: 'numberline', min: 0, max: 10 }) })],
+    });
+    harness.emitClient('visual_preflight_result', {
+      preflight_id: (preflight!.payload as { preflight_id?: string }).preflight_id,
+      accepted: true,
+      reasons: [],
+    });
+    await flushProxy();
+    await flushProxy();
+
+    expect(harness.progressEvents().at(-1)).toMatchObject({ source: 'template', status: 'active' });
+    expect(harness.boardCues()).toHaveLength(1);
+    expect(harness.toolOutput('template-call')).toMatchObject({ status: 'building', semanticGroupId: 'lesson-anchor-alt1' });
   });
 
   it('falls back to the classic illustration lane before any streamed step is revealed', async () => {
@@ -670,7 +800,7 @@ describe('the storyboard runner', () => {
     const audit = new Promise<{ outcome: 'rejected'; issues: string[] }>((resolve) => { resolveAudit = resolve; });
     const proposal = auditedProposal();
     const streamVisual: StreamingBoardDirector = (request, runtime) => runStreamingDirector({
-      model: { streamProposal: () => (async function* () { yield JSON.stringify(proposal); })() },
+      model: { streamPropose: () => (async function* () { yield JSON.stringify(proposal); })() },
       validateScene: async () => ({ ok: false, issues: ['request browser port required'] }),
       renderScene: async () => null,
       composition: { model: 'gpt-5.6-terra', reasoningEffort: 'low' },
@@ -741,7 +871,7 @@ describe('the storyboard runner', () => {
   it('times out only at the real step-2 boundary and then completes once', async () => {
     let auditAborted = false;
     const streamVisual: StreamingBoardDirector = (request, runtime) => runStreamingDirector({
-      model: { streamProposal: () => (async function* () { yield JSON.stringify(auditedProposal()); })() },
+      model: { streamPropose: () => (async function* () { yield JSON.stringify(auditedProposal()); })() },
       validateScene: async () => ({ ok: false, issues: ['request browser port required'] }),
       renderScene: async () => null,
       composition: { model: 'gpt-5.6-terra', reasoningEffort: 'low' },
@@ -1044,6 +1174,59 @@ describe('the storyboard runner', () => {
     const bridges3 = upstream3.ofType<SystemNote>('conversation.item.create')
       .filter((event) => event.item?.content?.[0]?.text?.includes('unfinished remainder'));
     expect(bridges3).toHaveLength(0);
+  });
+
+  it('routes an explicit exact learner drawing command to the template lane without a model tool call', async () => {
+    const directVisual = vi.fn(async () => { throw new Error('classic Director must not run'); });
+    const harness = await connectBoardLed({ directVisual });
+    await harness.establish();
+    harness.upstream.emit({
+      type: 'response.done',
+      response: { id: 'anchor-response', status: 'completed', output: [{ type: 'function_call' }] },
+    });
+    await flushProxy();
+    expect(harness.boardCues()).toHaveLength(1);
+
+    harness.emitClient('user_text', {
+      text: 'Please add a second number line from zero to ten and mark five.',
+      idempotencyKey: 'explicit-visual-turn-1',
+    });
+    await flushProxy();
+
+    expect(harness.progressEvents()).toContainEqual(expect.objectContaining({
+      source: 'anchor', status: 'abandoned', revealedSteps: 0,
+    }));
+    expect(directVisual).not.toHaveBeenCalled();
+    expect(harness.systemNotes().some((note) =>
+      note.includes('application accepted it') && note.includes('second number line'))).toBe(true);
+    expect(harness.repo.listEventsForInternalAudit(harness.session.id)).toContainEqual(
+      expect.objectContaining({
+        type: 'learner_visual_request',
+        payload: expect.objectContaining({ status: 'accepted', action: 'compare' }),
+      }),
+    );
+
+    const preflight = [...harness.client.sent].reverse().find((event) => event.type === 'visual_preflight');
+    expect(preflight?.payload).toMatchObject({
+      semanticObjectId: 'lesson-anchor-alt1',
+      ops: [expect.objectContaining({ spec: expect.objectContaining({ kind: 'numberline', min: 0, max: 10 }) })],
+    });
+    harness.emitClient('visual_preflight_result', {
+      preflight_id: (preflight!.payload as { preflight_id?: string }).preflight_id,
+      accepted: true,
+      reasons: [],
+    });
+    await flushProxy();
+    await flushProxy();
+
+    expect(harness.repo.listEvents(harness.session.id)).toContainEqual(
+      expect.objectContaining({ type: 'directed_scene' }),
+    );
+    expect(harness.progressEvents().at(-1)).toMatchObject({ source: 'template', status: 'active' });
+    expect(harness.boardCues().at(-1)?.payload).toMatchObject({
+      checkpoint: 'outline',
+    });
+    expect(harness.boardCues().at(-1)?.semanticObjectId).toBe('lesson-anchor-alt1');
   });
 
   it('restores an in-progress build on reconnect and resumes at the first unrevealed step', async () => {

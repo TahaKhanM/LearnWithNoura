@@ -8,9 +8,12 @@ import { createApi } from './api.js';
 import {
   createLiveBoardDirector,
   createLiveStreamingBoardDirector,
+  DEFAULT_STREAMING_RECOVERY_STRATEGY,
 } from './board/directorService.js';
 import { createLiveIllustrationService } from './board/illustrationService.js';
-import { createOpenAIVisionAuditPort } from './board/visionAuditService.js';
+import { M2SmokeBudget } from './board/m2SmokeBudget.js';
+import { createOpenAIImageGroundingProposalPort } from './board/imageGroundingService.js';
+import { createOpenAIVisionAuditPort, createVisionAuditForPipeline } from './board/visionAuditService.js';
 import { illustrationStoreFromRepo } from './board/repoIllustrationStore.js';
 import { fallbackTurns } from './fallbackTutor.js';
 import { createHeadlessSceneValidator, type HeadlessSceneValidatorHandle } from './lesson/headlessSceneValidator.js';
@@ -55,6 +58,17 @@ const openai = runtimeConfig.providerConfigured
 // automated tests — hermetic test runs set the flag explicitly so a locally
 // configured key never triggers live compilation calls.
 const fixtureCompilerForced = process.env.NOURA_LESSON_COMPILER === 'fixture';
+const authorizedM2Smoke = process.env.NOURA_AUTHORIZED_M2_LIVE_SMOKE === 'true';
+if (authorizedM2Smoke && (runtimeConfig.production || !fixtureCompilerForced || !openai || runtimeConfig.directorPipeline !== 'streaming')) {
+  throw new Error('The authorized M2 smoke requires local streaming, a configured provider, and the fixture compiler.');
+}
+const m2SmokeMode = process.env.NOURA_M2_LIVE_SMOKE_MODE === 'corrected_rerun'
+  ? 'corrected_rerun'
+  : 'initial';
+const m2SmokeBudget = authorizedM2Smoke
+  ? new M2SmokeBudget(m2SmokeMode === 'corrected_rerun' ? 0.85 : 1.25, m2SmokeMode)
+  : null;
+const drawingProvider = openai && (!fixtureCompilerForced || authorizedM2Smoke) ? openai : null;
 const boardHarnessUrl = process.env.NOURA_BOARD_HARNESS_URL
   ?? (runtimeConfig.production ? null : 'http://127.0.0.1:5173/dev/board');
 const compilation: LessonCompilationService = openai && !fixtureCompilerForced
@@ -77,9 +91,9 @@ const compilation: LessonCompilationService = openai && !fixtureCompilerForced
 const directorHarness: HeadlessSceneValidatorHandle | null = openai && !fixtureCompilerForced && boardHarnessUrl
   ? createHeadlessSceneValidator({ harnessUrl: boardHarnessUrl })
   : null;
-const illustrationService = openai && !fixtureCompilerForced && runtimeConfig.illustrationsEnabled
+const illustrationService = drawingProvider && runtimeConfig.illustrationsEnabled
   ? createLiveIllustrationService({
-      client: openai,
+      client: drawingProvider,
       imageModel: runtimeConfig.illustrationModel,
       visionModel: runtimeConfig.directorModel,
       visionEffort: runtimeConfig.directorReasoningEffort,
@@ -91,30 +105,41 @@ const illustrationService = openai && !fixtureCompilerForced && runtimeConfig.il
 // the Director remains available in production even when a serverless
 // isolate cannot launch Chromium. A configured harness is still useful for
 // offline compilation and as a non-realtime fallback.
-const boardDirector = openai && !fixtureCompilerForced
+const boardDirector = drawingProvider
   ? createLiveBoardDirector({
-      client: openai,
+      client: drawingProvider,
       model: runtimeConfig.directorModel,
       reasoningEffort: runtimeConfig.directorReasoningEffort,
       harness: directorHarness,
       illustrations: illustrationService,
+      ...(m2SmokeBudget ? { smokeAccounting: m2SmokeBudget } : {}),
     })
   : null;
-const visionAudit = openai && !fixtureCompilerForced
-  ? createOpenAIVisionAuditPort({
-      client: openai,
-      // M0 winner: 100% seeded-defect catch at 8.3% false rejection;
-      // M2 promotes these role settings to independent environment knobs.
-      model: 'gpt-5.6-luna',
-      reasoningEffort: 'low',
+const visionAudit = drawingProvider
+  ? createVisionAuditForPipeline(runtimeConfig.directorPipeline, () => createOpenAIVisionAuditPort({
+      client: drawingProvider,
+      // M0 evidence: 100% seeded-defect catch at 8.3% false rejection.
+      // Audit role settings are independent from composition and text roles.
+      model: runtimeConfig.visionAuditModel,
+      reasoningEffort: runtimeConfig.visionAuditReasoningEffort,
+      ...(m2SmokeBudget ? { smokeAccounting: m2SmokeBudget } : {}),
+    }))
+  : null;
+const imageGroundingProposal = drawingProvider && visionAudit
+  ? createOpenAIImageGroundingProposalPort({
+      client: drawingProvider,
+      model: runtimeConfig.visionAuditModel,
+      reasoningEffort: runtimeConfig.visionAuditReasoningEffort,
     })
   : null;
-const streamingBoardDirector = openai && !fixtureCompilerForced && runtimeConfig.directorPipeline === 'streaming'
+const streamingBoardDirector = drawingProvider && runtimeConfig.directorPipeline === 'streaming'
   ? createLiveStreamingBoardDirector({
-      client: openai,
+      client: drawingProvider,
       model: runtimeConfig.directorModel,
       reasoningEffort: runtimeConfig.directorReasoningEffort,
       harness: directorHarness,
+      recoveryStrategy: DEFAULT_STREAMING_RECOVERY_STRATEGY,
+      ...(m2SmokeBudget ? { smokeAccounting: m2SmokeBudget } : {}),
     })
   : null;
 
@@ -151,6 +176,20 @@ app.get(['/version', '/api/version'], (_req, res) => {
   });
 });
 
+if (m2SmokeBudget) {
+  app.get('/api/dev/m2-smoke-budget', (_req, res) => {
+    res.json({
+      ...m2SmokeBudget.snapshot(),
+      configuration: {
+        directorModel: runtimeConfig.directorModel,
+        directorReasoningEffort: runtimeConfig.directorReasoningEffort,
+        visionAuditModel: runtimeConfig.visionAuditModel,
+        visionAuditReasoningEffort: runtimeConfig.visionAuditReasoningEffort,
+        recoveryStrategy: DEFAULT_STREAMING_RECOVERY_STRATEGY,
+      },
+    });
+  });
+}
 app.use('/api', createApi(repo, openai, runtimeConfig.textModel, security.apiSecurity(), runtimeConfig, compilation));
 
 const sidebandRegistry = new SidebandRegistry();
@@ -184,18 +223,26 @@ app.post('/api/webrtc-call', express.text({ type: 'application/sdp', limit: '256
     res.status(429).json({ error: 'Too many voice call attempts. Try again shortly.' });
     return;
   }
-  const result = await bootstrapVoiceCall({
-    repo,
-    apiKey: process.env.OPENAI_API_KEY,
-    model: runtimeConfig.realtimeModel,
-    registry: sidebandRegistry,
-    log: (line) => console.log(`[realtime] ${line}`),
-  }, { sessionId, offerSdp });
-  if (!result.ok) {
-    res.status(result.status).json({ error: result.error });
-    return;
+  const smokeCallId = m2SmokeBudget?.begin('realtime', runtimeConfig.realtimeModel, 'low');
+  try {
+    const result = await bootstrapVoiceCall({
+      repo,
+      apiKey: process.env.OPENAI_API_KEY,
+      model: runtimeConfig.realtimeModel,
+      registry: sidebandRegistry,
+      log: (line) => console.log(`[realtime] ${line}`),
+    }, { sessionId, offerSdp });
+    if (result.ok === false) {
+      if (smokeCallId) m2SmokeBudget?.markFailed(smokeCallId);
+      res.status(result.status).json({ error: result.error });
+      return;
+    }
+    if (smokeCallId) m2SmokeBudget?.markCompleted(smokeCallId);
+    res.status(200).type('application/sdp').send(result.answerSdp);
+  } catch (error) {
+    if (smokeCallId) m2SmokeBudget?.markFailed(smokeCallId);
+    throw error;
   }
-  res.status(200).type('application/sdp').send(result.answerSdp);
 });
 
 app.post('/api/fallback-turn', async (req, res) => {
@@ -446,6 +493,7 @@ server.on('upgrade', async (request, socket, head) => {
       ...(boardDirector ? { directVisual: boardDirector } : {}),
       ...(streamingBoardDirector ? { streamVisual: streamingBoardDirector } : {}),
       ...(visionAudit ? { visionAudit } : {}),
+      ...(imageGroundingProposal ? { imageGroundingProposal } : {}),
       log: (line) => console.log(`[realtime] ${line}`),
       onLifecycle: (lifecycle) => proxyLifecycles.register(lifecycle),
     }).catch(() => {

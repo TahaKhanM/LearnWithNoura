@@ -588,21 +588,24 @@ export async function runConditionProbe(
   return combinedResult;
 }
 
-async function blindRasterGrade(
+export async function blindRasterGrade(
   client: OpenAI,
   spend: SpendGuard,
   intent: DirectorEvalIntent,
   rasters: string[],
   storyboard: Array<{ reveal: string; narration: string }>,
+  maxAttempts = 3,
+  maxTransportAttempts: 1 | 2 | 3 = 3,
 ): Promise<{ grade: number; reasons: string[]; valid: boolean }> {
   const reserve = judgeCallReserveUsd();
   const judgeModel = rubric.judgeModel as 'gpt-5.6-luna';
-  for (let semanticAttempt = 1; semanticAttempt <= 3; semanticAttempt += 1) {
+  for (let semanticAttempt = 1; semanticAttempt <= maxAttempts; semanticAttempt += 1) {
     const { response } = await runAccountedChatCompletion({
     spend,
     phase: 'judge',
     model: judgeModel,
     reserveUsd: reserve,
+    maxTransportAttempts,
     request: () => client.chat.completions.create({
     model: rubric.judgeModel,
     reasoning_effort: rubric.judgeReasoningEffort as 'low',
@@ -636,7 +639,7 @@ async function blindRasterGrade(
     }),
     });
     const graded = parseJudgeGrade(response.choices[0]?.message?.content ?? '');
-    if (graded.valid || semanticAttempt === 3) return graded;
+    if (graded.valid || semanticAttempt === maxAttempts) return graded;
     spend.judgeInvalidResponseRetries += 1;
   }
   return { grade: 1, reasons: ['Judge response was invalid JSON.'], valid: false };
@@ -659,7 +662,7 @@ function parseJudgeGrade(text: string): { grade: number; reasons: string[]; vali
   }
 }
 
-async function renderStoryboardRasters(
+export async function renderStoryboardRasters(
   harness: ReturnType<typeof createHeadlessSceneValidator>,
   intent: DirectorEvalIntent,
   scene: ReturnType<typeof buildDirectedScene>,

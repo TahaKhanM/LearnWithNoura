@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { DirectorSceneRequest } from './director.js';
-import type { DirectorStreamModelPort } from './directorStreamingService.js';
+import type { SceneModelPort } from './directorStreamingService.js';
+import type { LayoutCorrectionPort } from './layoutCorrection.js';
 import { StreamingDirectorPrecommitError, streamVisual } from './streamingDirector.js';
 
 describe('streaming Board Director', () => {
@@ -10,8 +11,8 @@ describe('streaming Board Director', () => {
     const secondStart = text.indexOf(JSON.stringify(proposal.steps[1]));
     const releaseTail = deferred<void>();
     const firstDelivered = deferred<void>();
-    const port: DirectorStreamModelPort = {
-      streamProposal: () => controlledChunks(
+    const port: SceneModelPort = {
+      streamPropose: () => controlledChunks(
         text.slice(0, secondStart + 10),
         text.slice(secondStart + 10),
         releaseTail.promise,
@@ -41,8 +42,77 @@ describe('streaming Board Director', () => {
     expect(validateScene.mock.calls.map(([ops]) => ops.length)).toEqual([1, 2]);
   });
 
+  it('validates every cumulative step in the existing board context', async () => {
+    const input = request();
+    input.currentBoardOps = [{
+      op: 'add', id: 'existing', color: 'ink',
+      spec: { kind: 'line', from: [80, 80], to: [920, 80] },
+    }];
+    input.visibleObjectIds = ['existing'];
+    const validatedIds: string[][] = [];
+    const result = await streamVisual({
+      model: { streamPropose: () => oneChunk(JSON.stringify(scene())) },
+      validateScene: async (ops) => {
+        const ids = ops.flatMap((op) => op.op === 'add' ? [op.id] : []);
+        validatedIds.push(ids);
+        return ids.includes('existing')
+          ? { ok: true as const }
+          : { ok: false as const, issues: ['existing board context is missing'] };
+      },
+      renderScene: async () => null,
+    }, input, {
+      signal: new AbortController().signal,
+      onStep: async () => {},
+    });
+
+    expect(result.ok).toBe(true);
+    expect(validatedIds).toEqual([
+      ['existing', 'a'],
+      ['existing', 'a', 'b'],
+    ]);
+  });
+
+  it('runs one targeted placement correction before rejecting browser layout', async () => {
+    const proposal = { ...scene(), steps: [step('s1', 'a')] };
+    const streamPlacements = vi.fn(() => oneChunk(
+      '{"placements":[{"id":"a","dx":0,"dy":120,"side":null}]}',
+    ));
+    const layoutCorrection: LayoutCorrectionPort = { streamPlacements };
+    const validateScene = vi.fn(async (ops: Array<{ op: string; id?: string; spec?: { at?: [number, number] } }>) =>
+      ops[0]?.spec?.at?.[1] === 420
+        ? { ok: true as const }
+        : {
+            ok: false as const,
+            issues: ['collision:a:fixed'],
+            layoutIssues: [{
+              code: 'collision' as const,
+              itemId: 'a',
+              withItemId: 'fixed',
+              itemBounds: { x: 390, y: 250, w: 220, h: 100 },
+              withItemBounds: { x: 390, y: 245, w: 220, h: 100 },
+            }],
+          });
+    const delivered: Array<[number, number] | undefined> = [];
+    const result = await streamVisual({
+      model: { streamPropose: () => oneChunk(JSON.stringify(proposal)) },
+      validateScene: validateScene as never,
+      renderScene: async () => null,
+      layoutCorrection,
+    }, request(), {
+      signal: new AbortController().signal,
+      onStep: async (candidate) => {
+        delivered.push(candidate.ops[0]?.spec.kind === 'box' ? candidate.ops[0].spec.at : undefined);
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(streamPlacements).toHaveBeenCalledOnce();
+    expect(validateScene).toHaveBeenCalledTimes(2);
+    expect(delivered).toEqual([[500, 420]]);
+  });
+
   it('fails closed on a later cumulative browser rejection while keeping the first callback', async () => {
-    const port: DirectorStreamModelPort = { streamProposal: () => oneChunk(JSON.stringify(scene())) };
+    const port: SceneModelPort = { streamPropose: () => oneChunk(JSON.stringify(scene())) };
     const delivered: string[] = [];
     const result = await streamVisual({
       model: port,
@@ -67,8 +137,8 @@ describe('streaming Board Director', () => {
     const text = JSON.stringify(proposal);
     const secondStart = text.indexOf(JSON.stringify(proposal.steps[1]));
     const controller = new AbortController();
-    const port: DirectorStreamModelPort = {
-      streamProposal: () => controlledChunks(
+    const port: SceneModelPort = {
+      streamPropose: () => controlledChunks(
         text.slice(0, secondStart + 10),
         text.slice(secondStart + 10),
         Promise.resolve(),
@@ -104,7 +174,7 @@ describe('streaming Board Director', () => {
     };
     const onStep = vi.fn(async () => {});
     const result = await streamVisual({
-      model: { streamProposal: () => oneChunk(JSON.stringify(proposal)) },
+      model: { streamPropose: () => oneChunk(JSON.stringify(proposal)) },
       validateScene: async () => ({ ok: true }),
       renderScene: async () => null,
     }, request(), {
@@ -120,10 +190,62 @@ describe('streaming Board Director', () => {
     expect(onStep).not.toHaveBeenCalled();
   });
 
+  it('short-circuits a non-null stream head into the exact deterministic template', async () => {
+    let consumedTail = false;
+    const providerSignals: AbortSignal[] = [];
+    const steps: string[] = [];
+    const input = request();
+    input.idea = 'Compare 7/12 and 5/8 on one exact fraction strip.';
+    const result = await streamVisual({
+      model: {
+        streamPropose: ({ signal }) => {
+          providerSignals.push(signal);
+          return (async function* () {
+            yield '{"template":"fraction_comparison",';
+            consumedTail = true;
+            yield '"groupLabel":"must not be consumed"}';
+          })();
+        },
+      },
+      validateScene: async () => ({ ok: true }),
+      renderScene: async () => null,
+    }, input, {
+      signal: new AbortController().signal,
+      onStep: async (step) => { steps.push(step.step.id); },
+    });
+
+    expect(result).toMatchObject({ ok: true, scene: { template: 'fraction_comparison' } });
+    expect(steps.length).toBeGreaterThan(0);
+    expect(consumedTail).toBe(false);
+    expect(providerSignals[0]?.aborted).toBe(true);
+  });
+
+  it('maps provider exceptions to closed failure codes', async () => {
+    const result = await streamVisual({
+      model: {
+        streamPropose: () => (async function* () {
+          yield await Promise.reject<string>(new Error('PRIVATE PROVIDER FAILURE TEXT'));
+        })(),
+      },
+      validateScene: async () => ({ ok: true }),
+      renderScene: async () => null,
+    }, request(), {
+      signal: new AbortController().signal,
+      onStep: async () => {},
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      reasons: ['director_stream_error:provider'],
+      retryable: true,
+    });
+    expect(JSON.stringify(result)).not.toContain('PRIVATE PROVIDER FAILURE TEXT');
+  });
+
   it('records first-op telemetry only after the realtime precommit callback succeeds', async () => {
     const timings = vi.fn();
     const result = await streamVisual({
-      model: { streamProposal: () => oneChunk(JSON.stringify(scene())) },
+      model: { streamPropose: () => oneChunk(JSON.stringify(scene())) },
       validateScene: async () => ({ ok: true }),
       renderScene: async () => null,
       composition: { model: 'gpt-5.6-terra', reasoningEffort: 'low' },

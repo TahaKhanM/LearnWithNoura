@@ -4,12 +4,14 @@ import {
   type CompiledLesson,
 } from '../../shared/compiledLesson.js';
 
-/** Marks a conversation-led plan that is safe to teach from immediately
- * while the live compiler may still replace it with a stronger artifact. */
+/** Marks the metadata-bearing pending artifact used while the live compiler
+ * prepares the real lesson. Realtime refuses pending compilation records, so
+ * this can preserve the normalized objective without ever becoming the plan
+ * a running call snapshots. */
 export const PROVISIONAL_COMPILER_MODEL = 'provisional-conversation';
 
-/** Instant conversation-led lesson so Preparing does not block on the
- * compiler. Production still runs the live compiler in the background. */
+/** Deterministic pending artifact. Production shows Preparing until the live
+ * compiler promotes the record to ready. */
 export function compileProvisionalConversationLesson(input: {
   lessonKey: string;
   goal: string;

@@ -1,4 +1,4 @@
-export type LiveEvalPhase = 'warmup' | 'composition' | 'judge' | 'vision_audit' | 'sketch';
+export type LiveEvalPhase = 'warmup' | 'composition' | 'judge' | 'vision_audit' | 'sketch' | 'layout_correction' | 'recovery_escalation' | 'image_grounding';
 export type LiveEvalModel = 'gpt-5.6-terra' | 'gpt-5.6-luna';
 
 export interface SpendUsageEvidence {

@@ -34,9 +34,11 @@ export async function runAccountedChatCompletion(input: {
   reserveUsd: number;
   request: () => Promise<OpenAI.Chat.Completions.ChatCompletion>;
   retryDelay?: (attempt: 2 | 3) => Promise<void>;
+  maxTransportAttempts?: 1 | 2 | 3;
 }): Promise<{ response: OpenAI.Chat.Completions.ChatCompletion; costUsd: number }> {
   let lastError: unknown;
-  for (let attempt = 1; attempt <= 3; attempt += 1) {
+  const maxTransportAttempts = input.maxTransportAttempts ?? 3;
+  for (let attempt = 1; attempt <= maxTransportAttempts; attempt += 1) {
     if (attempt > 1) {
       const retryAttempt = attempt as 2 | 3;
       await (input.retryDelay ?? defaultRetryDelay)(retryAttempt);
@@ -68,7 +70,7 @@ export async function runAccountedChatCompletion(input: {
       lastError = error;
     }
   }
-  throw new StudyProviderError(`${input.phase} provider call failed after two bounded retries.`, {
+  throw new StudyProviderError(`${input.phase} provider call failed after ${maxTransportAttempts} bounded attempt${maxTransportAttempts === 1 ? '' : 's'}.`, {
     cause: lastError,
   });
 }

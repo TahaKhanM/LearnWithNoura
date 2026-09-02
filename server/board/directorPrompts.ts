@@ -26,14 +26,18 @@ const DIRECTOR_KIND_LIST = `- {"kind":"line","from":[x,y],"to":[x,y]} options "a
 - {"kind":"asset","assetId":"sun|cloud|raindrop|leaf|tree|root|atom|cell|magnet|battery|bulb|thermometer|heart|lungs|globe|mountain|river|volcano|gear|scale|beaker|cycle|person|book|…","at":[x,y],"size":72,"label":"optional"} — curated local icons. Prefer an asset when a simple silhouette teaches faster than constructed geometry (weather, organisms, lab tools). Prefer exact geometry for measured maths.
 - {"kind":"draggable","handle":"point|token|piece","at":[x,y],"size":44,"label":"marker"} — learner-movable tokens checked by a stage manipulativeCheck (never emit without a matching check spec)
 - {"kind":"snapZone","shape":"box|interval|point","at":[x,y],...} — invisible or dashed drop targets paired with draggable checks
-- {"kind":"tappable","shape":"circle|box","at":[x,y],"label":"acute angle"} — tap-to-choose targets for selected-predicate checks`;
+- {"kind":"tappable","shape":"circle|box","at":[x,y],"label":"acute angle"} — tap-to-choose targets for selected-predicate checks
+- {"kind":"annotate","style":"circle|underline|arrow|tick|cross|bracket|callout|highlighter","target":{"type":"semantic","objectId":"id","anchor":"vertex:0"}} — code resolves the target and computes annotation geometry
+- {"kind":"transform","target":"id","operation":{"type":"rotate","angleDeg":90}} — rotate, reflect, translate, or enlarge a referenced object; never calculate final coordinates
+- Curriculum primitives with code-owned geometry: panelGrid, regionFill (venn/fraction/half_plane/polygon), scatter, boxplot, histogram, isometricSolid, cubeNet, planView, paperFoldHolePunch, gridPaper, clock, protractor. Supply their measured values and categorical parameters exactly.`;
 
 const DIRECTOR_HARD_RULES = `- Add operations only. Nothing visible may be erased, cleared, replaced, or updated.
 - New ids must be short, unique, and must not collide with visible board object ids.
 - Stay well inside the board and the object budget you were given; fewer, larger, clearer objects beat clutter.
 - The storyboard reveals every new object exactly once, in a teachable order (structure first, then relations, then labels, then connectors, then emphasis).
 - Each narration beat is 1–2 short spoken sentences a child understands, about exactly the objects that step reveals. Never mention drawing, tools, or ids in narration.
-- If the request names visible objects, design beside them and refer to them in narration by their meaning, never redraw them.`;
+- If the request names visible objects, design beside them and refer to them in narration by their meaning, never redraw them.
+- Prefer add-op place:{"anchor":"objectId","side":"above|below|left|right|inside|on","gap":n,"align":"start|center|end"} for labels, annotations, and qualitative relations. Emit structural anchors first; keep absolute coordinates for exact quantitative geometry.`;
 
 const ILLUSTRATION_GUIDANCE = `
 Illustration vs diagram:

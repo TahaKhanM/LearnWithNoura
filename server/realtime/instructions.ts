@@ -64,7 +64,7 @@ export function lessonExecutionContext(
   ];
   if (blueprint.mode === 'conversation_led' || !anchorScene) {
     lines.push(
-      'This lesson has no pre-validated scene. Allowed board mutation none means no required scene change — it does not forbid drawing. If the learner asks you to draw, or a simple picture would help, call board_ops immediately. A blank board is allowed; the first marks do not need existing object ids. Never say you cannot draw.',
+      'This lesson has no pre-validated anchor. Allowed board mutation none means no required scene change — it does not forbid a useful visual. When a new representation would help or the learner asks for one, call request_visual with action establish; the Board Director designs it and the learner browser validates it. Use board_ops only for a small increment on work that is already visible. Never tell the learner you cannot draw.',
     );
   }
   if (blueprint.detourStack.length > 0) {

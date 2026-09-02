@@ -18,6 +18,7 @@ import {
 import type { BoardDirector } from '../board/director.js';
 import type { StreamingBoardDirector } from '../board/streamingDirector.js';
 import { VISION_AUDIT_BUDGET_MS, type VisionAuditPort } from '../board/visionAudit.js';
+import type { ImageGroundingProposalPort } from '../board/imageGrounding.js';
 import type { ClientCueOptional, CoordinatorContext, CoordinatorState } from './coordinatorContext.js';
 import type { GenerationIdentity } from '../../shared/runtimeProtocol.js';
 import { latestVoiceCallId, type SidebandRegistry } from './callBootstrap.js';
@@ -67,6 +68,7 @@ export interface ProxyOptions {
   /** Streaming Director pipeline; absent keeps the classic rollback path. */
   streamVisual?: StreamingBoardDirector;
   visionAudit?: VisionAuditPort;
+  imageGroundingProposal?: ImageGroundingProposalPort;
   visionAuditBudgetMs?: number;
   /** How long one storyboard step may await visibility confirmation. */
   stepRevealTimeoutMs?: number;
@@ -102,6 +104,7 @@ function createCoordinatorState(goal: string): CoordinatorState {
     terminalTelemetryResponses: new Set(),
     reportedPlaybackResponses: new Set(),
     pendingBoardOps: new Map(),
+    pendingImageGroundings: new Map(),
     activeResponseId: null,
     speechInProgress: false,
     endpointingEagerness: 'medium',
@@ -120,6 +123,7 @@ function createCoordinatorState(goal: string): CoordinatorState {
     visualRequestEpoch: 0,
     activeVisualRequestAbortController: null,
     abandonedVisualRequests: new Set(),
+    pendingExplicitVisualRequest: null,
     planStagedThisTurn: false,
     planAttemptsThisTurn: 0,
     objectsCreatedThisTurn: new Set(),
@@ -221,13 +225,17 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
     log,
     telemetryWriter,
     telemetryRepo,
-    preflightTimeoutMs: options.preflightTimeoutMs ?? 1_200,
+    // Font readiness and a cold client render can exceed one second on a
+    // real device. This is off the audio plane, so prefer a truthful bounded
+    // wait over rejecting a valid scene during normal startup variance.
+    preflightTimeoutMs: options.preflightTimeoutMs ?? 4_000,
     visibilityTimeoutMs: options.visibilityTimeoutMs ?? 15_000,
     planDetour: options.planDetour ?? null,
     detourPlanTimeoutMs: options.detourPlanTimeoutMs ?? DETOUR_PLAN_TIMEOUT_MS,
     directVisual: options.directVisual ?? null,
     streamVisual: options.streamVisual ?? null,
     visionAudit: options.visionAudit ?? null,
+    imageGroundingProposal: options.imageGroundingProposal ?? null,
     visionAuditBudgetMs: options.visionAuditBudgetMs ?? VISION_AUDIT_BUDGET_MS,
     stepRevealTimeoutMs: options.stepRevealTimeoutMs ?? 45_000,
     state,

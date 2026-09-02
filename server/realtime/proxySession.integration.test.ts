@@ -100,8 +100,7 @@ describe('raw Realtime sideband to playback-bound session integration', () => {
       characterAttentionTarget: 'learner',
     });
     expect(harness.session.getSnapshot().captions.map((caption) => caption.text)).toEqual([
-      'Repeated phrase.',
-      'Repeated phrase later?',
+      'Repeated phrase. Repeated phrase later?',
     ]);
 
     // The client relayed the heard duration for the server's audio telemetry.

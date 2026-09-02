@@ -104,7 +104,7 @@ function restoreStoryboardRun(ctx: CoordinatorContext, events: StoredEvents): vo
     if (event.type === 'storyboard_progress') {
       const payload = event.payload as Partial<StoredProgress>;
       if (typeof payload.runId === 'string' &&
-          (payload.source === 'anchor' || payload.source === 'director') &&
+          (payload.source === 'anchor' || payload.source === 'template' || payload.source === 'director') &&
           typeof payload.revealedSteps === 'number' &&
           typeof payload.totalSteps === 'number' &&
           typeof payload.status === 'string') {

@@ -11,8 +11,10 @@ export class FakeVoiceTransport implements VoiceTransport {
   micEnergy = 0;
   voiceEnergy = 0;
   playbackClears = 0;
+  suppressedResponses = new Set<string>();
   private handlers: VoiceTransportHandlers;
   private activeResponseId: string | null = null;
+  private responseHint: string | null = null;
   private playedSoFarMs = 0;
 
   constructor(handlers: VoiceTransportHandlers) {
@@ -21,8 +23,21 @@ export class FakeVoiceTransport implements VoiceTransport {
 
   connect(): Promise<void> {
     this.state = 'connected';
+    this.handlers.onMicrophoneState?.(true, false);
     this.handlers.onStateChange('connected');
     return Promise.resolve();
+  }
+
+  noteResponse(responseId: string): void {
+    this.responseHint = responseId;
+  }
+
+  suppressResponse(responseId: string): void {
+    this.suppressedResponses.add(responseId);
+  }
+
+  resumePlayback(): Promise<boolean> {
+    return Promise.resolve(true);
   }
 
   setMicMuted(muted: boolean): void {
@@ -61,13 +76,13 @@ export class FakeVoiceTransport implements VoiceTransport {
   /** Simulates provider playback boundaries arriving on the data channel. */
   emitBoundary(boundary: PlaybackBoundary, responseId: string | null, playedMs = 0): void {
     if (boundary === 'started') {
-      this.activeResponseId = responseId;
+      this.activeResponseId = responseId ?? this.responseHint;
       this.playedSoFarMs = 0;
     } else {
       this.playedSoFarMs = 0;
       this.activeResponseId = null;
     }
-    this.handlers.onPlaybackBoundary(boundary, responseId, playedMs);
+    this.handlers.onPlaybackBoundary(boundary, responseId ?? this.responseHint, playedMs);
   }
 
   /** Advances the local playback clock without emitting a boundary. */
@@ -76,6 +91,7 @@ export class FakeVoiceTransport implements VoiceTransport {
   }
 
   fail(): void {
+    this.handlers.onPlaybackFailure?.(this.activeResponseId, 'connection_failed');
     this.state = 'failed';
     this.handlers.onStateChange('failed');
   }

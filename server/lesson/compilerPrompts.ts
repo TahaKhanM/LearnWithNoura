@@ -37,6 +37,8 @@ export const AUTHOR_LESSON_PROMPT = `You are the lesson compiler for Noura, a vo
 
 Requirements:
 - 3-5 stages. Each stage has: id (short slug), kind (orient|model|guided_check|independent_check|closure), objective, boardPurpose, allowedBoardMutation, learnerOpportunity (what the child gets to do), evidenceExpected.
+- boardPurpose must be exactly one of: establish_anchor, reveal_relation, demonstrate_change, compare_cases, elicit_learner_work, test_prediction, summarize, none.
+- allowedBoardMutation must be exactly one of: establish, extend, emphasize, none.
 - At least one stage carries checks: exact child-facing questionOrTask wording, responseMode (one of "voice", "text", "draw", "choice", "mixed", "manipulate"), optional targetObjectIds naming anchor objects the question is about, optional manipulativeCheck when responseMode is "manipulate", and misconceptions — anticipated wrong answers each with a concrete tactic.
 - Decide the mode. board_led when a picture genuinely carries the idea; conversation_led when talk serves better (stories, reflection, pure discussion). conversation_led lessons get anchor: null and every stage boardPurpose "none", allowedBoardMutation "none".
 - board_led lessons need exactly one anchor scene and at least one stage with allowedBoardMutation "establish" (boardPurpose "establish_anchor").
@@ -51,7 +53,7 @@ Reply with JSON only:
 {
   "mode": "board_led|conversation_led",
   "successCriteria": ["..."],
-  "stages": [{"id":"...","kind":"...","objective":"...","boardPurpose":"...","allowedBoardMutation":"...","learnerOpportunity":"...","evidenceExpected":"...","checks":[{"id":"...","questionOrTask":"...","responseMode":"voice|text|draw|choice|mixed|manipulate","targetObjectIds":["..."],"manipulativeCheck":{"targetId":"...","predicate":"within|selected|snapped","snapZoneId":"...","tolerance":12},"misconceptions":[{"anticipatedAnswer":"...","tactic":"..."}]}]}],
+  "stages": [{"id":"...","kind":"orient|model|guided_check|independent_check|closure","objective":"...","boardPurpose":"establish_anchor|reveal_relation|demonstrate_change|compare_cases|elicit_learner_work|test_prediction|summarize|none","allowedBoardMutation":"establish|extend|emphasize|none","learnerOpportunity":"...","evidenceExpected":"...","checks":[{"id":"...","questionOrTask":"...","responseMode":"voice|text|draw|choice|mixed|manipulate","targetObjectIds":["..."],"manipulativeCheck":{"targetId":"...","predicate":"within|selected|snapped","snapZoneId":"...","tolerance":12},"misconceptions":[{"anticipatedAnswer":"...","tactic":"..."}]}]}],
   "anchor": {"kind":"template","domain":"...","groupLabel":"...","template":"...","parameters":{},"instructionalQuestion":"...","narrations":{"outline":"...","relation":"...","label":"...","connector":"...","emphasis":"..."}} | null
 }
 

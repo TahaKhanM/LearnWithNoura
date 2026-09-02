@@ -64,6 +64,12 @@ const SectionNavigationCauseSchema = z.enum([
 ]);
 
 const TutorObjectDisappearanceCauseSchema = z.enum(['scene_mutation', 'unknown']);
+const MediaPlaybackOutcomeSchema = z.enum([
+  'autoplay_blocked',
+  'resumed',
+  'connection_failed',
+  'not_played',
+]);
 
 export const TELEMETRY_GAP_REASONS = [
   'server_queue_overflow',
@@ -163,10 +169,15 @@ export const MetricInputSchema = z.discriminatedUnion('name', [
     name: z.literal('storyboard_outcome'),
     dimensions: z.object({
       outcome: z.enum(['completed', 'abandoned']),
-      source: z.enum(['anchor', 'director']),
+      source: z.enum(['anchor', 'template', 'director']),
       revealedSteps: nonNegativeInt,
       totalSteps: nonNegativeInt,
     }),
+  }),
+  z.object({
+    ...countMetricBase,
+    name: z.literal('media_playback_outcome'),
+    dimensions: z.object({ outcome: MediaPlaybackOutcomeSchema }),
   }),
   z.object({
     schemaVersion,

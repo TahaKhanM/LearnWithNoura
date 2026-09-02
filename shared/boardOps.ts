@@ -21,9 +21,10 @@ import {
   type ImageSpec,
   type SnapZoneSpec,
   type TappableSpec,
+  type CurriculumSpec,
 } from './authoredSpecs.js';
 
-export type { ArcSpec, AssetSpec, CurveSpec, DraggableSpec, ImageSpec, SnapZoneSpec, TappableSpec } from './authoredSpecs.js';
+export type { ArcSpec, AssetSpec, CurveSpec, DraggableSpec, ImageSpec, SnapZoneSpec, TappableSpec, CurriculumSpec } from './authoredSpecs.js';
 export { AUTHORED_ONLY_KINDS } from './authoredSpecs.js';
 export { MIN_MANIPULATIVE_HIT_PX } from './manipulativeSpecs.js';
 
@@ -194,6 +195,24 @@ export interface PathSpec {
   width?: number;
 }
 
+export type AnnotationStyle = 'circle' | 'underline' | 'arrow' | 'tick' | 'cross' | 'bracket' | 'callout' | 'highlighter';
+export type ImageRegionSelector =
+  | { type: 'FragmentSelector'; unit: 'percent'; x: number; y: number; w: number; h: number }
+  | { type: 'SvgSelector'; points: Vec[] }
+  | { type: 'PointSelector'; x: number; y: number };
+export type AnchorRef =
+  | { type: 'semantic'; objectId: string; anchor?: string }
+  | { type: 'learner_stroke'; strokeId: string; anchor?: 'start' | 'middle' | 'end' }
+  | { type: 'image_region'; imageId: string; selector: ImageRegionSelector }
+  | { type: 'point'; at: Vec };
+
+export interface AnnotateSpec {
+  kind: 'annotate';
+  style: AnnotationStyle;
+  target: AnchorRef | AnchorRef[];
+  note?: string;
+}
+
 export type ShapeSpec =
   | LineSpec
   | PolygonSpec
@@ -212,21 +231,31 @@ export type ShapeSpec =
   | ConnectorSpec
   | TableSpec
   | PathSpec
+  | AnnotateSpec
   | ArcSpec
   | CurveSpec
   | AssetSpec
   | ImageSpec
   | DraggableSpec
   | SnapZoneSpec
-  | TappableSpec;
+  | TappableSpec
+  | CurriculumSpec;
 
 export type SpecKind = ShapeSpec['kind'];
+
+export interface RelationalPlace {
+  anchor: string;
+  side: 'above' | 'below' | 'left' | 'right' | 'inside' | 'on';
+  gap: number;
+  align: 'start' | 'center' | 'end';
+}
 
 export interface AddOp {
   op: 'add';
   id: string;
   color?: string;
   spec: ShapeSpec;
+  place?: RelationalPlace;
   /** Region membership for current-board rasters. Not accepted from the voice model. */
   semanticGroupId?: string;
 }
@@ -278,11 +307,48 @@ function clamp(v: number, lo: number, hi: number): number {
 }
 
 function vec(v: unknown, pad = 0): Vec | null {
-  if (!Array.isArray(v) || v.length < 2) return null;
-  const x = num(v[0]);
-  const y = num(v[1]);
-  if (x === null || y === null) return null;
-  return [clamp(x, -pad, BOARD_W + pad), clamp(y, -pad, BOARD_H + pad)];
+  if (Array.isArray(v) && v.length >= 2) {
+    const x = num(v[0]);
+    const y = num(v[1]);
+    if (x === null || y === null) return null;
+    return [clamp(x, -pad, BOARD_W + pad), clamp(y, -pad, BOARD_H + pad)];
+  }
+  if (typeof v === 'object' && v !== null) {
+    const rec = v as { x?: unknown; y?: unknown };
+    const x = num(rec.x);
+    const y = num(rec.y);
+    if (x === null || y === null) return null;
+    return [clamp(x, -pad, BOARD_W + pad), clamp(y, -pad, BOARD_H + pad)];
+  }
+  return null;
+}
+
+/** Voice models routinely emit everyday names (`triangle`) and `{x,y}`
+ * points. Fold those into the canonical spec before validation. */
+function normalizeRawSpec(raw: RawOp): RawOp {
+  const kind = String(raw.kind ?? raw.type ?? '').trim().toLowerCase();
+  const aliased =
+    kind === 'triangle' ? 'polygon'
+    : kind === 'square' || kind === 'rectangle' || kind === 'rect' ? 'polygon'
+    : kind === 'arrow' ? 'line'
+    : raw.kind ?? raw.type;
+  const next: RawOp = { ...raw, kind: aliased };
+  if ((kind === 'square' || kind === 'rectangle' || kind === 'rect') && next.points == null) {
+    const at = vec(raw.at) ?? vec(raw.center);
+    const width = num(raw.w) ?? num(raw.size) ?? num(raw.side) ?? 160;
+    const height = kind === 'square' ? width : (num(raw.h) ?? width);
+    if (at) {
+      const [cx, cy] = at;
+      next.points = [
+        [cx - width / 2, cy - height / 2],
+        [cx + width / 2, cy - height / 2],
+        [cx + width / 2, cy + height / 2],
+        [cx - width / 2, cy + height / 2],
+      ];
+    }
+  }
+  if (kind === 'arrow' && next.arrow == null) next.arrow = 'end';
+  return next;
 }
 
 function str(v: unknown, max: number): string | null {
@@ -359,11 +425,89 @@ function pointsList(v: unknown, min: number, pad = 0): Vec[] | null {
   return pts.length >= min ? pts : null;
 }
 
+const ANNOTATION_STYLES = new Set<AnnotationStyle>([
+  'circle', 'underline', 'arrow', 'tick', 'cross', 'bracket', 'callout', 'highlighter',
+]);
+
+function normalizedPoint(value: unknown): Vec | null {
+  if (!Array.isArray(value) || value.length < 2) return null;
+  const x = num(value[0]);
+  const y = num(value[1]);
+  return x !== null && y !== null && x >= 0 && x <= 1 && y >= 0 && y <= 1 ? [x, y] : null;
+}
+
+function validateImageSelector(value: unknown): ImageRegionSelector | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const raw = value as Record<string, unknown>;
+  if (raw.type === 'FragmentSelector' && raw.unit === 'percent') {
+    const x = num(raw.x); const y = num(raw.y); const w = num(raw.w); const h = num(raw.h);
+    if (x === null || y === null || w === null || h === null || x < 0 || y < 0 || w <= 0 || h <= 0 || x + w > 1 || y + h > 1) return null;
+    return { type: 'FragmentSelector', unit: 'percent', x, y, w, h };
+  }
+  if (raw.type === 'SvgSelector' && Array.isArray(raw.points)) {
+    const points = raw.points.slice(0, 32).map(normalizedPoint).filter((point): point is Vec => point !== null);
+    return points.length >= 3 && points.length === raw.points.length ? { type: 'SvgSelector', points } : null;
+  }
+  if (raw.type === 'PointSelector') {
+    const x = num(raw.x); const y = num(raw.y);
+    return x !== null && y !== null && x >= 0 && x <= 1 && y >= 0 && y <= 1
+      ? { type: 'PointSelector', x, y }
+      : null;
+  }
+  return null;
+}
+
+export function validateAnchorRef(value: unknown): AnchorRef | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const raw = value as Record<string, unknown>;
+  if (raw.type === 'semantic') {
+    const objectId = id(raw.objectId);
+    const anchor = str(raw.anchor, 60);
+    if (!objectId || (anchor && !/^[a-z0-9_-]+(?::[a-z0-9_.-]+)*$/i.test(anchor))) return null;
+    return { type: 'semantic', objectId, ...(anchor ? { anchor } : {}) };
+  }
+  if (raw.type === 'learner_stroke') {
+    const strokeId = id(raw.strokeId);
+    const anchor = raw.anchor === 'start' || raw.anchor === 'middle' || raw.anchor === 'end' ? raw.anchor : undefined;
+    return strokeId ? { type: 'learner_stroke', strokeId, ...(anchor ? { anchor } : {}) } : null;
+  }
+  if (raw.type === 'image_region') {
+    const imageId = id(raw.imageId);
+    const selector = validateImageSelector(raw.selector);
+    return imageId && selector ? { type: 'image_region', imageId, selector } : null;
+  }
+  if (raw.type === 'point') {
+    const at = vec(raw.at);
+    return at ? { type: 'point', at } : null;
+  }
+  return null;
+}
+
+function validateRelationalPlace(value: unknown): RelationalPlace | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
+  const raw = value as Record<string, unknown>;
+  const anchor = id(raw.anchor);
+  const side = ['above', 'below', 'left', 'right', 'inside', 'on'].includes(String(raw.side)) ? raw.side as RelationalPlace['side'] : null;
+  const gap = num(raw.gap);
+  const align = ['start', 'center', 'end'].includes(String(raw.align)) ? raw.align as RelationalPlace['align'] : null;
+  return anchor && side && gap !== null && gap >= 0 && align
+    ? { anchor, side, gap: clamp(gap, 0, 200), align }
+    : null;
+}
+
+export function anchorRefTargetIds(target: AnchorRef | AnchorRef[]): string[] {
+  return (Array.isArray(target) ? target : [target]).flatMap((ref) =>
+    ref.type === 'semantic' ? [ref.objectId]
+      : ref.type === 'learner_stroke' ? [ref.strokeId]
+        : ref.type === 'image_region' ? [ref.imageId] : []);
+}
+
 /**
  * Validates one raw spec-shaped object (flattened: kind + fields at the top
  * level, as the model sends them). Returns null when unusable.
  */
 export function validateSpec(raw: RawOp): ShapeSpec | null {
+  raw = normalizeRawSpec(raw);
   switch (raw.kind) {
     case 'line': {
       const from = vec(raw.from);
@@ -624,6 +768,20 @@ export function validateSpec(raw: RawOp): ShapeSpec | null {
         ...(num(raw.width) ? { width: clamp(num(raw.width) as number, 1, 12) } : {}),
       };
     }
+    case 'annotate': {
+      if (!ANNOTATION_STYLES.has(raw.style as AnnotationStyle)) return null;
+      const sourceTargets = Array.isArray(raw.target) ? raw.target.slice(0, 8) : [raw.target];
+      const targets = sourceTargets.map(validateAnchorRef);
+      if (targets.length === 0 || targets.some((target) => target === null)) return null;
+      const note = str(raw.note, MAX_TEXT);
+      if (raw.style === 'callout' && !note) return null;
+      return {
+        kind: 'annotate',
+        style: raw.style as AnnotationStyle,
+        target: targets.length === 1 ? targets[0]! : targets as AnchorRef[],
+        ...(note ? { note } : {}),
+      };
+    }
     default:
       return validateAuthoredKind(raw);
   }
@@ -684,8 +842,17 @@ export function validateOps(rawOps: unknown, options?: { tier?: OpsValidationTie
           });
           break;
         }
+        const place = op.place == null ? null : validateRelationalPlace(op.place);
+        if (op.place != null && !place) {
+          out.rejected.push({ reason: 'invalid relational placement', raw });
+          break;
+        }
+        if (tier === 'fast' && place) {
+          out.rejected.push({ reason: 'relational placement is director/compiler-authored only', raw });
+          break;
+        }
         const color = normalizeColor(op.color);
-        out.ops.push({ op: 'add', id: opId, spec, ...(color ? { color } : {}) });
+        out.ops.push({ op: 'add', id: opId, spec, ...(color ? { color } : {}), ...(place ? { place } : {}) });
         break;
       }
       case 'update': {

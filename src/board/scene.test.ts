@@ -119,7 +119,34 @@ describe('describeScene', () => {
     expect(text).toContain('drawn by the learner');
   });
 
+  it('describes every M7 curriculum primitive in model-readable terms', () => {
+    const raw = [
+      { op: 'add', id: 'source', spec: { kind: 'line', from: [100, 100], to: [200, 100] } },
+      { op: 'add', id: 'transform', spec: { kind: 'transform', target: 'source', operation: { type: 'rotate', angleDeg: 90 } } },
+      { op: 'add', id: 'panels', spec: { kind: 'panelGrid', at: [80, 60], w: 400, h: 200, rows: 1, cols: 2, panels: [] } },
+      { op: 'add', id: 'region', spec: { kind: 'regionFill', mode: 'fraction', at: [100, 300], w: 300, h: 60, numerator: 2, denominator: 3 } },
+      { op: 'add', id: 'scatter', spec: { kind: 'scatter', at: [100, 100], w: 300, h: 200, xRange: [0, 1], yRange: [0, 1], points: [[0.5, 0.5]] } },
+      { op: 'add', id: 'boxplot', spec: { kind: 'boxplot', at: [100, 200], w: 300, min: 0, q1: 1, median: 2, q3: 3, max: 4 } },
+      { op: 'add', id: 'histogram', spec: { kind: 'histogram', at: [100, 100], w: 300, h: 200, bins: [{ from: 0, to: 1, frequency: 2 }] } },
+      { op: 'add', id: 'solid', spec: { kind: 'isometricSolid', at: [500, 350], unit: 40, voxels: [[0, 0, 0]] } },
+      { op: 'add', id: 'net', spec: { kind: 'cubeNet', at: [100, 100], cell: 40, faces: [{ id: 'a', row: 1, col: 0 }, { id: 'b', row: 1, col: 1 }, { id: 'c', row: 1, col: 2 }, { id: 'd', row: 1, col: 3 }, { id: 'e', row: 0, col: 1 }, { id: 'f', row: 2, col: 1 }] } },
+      { op: 'add', id: 'plan', spec: { kind: 'planView', at: [100, 100], cell: 40, heights: [[1, 0], [2, 1]] } },
+      { op: 'add', id: 'paper', spec: { kind: 'paperFoldHolePunch', at: [100, 100], w: 400, h: 200, folds: ['right'], holes: [[0.5, 0.5]] } },
+      { op: 'add', id: 'grid', spec: { kind: 'gridPaper', at: [100, 100], w: 300, h: 200, spacing: 20, style: 'dot' } },
+      { op: 'add', id: 'clock', spec: { kind: 'clock', center: [500, 300], r: 100, hour: 9, minute: 15 } },
+      { op: 'add', id: 'protractor', spec: { kind: 'protractor', center: [500, 400], r: 180, angleDeg: 45 } },
+    ];
+    const validated = validateOps(raw, { tier: 'authored' });
+    expect(validated.rejected).toEqual([]);
+    const text = describeScene(applyOps(emptyScene, validated.ops, 'tutor', undefined, { tier: 'authored' }).scene);
+    for (const phrase of ['rotate transform', 'panel grid', 'fraction region fill', 'scatter plot', 'box plot', 'histogram', 'isometric solid', 'cube net', 'plan view', 'paper-fold sequence', 'dot paper', 'clock showing', 'protractor showing']) {
+      expect(text).toContain(phrase);
+    }
+    expect(text).not.toContain('undefined');
+  });
+
   it('handles the empty board', () => {
-    expect(describeScene(emptyScene)).toContain('empty');
+    expect(describeScene(emptyScene)).toMatch(/blank and ready/i);
+    expect(describeScene(emptyScene)).toMatch(/do not mention that it is empty/i);
   });
 });

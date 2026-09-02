@@ -1,4 +1,4 @@
-import type { BoardOp } from '../../shared/boardOps';
+import type { BoardOp, ImageRegionSelector } from '../../shared/boardOps';
 import {
   createRuntimeEvent,
   RuntimeEventEnvelopeSchema,
@@ -9,7 +9,7 @@ import {
 import { GenerationScope } from './generationScope';
 import { ResponseCueTimeline, type ResponseCue, type ResponsePlaybackStatus } from './responseTimeline';
 import { VoiceInterruptionGate } from './voiceInterruption';
-import { WebRtcVoiceTransport, type PlaybackBoundary, type VoiceTransport, type VoiceTransportHandlers } from './voiceTransport';
+import { WebRtcVoiceTransport, type PlaybackBoundary, type PlaybackFailureReason, type VoiceTransport, type VoiceTransportHandlers } from './voiceTransport';
 import type { LearnerBoardAnalysis } from '../../shared/learnerBoard';
 import { DeliveredTaskSchema, type DeliveredTask } from '../../shared/lessonTurn';
 import {
@@ -19,12 +19,17 @@ import {
 } from '../../shared/sessionTelemetry';
 import { ResponseTimingTracker } from './sessionTelemetry';
 import type { NavigationCause } from '../board/renderedObjectTracker';
+import type { LayoutPreflightResult } from '../../shared/layoutFeedback';
+import { ResponseCaptionTimeline, type CaptionLine } from './captionTimeline';
+
+export type { CaptionLine } from './captionTimeline';
+export { segmentPhrases } from './captionTimeline';
 
 export type Phase = 'connecting' | 'listening' | 'thinking' | 'speaking' | 'reconnecting' | 'fallback' | 'failed' | 'ended';
-export interface CaptionLine { role: 'tutor' | 'child'; text: string; live: boolean; responseId?: string }
 export interface LessonState { activeConcept?: string; strategy?: string; nextStep?: string; phase?: string; activeSemanticObjectId?: string; characterAttentionTarget?: string }
 export interface EvidenceEntry { concept: string; observation: string; verdict: string; confidence: string }
 export interface SubmissionProgress { submissionId: string; status: 'sending' | 'accepted' | 'failed'; error?: string }
+export interface ImageGroundingTapRequest { requestId: string; imageId: string; hint: string }
 export interface BoardSubmissionInput {
   submissionId: string;
   draftId: string;
@@ -52,6 +57,7 @@ export interface SessionSnapshot {
   identity: GenerationIdentity;
   micAvailable: boolean;
   micDenied: boolean;
+  audioBlocked: boolean;
   muted: boolean;
   captions: CaptionLine[];
   lessonState: LessonState;
@@ -67,6 +73,7 @@ export interface SessionSnapshot {
   submission: SubmissionProgress | null;
   /** Transient illustration preparation; never a persisted board op. */
   illustration: IllustrationStatus | null;
+  imageGrounding: ImageGroundingTapRequest | null;
 }
 
 export interface IllustrationStatus {
@@ -102,7 +109,7 @@ export class RealtimeSession {
   private listeners = new Set<Listener>();
   private snapshot: SessionSnapshot;
   private timeline = new ResponseCueTimeline();
-  private phraseBuffers = new Map<string, string>();
+  private captionTimeline = new ResponseCaptionTimeline();
   private currentResponseId: string | null = null;
   private deadResponses = new Set<string>();
   /** Responses whose audible playback has started (playback binds reveals). */
@@ -136,6 +143,7 @@ export class RealtimeSession {
   private responseTiming = new ResponseTimingTracker();
   private pendingUncorrelatedMetrics: MetricInput[] = [];
   private pendingClientMetricGapCount = 0;
+  private reportedPlaybackFailures = new Set<string>();
 
   onBoardOps: (ops: BoardOp[], animate: boolean, identity: GenerationIdentity, cue?: VisualCueMetadata) => Promise<boolean | void> | boolean | void = () => {};
   onLearnerBoardReplay: (ops: BoardOp[], semanticGroupId?: string) => void = () => {};
@@ -144,7 +152,7 @@ export class RealtimeSession {
   onCaptionQuestion: (identity: GenerationIdentity) => void = () => {};
   onSubmissionResult: (submissionId: string, accepted: boolean, error?: string) => void = () => {};
   /** Compile-checks a complete candidate visual plan without committing it. */
-  onVisualPreflight: (ops: BoardOp[], semanticGroupId?: string, replacesGroup?: string) => Promise<{ accepted: boolean; reasons: string[] }> | { accepted: boolean; reasons: string[] } = () => ({ accepted: true, reasons: [] });
+  onVisualPreflight: (ops: BoardOp[], semanticGroupId?: string, replacesGroup?: string) => Promise<LayoutPreflightResult> | LayoutPreflightResult = () => ({ accepted: true, reasons: [], layoutIssues: [] });
   /** Renders immutable candidate ops through the learner's real browser
    * pipeline for Director vision inspection. */
   onVisualRender: (ops: BoardOp[], semanticGroupId?: string) => Promise<string | null> | string | null = () => null;
@@ -158,9 +166,9 @@ export class RealtimeSession {
     this.scope = new GenerationScope(identity);
     this.gate = new RuntimeEventGate(identity);
     this.snapshot = {
-      phase: 'connecting', identity, micAvailable: WebRtcVoiceTransport.supported(), micDenied: false, muted: false,
+      phase: 'connecting', identity, micAvailable: WebRtcVoiceTransport.microphoneSupported(), micDenied: false, audioBlocked: false, muted: false,
       captions: [], lessonState: {}, evidenceCount: 0, lastEvidence: null,
-      micEnergy: 0, voiceEnergy: 0, error: null, metrics: {}, task: null, submission: null, illustration: null,
+      micEnergy: 0, voiceEnergy: 0, error: null, metrics: {}, task: null, submission: null, illustration: null, imageGrounding: null,
     };
   }
 
@@ -242,8 +250,16 @@ export class RealtimeSession {
     this.connectionEpoch += 1;
     this.activateScope(false);
     this.update({ phase: 'connecting' });
-    await this.connectVoice();
-    this.connect();
+    const voiceReady = await this.connectVoice();
+    if (voiceReady) {
+      this.connect();
+    } else {
+      this.update({
+        phase: 'fallback',
+        error: 'Live voice is unavailable on this device — continue by typing below.',
+        micAvailable: false,
+      });
+    }
   }
 
   /**
@@ -253,20 +269,31 @@ export class RealtimeSession {
    * missing WebRTC, bootstrap failure — never blocks the lesson: the envelope
    * still carries captions, board, and typed turns.
    */
-  private async connectVoice(): Promise<void> {
-    if (!this.lessonCapability) return;
+  private async connectVoice(): Promise<boolean> {
+    if (!this.lessonCapability) return false;
     // Playwright installs a page-level fake transport so E2E suites run
     // fully offline; vitest injects one through the constructor.
     const pageFactory = (window as Window & { __nouraVoiceTransport?: VoiceTransportFactory }).__nouraVoiceTransport ?? null;
     const injected = this.injectedVoiceTransport ?? pageFactory;
-    if (!injected && !WebRtcVoiceTransport.supported()) return;
+    if (!injected && !WebRtcVoiceTransport.supported()) return false;
+    const playbackError = 'Noura’s audio is blocked by the browser. Tap “Enable voice” to continue hearing her.';
     const handlers: VoiceTransportHandlers = {
       onPlaybackBoundary: (boundary, responseId, playedMs) => this.handlePlaybackBoundary(boundary, responseId, playedMs),
       onStateChange: (state) => {
+        if (state === 'blocked' && !this.closedByUs && this.snapshot.phase !== 'ended') {
+          if (this.captionTimeline.audioUnavailableForPending()) this.syncCaptions();
+          this.update({ audioBlocked: true, error: playbackError });
+        }
+        if (state === 'connected' && this.snapshot.audioBlocked) {
+          this.update({ audioBlocked: false, error: this.snapshot.error === playbackError ? null : this.snapshot.error });
+        }
         if (state === 'failed' && !this.closedByUs && this.snapshot.phase !== 'ended') {
+          if (this.captionTimeline.audioUnavailableForPending()) this.syncCaptions();
           this.update({ error: 'Noura’s voice connection was lost — captions continue below.' });
         }
       },
+      onMicrophoneState: (available, denied) => this.update({ micAvailable: available, micDenied: denied }),
+      onPlaybackFailure: (responseId, reason) => this.handlePlaybackFailure(responseId, reason),
     };
     const factory = injected ?? ((input) => new WebRtcVoiceTransport(input));
     const voice = factory({
@@ -279,11 +306,13 @@ export class RealtimeSession {
     this.voice = voice;
     try {
       await voice.connect();
+      return true;
     } catch (error) {
       this.voice = null;
       voice.close();
       const denied = error instanceof DOMException && error.name === 'NotAllowedError';
       this.update(denied ? { micDenied: true, micAvailable: false } : { micAvailable: false });
+      return false;
     }
   }
 
@@ -308,8 +337,17 @@ export class RealtimeSession {
       this.send('hello', {});
     };
     ws.onmessage = (event) => {
-      try { this.handleServer(JSON.parse(String(event.data))); }
-      catch { /* malformed frames never mutate state */ }
+      let decoded: unknown;
+      try { decoded = JSON.parse(String(event.data)); }
+      catch { return; }
+      try { this.handleServer(decoded); }
+      catch (error) {
+        // Protocol validation still rejects malformed frames quietly; an
+        // exception after validation is our bug and must not become a silent
+        // audio/caption/drawing stall.
+        console.error('Noura control event failed', error);
+        this.update({ error: 'Noura could not apply a live lesson update. Please try again.' });
+      }
     };
     ws.onclose = () => {
       if (this.closedByUs || this.ws !== ws) return;
@@ -388,6 +426,20 @@ export class RealtimeSession {
     this.update({ muted });
   }
 
+  async resumeAudio(): Promise<void> {
+    const resumed = await this.voice?.resumePlayback();
+    if (resumed) {
+      this.emitMetric({
+        schemaVersion: TELEMETRY_SCHEMA_VERSION,
+        name: 'media_playback_outcome',
+        unit: 'count',
+        value: 1,
+        dimensions: { outcome: 'resumed' },
+      });
+      this.update({ audioBlocked: false, error: null });
+    }
+  }
+
   /**
    * A deliberate first touch of the board. It may stop Noura mid-sentence and
    * acquire the learner floor, but it never submits anything: the stroke that
@@ -418,6 +470,18 @@ export class RealtimeSession {
   }
 
   get hasOpenDraft(): boolean { return this.draftOpen; }
+
+  submitImageRegionTap(selector: Extract<ImageRegionSelector, { type: 'PointSelector' }>): boolean {
+    const request = this.snapshot.imageGrounding;
+    if (!request || this.snapshot.phase === 'ended' || this.ws?.readyState !== WebSocket.OPEN) return false;
+    this.send('image_region_tap', {
+      request_id: request.requestId,
+      image_id: request.imageId,
+      selector,
+    });
+    this.update({ imageGrounding: null });
+    return true;
+  }
 
   /**
    * The learner pressed Done: exactly one idempotent submission, exactly one
@@ -548,23 +612,48 @@ export class RealtimeSession {
    * treated as genuinely silent and released.
    */
   private responsePlaybackStatus(responseId: string): ResponsePlaybackStatus {
-    if (!this.voice || this.deadResponses.has(responseId)) return 'finished';
-    if (this.voice.playingResponseId() === responseId) return 'playing';
+    const voice = this.voice;
+    if (!voice || !this.audioExpected() || this.deadResponses.has(responseId)) return 'finished';
+    if (voice.playingResponseId() === responseId) return 'playing';
     if (this.startedResponses.has(responseId)) return 'finished';
     const doneAt = this.responseDoneAt.get(responseId);
     if (doneAt !== undefined && performance.now() - doneAt >= SILENT_RESPONSE_GRACE_MS) return 'finished';
     return 'pending';
   }
 
+  private audioExpected(): boolean {
+    return this.voice !== null && !['blocked', 'failed', 'closed'].includes(this.voice.state);
+  }
+
+  private handlePlaybackFailure(responseId: string | null, reason: PlaybackFailureReason): void {
+    const failureKey = `${responseId ?? 'unbound'}:${reason}`;
+    if (!this.reportedPlaybackFailures.has(failureKey)) {
+      this.rememberBounded(this.reportedPlaybackFailures, failureKey);
+      this.emitMetric({
+        schemaVersion: TELEMETRY_SCHEMA_VERSION,
+        name: 'media_playback_outcome',
+        unit: 'count',
+        value: 1,
+        dimensions: { outcome: reason },
+      });
+    }
+    if (responseId && this.captionTimeline.audioUnavailable(responseId)) this.syncCaptions();
+    if (reason === 'autoplay_blocked') return;
+    if (responseId === this.currentResponseId && this.snapshot.phase === 'speaking') {
+      this.update({ phase: 'listening', voiceEnergy: 0 });
+    }
+  }
+
   private interruptLocally(reason: 'voice' | 'text' | 'server' | 'interaction'): void {
     const identity = this.scope.identity;
     const interruptedResponseId = this.voice?.playingResponseId() ?? this.currentResponseId;
-    this.markResponseDead(this.currentResponseId);
+    this.markResponseDead(interruptedResponseId);
+    if (interruptedResponseId) this.voice?.suppressResponse(interruptedResponseId);
     const detectorAt = performance.now();
     const heardMs = this.voice?.stopPlayback() ?? 0;
     const detectorToStopScheduledMs = Math.max(0, performance.now() - detectorAt);
     this.timeline.cancel(identity);
-    this.phraseBuffers.clear();
+    if (interruptedResponseId && this.captionTimeline.interrupt(interruptedResponseId)) this.syncCaptions();
     this.voiceInterruption.reset();
     this.interruptionPending = true;
     this.cancelGeneration(`interrupted by ${reason}`);
@@ -604,6 +693,7 @@ export class RealtimeSession {
     if (boundary === 'started' && responseId && !this.deadResponses.has(responseId)) {
       this.currentResponseId = responseId;
       this.rememberBounded(this.startedResponses, responseId);
+      if (this.captionTimeline.playbackStarted(responseId, performance.now())) this.syncCaptions();
       const awaitedRevealMetric = this.responseTiming.noteNarrationScheduled(responseId, performance.now());
       if (awaitedRevealMetric) this.emitMetric(awaitedRevealMetric, this.scope.identity, responseId);
       if (this.speechStoppedAt > 0) {
@@ -632,10 +722,11 @@ export class RealtimeSession {
       if (this.snapshot.phase !== 'speaking') this.update({ phase: 'speaking' });
       return;
     }
-    // stopped / cleared: the child has heard everything buffered for this
-    // response — release the cues that were waiting on it.
+    // stopped / cleared: finish only this response. Flushing every transcript
+    // buffer here used to leak a future response into an earlier boundary.
+    if (responseId && this.captionTimeline.playbackFinished(responseId)) this.syncCaptions();
+    if (responseId && responseId === this.currentResponseId) this.currentResponseId = null;
     this.releasePending();
-    for (const pendingResponseId of this.phraseBuffers.keys()) this.flushPhrase(pendingResponseId, false);
     if (this.snapshot.phase === 'speaking') this.update({ phase: 'listening', voiceEnergy: 0 });
   }
 
@@ -698,6 +789,10 @@ export class RealtimeSession {
       case 'response_started': {
         this.currentResponseId = typeof message.response_id === 'string' ? message.response_id : null;
         if (this.currentResponseId) this.scope.providerResponseIds.add(this.currentResponseId);
+        if (this.currentResponseId) {
+          this.voice?.noteResponse(this.currentResponseId);
+          this.captionTimeline.registerResponse(this.currentResponseId, this.audioExpected());
+        }
         // A new tutor response means the learner's answer is being handled;
         // the delivered task banner has served its purpose.
         if (this.snapshot.task && !this.draftOpen) this.update({ task: null });
@@ -723,18 +818,14 @@ export class RealtimeSession {
         if (typeof message.delta !== 'string') break;
         const responseId = String(message.response_id ?? '');
         if (this.deadResponses.has(responseId)) break;
-        this.pushTranscriptDelta(responseId, message.delta);
+        if (this.captionTimeline.pushDelta(responseId, message.delta, performance.now(), this.audioExpected())) this.syncCaptions();
         break;
       }
       case 'transcript_done': {
         const responseId = String(message.response_id ?? '');
         const text = String(message.text ?? '').trim();
         if (text && !this.deadResponses.has(responseId)) {
-          this.timeline.enqueue({
-            kind: 'final', cueId: envelope.eventId, responseId,
-            sequence: envelope.sequence, identity: envelope, text,
-          });
-          this.releasePending();
+          if (this.captionTimeline.finishTranscript(responseId, text, performance.now(), this.audioExpected())) this.syncCaptions();
         }
         break;
       }
@@ -770,7 +861,7 @@ export class RealtimeSession {
       }
       case 'user_transcript': {
         const text = String(message.text ?? '').trim();
-        if (text) this.appendCaption({ role: 'child', text, live: false });
+        if (text && this.captionTimeline.appendChild(text)) this.syncCaptions();
         break;
       }
       case 'speech_started': {
@@ -841,8 +932,18 @@ export class RealtimeSession {
         const semanticGroupId = typeof message.semanticObjectId === 'string' ? message.semanticObjectId : undefined;
         const replacesGroup = typeof message.replacesGroup === 'string' ? message.replacesGroup : undefined;
         void Promise.resolve(this.onVisualPreflight(message.ops as BoardOp[], semanticGroupId, replacesGroup))
-          .then((result) => this.send('visual_preflight_result', { preflight_id: preflightId, accepted: result.accepted, reasons: result.reasons.slice(0, 8) }))
-          .catch(() => this.send('visual_preflight_result', { preflight_id: preflightId, accepted: false, reasons: ['preflight crashed'] }));
+          .then((result) => this.send('visual_preflight_result', {
+            preflight_id: preflightId,
+            accepted: result.accepted,
+            reasons: result.reasons.slice(0, 8),
+            layout_issues: result.layoutIssues.slice(0, 8),
+          }))
+          .catch(() => this.send('visual_preflight_result', {
+            preflight_id: preflightId,
+            accepted: false,
+            reasons: ['preflight crashed'],
+            layout_issues: [],
+          }));
         break;
       }
       case 'visual_render': {
@@ -887,21 +988,30 @@ export class RealtimeSession {
           this.update({ metrics: { ...this.snapshot.metrics, providerCancelConfirmationMs } });
           this.cancelRequestedAt = 0;
         }
+        if (typeof message.response_id === 'string' && message.response_id && message.status === 'cancelled') {
+          if (this.captionTimeline.interrupt(message.response_id)) this.syncCaptions();
+        }
+        if (typeof message.response_id === 'string' && message.response_id && ['failed', 'incomplete'].includes(String(message.status))) {
+          if (this.captionTimeline.audioUnavailable(message.response_id)) this.syncCaptions();
+        }
         this.releasePending();
+        if (typeof message.response_id === 'string' && message.response_id === this.currentResponseId && !this.audioExpected()) {
+          this.currentResponseId = null;
+          if (['thinking', 'speaking'].includes(this.snapshot.phase)) this.update({ phase: 'listening', voiceEnergy: 0 });
+        }
         const playing = this.voice?.playingResponseId() ?? null;
         if (playing === null && this.timeline.pendingCount() === 0 && this.snapshot.phase === 'speaking') this.update({ phase: 'listening' });
         break;
       }
       case 'safe_question': {
         const text = String(message.text ?? '').trim();
-        if (text) this.appendCaption({ role: 'tutor', text, live: false });
-        if (text) this.onCaptionQuestion(this.scope.identity);
+        if (text && this.captionTimeline.appendTutorText(text)) this.syncCaptions();
         this.update({ phase: 'listening' });
         break;
       }
       case 'fallback_caption': {
         const text = String(message.text ?? '').trim();
-        if (text) for (const phrase of segmentPhrases(text)) this.appendCaption({ role: 'tutor', text: phrase, live: false, responseId: String(message.response_id ?? '') || undefined });
+        if (text && this.captionTimeline.appendTutorText(text, String(message.response_id ?? '') || undefined)) this.syncCaptions();
         this.update({ phase: 'fallback' });
         break;
       }
@@ -928,6 +1038,18 @@ export class RealtimeSession {
         });
         break;
       }
+      case 'image_region_tap_request': {
+        const requestId = String(message.request_id ?? '').trim();
+        const imageId = String(message.image_id ?? '').trim();
+        const hint = String(message.hint ?? '').trim();
+        if (requestId && imageId && hint) this.update({ imageGrounding: { requestId, imageId, hint } });
+        break;
+      }
+      case 'image_region_grounded': {
+        const requestId = String(message.request_id ?? '').trim();
+        if (!requestId || this.snapshot.imageGrounding?.requestId === requestId) this.update({ imageGrounding: null });
+        break;
+      }
       case 'error': {
         const text = String(message.message ?? 'Something went wrong.');
         this.update({ error: text });
@@ -940,6 +1062,20 @@ export class RealtimeSession {
 
   private releasePending(): void {
     if (!this.scope.active) return;
+    const now = performance.now();
+    let captionsChanged = this.captionTimeline.advance(now);
+    let silentCurrentResponse = false;
+    for (const [responseId, doneAt] of this.responseDoneAt) {
+      if (!this.startedResponses.has(responseId) && now - doneAt >= SILENT_RESPONSE_GRACE_MS) {
+        captionsChanged = this.captionTimeline.audioUnavailable(responseId) || captionsChanged;
+        if (responseId === this.currentResponseId) silentCurrentResponse = true;
+      }
+    }
+    if (captionsChanged) this.syncCaptions();
+    if (silentCurrentResponse) {
+      this.currentResponseId = null;
+      if (['thinking', 'speaking'].includes(this.snapshot.phase)) this.update({ phase: 'listening', voiceEnergy: 0 });
+    }
     const energy = this.voice?.readVoiceEnergy() ?? 0;
     if (Math.abs(energy - this.snapshot.voiceEnergy) > 0.01) this.update({ voiceEnergy: energy });
     for (const cue of this.timeline.drain((responseId) => this.responsePlaybackStatus(responseId))) this.releaseCue(cue);
@@ -953,7 +1089,6 @@ export class RealtimeSession {
       this.update({ task: cue.task });
       this.onCaptionQuestion(this.scope.identity);
     }
-    else this.applyFinalTranscript(cue.responseId, cue.text);
   }
 
   private releaseOps(item: Extract<ResponseCue, { kind: 'visual' }>): void {
@@ -969,11 +1104,7 @@ export class RealtimeSession {
       eventId: item.eventId ?? undefined,
     })).then((completed) => {
       if (completed === false && item.eventId !== null) {
-        this.send('ops_rejected', {
-          event_id: item.eventId,
-          response_id: item.responseId,
-          reason: 'The checkpoint exceeded the board layout or legibility budget.',
-        });
+        this.rejectBoardCue(item, 'The checkpoint exceeded the board layout or legibility budget.');
         return;
       }
       if (completed !== false && item.eventId !== null) {
@@ -993,39 +1124,35 @@ export class RealtimeSession {
           this.send('ops_shown', { event_id: item.eventId });
         }
       }
+    }).catch((error) => {
+      this.rejectBoardCue(item, 'The board renderer failed before the checkpoint could be committed.');
+      console.error('Noura board checkpoint failed', error);
+      this.update({ error: 'Noura could not show that board update. The lesson will continue with the visible work.' });
     });
   }
 
-  private pushTranscriptDelta(responseId: string, delta: string, force = false): void {
-    let buffer = (this.phraseBuffers.get(responseId) ?? '') + delta;
-    const boundary = force ? buffer.length : phraseBoundary(buffer);
-    if (boundary > 0) {
-      const phrase = buffer.slice(0, boundary).trim();
-      buffer = buffer.slice(boundary);
-      if (phrase) this.appendCaption({ role: 'tutor', text: phrase, live: !force, responseId });
-      if (phrase && /[?？]\s*$/.test(phrase)) this.onCaptionQuestion(this.scope.identity);
+  private rejectBoardCue(item: Extract<ResponseCue, { kind: 'visual' }>, reason: string): void {
+    if (item.eventId === null) return;
+    this.send('ops_rejected', {
+      event_id: item.eventId,
+      response_id: item.responseId,
+      reason,
+    });
+  }
+
+  private syncCaptions(): void {
+    const next = this.captionTimeline.lines();
+    if (sameCaptions(this.snapshot.captions, next)) return;
+    const previousTutor = [...this.snapshot.captions].reverse().find((line) => line.role === 'tutor');
+    const nextTutor = [...next].reverse().find((line) => line.role === 'tutor');
+    this.update({ captions: next });
+    if (nextTutor && nextTutor.text !== previousTutor?.text && /[?？]\s*$/.test(nextTutor.text)) {
+      this.onCaptionQuestion(this.scope.identity);
     }
-    this.phraseBuffers.set(responseId, buffer);
   }
-
-  private flushPhrase(responseId: string, live: boolean): void {
-    const phrase = (this.phraseBuffers.get(responseId) ?? '').trim();
-    this.phraseBuffers.delete(responseId);
-    if (phrase) this.appendCaption({ role: 'tutor', text: phrase, live, responseId });
-  }
-
-  private applyFinalTranscript(responseId: string, text: string): void {
-    this.phraseBuffers.delete(responseId);
-    const withoutResponse = this.snapshot.captions.filter((caption) => caption.responseId !== responseId);
-    const corrected = segmentPhrases(text).map((phrase) => ({ role: 'tutor' as const, text: phrase, live: false, responseId }));
-    this.update({ captions: [...withoutResponse, ...corrected].slice(-100) });
-    if (/[?？]\s*$/.test(text)) this.onCaptionQuestion(this.scope.identity);
-  }
-
-  private appendCaption(line: CaptionLine): void { this.update({ captions: [...this.snapshot.captions, line].slice(-100) }); }
 
   private async runFallbackTurn(text: string, idempotencyKey: string, scope: GenerationScope): Promise<void> {
-    this.appendCaption({ role: 'child', text, live: false });
+    if (this.captionTimeline.appendChild(text)) this.syncCaptions();
     this.update({ phase: 'thinking' });
     try {
       const response = await fetch('/api/fallback-turn', {
@@ -1047,20 +1174,25 @@ export class RealtimeSession {
     scope.addCleanup(() => void reader.cancel().catch(() => undefined));
     const decoder = new TextDecoder();
     let buffer = '';
+    const handleLine = (line: string) => {
+      if (!line.trim() || !scope.active) return;
+      try {
+        const decoded = JSON.parse(line) as unknown;
+        if (RuntimeEventEnvelopeSchema.safeParse(decoded).success) this.handleServer(decoded);
+        else this.handleFallbackStep(decoded as Record<string, unknown>, scope.identity);
+      } catch { /* malformed line */ }
+    };
     for (;;) {
       const { done, value } = await reader.read();
-      if (done || !scope.active) break;
+      if (done || !scope.active) {
+        buffer += decoder.decode();
+        handleLine(buffer);
+        break;
+      }
       buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split('\n');
       buffer = lines.pop() ?? '';
-      for (const line of lines) if (line.trim() && scope.active) {
-        try {
-          const decoded = JSON.parse(line) as unknown;
-          if (RuntimeEventEnvelopeSchema.safeParse(decoded).success) this.handleServer(decoded);
-          else this.handleFallbackStep(decoded as Record<string, unknown>, scope.identity);
-        }
-        catch { /* malformed line */ }
-      }
+      for (const line of lines) handleLine(line);
     }
   }
 
@@ -1159,22 +1291,10 @@ export class RealtimeSession {
   }
 }
 
-function phraseBoundary(text: string): number {
-  const punctuation = [...text.matchAll(/[.!?;:]\s+/g)].at(-1);
-  if (punctuation && punctuation.index !== undefined) return punctuation.index + punctuation[0].length;
-  if (text.length < 92) return 0;
-  const breakAt = text.lastIndexOf(' ', 92);
-  return breakAt > 36 ? breakAt + 1 : 92;
-}
-
-export function segmentPhrases(text: string): string[] {
-  const phrases: string[] = [];
-  let remaining = text.trim();
-  while (remaining) {
-    const boundary = phraseBoundary(remaining);
-    if (boundary === 0) { phrases.push(remaining); break; }
-    phrases.push(remaining.slice(0, boundary).trim());
-    remaining = remaining.slice(boundary).trim();
-  }
-  return phrases.filter(Boolean);
+function sameCaptions(left: readonly CaptionLine[], right: readonly CaptionLine[]): boolean {
+  return left.length === right.length && left.every((line, index) => {
+    const candidate = right[index];
+    return line.role === candidate.role && line.text === candidate.text &&
+      line.live === candidate.live && line.responseId === candidate.responseId;
+  });
 }

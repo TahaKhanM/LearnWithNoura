@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { installFakeRealtime, setLessonCapability } from '../helpers';
+import { installFakeRealtime, setLessonCapability, waitForFakeRealtimeStart } from '../helpers';
 
 for (const viewport of [
   { name: 'desktop', width: 1440, height: 900 },
@@ -18,6 +18,13 @@ for (const viewport of [
     await setLessonCapability(page, sessionId, 'visual-fixture-capability');
     await page.goto(`/lesson/${sessionId}`);
     await page.getByRole('button', { name: 'Begin' }).click();
+    await waitForFakeRealtimeStart(page);
+    // Visual fixtures need a stable idle footer but deliberately do not run
+    // an opening provider response. Use the existing captions-only idle cue.
+    await page.evaluate(() => {
+      const socket = (window as typeof window & { __nouraFakeSocket: { emit(type: string, payload: Record<string, unknown>): void } }).__nouraFakeSocket;
+      socket.emit('safe_question', { text: '' });
+    });
     await expect(page.getByText(/Type below — Noura is ready|Listening/)).toBeVisible();
     await page.evaluate(() => {
       const socket = (window as typeof window & { __nouraFakeSocket: { emit(type: string, payload: Record<string, unknown>, optional?: Record<string, unknown>): void } }).__nouraFakeSocket;

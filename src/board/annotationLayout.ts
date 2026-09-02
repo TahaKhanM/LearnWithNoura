@@ -201,6 +201,23 @@ function geometryObstacles(items: SceneItem[], compiled: Map<string, CompiledIte
         if (box) solids.push(box);
         break;
       }
+      case 'transform':
+      case 'panelGrid':
+      case 'regionFill':
+      case 'scatter':
+      case 'boxplot':
+      case 'histogram':
+      case 'isometricSolid':
+      case 'cubeNet':
+      case 'planView':
+      case 'paperFoldHolePunch':
+      case 'gridPaper':
+      case 'clock':
+      case 'protractor': {
+        const box = compiled.get(item.id)?.bbox;
+        if (box) solids.push(box);
+        break;
+      }
       case 'plot':
       case 'text':
       case 'equation':

@@ -3,9 +3,9 @@ import { currentStage } from '../lesson/orchestrator.js';
 import { preflightWithClient } from './boardStaging.js';
 import type { CoordinatorContext } from './coordinatorContext.js';
 import { refreshBoardInstructions } from './sessionConfig.js';
-import { startStoryboardRun, storyboardRunSteps } from './storyboardRunner.js';
+import { startStoryboardRun, storyboardRunSteps, type StoryboardSource } from './storyboardRunner.js';
 import { finishTool } from './turnFloor.js';
-import { abandonStaleVisualRequest } from './visualRequestOutcomes.js';
+import { abandonStaleVisualRequest, failDirectedScene } from './visualRequestOutcomes.js';
 
 /**
  * Preflights and reveals a compiled anchor scene without allowing the voice
@@ -19,6 +19,36 @@ export function startAnchorStoryboard(
   request: { requestId: string },
   scene: AnchorScene,
 ): void {
+  startValidatedStoryboard(ctx, { callId, responseId }, request, scene, {
+    source: 'anchor',
+    runId: `run-${responseId}`.slice(0, 120),
+    handoff: anchorHandoff(ctx),
+    persistScene: false,
+  });
+}
+
+export function startTemplateStoryboard(
+  ctx: CoordinatorContext,
+  tool: { callId: string; responseId: string } | null,
+  request: { requestId: string },
+  scene: AnchorScene,
+  handoff: string,
+): void {
+  startValidatedStoryboard(ctx, tool, request, scene, {
+    source: 'template',
+    runId: `run-${request.requestId}`.slice(0, 120),
+    handoff,
+    persistScene: true,
+  });
+}
+
+function startValidatedStoryboard(
+  ctx: CoordinatorContext,
+  tool: { callId: string; responseId: string } | null,
+  request: { requestId: string },
+  scene: AnchorScene,
+  options: { source: StoryboardSource; runId: string; handoff: string; persistScene: boolean },
+): void {
   const { state } = ctx;
   const visualIntentStartedAtMs = Date.now();
   state.planStagedThisTurn = true;
@@ -29,8 +59,8 @@ export function startAnchorStoryboard(
     // A learner turn completed (or another build started) while the
     // preflight was in flight: nothing may build mid-turn. The tool result
     // is still pending, so IT is the honest channel — no system note.
-    abandonStaleVisualRequest(ctx, request.requestId, 'anchor', scene.storyboard.length, { injectNote: false });
-    finishTool(ctx, callId, responseId, {
+    abandonStaleVisualRequest(ctx, request.requestId, options.source, scene.storyboard.length, { injectNote: tool === null });
+    if (tool) finishTool(ctx, tool.callId, tool.responseId, {
       ok: false,
       accepted: false,
       reason: 'The lesson moved on before the scene was ready; nothing was drawn. If the visual is still needed, request it again in your next teaching turn.',
@@ -51,13 +81,21 @@ export function startAnchorStoryboard(
       state.visualPlanState = 'failed';
       state.boardContext.observeBoardRejection(preflight.reasons.join('; ').slice(0, 300) || 'Complete-plan preflight failed.');
       refreshBoardInstructions(ctx);
-      finishTool(ctx, callId, responseId, {
+      if (tool) finishTool(ctx, tool.callId, tool.responseId, {
         ok: false,
         accepted: false,
         reason: `The scene failed deterministic layout preflight: ${preflight.reasons.join('; ').slice(0, 240)}. Nothing was drawn. Continue without the visual.`,
         board: state.boardContext.toolSnapshot(),
       });
+      else failDirectedScene(ctx, preflight.reasons);
       return;
+    }
+    if (options.persistScene) {
+      await ctx.repo.addEvent(ctx.sessionId, 'directed_scene', { runId: options.runId, scene });
+      if (visualRequestIsStale(ctx, epoch)) {
+        staleAbandon();
+        return;
+      }
     }
     // Recheck at first-beat scheduling: speech may have started after the
     // post-await stale check and before the run is armed.
@@ -67,7 +105,7 @@ export function startAnchorStoryboard(
     }
     state.visualPlanState = 'rendering';
     const steps = storyboardRunSteps(scene);
-    finishTool(ctx, callId, responseId, {
+    if (tool) finishTool(ctx, tool.callId, tool.responseId, {
       ok: true,
       accepted: true,
       status: 'building',
@@ -80,13 +118,15 @@ export function startAnchorStoryboard(
     // safe boundary to bind to, it waits for a genuinely free floor.
     const floorBusy = state.childHoldsFloor || state.speechInProgress || state.draftOpen;
     startStoryboardRun(ctx, {
-      runId: `run-${responseId}`.slice(0, 120),
-      source: 'anchor',
+      runId: options.runId,
+      source: options.source,
       groupId: scene.groupId,
       groupLabel: scene.groupLabel,
       steps,
-      revealAfterResponseId: floorBusy ? null : responseId,
-      handoff: anchorHandoff(ctx),
+      revealAfterResponseId: floorBusy
+        ? null
+        : tool?.responseId ?? state.activeResponseId ?? state.lastCompletedResponseId,
+      handoff: options.handoff,
       visualIntentStartedAtMs,
     });
   })().catch((error) => {
@@ -96,7 +136,8 @@ export function startAnchorStoryboard(
       return;
     }
     state.visualPlanState = 'failed';
-    finishTool(ctx, callId, responseId, { ok: false, accepted: false, error: String(error).slice(0, 260) });
+    if (tool) finishTool(ctx, tool.callId, tool.responseId, { ok: false, accepted: false, error: String(error).slice(0, 260) });
+    else failDirectedScene(ctx, [String(error).slice(0, 260)]);
   });
   ctx.trackSideEffect(task);
 }

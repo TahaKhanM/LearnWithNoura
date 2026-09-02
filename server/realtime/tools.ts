@@ -23,7 +23,7 @@ export const REALTIME_TOOLS = [
     type: 'function' as const,
     name: 'request_visual',
     description:
-      'Request the one board change for this teaching turn by INTENT — you never supply geometry. Actions are additive only, visible work never disappears: establish (build the lesson\u2019s anchor scene, once), extend (small additions belong in board_ops), emphasize (highlight named visible objects), compare (a new scene in an announced side section; the learner view does not switch), none. For establish and compare the application designs, validates, and reveals the scene step by step, prompting you to narrate each beat; while it prepares, keep teaching with what is visible. Exception: never call this twice in one tutor turn or while a build is in progress.',
+      'Request a new representation by INTENT; you never supply geometry. Use establish for the first figure on a blank board in any lesson (including a learner-requested number line, graph, diagram, or sketch), compare for a new side representation, and emphasize for visible named objects. The application designs, validates in the learner browser, vision-checks, and reveals new scenes. Use board_ops only for a small fast increment attached to work that is already visible. Actions are additive only; never call this twice in one tutor turn or while a build is in progress.',
     parameters: {
       type: 'object',
       additionalProperties: false,
@@ -46,7 +46,7 @@ export const REALTIME_TOOLS = [
     type: 'function' as const,
     name: 'propose_teaching_move',
     description:
-      'Propose the next pedagogical move executing the CURRENT blueprint stage. Deterministic lesson code validates stage legality, anchor stability, and whether waiting is legal. Trigger: before each teaching move. Exception: a stage other than the current one is rejected unless you record a prerequisite detour.',
+      'Propose the next pedagogical move executing the CURRENT blueprint stage. Deterministic lesson code validates stage legality, anchor stability, and whether waiting is legal. Not a gate before a visual request: request the representation first, then use this when handing a question or recording the move. Exception: a stage other than the current one is rejected unless you record a prerequisite detour.',
     parameters: {
       type: 'object',
       additionalProperties: false,
@@ -87,7 +87,7 @@ export const REALTIME_TOOLS = [
     type: 'function' as const,
     name: 'board_ops',
     description:
-      'Add one small increment to an existing shared-board visual — the fast tier: highlight, update, or a handful of additions attached to visible objects. New scenes and representations go through request_visual so the application owns layout. There is no clear or replace operation: visible work persists.',
+      'Fast, atomic increments on work that is already visible: highlight/update a visible object or add code-owned annotate marks targeting a visible semantic object/sub-anchor or learner-stroke id. Annotation geometry is computed by the application; use a raw point only as a last resort. New figures and representations—including the first marks on a blank board—go through request_visual. A successful status visible means first paint was confirmed in the learner browser. There is no clear or replace operation: visible work persists.',
     parameters: {
       type: 'object',
       additionalProperties: false,
@@ -99,6 +99,24 @@ export const REALTIME_TOOLS = [
         },
       },
       required: ['ops'],
+    },
+  },
+  {
+    type: 'function' as const,
+    name: 'ground_image_region',
+    description:
+      'Point an annotation at a named region inside an existing visible image. Supply only the visible image id, a concrete target hint, annotation style, and optional note. The application proposes a normalized region, renders it back, verifies it with the audit role, and asks the learner to tap only when confidence is low. Do not use for ordinary vector objects; use fast board_ops annotate instead.',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        requestId: { type: 'string', minLength: 1, maxLength: 120 },
+        imageId: { type: 'string', minLength: 1, maxLength: 40 },
+        hint: { type: 'string', minLength: 2, maxLength: 200 },
+        style: { type: 'string', enum: ['circle', 'underline', 'arrow', 'tick', 'cross', 'bracket', 'callout', 'highlighter'] },
+        note: { type: 'string', maxLength: 120 },
+      },
+      required: ['requestId', 'imageId', 'hint', 'style'],
     },
   },
   {

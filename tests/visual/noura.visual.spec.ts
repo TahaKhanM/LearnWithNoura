@@ -91,6 +91,26 @@ test('handwritten annotation style', async ({ page }) => {
   await expect(page).toHaveScreenshot('scene-handwritten.png', { animations: 'disabled' });
 });
 
+test('code-owned AnchorRef annotations', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.goto('/dev/board?scene=annotations');
+  await expect(page.locator('[data-active-scene]')).toContainText('annotations');
+  await expect(page.locator('[data-item^="annotation-"]')).toHaveCount(7);
+  await expect(page).toHaveScreenshot('scene-annotations.png', { animations: 'disabled' });
+});
+
+for (const scene of ['m7-data', 'm7-spatial', 'm7-relations', 'm7-regions', 'm7-paper', 'm7-instruments']) {
+  test(`curriculum primitive ${scene}`, async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.goto(`/dev/board?scene=${scene}`);
+    await expect(page.locator('[data-active-scene]')).toContainText(scene);
+    await expect(page.locator(`[data-region="group-${scene}"]`).first()).toBeVisible();
+    await expect(page).toHaveScreenshot(`scene-${scene}.png`, { animations: 'disabled' });
+  });
+}
+
 test('curated assets scene', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.emulateMedia({ reducedMotion: 'reduce' });

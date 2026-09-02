@@ -2,6 +2,20 @@ import { describe, expect, it } from 'vitest';
 import { applyUpdate, normalizeColor, validateOps, PALETTE, BOARD_W } from './boardOps';
 
 describe('validateOps', () => {
+  it('accepts the shapes the voice model actually emits for a triangle', () => {
+    const aliased = validateOps([
+      { op: 'add', id: 'tri', kind: 'triangle', points: [[200, 400], [500, 120], [800, 400]] },
+    ]);
+    expect(aliased.rejected).toEqual([]);
+    expect(aliased.ops[0]).toMatchObject({ op: 'add', id: 'tri', spec: { kind: 'polygon' } });
+
+    const objectPoints = validateOps([
+      { op: 'add', id: 'tri-xy', type: 'triangle', points: [{ x: 200, y: 400 }, { x: 500, y: 120 }, { x: 800, y: 400 }] },
+    ]);
+    expect(objectPoints.rejected).toEqual([]);
+    expect(objectPoints.ops[0]).toMatchObject({ spec: { kind: 'polygon' } });
+  });
+
   it('accepts a well-formed add', () => {
     const { ops, rejected } = validateOps([
       { op: 'add', id: 't1', kind: 'polygon', points: [[0, 0], [100, 0], [50, 80]], color: 'blue' },
@@ -81,6 +95,58 @@ describe('validateOps', () => {
     ]);
     const spec = (ops[0] as { spec: { rows: string[][] } }).spec;
     expect(spec.rows[1]).toHaveLength(3);
+  });
+
+  it('accepts code-owned annotations on semantic, stroke, image-region, and raw-point anchors in both tiers', () => {
+    const targets = [
+      { type: 'semantic', objectId: 'triangle', anchor: 'vertex:1' },
+      { type: 'learner_stroke', strokeId: 'learner-stroke-1', anchor: 'end' },
+      {
+        type: 'image_region',
+        imageId: 'worksheet-image',
+        selector: { type: 'FragmentSelector', unit: 'percent', x: 0.1, y: 0.2, w: 0.3, h: 0.25 },
+      },
+      { type: 'point', at: [420, 240] },
+    ];
+    for (const tier of ['fast', 'authored'] as const) {
+      const result = validateOps([{
+        op: 'add', id: `annotation-${tier}`, color: 'red',
+        spec: { kind: 'annotate', style: 'callout', target: targets, note: 'Check this part' },
+      }], { tier });
+      expect(result.rejected).toEqual([]);
+      expect(result.ops[0]).toMatchObject({
+        op: 'add',
+        spec: { kind: 'annotate', style: 'callout', target: targets, note: 'Check this part' },
+      });
+    }
+  });
+
+  it('round-trips every persisted image selector variant', () => {
+    const selectors = [
+      { type: 'FragmentSelector', unit: 'percent', x: 0.1, y: 0.2, w: 0.3, h: 0.25 },
+      { type: 'SvgSelector', points: [[0.1, 0.1], [0.8, 0.2], [0.5, 0.9]] },
+      { type: 'PointSelector', x: 0.45, y: 0.6 },
+    ];
+    for (const [index, selector] of selectors.entries()) {
+      const result = validateOps([{
+        op: 'add', id: `region-${index}`,
+        spec: { kind: 'annotate', style: 'circle', target: { type: 'image_region', imageId: 'worksheet', selector } },
+      }], { tier: 'authored' });
+      expect(result.rejected).toEqual([]);
+      expect(JSON.parse(JSON.stringify(result.ops[0]))).toEqual(result.ops[0]);
+    }
+  });
+
+  it('rejects malformed annotation selectors and unsupported styles', () => {
+    const invalid = validateOps([
+      {
+        op: 'add', id: 'bad-region',
+        spec: { kind: 'annotate', style: 'circle', target: { type: 'image_region', imageId: 'image', selector: { type: 'FragmentSelector', unit: 'percent', x: 0.9, y: 0.9, w: 0.5, h: 0.5 } } },
+      },
+      { op: 'add', id: 'bad-style', spec: { kind: 'annotate', style: 'scribble', target: { type: 'point', at: [10, 10] } } },
+    ]);
+    expect(invalid.ops).toEqual([]);
+    expect(invalid.rejected).toHaveLength(2);
   });
 
   it('passes through clear/highlight/erase/update', () => {

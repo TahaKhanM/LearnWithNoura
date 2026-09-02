@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { validateOps, type BoardOp } from '../../shared/boardOps.js';
+import type { LayoutIssue } from '../../shared/layoutFeedback.js';
 import {
   AnchorSceneSchema,
   CompiledLessonSchema,
@@ -30,7 +31,7 @@ export interface AuthoringChatClient {
   complete(request: { messages: { role: 'system' | 'user'; content: string }[] }): Promise<string | null>;
 }
 
-export type SceneValidationResult = { ok: true } | { ok: false; issues: string[] };
+export type SceneValidationResult = { ok: true } | { ok: false; issues: string[]; layoutIssues?: LayoutIssue[] };
 /** Validates final BoardOps through the real client render pipeline. */
 export type SceneValidator = (ops: BoardOp[]) => Promise<SceneValidationResult>;
 
@@ -96,7 +97,13 @@ const AuthoredRawAnchorSchema = z.object({
   storyboard: z.array(StoryboardStepSchema).min(1).max(8),
 });
 
-const AuthoredLessonSchema = z.object({
+const VALID_BOARD_PURPOSES = new Set([
+  'establish_anchor', 'reveal_relation', 'demonstrate_change', 'compare_cases',
+  'elicit_learner_work', 'test_prediction', 'summarize', 'none',
+]);
+const VALID_BOARD_MUTATIONS = new Set(['establish', 'extend', 'emphasize', 'none']);
+
+const AuthoredLessonSchema = z.preprocess(normalizeAuthoredLessonCandidate, z.object({
   mode: z.enum(['board_led', 'conversation_led']),
   successCriteria: z.array(z.string().min(1).max(240)).min(1).max(4),
   stages: z.array(LessonStageSchema).min(3).max(5),
@@ -111,8 +118,54 @@ const AuthoredLessonSchema = z.object({
   if (!lesson.stages.some((stage) => (stage.checks?.length ?? 0) > 0)) {
     context.addIssue({ code: 'custom', path: ['stages'], message: 'At least one stage must carry an exact check question.' });
   }
-});
+}));
 type AuthoredLesson = z.infer<typeof AuthoredLessonSchema>;
+
+/**
+ * The strong model authors stage content; the application owns the finite
+ * board-policy vocabulary. JSON mode guarantees syntax, not enum adherence,
+ * so an otherwise valid production lesson must not fail because the model
+ * wrote a descriptive synonym such as "model_relation". Preserve legal
+ * choices and derive only invalid/missing values from the stage kind.
+ */
+function normalizeAuthoredLessonCandidate(value: unknown): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+  const lesson = value as Record<string, unknown>;
+  if (!Array.isArray(lesson.stages)) return value;
+  const conversationLed = lesson.mode === 'conversation_led';
+  return {
+    ...lesson,
+    stages: lesson.stages.map((candidate) => {
+      if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return candidate;
+      const stage = candidate as Record<string, unknown>;
+      if (conversationLed) {
+        return { ...stage, boardPurpose: 'none', allowedBoardMutation: 'none' };
+      }
+      const fallback = canonicalBoardPolicy(String(stage.kind ?? ''));
+      return {
+        ...stage,
+        boardPurpose: typeof stage.boardPurpose === 'string' && VALID_BOARD_PURPOSES.has(stage.boardPurpose)
+          ? stage.boardPurpose
+          : fallback.boardPurpose,
+        allowedBoardMutation: typeof stage.allowedBoardMutation === 'string' && VALID_BOARD_MUTATIONS.has(stage.allowedBoardMutation)
+          ? stage.allowedBoardMutation
+          : fallback.allowedBoardMutation,
+      };
+    }),
+  };
+}
+
+function canonicalBoardPolicy(kind: string): {
+  boardPurpose: 'establish_anchor' | 'reveal_relation' | 'elicit_learner_work' | 'test_prediction' | 'summarize' | 'none';
+  allowedBoardMutation: 'establish' | 'extend' | 'emphasize' | 'none';
+} {
+  if (kind === 'orient') return { boardPurpose: 'establish_anchor', allowedBoardMutation: 'establish' };
+  if (kind === 'model') return { boardPurpose: 'reveal_relation', allowedBoardMutation: 'extend' };
+  if (kind === 'guided_check') return { boardPurpose: 'elicit_learner_work', allowedBoardMutation: 'emphasize' };
+  if (kind === 'independent_check') return { boardPurpose: 'test_prediction', allowedBoardMutation: 'emphasize' };
+  if (kind === 'closure') return { boardPurpose: 'summarize', allowedBoardMutation: 'none' };
+  return { boardPurpose: 'none', allowedBoardMutation: 'none' };
+}
 
 const DetourResponseSchema = z.object({
   stages: z.array(LessonStageSchema).min(1).max(2),
@@ -193,7 +246,7 @@ async function assembleAndValidate(deps: LessonCompilerDeps, input: CompileLesso
   const anchorScene = draft.anchor ? buildAnchorScene(input, draft.anchor) : null;
   if (anchorScene) {
     const verdict = await deps.validateScene(anchorScene.ops);
-    if (!verdict.ok) throw new LessonCompileError('Scene validation rejected the anchor scene.', verdict.issues);
+    if (verdict.ok === false) throw new LessonCompileError('Scene validation rejected the anchor scene.', verdict.issues);
   }
   return CompiledLessonSchema.parse({
     compiledLessonId: `compiled-${input.lessonKey}`,

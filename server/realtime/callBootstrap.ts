@@ -41,7 +41,8 @@ export async function createRealtimeCall(input: {
     throw new Error(`Realtime call creation failed with status ${response.status}.`);
   }
   const location = response.headers.get('Location') ?? '';
-  const callId = location.split('/').filter(Boolean).at(-1) ?? '';
+  const locationParts = location.split('/').filter(Boolean);
+  const callId = locationParts[locationParts.length - 1] ?? '';
   if (!callId || !location.includes('/realtime/calls/')) {
     throw new Error('Realtime call response carried no call id in its Location header.');
   }

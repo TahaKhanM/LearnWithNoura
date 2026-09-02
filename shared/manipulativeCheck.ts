@@ -110,6 +110,12 @@ function distanceToInterval(point: [number, number], x0: number, x1: number, y: 
   return Math.hypot(dx, dy);
 }
 
+function explicitPoint(value: readonly unknown[] | undefined, fallback: [number, number]): [number, number] {
+  const x = value?.[0];
+  const y = value?.[1];
+  return typeof x === 'number' && typeof y === 'number' ? [x, y] : fallback;
+}
+
 function withinBounds(
   point: [number, number],
   bounds: NonNullable<ManipulativeCheck['bounds']>,
@@ -120,7 +126,7 @@ function withinBounds(
     const zone: SnapZoneSpec = {
       kind: 'snapZone',
       shape: 'interval',
-      at: bounds.at ?? [0, 300],
+      at: explicitPoint(bounds.at, [0, 300]),
       from: bounds.from,
       to: bounds.to,
       ...(bounds.numberlineId ? { numberlineId: bounds.numberlineId } : {}),
@@ -132,9 +138,10 @@ function withinBounds(
     return { passed: distancePx <= tolerance, distancePx };
   }
   if (bounds.at && bounds.w && bounds.h) {
-    const passed = pointInBox(point, bounds.at, bounds.w, bounds.h, tolerance);
-    const cx = bounds.at[0];
-    const cy = bounds.at[1];
+    const at = explicitPoint(bounds.at, [0, 0]);
+    const passed = pointInBox(point, at, bounds.w, bounds.h, tolerance);
+    const cx = at[0];
+    const cy = at[1];
     const distancePx = Math.hypot(point[0] - cx, point[1] - cy);
     return { passed, distancePx };
   }
@@ -231,7 +238,7 @@ export function evaluateManipulativeCheck(input: EvaluateManipulativeInput): Man
       ? ({
           kind: 'snapZone',
           shape: input.check.bounds.from !== undefined ? 'interval' as const : 'box' as const,
-          at: input.check.bounds.at ?? point,
+          at: explicitPoint(input.check.bounds.at, point),
           w: input.check.bounds.w,
           h: input.check.bounds.h,
           from: input.check.bounds.from,

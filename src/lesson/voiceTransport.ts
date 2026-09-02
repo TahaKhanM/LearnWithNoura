@@ -11,18 +11,30 @@
  */
 
 export type PlaybackBoundary = 'started' | 'stopped' | 'cleared';
-export type VoiceTransportState = 'new' | 'connecting' | 'connected' | 'failed' | 'closed';
+export type VoiceTransportState = 'new' | 'connecting' | 'connected' | 'blocked' | 'failed' | 'closed';
+export type PlaybackFailureReason = 'autoplay_blocked' | 'connection_failed' | 'not_played';
 
 export interface VoiceTransportHandlers {
   /** A provider playback boundary, with how long this response has played. */
   onPlaybackBoundary: (boundary: PlaybackBoundary, responseId: string | null, playedMs: number) => void;
   onStateChange: (state: VoiceTransportState) => void;
+  onMicrophoneState?: (available: boolean, denied: boolean) => void;
+  onPlaybackFailure?: (responseId: string | null, reason: PlaybackFailureReason) => void;
 }
 
 export interface VoiceTransport {
   readonly state: VoiceTransportState;
   /** Requests the microphone, negotiates the call, and starts playback. */
   connect(): Promise<void>;
+  /** Correlates an independently delivered sideband response with WebRTC
+   * playback events that may omit or race its response id. */
+  noteResponse(responseId: string): void;
+  /** Prevents a cancelled response from becoming audible if a late provider
+   * buffer-start event races the local clear. */
+  suppressResponse(responseId: string): void;
+  /** Explicit recovery for browser autoplay policy. Must be callable from a
+   * learner gesture and reports whether local media playback resumed. */
+  resumePlayback(): Promise<boolean>;
   setMicMuted(muted: boolean): void;
   /** The response the provider is audibly playing right now, if any. */
   playingResponseId(): string | null;
@@ -42,6 +54,7 @@ export interface VoiceTransport {
 }
 
 const ICE_GATHERING_TIMEOUT_MS = 2_000;
+export const MICROPHONE_PERMISSION_TIMEOUT_MS = 3_000;
 const ANALYSER_FFT_SIZE = 1024;
 
 export class WebRtcVoiceTransport implements VoiceTransport {
@@ -59,8 +72,14 @@ export class WebRtcVoiceTransport implements VoiceTransport {
   private voiceAnalyser: AnalyserNode | null = null;
   private analyserFrame = new Float32Array(ANALYSER_FFT_SIZE);
   private activeResponseId: string | null = null;
+  private providerResponseId: string | null = null;
+  private responseHint: string | null = null;
+  private providerBufferActive = false;
   private playbackStartedAt = 0;
   private micMuted = false;
+  private mediaPlaying = false;
+  private resumeListenersArmed = false;
+  private suppressedResponses = new Set<string>();
 
   constructor(input: { sessionId: string; lessonCapability: string; handlers: VoiceTransportHandlers }) {
     this.sessionId = input.sessionId;
@@ -69,23 +88,45 @@ export class WebRtcVoiceTransport implements VoiceTransport {
   }
 
   static supported(): boolean {
-    return typeof navigator !== 'undefined' &&
-      Boolean(navigator.mediaDevices?.getUserMedia) &&
-      typeof RTCPeerConnection !== 'undefined';
+    return typeof RTCPeerConnection !== 'undefined';
+  }
+
+  static microphoneSupported(): boolean {
+    return typeof navigator !== 'undefined' && Boolean(navigator.mediaDevices?.getUserMedia);
   }
 
   async connect(): Promise<void> {
     if (this.state !== 'new') return;
     this.setState('connecting');
     try {
-      this.micStream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-      });
       const pc = new RTCPeerConnection();
       this.pc = pc;
-      for (const track of this.micStream.getAudioTracks()) {
-        track.enabled = !this.micMuted;
-        pc.addTrack(track, this.micStream);
+      this.ensureAudioElement();
+      const microphone = await this.requestMicrophone();
+      if (
+        this.pc !== pc
+        || (this.state as VoiceTransportState) === 'closed'
+        || (this.state as VoiceTransportState) === 'failed'
+      ) {
+        for (const track of microphone.stream?.getAudioTracks() ?? []) track.stop();
+        throw new DOMException('Voice connection was closed.', 'AbortError');
+      }
+      this.micStream = microphone.stream;
+      const micTracks = this.micStream?.getAudioTracks() ?? [];
+      if (micTracks.length > 0 && this.micStream) {
+        this.handlers.onMicrophoneState?.(true, false);
+        for (const track of micTracks) {
+          track.enabled = !this.micMuted;
+          pc.addTrack(track, this.micStream);
+        }
+        this.attachMicAnalyser(this.micStream);
+      } else {
+        this.handlers.onMicrophoneState?.(false, microphone.denied);
+        // A denied/missing microphone must not prevent typed lessons, tutor
+        // audio, or subtitles. A permission prompt that is ignored is bounded
+        // too: negotiate a listen-only media section instead of leaving the
+        // lesson on “Waking Noura up…” indefinitely.
+        pc.addTransceiver('audio', { direction: 'recvonly' });
       }
       pc.ontrack = (event) => this.attachRemoteTrack(event.streams[0] ?? new MediaStream([event.track]));
       const dataChannel = pc.createDataChannel('oai-events');
@@ -93,13 +134,12 @@ export class WebRtcVoiceTransport implements VoiceTransport {
       this.dataChannel = dataChannel;
       pc.onconnectionstatechange = () => {
         if (!this.pc) return;
-        if (pc.connectionState === 'connected') this.setState('connected');
+        if (pc.connectionState === 'connected' && this.state !== 'blocked') this.setState('connected');
         // A short blip may recover on its own; `failed` is terminal for this
         // negotiation. The session degrades to captions (sideband transcripts
         // keep flowing) rather than hanging silently.
-        if (pc.connectionState === 'failed') this.setState('failed');
+        if (pc.connectionState === 'failed') this.failMediaConnection();
       };
-      this.attachMicAnalyser(this.micStream);
 
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
@@ -113,7 +153,7 @@ export class WebRtcVoiceTransport implements VoiceTransport {
       if (!response.ok) throw new Error(`voice call bootstrap failed (${response.status})`);
       const answerSdp = await response.text();
       await pc.setRemoteDescription({ type: 'answer', sdp: answerSdp });
-      this.setState('connected');
+      if ((this.state as VoiceTransportState) !== 'blocked') this.setState('connected');
     } catch (error) {
       this.close('failed');
       throw error;
@@ -123,6 +163,42 @@ export class WebRtcVoiceTransport implements VoiceTransport {
   setMicMuted(muted: boolean): void {
     this.micMuted = muted;
     for (const track of this.micStream?.getAudioTracks() ?? []) track.enabled = !muted;
+  }
+
+  noteResponse(responseId: string): void {
+    if (!responseId) return;
+    this.responseHint = responseId;
+    if (this.providerBufferActive && !this.providerResponseId) {
+      this.providerResponseId = responseId;
+      this.startLocalBoundaryIfReady();
+    }
+  }
+
+  suppressResponse(responseId: string): void {
+    if (!responseId) return;
+    this.suppressedResponses.add(responseId);
+    if (this.suppressedResponses.size > 64) {
+      this.suppressedResponses.delete(this.suppressedResponses.values().next().value as string);
+    }
+  }
+
+  async resumePlayback(): Promise<boolean> {
+    const audio = this.audioElement;
+    if (!audio || !audio.srcObject || this.state === 'closed' || this.state === 'failed') return false;
+    try {
+      await audio.play();
+      this.mediaPlaying = !audio.paused;
+      this.disarmResumeListeners();
+      if (this.state === 'blocked') this.setState('connected');
+      this.startLocalBoundaryIfReady();
+      return this.mediaPlaying;
+    } catch {
+      this.mediaPlaying = false;
+      this.setState('blocked');
+      this.armResumeListeners();
+      this.handlers.onPlaybackFailure?.(this.providerResponseId ?? this.responseHint, 'autoplay_blocked');
+      return false;
+    }
   }
 
   playingResponseId(): string | null {
@@ -137,11 +213,11 @@ export class WebRtcVoiceTransport implements VoiceTransport {
   stopPlayback(): number {
     const heardMs = this.playedMs();
     if (this.audioElement) this.audioElement.muted = true;
-    if (this.dataChannel?.readyState === 'open') {
-      try { this.dataChannel.send(JSON.stringify({ type: 'output_audio_buffer.clear' })); }
-      catch { /* the provider's cleared event is a courtesy, not a dependency */ }
-    }
+    this.clearProviderBuffer();
     this.activeResponseId = null;
+    this.providerResponseId = null;
+    this.providerBufferActive = false;
+    this.responseHint = null;
     return heardMs;
   }
 
@@ -159,6 +235,7 @@ export class WebRtcVoiceTransport implements VoiceTransport {
     for (const track of this.micStream?.getAudioTracks() ?? []) track.stop();
     this.micStream = null;
     this.dataChannel = null;
+    this.disarmResumeListeners();
     try { this.pc?.close(); } catch { /* already closed */ }
     this.pc = null;
     if (this.audioElement) {
@@ -171,6 +248,10 @@ export class WebRtcVoiceTransport implements VoiceTransport {
     this.micAnalyser = null;
     this.voiceAnalyser = null;
     this.activeResponseId = null;
+    this.providerResponseId = null;
+    this.responseHint = null;
+    this.providerBufferActive = false;
+    this.mediaPlaying = false;
     this.setState(finalState);
   }
 
@@ -181,31 +262,40 @@ export class WebRtcVoiceTransport implements VoiceTransport {
   }
 
   private attachRemoteTrack(stream: MediaStream): void {
-    if (!this.audioElement) {
-      this.audioElement = document.createElement('audio');
-      this.audioElement.autoplay = true;
-      this.audioElement.style.display = 'none';
-      document.body.appendChild(this.audioElement);
+    const audio = this.ensureAudioElement();
+    audio.srcObject = stream;
+    audio.muted = false;
+    for (const track of stream.getAudioTracks?.() ?? []) {
+      track.addEventListener('ended', () => this.failMediaConnection());
     }
-    this.audioElement.srcObject = stream;
-    this.audioElement.muted = false;
-    void this.audioElement.play().catch(() => {
-      /* autoplay policy: playback resumes on the next user gesture */
-    });
-    const context = this.context();
-    this.voiceAnalyser = context.createAnalyser();
-    this.voiceAnalyser.fftSize = ANALYSER_FFT_SIZE;
-    context.createMediaStreamSource(stream).connect(this.voiceAnalyser);
+    void this.resumePlayback();
+    try {
+      const context = this.context();
+      if (!context) return;
+      this.voiceAnalyser = context.createAnalyser();
+      this.voiceAnalyser.fftSize = ANALYSER_FFT_SIZE;
+      context.createMediaStreamSource(stream).connect(this.voiceAnalyser);
+    } catch {
+      this.voiceAnalyser = null;
+    }
   }
 
   private attachMicAnalyser(stream: MediaStream): void {
-    const context = this.context();
-    this.micAnalyser = context.createAnalyser();
-    this.micAnalyser.fftSize = ANALYSER_FFT_SIZE;
-    context.createMediaStreamSource(stream).connect(this.micAnalyser);
+    try {
+      const context = this.context();
+      if (!context) return;
+      this.micAnalyser = context.createAnalyser();
+      this.micAnalyser.fftSize = ANALYSER_FFT_SIZE;
+      context.createMediaStreamSource(stream).connect(this.micAnalyser);
+    } catch {
+      // Metering and barge-in energy are optional observers. They must never
+      // abort SDP negotiation, remote audio, or subtitles.
+      this.micAnalyser = null;
+    }
   }
 
-  private context(): AudioContext {
+  private context(): AudioContext | null {
+    if (typeof AudioContext === 'undefined') return null;
     if (!this.analyserContext) this.analyserContext = new AudioContext();
     if (this.analyserContext.state === 'suspended') void this.analyserContext.resume().catch(() => undefined);
     return this.analyserContext;
@@ -228,29 +318,137 @@ export class WebRtcVoiceTransport implements VoiceTransport {
     const responseId = typeof event.response_id === 'string' ? event.response_id : null;
     switch (event.type) {
       case 'output_audio_buffer.started': {
-        this.activeResponseId = responseId;
-        this.playbackStartedAt = performance.now();
+        this.providerBufferActive = true;
+        this.providerResponseId = responseId ?? this.responseHint;
+        if (this.providerResponseId && this.suppressedResponses.has(this.providerResponseId)) {
+          if (this.audioElement) this.audioElement.muted = true;
+          this.clearProviderBuffer();
+          this.providerBufferActive = false;
+          this.providerResponseId = null;
+          break;
+        }
         if (this.audioElement) this.audioElement.muted = false;
-        this.handlers.onPlaybackBoundary('started', responseId, 0);
+        this.startLocalBoundaryIfReady();
+        if (!this.mediaPlaying) void this.resumePlayback();
         break;
       }
       case 'output_audio_buffer.stopped': {
-        const playedMs = this.playedMs();
-        const stopped = this.activeResponseId ?? responseId;
-        this.activeResponseId = null;
-        this.handlers.onPlaybackBoundary('stopped', stopped, playedMs);
+        this.finishProviderBoundary('stopped', responseId);
         break;
       }
       case 'output_audio_buffer.cleared': {
-        const playedMs = this.playedMs();
-        const cleared = this.activeResponseId ?? responseId;
-        this.activeResponseId = null;
-        this.handlers.onPlaybackBoundary('cleared', cleared, playedMs);
+        this.finishProviderBoundary('cleared', responseId);
         break;
       }
       default:
         break;
     }
+  }
+
+  private ensureAudioElement(): HTMLAudioElement {
+    if (this.audioElement) return this.audioElement;
+    const audio = document.createElement('audio');
+    audio.autoplay = true;
+    audio.setAttribute('playsinline', '');
+    audio.preload = 'auto';
+    audio.style.display = 'none';
+    audio.addEventListener('playing', () => {
+      this.mediaPlaying = true;
+      this.disarmResumeListeners();
+      if (this.state === 'blocked') this.setState('connected');
+      this.startLocalBoundaryIfReady();
+    });
+    audio.addEventListener('pause', () => { this.mediaPlaying = false; });
+    audio.addEventListener('error', () => this.failMediaConnection());
+    document.body.appendChild(audio);
+    this.audioElement = audio;
+    return audio;
+  }
+
+  private startLocalBoundaryIfReady(): void {
+    const responseId = this.providerResponseId;
+    if (!this.providerBufferActive || !this.mediaPlaying || !responseId || this.activeResponseId === responseId) return;
+    this.activeResponseId = responseId;
+    this.playbackStartedAt = performance.now();
+    this.handlers.onPlaybackBoundary('started', responseId, 0);
+  }
+
+  private finishProviderBoundary(boundary: Exclude<PlaybackBoundary, 'started'>, eventResponseId: string | null): void {
+    const responseId = this.activeResponseId ?? this.providerResponseId ?? eventResponseId ?? this.responseHint;
+    const playedMs = this.playedMs();
+    const locallyStarted = this.activeResponseId !== null;
+    this.activeResponseId = null;
+    this.providerResponseId = null;
+    this.providerBufferActive = false;
+    if (responseId === this.responseHint) this.responseHint = null;
+    if (locallyStarted) this.handlers.onPlaybackBoundary(boundary, responseId, playedMs);
+    else this.handlers.onPlaybackFailure?.(responseId, 'not_played');
+  }
+
+  private clearProviderBuffer(): void {
+    if (this.dataChannel?.readyState !== 'open') return;
+    try { this.dataChannel.send(JSON.stringify({ type: 'output_audio_buffer.clear' })); }
+    catch { /* a sideband cancel still follows */ }
+  }
+
+  private readonly resumeFromGesture = (): void => { void this.resumePlayback(); };
+
+  private failMediaConnection(): void {
+    if (this.state === 'closed' || this.state === 'failed') return;
+    this.handlers.onPlaybackFailure?.(this.activeResponseId ?? this.providerResponseId ?? this.responseHint, 'connection_failed');
+    this.activeResponseId = null;
+    this.providerResponseId = null;
+    this.providerBufferActive = false;
+    this.mediaPlaying = false;
+    this.setState('failed');
+  }
+
+  private armResumeListeners(): void {
+    if (this.resumeListenersArmed) return;
+    this.resumeListenersArmed = true;
+    document.addEventListener('pointerdown', this.resumeFromGesture, true);
+    document.addEventListener('keydown', this.resumeFromGesture, true);
+    document.addEventListener('touchend', this.resumeFromGesture, true);
+  }
+
+  private disarmResumeListeners(): void {
+    if (!this.resumeListenersArmed) return;
+    this.resumeListenersArmed = false;
+    document.removeEventListener('pointerdown', this.resumeFromGesture, true);
+    document.removeEventListener('keydown', this.resumeFromGesture, true);
+    document.removeEventListener('touchend', this.resumeFromGesture, true);
+  }
+
+  private requestMicrophone(): Promise<{ stream: MediaStream | null; denied: boolean }> {
+    const getUserMedia = navigator.mediaDevices?.getUserMedia?.bind(navigator.mediaDevices);
+    if (!getUserMedia) return Promise.resolve({ stream: null, denied: false });
+
+    return new Promise((resolve) => {
+      let finished = false;
+      const finish = (result: { stream: MediaStream | null; denied: boolean }) => {
+        if (finished) {
+          for (const track of result.stream?.getAudioTracks() ?? []) track.stop();
+          return;
+        }
+        finished = true;
+        clearTimeout(timer);
+        resolve(result);
+      };
+      const timer = setTimeout(
+        () => finish({ stream: null, denied: false }),
+        MICROPHONE_PERMISSION_TIMEOUT_MS,
+      );
+
+      void getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      }).then(
+        (stream) => finish({ stream, denied: false }),
+        (error: unknown) => finish({
+          stream: null,
+          denied: error instanceof DOMException && error.name === 'NotAllowedError',
+        }),
+      );
+    });
   }
 
   private waitForIceGathering(pc: RTCPeerConnection): Promise<void> {
