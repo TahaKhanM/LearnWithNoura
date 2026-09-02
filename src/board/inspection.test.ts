@@ -37,6 +37,12 @@ describe('scene inspection and repair', () => {
       { op: 'add', id: 'a', spec: { kind: 'box', at: [400, 300], text: 'First idea' } },
       { op: 'add', id: 'b', spec: { kind: 'box', at: [405, 305], text: 'Second idea' } },
     ], 'tutor').scene;
-    expect(inspectScene(scene).issues).toEqual(expect.arrayContaining([expect.objectContaining({ kind: 'collision' })]));
+    expect(inspectScene(scene).issues).toEqual(expect.arrayContaining([expect.objectContaining({
+      kind: 'collision',
+      itemId: 'b',
+      withItemId: 'a',
+      itemBounds: { x: expect.any(Number), y: expect.any(Number), w: expect.any(Number), h: expect.any(Number) },
+      withItemBounds: { x: expect.any(Number), y: expect.any(Number), w: expect.any(Number), h: expect.any(Number) },
+    })]));
   });
 });

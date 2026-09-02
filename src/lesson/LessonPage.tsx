@@ -17,7 +17,7 @@ import { analyzeLearnerBoardChange, analysisFocusBox } from '../board/learnerSke
 import { deriveSemanticViewports } from '../board/semanticViewport';
 import { renderSceneImage } from '../board/snapshot';
 import { registerKatexMeasurer } from '../board/compile';
-import { measureKatexInDom } from '../board/domKatexMeasurer';
+import { measureKatexInDom, prepareDomBoardMeasurement } from '../board/domKatexMeasurer';
 import { evaluateManipulativeCheck } from '../../shared/manipulativeCheck';
 import type { ManipulativeFeedback } from '../board/ManipulativeLayer';
 import type { UpdateOp } from '../../shared/boardOps';
@@ -239,7 +239,15 @@ export function LessonPage({ sessionId }: LessonPageProps) {
       // The cue has crossed the heard-audio boundary, so it is now true on the
       // visible board. Promote it before animation; learner input and ordinary
       // re-renders must build on this state rather than an older checkpoint.
-      const applied = boardState.current.applyTutorCheckpoint(ops, cue?.semanticObjectId, cue?.replacesGroup);
+      await prepareDomBoardMeasurement(ops);
+      registerKatexMeasurer(measureKatexInDom);
+      const applied = (() => {
+        try {
+          return boardState.current.applyTutorCheckpoint(ops, cue?.semanticObjectId, cue?.replacesGroup);
+        } finally {
+          registerKatexMeasurer(null);
+        }
+      })();
       if (!applied) return false;
       const candidate = applied.scene;
       const expectedGroup = cue?.semanticObjectId ?? activeVisualGroupRef.current;
@@ -297,7 +305,7 @@ export function LessonPage({ sessionId }: LessonPageProps) {
     // Complete-plan preflight: the model only hears "accepted" for visuals
     // whose entire final scene compiles and passes quality checks offscreen.
     session.onVisualPreflight = async (ops, semanticGroupId, replacesGroup) => {
-      await document.fonts.ready;
+      await prepareDomBoardMeasurement(ops);
       registerKatexMeasurer(measureKatexInDom);
       try {
         return boardState.current.preflightTutorOps(ops, semanticGroupId, replacesGroup);
@@ -306,7 +314,7 @@ export function LessonPage({ sessionId }: LessonPageProps) {
       }
     };
     session.onVisualRender = async (ops, semanticGroupId) => {
-      await document.fonts.ready;
+      await prepareDomBoardMeasurement(ops);
       registerKatexMeasurer(measureKatexInDom);
       try {
         // A render without a target group is the Director asking what the
@@ -431,6 +439,17 @@ export function LessonPage({ sessionId }: LessonPageProps) {
     setScene(result.scene);
     draftRef.current.addErase(op, original, 'erased one of their own marks');
   }, [session, ensureDraftOpen]);
+
+  const handleImageRegionTap = useCallback((point: Vec) => {
+    const request = session.getSnapshot().imageGrounding;
+    if (!request) return;
+    const image = boardState.current.current.items.find((item) => item.id === request.imageId && item.spec.kind === 'image');
+    if (!image || image.spec.kind !== 'image') return;
+    const x = (point[0] - image.spec.at[0]) / image.spec.w;
+    const y = (point[1] - image.spec.at[1]) / image.spec.h;
+    if (x < 0 || x > 1 || y < 0 || y > 1) return;
+    session.submitImageRegionTap({ type: 'PointSelector', x, y });
+  }, [session]);
 
   const applyDraftOps = useCallback((ops: BoardOp[]) => {
     if (ops.length === 0) return;
@@ -757,6 +776,12 @@ export function LessonPage({ sessionId }: LessonPageProps) {
           </div>
         )}
         {started && <IllustrationStatusBanner illustration={snap.illustration} />}
+        {started && snap.imageGrounding && (
+          <div className="lesson__task" data-testid="image-grounding-tap" role="status" aria-live="polite">
+            <strong>Tap the part Noura means</strong>
+            <span className="lesson__task-prompt">{snap.imageGrounding.hint}</span>
+          </div>
+        )}
         <div className={`lesson__surface${boardOverview ? ' lesson__surface--overview' : ''}`}>
           <IllustrationPartialPreview illustration={snap.illustration} />
           <BoardCanvas
@@ -771,6 +796,8 @@ export function LessonPage({ sessionId }: LessonPageProps) {
             onLearnerActivityStart={() => session.beginLearnerActivity()}
             onTutorPen={handleTutorPen}
             onLearnerAttention={handleLearnerAttention}
+            tapRequested={Boolean(snap.imageGrounding)}
+            onBoardTap={handleImageRegionTap}
             longDescription={describeScene(scene)}
             animatorRef={handleAnimatorReady}
             focusSemanticObjectId={activeVisualGroupId}
@@ -1013,9 +1040,19 @@ export function LessonPage({ sessionId }: LessonPageProps) {
                 The microphone is blocked, so Noura can’t hear you — but typing works.
               </p>
             )}
+            {snap.audioBlocked && (
+              <p className="lesson__notice">
+                Sound needs permission from this browser. Captions will continue until voice is enabled.
+              </p>
+            )}
           </div>
 
           <div className="lesson__controls">
+            {snap.audioBlocked && (
+              <button className="lesson__audio-enable" onClick={() => void session.resumeAudio()}>
+                Enable voice
+              </button>
+            )}
             {snap.micAvailable && !snap.micDenied && snap.phase !== 'fallback' && (
               <button
                 className="lesson__mic"

@@ -186,12 +186,145 @@ describe('realtime proxy response annotation', () => {
       type: 'response.function_call_arguments.done', response_id: 'scene-response', call_id: 'scene-call', name: 'request_visual',
       arguments: JSON.stringify({
         schemaVersion: '3.0.0', requestId: 'proof-request', action: 'establish',
-        purpose: 'The stage needs the proof laid out spatially', idea: 'The rearrangement proof of the Pythagorean theorem', density: 'minimal',
+        purpose: 'The stage needs an unfamiliar abstract relationship', idea: 'Show opportunity cost without treating both options as equivalent', density: 'minimal',
       }),
     });
     await flushProxy();
-    expect(toolOutput(upstream, 'scene-call')).toMatchObject({ ok: false, accepted: false, reason: expect.stringContaining('No scene service') });
+    expect(toolOutput(upstream, 'scene-call')).toMatchObject({
+      ok: false,
+      accepted: false,
+      reason: expect.stringMatching(/scene-planning service is unavailable/i),
+    });
+    expect(String(toolOutput(upstream, 'scene-call').reason)).toMatch(/nothing was drawn/i);
     expect(repo.listEventsForInternalAudit(session.id).filter((event) => event.type === 'semantic_scene')).toEqual([]);
+  });
+
+  it('fails board-led new-scene requests closed without a Director', async () => {
+    vi.stubGlobal('WebSocket', FakeUpstream);
+    const repo = new Repo(openTestDb());
+    const child = repo.createChild('Maya', 10);
+    const session = repo.createSession(child.id, 'geometry');
+    seedCompiledLesson(repo, session.id, 'board_led');
+    const client = new FakeClient();
+    await connectRealtimeProxy(client as never, { apiKey: 'offline-fixture', model: 'gpt-realtime-2.1', repo, sessionId: session.id, createUpstream: () => new FakeUpstream() as never });
+    const active = { ...identity, sessionId: session.id };
+    const upstream = FakeUpstream.latest;
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 0, 'hello', {})));
+    upstream.emit({ type: 'response.created', response: { id: 'scene-response' } });
+    upstream.emit({
+      type: 'response.function_call_arguments.done', response_id: 'scene-response', call_id: 'scene-call', name: 'request_visual',
+      arguments: JSON.stringify({
+        schemaVersion: '3.0.0', requestId: 'compare-request', action: 'compare',
+        purpose: 'Show a second representation', idea: 'A different triangle beside the first', density: 'minimal',
+      }),
+    });
+    await flushProxy();
+    expect(toolOutput(upstream, 'scene-call')).toMatchObject({ ok: false, accepted: false, reason: expect.stringContaining('scene-planning service is unavailable') });
+  });
+
+  it('routes a conversation-led first representation through the Board Director', async () => {
+    vi.stubGlobal('WebSocket', FakeUpstream);
+    const repo = new Repo(openTestDb());
+    const child = repo.createChild('Maya', 10);
+    const session = repo.createSession(child.id, 'show an entropy diagram');
+    seedCompiledLesson(repo, session.id, 'conversation_led');
+    const client = new FakeClient();
+    const requests: Array<{ idea: string; sectionId: string }> = [];
+    await connectRealtimeProxy(client as never, {
+      apiKey: 'offline-fixture', model: 'gpt-realtime-2.1', repo, sessionId: session.id,
+      createUpstream: () => new FakeUpstream() as never,
+      directVisual: async (request) => {
+        requests.push({ idea: request.idea, sectionId: request.sectionId });
+        return {
+          ok: true,
+          scene: {
+            groupId: request.sectionId,
+            groupLabel: 'Entropy model',
+            template: null,
+            ops: [{ op: 'add', id: 'arrangements', spec: { kind: 'box', at: [500, 300], text: 'Possible arrangements' } }],
+            storyboard: [{ id: 'arrangements-step', reveal: 'outline', narration: 'This box represents the possible arrangements.', objectIds: ['arrangements'] }],
+          },
+        };
+      },
+    });
+    const active = { ...identity, sessionId: session.id };
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 0, 'hello', {})));
+    const upstream = FakeUpstream.latest;
+    upstream.emit({ type: 'response.created', response: { id: 'scene-response' } });
+    upstream.emit({
+      type: 'response.function_call_arguments.done', response_id: 'scene-response', call_id: 'scene-call', name: 'request_visual',
+      arguments: JSON.stringify({
+        schemaVersion: '3.0.0', requestId: 'entropy-request', action: 'establish',
+        purpose: 'Show an unfamiliar abstract relationship', idea: 'Two arrangements shown as boxes', density: 'minimal',
+      }),
+    });
+    await flushProxy();
+    expect(toolOutput(upstream, 'scene-call')).toMatchObject({ ok: true, accepted: true, status: 'preparing' });
+    expect(requests).toEqual([{ idea: 'Two arrangements shown as boxes', sectionId: 'lesson-anchor' }]);
+
+    const preflight = client.sent.find((event) => event.type === 'visual_preflight');
+    expect(preflight).toBeDefined();
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 1, 'visual_preflight_result', {
+      preflight_id: (preflight?.payload as { preflight_id?: string } | undefined)?.preflight_id,
+      accepted: true,
+      reasons: [],
+    })));
+    await flushProxy();
+    expect(client.sent.some((event) => event.type === 'board_ops')).toBe(true);
+  });
+
+  it('keeps the full session brief on conversation-led learner turns', async () => {
+    vi.stubGlobal('WebSocket', FakeUpstream);
+    const repo = new Repo(openTestDb());
+    const child = repo.createChild('Maya', 10);
+    const session = repo.createSession(child.id, 'geometry');
+    seedCompiledLesson(repo, session.id, 'conversation_led');
+    const client = new FakeClient();
+    await connectRealtimeProxy(client as never, { apiKey: 'offline-fixture', model: 'gpt-realtime-2.1', repo, sessionId: session.id, createUpstream: () => new FakeUpstream() as never });
+    const active = { ...identity, sessionId: session.id };
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 0, 'hello', {})));
+    const upstream = FakeUpstream.latest;
+    const creates = () => upstream.sent.map((raw) => JSON.parse(raw) as { type: string; response?: { instructions?: string } })
+      .filter((event) => event.type === 'response.create');
+
+    upstream.emit({ type: 'input_audio_buffer.speech_started' });
+    upstream.emit({ type: 'input_audio_buffer.speech_stopped' });
+    await flushProxy();
+    const voiceCreate = creates().at(-1);
+    // Per-response instructions replace the session brief. Ordinary turns
+    // therefore use the full session instructions instead of a patch-sized
+    // drawing steer that drops persona, stage, and safety context.
+    expect(voiceCreate?.response).toBeUndefined();
+    const latestSession = upstream.sent.map((raw) => JSON.parse(raw) as { type: string; session?: { instructions?: string } })
+      .filter((event) => event.type === 'session.update').at(-1);
+    expect(latestSession?.session?.instructions).toMatch(/request_visual/i);
+    expect(latestSession?.session?.instructions).toMatch(/Current stage/i);
+  });
+
+  it('does not turn a visual teaching move into a learner task banner', async () => {
+    vi.stubGlobal('WebSocket', FakeUpstream);
+    const repo = new Repo(openTestDb());
+    const child = repo.createChild('Maya', 10);
+    const session = repo.createSession(child.id, 'geometry');
+    const client = new FakeClient();
+    await connectRealtimeProxy(client as never, { apiKey: 'offline-fixture', model: 'gpt-realtime-2.1', repo, sessionId: session.id, createUpstream: () => new FakeUpstream() as never });
+    const active = { ...identity, sessionId: session.id };
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 0, 'hello', {})));
+    const upstream = FakeUpstream.latest;
+    upstream.emit({ type: 'response.created', response: { id: 'visual-response' } });
+    upstream.emit({
+      type: 'response.function_call_arguments.done', response_id: 'visual-response', call_id: 'move-call', name: 'propose_teaching_move',
+      arguments: JSON.stringify({
+        rationale: 'Draw the triangle they asked for', microObjective: 'see a triangle',
+        strategy: 'put the figure on the board', childFacingText: 'Okay I will draw a triangle.',
+        questionOrTask: 'Okay I will draw a triangle.', proposedAction: 'visual',
+      }),
+    });
+    await flushProxy();
+    upstream.emit({ type: 'response.output_audio_transcript.done', response_id: 'visual-response', transcript: 'Okay I will draw a triangle.' });
+    upstream.emit({ type: 'response.done', response: { id: 'visual-response', status: 'completed', output: [{ type: 'function_call' }] } });
+    await flushProxy();
+    expect(client.sent.some((event) => event.type === 'learner_task')).toBe(false);
   });
 
   it('answers an extend request with guidance and routes the adaptation into the visible section', async () => {
@@ -223,6 +356,9 @@ describe('realtime proxy response annotation', () => {
       type: 'response.function_call_arguments.done', response_id: 'adapt-response', call_id: 'highlight-call', name: 'board_ops',
       arguments: JSON.stringify({ ops: [{ op: 'highlight', id: 'fraction-line' }] }),
     });
+    await flushProxy();
+    const highlightedEvent = repo.listEventsForInternalAudit(session.id).find((event) => event.type === 'board_ops' && !event.released);
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 1, 'ops_presented', { event_id: highlightedEvent?.id })));
     await flushProxy();
 
     // Extensions stay in the anchor section as small increments — the model
@@ -387,12 +523,191 @@ describe('realtime proxy response annotation', () => {
       arguments: JSON.stringify({ ops: [{ op: 'add', id: 'triangle', spec: { kind: 'polygon', points: [[200, 400], [500, 120], [800, 400]] } }] }),
     });
     await flushProxy();
-    expect(toolOutput(upstream, 'ops-call')).toMatchObject({ ok: true, applied: 1 });
+    const eventId = repo.listEventsForInternalAudit(session.id).find((event) => event.type === 'board_ops')?.id;
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 1, 'ops_presented', { event_id: eventId })));
+    await flushProxy();
+    expect(toolOutput(upstream, 'ops-call')).toMatchObject({
+      ok: true,
+      applied: 1,
+      visible: true,
+      justDrawn: ['triangle'],
+      board: { visibleObjectIds: expect.arrayContaining(['triangle']) },
+    });
     expect(creates()).toEqual([]);
 
     upstream.emit({ type: 'response.done', response: { id: 'okay-response', status: 'completed', output: [{ type: 'function_call' }] } });
     await flushProxy();
     expect(creates()).toHaveLength(1);
+  });
+
+  it('delivers fast semantic and learner-stroke annotations without a vision call', async () => {
+    vi.stubGlobal('WebSocket', FakeUpstream);
+    const repo = new Repo(openTestDb());
+    const child = repo.createChild('Maya', 10);
+    const session = repo.createSession(child.id, 'geometry');
+    repo.addEvent(session.id, 'board_ops', {
+      semanticObjectId: 'geometry',
+      ops: [{ op: 'add', id: 'triangle', spec: { kind: 'polygon', points: [[200, 400], [500, 120], [800, 400]] } }],
+    });
+    repo.addEvent(session.id, 'learner_board', {
+      semanticObjectId: 'geometry',
+      ops: [{ op: 'add', id: 'sketch-learner-stroke', spec: { kind: 'path', points: [[180, 280], [240, 320], [310, 290]] } }],
+    });
+    const inspect = vi.fn(async () => ({ outcome: 'approved' as const, issues: [] }));
+    const client = new FakeClient();
+    await connectRealtimeProxy(client as never, {
+      apiKey: 'offline-fixture', model: 'gpt-realtime-2.1', repo, sessionId: session.id,
+      visionAudit: { model: 'gpt-5.6-luna', reasoningEffort: 'low', inspect },
+      createUpstream: () => new FakeUpstream() as never,
+    });
+    const active = { ...identity, sessionId: session.id };
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 0, 'hello', {})));
+    const upstream = FakeUpstream.latest;
+    upstream.emit({ type: 'response.created', response: { id: 'annotation-response' } });
+    const startedAt = Date.now();
+    upstream.emit({
+      type: 'response.function_call_arguments.done', response_id: 'annotation-response', call_id: 'annotation-call', name: 'board_ops',
+      arguments: JSON.stringify({ ops: [
+        { op: 'add', id: 'apex-circle', spec: { kind: 'annotate', style: 'circle', target: { type: 'semantic', objectId: 'triangle', anchor: 'vertex:1' } } },
+        { op: 'add', id: 'stroke-tick', spec: { kind: 'annotate', style: 'tick', target: { type: 'learner_stroke', strokeId: 'sketch-learner-stroke', anchor: 'end' } } },
+      ] }),
+    });
+    await flushProxy();
+    const staged = repo.listEventsForInternalAudit(session.id).find((event) =>
+      event.type === 'board_ops' && !event.released && JSON.stringify(event.payload).includes('apex-circle'));
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 1, 'ops_presented', { event_id: staged?.id })));
+    await flushProxy();
+
+    const annotationOutput = toolOutput(upstream, 'annotation-call');
+    expect(annotationOutput.rejected ?? []).toEqual([]);
+    expect(annotationOutput).toMatchObject({
+      ok: true,
+      status: 'visible',
+      applied: 2,
+      justDrawn: ['apex-circle', 'stroke-tick'],
+    });
+    expect(Date.now() - startedAt).toBeLessThan(1_000);
+    expect(inspect).not.toHaveBeenCalled();
+  });
+
+  it('grounds an image region, render-back audits it, and stages only the verified annotation', async () => {
+    vi.stubGlobal('WebSocket', FakeUpstream);
+    const repo = new Repo(openTestDb());
+    const child = repo.createChild('Maya', 10);
+    const session = repo.createSession(child.id, 'synthetic worksheet');
+    repo.addEvent(session.id, 'board_ops', {
+      semanticObjectId: 'image-board',
+      ops: [{ op: 'add', id: 'worksheet-image', spec: { kind: 'image', assetId: 'img-a1b2c3d4', at: [100, 80], w: 800, h: 420, alt: 'Synthetic worksheet' } }],
+    });
+    const propose = vi.fn(async () => ({
+      selector: { type: 'FragmentSelector' as const, unit: 'percent' as const, x: 0.2, y: 0.25, w: 0.3, h: 0.2 },
+      confidence: 0.91,
+    }));
+    const inspect = vi.fn(async () => ({ outcome: 'approved' as const, issues: [] }));
+    const client = new FakeClient();
+    await connectRealtimeProxy(client as never, {
+      apiKey: 'offline-fixture', model: 'gpt-realtime-2.1', repo, sessionId: session.id,
+      imageGroundingProposal: { propose },
+      visionAudit: { model: 'gpt-5.6-luna', reasoningEffort: 'low', inspect },
+      createUpstream: () => new FakeUpstream() as never,
+    });
+    const active = { ...identity, sessionId: session.id };
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 0, 'hello', {})));
+    const upstream = FakeUpstream.latest;
+    upstream.emit({ type: 'response.created', response: { id: 'grounding-response' } });
+    upstream.emit({
+      type: 'response.function_call_arguments.done', response_id: 'grounding-response', call_id: 'grounding-call', name: 'ground_image_region',
+      arguments: JSON.stringify({ requestId: 'grounding-1', imageId: 'worksheet-image', hint: 'the denominator', style: 'circle' }),
+    });
+
+    await vi.waitFor(() => expect(client.sent.filter((event) => event.type === 'visual_render')).toHaveLength(1));
+    const currentRender = client.sent.find((event) => event.type === 'visual_render')!;
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 1, 'visual_render_result', {
+      render_id: (currentRender.payload as { render_id: string }).render_id,
+      image_data_url: 'data:image/jpeg;base64,Ym9hcmQ=',
+    })));
+    await vi.waitFor(() => expect(client.sent.filter((event) => event.type === 'visual_preflight')).toHaveLength(1));
+    const preflight = client.sent.find((event) => event.type === 'visual_preflight')!;
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 2, 'visual_preflight_result', {
+      preflight_id: (preflight.payload as { preflight_id: string }).preflight_id,
+      accepted: true,
+      reasons: [],
+    })));
+    await vi.waitFor(() => expect(client.sent.filter((event) => event.type === 'visual_render')).toHaveLength(2));
+    const candidateRender = client.sent.filter((event) => event.type === 'visual_render')[1];
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 3, 'visual_render_result', {
+      render_id: (candidateRender.payload as { render_id: string }).render_id,
+      image_data_url: 'data:image/jpeg;base64,Y2FuZGlkYXRl',
+    })));
+    await vi.waitFor(() => expect(client.sent.some((event) => event.type === 'board_ops')).toBe(true));
+    const staged = repo.listEventsForInternalAudit(session.id).find((event) =>
+      event.type === 'board_ops' && !event.released && JSON.stringify(event.payload).includes('annotation-grounding-1'));
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 4, 'ops_presented', { event_id: staged?.id })));
+    await flushProxy();
+
+    expect(toolOutput(upstream, 'grounding-call')).toMatchObject({ ok: true, accepted: true, status: 'visible' });
+    expect(propose).toHaveBeenCalledOnce();
+    expect(inspect).toHaveBeenCalledOnce();
+    expect(staged?.payload).toMatchObject({
+      ops: [expect.objectContaining({ spec: expect.objectContaining({ kind: 'annotate', target: { type: 'image_region', imageId: 'worksheet-image', selector: expect.objectContaining({ type: 'FragmentSelector' }) } }) })],
+    });
+    expect(client.sent.some((event) => event.type === 'image_region_tap_request')).toBe(false);
+  });
+
+  it('requests one child tap on low-confidence image grounding and persists only the normalized selector', async () => {
+    vi.stubGlobal('WebSocket', FakeUpstream);
+    const repo = new Repo(openTestDb());
+    const child = repo.createChild('Maya', 10);
+    const session = repo.createSession(child.id, 'synthetic worksheet');
+    repo.addEvent(session.id, 'board_ops', {
+      semanticObjectId: 'image-board',
+      ops: [{ op: 'add', id: 'worksheet-image', spec: { kind: 'image', assetId: 'img-a1b2c3d4', at: [100, 80], w: 800, h: 420, alt: 'Synthetic worksheet' } }],
+    });
+    const inspect = vi.fn();
+    const client = new FakeClient();
+    await connectRealtimeProxy(client as never, {
+      apiKey: 'offline-fixture', model: 'gpt-realtime-2.1', repo, sessionId: session.id,
+      imageGroundingProposal: { propose: async () => ({ selector: { type: 'PointSelector', x: 0.4, y: 0.6 }, confidence: 0.5 }) },
+      visionAudit: { model: 'gpt-5.6-luna', reasoningEffort: 'low', inspect },
+      createUpstream: () => new FakeUpstream() as never,
+    });
+    const active = { ...identity, sessionId: session.id };
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 0, 'hello', {})));
+    const upstream = FakeUpstream.latest;
+    upstream.emit({ type: 'response.created', response: { id: 'tap-response' } });
+    upstream.emit({
+      type: 'response.function_call_arguments.done', response_id: 'tap-response', call_id: 'tap-call', name: 'ground_image_region',
+      arguments: JSON.stringify({ requestId: 'tap-grounding', imageId: 'worksheet-image', hint: 'the axle', style: 'arrow' }),
+    });
+    await vi.waitFor(() => expect(client.sent.filter((event) => event.type === 'visual_render')).toHaveLength(1));
+    const render = client.sent.find((event) => event.type === 'visual_render')!;
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 1, 'visual_render_result', {
+      render_id: (render.payload as { render_id: string }).render_id,
+      image_data_url: 'data:image/jpeg;base64,Ym9hcmQ=',
+    })));
+    await vi.waitFor(() => expect(client.sent.some((event) => event.type === 'image_region_tap_request')).toBe(true));
+    expect(toolOutput(upstream, 'tap-call')).toMatchObject({ ok: true, accepted: false, status: 'tap_required', reason: 'low_confidence' });
+    expect(inspect).not.toHaveBeenCalled();
+
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 2, 'image_region_tap', {
+      request_id: 'tap-grounding', image_id: 'worksheet-image',
+      selector: { type: 'PointSelector', x: 0.45, y: 0.55 },
+    })));
+    await vi.waitFor(() => expect(client.sent.some((event) => event.type === 'board_ops')).toBe(true));
+    const staged = repo.listEventsForInternalAudit(session.id).find((event) =>
+      event.type === 'board_ops' && !event.released && JSON.stringify(event.payload).includes('annotation-tap-grounding'));
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 3, 'ops_presented', { event_id: staged?.id })));
+    await flushProxy();
+
+    expect(staged?.payload).toMatchObject({
+      ops: [expect.objectContaining({ spec: expect.objectContaining({
+        kind: 'annotate',
+        target: { type: 'image_region', imageId: 'worksheet-image', selector: { type: 'PointSelector', x: 0.45, y: 0.55 } },
+      }) })],
+    });
+    expect(client.sent.find((event) => event.type === 'image_region_grounded')?.payload).toMatchObject({
+      request_id: 'tap-grounding', accepted: true,
+    });
   });
 
   it('retries a tool continuation that hit an already-active response', async () => {
@@ -481,7 +796,7 @@ describe('realtime proxy response annotation', () => {
     });
   });
 
-  it('strips raw clear ops and reports why', async () => {
+  it('rejects a destructive mixed batch atomically', async () => {
     vi.stubGlobal('WebSocket', FakeUpstream);
     const repo = new Repo(openTestDb());
     const child = repo.createChild('Maya', 10);
@@ -499,10 +814,10 @@ describe('realtime proxy response annotation', () => {
     const output = upstream.sent.map((raw) => JSON.parse(raw) as { type: string; item?: { call_id?: string; output?: string } })
       .find((event) => event.type === 'conversation.item.create' && event.item?.call_id === 'clear-call');
     const parsed = JSON.parse(output?.item?.output ?? '{}') as { ok?: boolean; applied?: number; rejected?: string[] };
-    expect(parsed.applied).toBe(1);
+    expect(parsed.applied).toBe(0);
     expect(parsed.rejected?.join(' ')).toMatch(/clear is not available/i);
     const staged = repo.listEventsForInternalAudit(session.id).find((event) => event.type === 'board_ops');
-    expect(JSON.stringify(staged?.payload)).not.toContain('"clear"');
+    expect(staged).toBeUndefined();
   });
 
   it('fails the anchor build closed when the browser rejects or never confirms the preflight', async () => {
@@ -737,7 +1052,7 @@ describe('realtime proxy response annotation', () => {
     const repo = new Repo(openTestDb());
     const child = repo.createChild('Maya', 10);
     const session = repo.createSession(child.id, 'fractions');
-    seedCompiledLesson(repo, session.id);
+    seedCompiledLesson(repo, session.id, 'board_led');
     const client = new FakeClient();
     const directorRequests: string[] = [];
     await connectRealtimeProxy(client as never, {
@@ -794,7 +1109,7 @@ describe('realtime proxy response annotation', () => {
       ok: false,
       accepted: false,
       reason: expect.stringContaining('One visual plan per teaching turn'),
-      anchorGroupId: null,
+      anchorGroupId: 'lesson-anchor',
     });
 
     // A learner turn resets the budget; the next comparison gets the next
@@ -1027,6 +1342,9 @@ describe('realtime proxy response annotation', () => {
       arguments: JSON.stringify({ ops: [{ op: 'add', id: 'kept-line', spec: { kind: 'line', from: [100, 100], to: [400, 100] } }] }),
     });
     await flushProxy();
+    const stagedAdd = repo.listEventsForInternalAudit(session.id).find((event) => event.type === 'board_ops');
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 1, 'ops_presented', { event_id: stagedAdd?.id })));
+    await flushProxy();
     // Erasing what was just taught, in the same turn, is rejected.
     upstream.emit({
       type: 'response.function_call_arguments.done', response_id: 'first-move', call_id: 'erase-call', name: 'board_ops',
@@ -1037,16 +1355,19 @@ describe('realtime proxy response annotation', () => {
 
     // The object survives the acknowledgement, later moves, and the next
     // learner response.
-    const stagedAdd = repo.listEventsForInternalAudit(session.id).find((event) => event.type === 'board_ops');
-    client.emit('message', JSON.stringify(createRuntimeEvent(active, 1, 'ops_shown', { event_id: stagedAdd?.id })));
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 2, 'ops_shown', { event_id: stagedAdd?.id })));
     await flushProxy();
-    client.emit('message', JSON.stringify(createRuntimeEvent(active, 2, 'user_text', { text: 'What does that line mean?', idempotencyKey: 'perm-key-0001' })));
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 3, 'user_text', { text: 'What does that line mean?', idempotencyKey: 'perm-key-0001' })));
     await flushProxy();
     upstream.emit({ type: 'response.created', response: { id: 'second-move' } });
     upstream.emit({
       type: 'response.function_call_arguments.done', response_id: 'second-move', call_id: 'later-call', name: 'board_ops',
       arguments: JSON.stringify({ ops: [{ op: 'add', id: 'later-label', spec: { kind: 'text', at: [120, 160], text: 'still here' } }] }),
     });
+    await flushProxy();
+    const laterEvent = repo.listEventsForInternalAudit(session.id).find((event) =>
+      event.type === 'board_ops' && JSON.stringify(event.payload).includes('later-label'));
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 4, 'ops_presented', { event_id: laterEvent?.id })));
     await flushProxy();
     const instructions = upstream.sent.map((raw) => JSON.parse(raw) as { type: string; session?: { instructions?: string } })
       .filter((event) => event.type === 'session.update').at(-1)?.session?.instructions ?? '';
@@ -1381,6 +1702,13 @@ describe('realtime proxy telemetry', () => {
         unit: 'count',
         value: 1,
         dimensions: { objectId: 'object-1', cause: 'scene_mutation' },
+      },
+      {
+        schemaVersion: '1.0.0',
+        name: 'media_playback_outcome',
+        unit: 'count',
+        value: 1,
+        dimensions: { outcome: 'autoplay_blocked' },
       },
     ] as const;
 

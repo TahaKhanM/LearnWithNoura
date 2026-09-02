@@ -92,7 +92,7 @@ export async function prepareIllustration(
   const cached = await deps.store.getByCacheKey(cacheKey);
   if (cached) {
     const cachedVision = await inspectCachedRecord(deps, brief, cached);
-    if (!cachedVision.ok) {
+    if (cachedVision.ok === false) {
       return fail(cachedVision.reasons, { cacheHit: true, latencyMs: elapsed() });
     }
     return ok(cached, brief, alt, { cacheHit: true, latencyMs: elapsed(), imageCount: 0, totalTokens: 0 });
@@ -122,7 +122,7 @@ export async function prepareIllustration(
       imageDataUrl: dataUrl,
     });
     const verdict = parseVision(visionReply);
-    if (!verdict.ok) {
+    if (verdict.ok === false) {
       lastReasons = verdict.reasons;
       continue;
     }
@@ -241,4 +241,3 @@ function toDataUrl(bytes: Uint8Array, mime: string): string {
 function clampSize(value: number, lo: number, hi: number): number {
   return Math.min(hi, Math.max(lo, value));
 }
-

@@ -5,8 +5,7 @@ import type { GenerationIdentity } from '../../shared/runtimeProtocol';
 export type ResponseCue =
   | { kind: 'visual'; cueId: string; responseId: string; sequence: number; identity: GenerationIdentity; ops: BoardOp[]; eventId: number | null; visualCueId?: string; semanticObjectId?: string; groupLabel?: string; checkpoint?: string; replacesGroup?: string; idempotencyKey?: string; awaitNarration?: boolean }
   | { kind: 'semantic'; cueId: string; responseId: string; sequence: number; identity: GenerationIdentity; state: Record<string, unknown>; semanticObjectId?: string }
-  | { kind: 'task'; cueId: string; responseId: string; sequence: number; identity: GenerationIdentity; task: DeliveredTask }
-  | { kind: 'final'; cueId: string; responseId: string; sequence: number; identity: GenerationIdentity; text: string };
+  | { kind: 'task'; cueId: string; responseId: string; sequence: number; identity: GenerationIdentity; task: DeliveredTask };
 
 /** What the session knows about a response's audible playback: currently
  * playing, not started yet (audio may still come), or finished for good
@@ -16,9 +15,9 @@ export type ResponsePlaybackStatus = 'playing' | 'pending' | 'finished';
 /**
  * Deterministic cue scheduler bound to real playback boundaries. Ordinary
  * board draws release as soon as they arrive so the picture is visible
- * while the tutor is still talking about it. Lesson-state, task banners,
- * and final caption corrections still wait while that response is audibly
- * playing. A response that is not playing releases those immediately.
+ * while the tutor is still talking about it. Lesson-state and task banners
+ * still wait while that response is audibly playing. Captions use their own
+ * ordered, phrase-paced playback timeline rather than this generic cue queue.
  *
  * Storyboard step cues (`awaitNarration`) bind to the END of their tagged
  * response: they hold until that response has finished playing, so a reveal
@@ -46,7 +45,7 @@ export class ResponseCueTimeline {
       const playback = status(cue.responseId);
       const held = cue.kind === 'visual'
         ? cue.awaitNarration && playback !== 'finished'
-        : playback === 'playing';
+        : playback !== 'finished';
       if (held) waiting.push(cue);
       else ready.push(cue);
     }

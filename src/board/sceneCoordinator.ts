@@ -1,8 +1,10 @@
 import type { BoardOp } from '../../shared/boardOps';
+import type { LayoutPreflightResult } from '../../shared/layoutFeedback';
 import { inspectScene, repairSceneOnce, type SceneInspection } from './inspection';
 import { layoutTutorAnnotations } from './annotationLayout';
 import { applyOps, emptyScene, type AppliedOps, type Owner, type SceneState } from './scene';
 import { sceneForGroup } from './sceneGroups';
+import { resolveRelationalPlacements } from './relationalPlacement';
 import { evaluateBoardQuality, type BoardQualityReport } from './quality';
 
 /**
@@ -48,7 +50,7 @@ export class BoardSceneCoordinator {
     const effectiveOps: BoardOp[] = replacesGroup ? [{ op: 'clear' }, ...ops] : ops;
     const scope = replacesGroup ?? semanticGroupId;
     const applied = applyOps(this.value, effectiveOps, 'tutor', scope);
-    const fullCandidate = applied.scene;
+    const fullCandidate = resolveRelationalPlacements(repairStructureBeforePlacement(applied.scene, scope));
     let candidate = layoutTutorAnnotations(scope ? sceneForGroup(fullCandidate, scope) : fullCandidate);
     let inspection = tutorInspection(candidate);
     if (!inspection.accepted) {
@@ -70,21 +72,34 @@ export class BoardSceneCoordinator {
    * whose entire final scene passes deterministic layout and quality checks,
    * so no later checkpoint can fail after earlier ones committed.
    */
-  preflightTutorOps(ops: BoardOp[], semanticGroupId?: string, replacesGroup?: string): { accepted: boolean; reasons: string[] } {
+  preflightTutorOps(ops: BoardOp[], semanticGroupId?: string, replacesGroup?: string): LayoutPreflightResult {
     const effectiveOps: BoardOp[] = replacesGroup ? [{ op: 'clear' }, ...ops] : ops;
     const scope = replacesGroup ?? semanticGroupId;
     const applied = applyOps(this.value, effectiveOps, 'tutor', scope);
-    let candidate = layoutTutorAnnotations(scope ? sceneForGroup(applied.scene, scope) : applied.scene);
+    const placed = resolveRelationalPlacements(repairStructureBeforePlacement(applied.scene, scope));
+    let candidate = layoutTutorAnnotations(scope ? sceneForGroup(placed, scope) : placed);
     let inspection = tutorInspection(candidate);
     if (!inspection.accepted) {
       candidate = repairSceneOnce(candidate, inspection);
       inspection = tutorInspection(candidate);
     }
     if (!inspection.accepted) {
-      return { accepted: false, reasons: inspection.issues.slice(0, 8).map((issue) => `${issue.kind}:${issue.itemId}${issue.withItemId ? `:${issue.withItemId}` : ''}`) };
+      return {
+        accepted: false,
+        reasons: inspection.issues.slice(0, 8).map((issue) => `${issue.code}:${issue.itemId}${issue.withItemId ? `:${issue.withItemId}` : ''}`),
+        layoutIssues: inspection.issues.slice(0, 8).map((issue) => ({
+          code: issue.code,
+          itemId: issue.itemId,
+          ...(issue.withItemId ? { withItemId: issue.withItemId } : {}),
+          ...(issue.itemBounds ? { itemBounds: issue.itemBounds } : {}),
+          ...(issue.withItemBounds ? { withItemBounds: issue.withItemBounds } : {}),
+        })),
+      };
     }
     const quality = evaluateBoardQuality(candidate);
-    return quality.accepted ? { accepted: true, reasons: [] } : { accepted: false, reasons: quality.reasons.slice(0, 8) };
+    return quality.accepted
+      ? { accepted: true, reasons: [], layoutIssues: [] }
+      : { accepted: false, reasons: quality.reasons.slice(0, 8), layoutIssues: quality.layoutIssues.slice(0, 8) };
   }
 
   applyReplay(ops: BoardOp[], owner: Owner, semanticGroupId?: string, replacesGroup?: string): AppliedOps | null {
@@ -102,11 +117,23 @@ export class BoardSceneCoordinator {
     const effectiveOps: BoardOp[] = replacesGroup ? [{ op: 'clear' }, ...ops] : ops;
     const scope = replacesGroup ?? semanticGroupId;
     const applied = applyOps(this.value, effectiveOps, 'tutor', scope, { tier: 'authored' });
-    const scoped = layoutTutorAnnotations(scope ? sceneForGroup(applied.scene, scope) : applied.scene);
-    const committed = scope ? mergeScopedScene(applied.scene, scoped) : scoped;
+    const placed = resolveRelationalPlacements(repairStructureBeforePlacement(applied.scene, scope));
+    const scoped = layoutTutorAnnotations(scope ? sceneForGroup(placed, scope) : placed);
+    const committed = scope ? mergeScopedScene(placed, scoped) : scoped;
     this.value = committed;
     return { ...applied, scene: committed };
   }
+}
+
+function repairStructureBeforePlacement(scene: SceneState, scope?: string): SceneState {
+  if (!scene.items.some((item) => item.place)) return scene;
+  const structure = { ...scene, items: scene.items.filter((item) => !item.place) };
+  const scoped = scope ? sceneForGroup(structure, scope) : structure;
+  const inspection = tutorInspection(scoped);
+  if (inspection.accepted) return scene;
+  const repaired = repairSceneOnce(scoped, inspection);
+  const byId = new Map(repaired.items.map((item) => [item.id, item]));
+  return { ...scene, items: scene.items.map((item) => byId.get(item.id) ?? item) };
 }
 
 function mergeScopedScene(full: SceneState, scoped: SceneState): SceneState {

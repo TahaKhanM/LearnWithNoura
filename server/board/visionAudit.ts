@@ -22,6 +22,17 @@ export interface VisionAuditPort {
   }>;
 }
 
+export type VisionAuditIssueCode = 'semantic_mismatch' | 'invalid_verdict' | 'audit_unavailable';
+
+export function closedVisionAuditIssues(
+  outcome: VisionAuditOutcome,
+): VisionAuditIssueCode[] {
+  if (outcome === 'rejected') return ['semantic_mismatch'];
+  if (outcome === 'invalid') return ['invalid_verdict'];
+  if (outcome === 'error') return ['audit_unavailable'];
+  return [];
+}
+
 export interface VisionAuditEvent {
   startedAtMs: number;
   model: OpenAiTelemetryModel;

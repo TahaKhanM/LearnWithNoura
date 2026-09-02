@@ -43,7 +43,7 @@ test('the maths board-led fixture passes the full client pipeline headlessly', a
   expect(anchor).not.toBeNull();
   if (!anchor) return;
   const verdict = await preflight(page, anchor.ops, anchor.groupId);
-  expect(verdict).toEqual({ accepted: true, reasons: [] });
+  expect(verdict).toEqual({ accepted: true, reasons: [], layoutIssues: [] });
 
   // The equation in this fixture is measured by a real KaTeX DOM render.
   const measured = await page.evaluate(() => {
@@ -65,7 +65,7 @@ test('the non-maths board-led fixture passes the full client pipeline headlessly
   expect(anchor).not.toBeNull();
   if (!anchor) return;
   const verdict = await preflight(page, anchor.ops, anchor.groupId);
-  expect(verdict).toEqual({ accepted: true, reasons: [] });
+  expect(verdict).toEqual({ accepted: true, reasons: [], layoutIssues: [] });
 });
 
 test('the conversation-led fixture carries no forced visuals', async () => {

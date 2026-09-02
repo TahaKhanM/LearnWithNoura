@@ -10,12 +10,19 @@ const files = {
   callBootstrap: readFileSync('server/realtime/callBootstrap.ts', 'utf8'),
   fallback: readFileSync('server/fallbackTutor.ts', 'utf8'),
   summary: readFileSync('server/summary.ts', 'utf8'),
+  app: readFileSync('server/app.ts', 'utf8'),
+  director: readFileSync('server/board/directorStreamingService.ts', 'utf8'),
+  audit: readFileSync('server/board/visionAuditService.ts', 'utf8'),
 };
 
 const assertions = [
   ['realtime model', files.config.includes("'gpt-realtime-2.1'")],
   ['transcription model', files.sessionConfig.includes("'gpt-4o-mini-transcribe'")],
   ['text model', files.config.includes("'gpt-5.6-terra'")],
+  ['independent Director role', files.config.includes('NOURA_DIRECTOR_MODEL') && files.director.includes('client.chat.completions.create')],
+  ['independent Luna-low audit role', files.config.includes('NOURA_VISION_AUDIT_MODEL') && files.config.includes("'gpt-5.6-luna'") && files.audit.includes('client.chat.completions.create')],
+  ['application wiring uses audit role config', files.app.includes('runtimeConfig.visionAuditModel') && files.app.includes('runtimeConfig.visionAuditReasoningEffort')],
+  ['legacy text model does not drive Director', !files.config.includes("env.NOURA_DIRECTOR_MODEL || env.OPENAI_MODEL")],
   ['illustration model', files.config.includes("'gpt-image-1.5'")],
   ['Realtime sideband endpoint', files.sessionConfig.includes("'wss://api.openai.com/v1/realtime'")],
   ['Realtime calls endpoint', files.callBootstrap.includes("'https://api.openai.com/v1/realtime/calls'")],

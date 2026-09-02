@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { applyOps, emptyScene } from './scene';
-import { latexToPlainText, sceneToCanonicalSvg } from './snapshot';
+import { absolutizeSnapshotImageHrefs, inlineSnapshotImageHrefs, latexToPlainText, sceneToCanonicalSvg } from './snapshot';
 
 describe('canonical board snapshot', () => {
   const scene = applyOps(emptyScene, [
@@ -58,7 +58,7 @@ describe('canonical board snapshot', () => {
     expect(svg).toContain('viewBox="0 0 2080 600"');
   });
 
-  it('serializes an illustration as an SVG image keyed by assetId, never a data-URL', () => {
+  it('serializes an illustration by assetId and inlines fetched bytes only for rasterization', async () => {
     const pictured = applyOps(emptyScene, [
       { op: 'add', id: 'pond', spec: { kind: 'image', assetId: 'img-a1b2c3d4e5f67890', at: [80, 60], w: 840, h: 420, alt: 'A pond habitat' } },
       { op: 'add', id: 'frog', spec: { kind: 'text', at: [200, 520], text: 'frog' } },
@@ -70,6 +70,13 @@ describe('canonical board snapshot', () => {
     expect(svg).toContain('aria-label="A pond habitat"');
     expect(svg).toContain('frog');
     expect(svg).not.toContain('data:image');
+    expect(absolutizeSnapshotImageHrefs(svg, 'https://lesson.example')).toContain('href="https://lesson.example/api/board-assets/img-a1b2c3d4e5f67890"');
+    const inlined = await inlineSnapshotImageHrefs(svg, async (path) => {
+      expect(path).toBe('/api/board-assets/img-a1b2c3d4e5f67890');
+      return 'data:image/png;base64,cGl4ZWxz';
+    });
+    expect(inlined).toContain('href="data:image/png;base64,cGl4ZWxz"');
+    await expect(inlineSnapshotImageHrefs(svg, async () => null)).resolves.toBeNull();
   });
 
   it('translates common LaTeX into deterministic readable text', () => {

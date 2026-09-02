@@ -1,6 +1,7 @@
 import { Worker } from 'node:worker_threads';
 import type { MetricObservation } from '../../shared/sessionTelemetry.js';
 import type { DomainRepository } from '../store/domain.js';
+import { SQLITE_BUSY_TIMEOUT_MS } from '../store/db.js';
 
 const DEFAULT_HISTORY_PAGE_SIZE = 5_000;
 const DEFAULT_MAX_PENDING = 1_024;
@@ -145,7 +146,7 @@ implements ManagedSessionTelemetryRepository {
     this.maxPending = positiveInteger(options.maxPending, DEFAULT_MAX_PENDING);
     this.worker = new Worker(SQLITE_WORKER_SOURCE, {
       eval: true,
-      workerData: { databasePath },
+      workerData: { databasePath, busyTimeoutMs: SQLITE_BUSY_TIMEOUT_MS },
     });
     this.worker.on('message', (message: unknown) => this.handleMessage(message));
     this.worker.on('error', (error) => this.failAll(error));
@@ -302,7 +303,9 @@ function isWorkerResponse(value: unknown): value is WorkerResponse {
 const SQLITE_WORKER_SOURCE = String.raw`
   const { parentPort, workerData } = require('node:worker_threads');
   const { DatabaseSync } = require('node:sqlite');
-  const database = new DatabaseSync(workerData.databasePath);
+  const database = new DatabaseSync(workerData.databasePath, {
+    timeout: workerData.busyTimeoutMs,
+  });
   database.exec('PRAGMA journal_mode = WAL');
   database.exec('PRAGMA foreign_keys = ON');
 

@@ -7,6 +7,9 @@ CREATE TABLE IF NOT EXISTS noura.compiled_lessons (
   updated_at BIGINT NOT NULL
 );
 
+REVOKE ALL ON noura.compiled_lessons FROM PUBLIC, anon, authenticated;
+GRANT SELECT, INSERT, UPDATE ON noura.compiled_lessons TO noura_app;
+
 INSERT INTO noura.schema_migrations (version, applied_at)
 VALUES (2, (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT)
 ON CONFLICT (version) DO NOTHING;

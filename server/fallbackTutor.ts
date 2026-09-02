@@ -1,6 +1,6 @@
 import type OpenAI from 'openai';
 import { createRuntimeEvent, type GenerationIdentity, type RuntimeEventEnvelope } from '../shared/runtimeProtocol.js';
-import { adaptSemanticScene, normalizeVisualAction } from '../shared/semanticScene.js';
+import { adaptSemanticScene, normalizeVisualAction, VISUAL_PLAN_VERSION, VisualTemplateSchema } from '../shared/semanticScene.js';
 import { ResponseTaxonomySchema, TeachingMoveSchema, type ResponseTaxonomy } from '../shared/pedagogy.js';
 import { createLessonState, reduceLesson, responseHandoff } from './lesson/orchestrator.js';
 import { buildInstructions } from './realtime/instructions.js';
@@ -14,13 +14,60 @@ import type { FallbackTurnIdentity } from './store/repo.js';
 
 const MAX_ROUNDS = 10;
 const DEFAULT_TIMEOUT_MS = 20_000;
-const ALLOWED_TOOLS = new Set(['inspect_board', 'semantic_visual_plan', 'propose_teaching_move', 'record_evidence']);
-const FALLBACK_TOOLS: OpenAI.Chat.ChatCompletionTool[] = REALTIME_TOOLS
+const ALLOWED_TOOLS = new Set(['inspect_board', 'propose_teaching_move', 'record_evidence', 'update_lesson_state']);
+const FALLBACK_VISUAL_TOOL: OpenAI.Chat.ChatCompletionTool = {
+  type: 'function',
+  function: {
+    name: 'semantic_visual_plan',
+    description: 'Captions-only visual fallback. Request one deterministic educational template by semantic content; code owns all geometry. Use establish for a first scene, compare for an additive side scene, emphasize for visible object ids, or none. Never replace or clear visible work.',
+    parameters: {
+      type: 'object', additionalProperties: false,
+      properties: {
+        schemaVersion: { type: 'string', enum: [VISUAL_PLAN_VERSION] },
+        planId: { type: 'string', minLength: 1, maxLength: 120 },
+        intent: {
+          type: 'object', additionalProperties: false,
+          properties: {
+            objective: { type: 'string', minLength: 1, maxLength: 300 },
+            domain: { type: 'string', enum: ['geometry', 'quantitative', 'algebra', 'comparison', 'process', 'argument', 'history', 'grammar', 'table', 'timeline', 'none'] },
+            relevance: { type: 'string', enum: ['essential', 'supportive', 'none'] },
+            questionAnswered: { type: 'string', minLength: 1, maxLength: 300 },
+            rationale: { type: 'string', minLength: 1, maxLength: 400 },
+            action: { type: 'string', enum: ['establish', 'emphasize', 'compare', 'none'] },
+            targetObjectIds: { type: 'array', maxItems: 12, items: { type: 'string', minLength: 1, maxLength: 160 } },
+            density: { type: 'string', enum: ['minimal', 'standard'] },
+            noBoardReason: { type: 'string', maxLength: 300 },
+          },
+          required: ['objective', 'domain', 'relevance', 'questionAnswered', 'rationale', 'action', 'density'],
+        },
+        groups: {
+          type: 'array', minItems: 0, maxItems: 1,
+          items: {
+            type: 'object', additionalProperties: false,
+            properties: {
+              id: { type: 'string', minLength: 1, maxLength: 80 },
+              label: { type: 'string', minLength: 1, maxLength: 160 },
+              revealOrder: { type: 'array', minItems: 1, items: { type: 'string', enum: ['outline', 'relation', 'label', 'connector', 'emphasis'] } },
+              template: { type: 'string', enum: VisualTemplateSchema.options },
+              parameters: { type: 'object' },
+            },
+            required: ['id', 'label', 'revealOrder', 'template', 'parameters'],
+          },
+        },
+      },
+      required: ['schemaVersion', 'planId', 'intent', 'groups'],
+    },
+  },
+};
+const FALLBACK_TOOLS: OpenAI.Chat.ChatCompletionTool[] = [
+  ...REALTIME_TOOLS
   .filter((tool) => ALLOWED_TOOLS.has(tool.name))
   .map((tool) => ({
     type: 'function',
     function: { name: tool.name, description: tool.description, parameters: tool.parameters },
-  }));
+  }) as OpenAI.Chat.ChatCompletionTool),
+  FALLBACK_VISUAL_TOOL,
+];
 
 export interface FallbackTurnRequest extends GenerationIdentity {
   idempotencyKey: string;
@@ -136,7 +183,7 @@ async function executeFallbackTurn(
     }))
     .filter((message) => message.content);
   const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
-    { role: 'system', content: `${instructions}\n\n${boardContext.prompt()}\n\nVoice is unavailable, so words appear as captions. Use semantic_visual_plan rather than board_ops. Keep the same short spoken style.` },
+    { role: 'system', content: `${instructions}\n\n${boardContext.prompt()}\n\nVoice is unavailable, so words appear as captions. The live request_visual and board_ops paths are unavailable in this one-way fallback. For a new board scene, use semantic_visual_plan and its deterministic templates. Keep the same short spoken style.` },
     ...history,
     { role: 'user', content: request.userText },
   ];
@@ -187,17 +234,40 @@ async function executeFallbackTurn(
               messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(output) });
               continue;
             }
-            if (action === 'none' || action === 'extend' || action === 'emphasize') {
-              const targetAvailable = action !== 'extend' || Boolean(plan.intent.targetGroupId && boardContext.hasGroup(plan.intent.targetGroupId));
+            if (action === 'none') {
               output = {
-                ok: targetAvailable,
-                accepted: targetAvailable,
+                ok: true,
+                accepted: true,
                 action,
                 relevance: plan.intent.relevance,
                 questionAnswered: plan.intent.questionAnswered,
-                ...(!targetAvailable ? { reason: 'The requested board section is not visible. Inspect the board first.' } : {}),
                 board: boardContext.toolSnapshot(),
               };
+              messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(output) });
+              continue;
+            }
+            if (action === 'emphasize') {
+              const targets = (plan.intent.targetObjectIds ?? []).filter((id) => boardContext.hasObject(id)).slice(0, 12);
+              if (targets.length === 0) {
+                output = { ok: false, accepted: false, reason: 'Emphasize requires visible target object ids.', board: boardContext.toolSnapshot() };
+              } else {
+                await ensureLearnerEvent();
+                const eventId = await repo.addFallbackEvent(identity, 'semantic_scene', {
+                  ops: targets.map((id) => ({ op: 'highlight', id })),
+                  checkpointId: `fallback-emphasize-${request.generationId}`,
+                  reveal: 'emphasis',
+                  semanticObjectId: 'fallback-visible-board',
+                  groupLabel: 'Board',
+                }, false);
+                await emit('board_ops', {
+                  ops: targets.map((id) => ({ op: 'highlight', id })),
+                  event_id: eventId,
+                  response_id: `fallback-${request.generationId}`,
+                  groupLabel: 'Board',
+                  checkpoint: 'emphasis',
+                }, { visualCueId: `fallback-emphasize-${request.generationId}`, semanticObjectId: 'fallback-visible-board' });
+                output = { ok: true, accepted: true, action, applied: targets.length, board: boardContext.toolSnapshot() };
+              }
               messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(output) });
               continue;
             }
@@ -311,6 +381,18 @@ async function executeFallbackTurn(
             lessonState = reduceLesson(lessonState, { type: 'ASSESSED', classification, evidenceId: stored.evidenceId });
             output = { ok: true, evidenceId: stored.evidenceId };
           }
+        } else if (call.function.name === 'update_lesson_state') {
+          const state = {
+            activeConcept: String(args.active_concept ?? '').slice(0, 160),
+            strategy: args.strategy ? String(args.strategy).slice(0, 160) : undefined,
+            nextStep: args.next_step ? String(args.next_step).slice(0, 240) : undefined,
+          };
+          if (state.activeConcept) {
+            await ensureLearnerEvent();
+            await repo.addFallbackEvent(identity, 'lesson_state', state);
+            await emit('lesson_state', { state });
+            output = { ok: true };
+          } else output = { ok: false, error: 'active_concept is required' };
         }
         messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(output) });
       }

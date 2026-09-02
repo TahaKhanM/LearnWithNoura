@@ -1,5 +1,6 @@
 import type { VisionAuditOutcome } from '../../shared/sessionTelemetry.js';
 import {
+  closedVisionAuditIssues,
   VISION_AUDIT_BUDGET_MS,
   type VisionAuditEvent,
   type VisionAuditInput,
@@ -45,6 +46,7 @@ export function createAdaptiveVisionAuditGate(input: {
   const auditController = new AbortController();
   const budgetMs = Math.max(0, input.budgetMs ?? VISION_AUDIT_BUDGET_MS);
   let budgetTimer: ReturnType<typeof setTimeout> | null = null;
+  let pendingRejectionTimer: ReturnType<typeof setTimeout> | null = null;
   let settled = false;
   let providerTerminal = false;
   let outcomeRecorded = false;
@@ -138,7 +140,12 @@ export function createAdaptiveVisionAuditGate(input: {
       return;
     }
     pendingRejection = outcome;
-    if (firstDurable) finalizeRejection(outcome);
+    if (firstDurable) {
+      finalizeRejection(outcome);
+      return;
+    }
+    pendingRejectionTimer = setTimeout(() => finalizeRejection(outcome), input.ctx.stepRevealTimeoutMs);
+    pendingRejectionTimer.unref?.();
   }
 
   function finalizeRejection(outcome: 'rejected' | 'invalid'): void {
@@ -209,13 +216,7 @@ export function createAdaptiveVisionAuditGate(input: {
   function recordOutcome(outcome: VisionAuditOutcome, startedAtMs: number): void {
     if (outcomeRecorded) return;
     outcomeRecorded = true;
-    const closedIssue = outcome === 'rejected'
-      ? ['semantic_mismatch']
-      : outcome === 'invalid'
-        ? ['invalid_verdict']
-        : outcome === 'error'
-          ? ['audit_unavailable']
-          : [];
+    const closedIssue = closedVisionAuditIssues(outcome);
     try {
       input.onOutcome?.({
         startedAtMs,
@@ -233,6 +234,8 @@ export function createAdaptiveVisionAuditGate(input: {
   }
 
   function cleanup(): void {
+    if (pendingRejectionTimer !== null) clearTimeout(pendingRejectionTimer);
+    pendingRejectionTimer = null;
     input.parentSignal.removeEventListener('abort', parentAbort);
     const active = input.ctx.state.storyboardRun;
     if (active?.runId === input.runId) {

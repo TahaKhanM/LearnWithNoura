@@ -7,16 +7,18 @@
 import { isBoardAssetId } from './boardAssets.js';
 import { validateManipulativeKind } from './manipulativeSpecs.js';
 import type { DraggableSpec, SnapZoneSpec, TappableSpec } from './manipulativeSpecs.js';
+import { CURRICULUM_SPEC_KINDS, validateCurriculumKind, type CurriculumSpec } from './curriculumSpecs.js';
 
 /** Local copies so this module does not import boardOps (cycle: boardOps → here). */
 const BOARD_W = 1000;
 const BOARD_H = 600;
 type Vec = [number, number];
 
-export const AUTHORED_ONLY_KINDS = ['arc', 'curve', 'asset', 'draggable', 'snapZone', 'tappable', 'image'] as const;
+export const AUTHORED_ONLY_KINDS = ['arc', 'curve', 'asset', 'draggable', 'snapZone', 'tappable', 'image', ...CURRICULUM_SPEC_KINDS] as const;
 export type AuthoredOnlyKind = (typeof AUTHORED_ONLY_KINDS)[number];
 
 export type { DraggableSpec, SnapZoneSpec, TappableSpec } from './manipulativeSpecs.js';
+export type { CurriculumSpec } from './curriculumSpecs.js';
 
 export interface CenterArcSpec {
   kind: 'arc';
@@ -194,9 +196,11 @@ export function validateImageSpec(raw: Record<string, unknown>): ImageSpec | nul
 
 export function validateAuthoredKind(
   raw: Record<string, unknown>,
-): ArcSpec | CurveSpec | AssetSpec | ImageSpec | DraggableSpec | SnapZoneSpec | TappableSpec | null {
+): ArcSpec | CurveSpec | AssetSpec | ImageSpec | DraggableSpec | SnapZoneSpec | TappableSpec | CurriculumSpec | null {
   const manipulative = validateManipulativeKind(raw);
   if (manipulative) return manipulative;
+  const curriculum = validateCurriculumKind(raw);
+  if (curriculum) return curriculum;
   switch (raw.kind) {
     case 'arc':
       return validateArcSpec(raw);

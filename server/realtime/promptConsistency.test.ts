@@ -82,11 +82,25 @@ describe('realtime prompt / tool-surface consistency', () => {
     expect(prompt).not.toMatch(/create the lesson blueprint/i);
   });
 
-  it('allows board_ops drawing in conversation-led lessons instead of refusing', () => {
+  it('keeps the Board Director available in conversation-led lessons', () => {
     expect(prompt).toContain('conversation_led');
-    expect(prompt).toContain('board_ops');
+    expect(prompt).toContain('request_visual');
     expect(prompt).not.toMatch(/just talk/);
-    expect(prompt).toMatch(/never tell the learner you cannot draw/i);
+    expect(prompt).toMatch(/does\s+not disable drawing/i);
+  });
+
+  it('routes every new representation through intent, validation, and vision', () => {
+    expect(prompt).toMatch(/any new representation/i);
+    expect(prompt).toMatch(/learner's real browser/i);
+    expect(prompt).toMatch(/vision-checks/i);
+    expect(prompt).not.toMatch(/Before each new teaching move, call `propose_teaching_move`/);
+  });
+
+  it('advertises board_ops only as the fast increment path', () => {
+    const tool = REALTIME_TOOLS.find((candidate) => candidate.name === 'board_ops');
+    expect(tool?.description).toMatch(/blank board/i);
+    expect(tool?.description).toMatch(/first paint/i);
+    expect(tool?.description).toMatch(/go through request_visual/i);
   });
 });
 

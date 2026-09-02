@@ -97,7 +97,8 @@ export function latexToPlainText(latex: string): string {
  * changes, or animation state than the revision it was asked to render.
  */
 export async function renderSceneImage(scene: SceneState, options: SceneSnapshotOptions = {}): Promise<string | null> {
-  const markup = sceneToCanonicalSvg(scene);
+  const markup = await inlineSnapshotImageHrefs(sceneToCanonicalSvg(scene));
+  if (!markup) return null;
   const url = URL.createObjectURL(new Blob([markup], { type: 'image/svg+xml' }));
   try {
     const image = new Image();
@@ -166,6 +167,42 @@ function normalizedCrop(box: BBox): BBox {
 function fitInside(width: number, height: number, maxWidth: number, maxHeight: number): { w: number; h: number } {
   const scale = Math.min(maxWidth / width, maxHeight / height);
   return { w: width * scale, h: height * scale };
+}
+
+export async function inlineSnapshotImageHrefs(
+  markup: string,
+  load: (path: string) => Promise<string | null> = loadSnapshotImage,
+): Promise<string | null> {
+  const paths = [...new Set([...markup.matchAll(/href="(\/api\/board-assets\/[^"]+)"/g)].map((match) => match[1]))];
+  let inlined = markup;
+  for (const path of paths) {
+    const dataUrl = await load(path);
+    if (!dataUrl || !/^data:image\/(?:png|jpeg|webp|svg\+xml);base64,[A-Za-z0-9+/=]+$/.test(dataUrl)) return null;
+    inlined = inlined.replaceAll(`href="${path}"`, `href="${dataUrl}"`);
+  }
+  return inlined;
+}
+
+async function loadSnapshotImage(path: string): Promise<string | null> {
+  try {
+    const absolute = new URL(path, globalThis.location?.origin).href;
+    const response = await fetch(absolute, { credentials: 'same-origin' });
+    const contentType = response.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase() ?? '';
+    if (!response.ok || !/^image\/(?:png|jpeg|webp|svg\+xml)$/.test(contentType)) return null;
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    if (bytes.byteLength === 0 || bytes.byteLength > 4_000_000) return null;
+    let binary = '';
+    for (let offset = 0; offset < bytes.length; offset += 16_384) binary += String.fromCharCode(...bytes.subarray(offset, offset + 16_384));
+    return `data:${contentType};base64,${btoa(binary)}`;
+  } catch {
+    return null;
+  }
+}
+
+export function absolutizeSnapshotImageHrefs(markup: string, origin?: string): string {
+  if (!origin || !/^https?:\/\//.test(origin)) return markup;
+  return markup.replace(/href="(\/api\/board-assets\/[^"]+)"/g, (_match, path: string) =>
+    `href="${escapeXml(new URL(path, origin).href)}"`);
 }
 
 function escapeXml(value: string): string {

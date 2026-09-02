@@ -16,9 +16,10 @@ import { compileProvisionalConversationLesson, PROVISIONAL_COMPILER_MODEL } from
 
 /**
  * The session-facing face of the lesson compiler. Session creation calls
- * normalize() inside the request, then start() writes a ready conversation-led
- * plan immediately so Preparing does not block Begin. A stronger compile may
- * replace that plan in the background while it is still provisional.
+ * normalize() inside the request, then start() records a pending artifact.
+ * A stronger compile promotes it to ready in the background. The lesson UI
+ * owns this honest Preparing state; realtime never snapshots a provisional
+ * plan that can be replaced behind its back.
  */
 
 export interface CompilationStartInput {
@@ -91,7 +92,8 @@ export interface LiveCompilationOptions {
   keepAlive?: (work: Promise<unknown>) => void;
 }
 
-/** Real compiler: Chat Completions authorship + headless scene validation. */
+/** Real compiler: Chat Completions authorship plus optional early headless
+ * validation. The connected lesson browser is the mandatory reveal gate. */
 export function createLiveCompilationService(options: LiveCompilationOptions): LessonCompilationService {
   const authoring: AuthoringChatClient = {
     complete: async ({ messages }) => {
@@ -111,9 +113,13 @@ export function createLiveCompilationService(options: LiveCompilationOptions): L
     maxSceneRetries: options.maxSceneRetries,
     validateScene: async (ops) => {
       if (!options.harnessUrl) {
-        // Fail closed: without the real client pipeline no scene is trusted,
-        // and the compiler falls back toward conversation-led lessons.
-        return { ok: false, issues: ['No board harness URL is configured for scene validation.'] };
+        // Production validation authority is the connected learner browser.
+        // The authored BoardOps schema is enforced during compilation, and
+        // the anchor is preflighted through that real browser before its
+        // first storyboard step can be shown. Server Chromium is an optional
+        // early-quality gate, not a production availability switch.
+        void ops;
+        return { ok: true };
       }
       validator ??= createHeadlessSceneValidator({ harnessUrl: options.harnessUrl });
       return validator.validate(ops);
@@ -128,8 +134,8 @@ export function createLiveCompilationService(options: LiveCompilationOptions): L
         goal: input.goal,
         objective: input.objective,
       });
-      const ready = await options.repo.upsertCompiledLesson(input.sessionId, {
-        status: 'ready',
+      const pending = await options.repo.upsertCompiledLesson(input.sessionId, {
+        status: 'pending',
         lesson: provisional,
       });
       const work = (async () => {
@@ -149,11 +155,15 @@ export function createLiveCompilationService(options: LiveCompilationOptions): L
             ? error.reasons
             : [String(error instanceof Error ? error.message : error).slice(0, 300)];
           options.onCompileError?.(input.sessionId, reasons);
-          // Keep the provisional plan teachable; do not fail the session.
+          await options.repo.upsertCompiledLesson(input.sessionId, {
+            status: 'failed',
+            lesson: provisional,
+            failureReason: 'Noura could not prepare a validated lesson for this goal. Please try again.',
+          });
         }
       })();
       options.keepAlive?.(work);
-      return ready;
+      return pending;
     },
     planDetour: (input) => compileDetourStages(deps, input),
     close: async () => {
@@ -163,6 +173,6 @@ export function createLiveCompilationService(options: LiveCompilationOptions): L
   };
 }
 
-function isUpgradeableCompiledLesson(record: { status: string; lesson: { compilerModel?: string } | null }): boolean {
+function isUpgradeableCompiledLesson<RecordShape extends { status: string; lesson: { compilerModel?: string } | null }>(record: RecordShape): boolean {
   return record.status === 'pending' || record.lesson?.compilerModel === PROVISIONAL_COMPILER_MODEL;
 }

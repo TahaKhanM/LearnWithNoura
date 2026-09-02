@@ -1,5 +1,6 @@
 import type { BoardOp } from '../../shared/boardOps.js';
 import type { SemanticCheckpoint } from '../../shared/semanticScene.js';
+import type { LayoutPreflightResult } from '../../shared/layoutFeedback.js';
 import type { CoordinatorContext } from './coordinatorContext.js';
 import { identityForResponse } from './responseRegistry.js';
 import { refreshBoardInstructions } from './sessionConfig.js';
@@ -42,6 +43,36 @@ function waitForCheckpointVisibility(ctx: CoordinatorContext, eventIds: number[]
   });
 }
 
+/** Resolves at the first committed browser paint, before draw-on animation
+ * completion. This is the semantic visibility barrier for tool results. */
+export function waitForCheckpointPresentation(ctx: CoordinatorContext, eventIds: number[]): Promise<boolean> {
+  if (eventIds.length === 0) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    let remaining = eventIds.length;
+    let settled = false;
+    const timer = setTimeout(() => finish(false), ctx.visibilityTimeoutMs);
+    const finish = (presented: boolean) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      for (const eventId of eventIds) ctx.state.pendingPresentation.delete(eventId);
+      resolve(presented);
+    };
+    for (const eventId of eventIds) {
+      if (ctx.state.presentedBoardOps.has(eventId)) {
+        remaining -= 1;
+        continue;
+      }
+      ctx.state.pendingPresentation.set(eventId, (presented) => {
+        if (!presented) { finish(false); return; }
+        remaining -= 1;
+        if (remaining <= 0) finish(true);
+      });
+    }
+    if (remaining <= 0) finish(true);
+  });
+}
+
 /**
  * Asks the browser to compile-check a complete candidate plan offscreen.
  * Fails closed: no connected client or a timeout means "not shown" — the
@@ -51,13 +82,13 @@ function waitForCheckpointVisibility(ctx: CoordinatorContext, eventIds: number[]
 export function preflightWithClient(
   ctx: CoordinatorContext,
   input: { ops: BoardOp[]; semanticGroupId: string; groupLabel?: string; replacesGroup?: string },
-): Promise<{ accepted: boolean; reasons: string[] }> {
-  if (!ctx.state.clientIdentity || !ctx.clientConnected()) return Promise.resolve({ accepted: false, reasons: ['no browser is connected to validate the plan'] });
+): Promise<LayoutPreflightResult> {
+  if (!ctx.state.clientIdentity || !ctx.clientConnected()) return Promise.resolve({ accepted: false, reasons: ['no browser is connected to validate the plan'], layoutIssues: [] });
   const preflightId = `preflight-${++ctx.state.preflightCounter}`;
   return new Promise((resolve) => {
     const timer = setTimeout(() => {
       ctx.state.pendingPreflights.delete(preflightId);
-      resolve({ accepted: false, reasons: ['the browser did not confirm the plan in time'] });
+      resolve({ accepted: false, reasons: ['the browser did not confirm the plan in time'], layoutIssues: [] });
     }, ctx.preflightTimeoutMs);
     ctx.state.pendingPreflights.set(preflightId, (result) => {
       clearTimeout(timer);

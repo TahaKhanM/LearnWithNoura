@@ -4,6 +4,13 @@ import { openTestDb } from '../store/db';
 import { Repo } from '../store/repo';
 
 describe('released board context', () => {
+  it('does not tell the tutor to narrate a blank board', () => {
+    const board = new BoardContextTracker();
+    expect(board.toolSnapshot().summary).toMatch(/blank and ready/i);
+    expect(board.toolSnapshot().summary).toMatch(/do not mention that it is empty/i);
+    expect(board.prompt()).not.toMatch(/^The board is empty\.$/m);
+  });
+
   it('reconstructs only visible tutor/learner state and exposes reusable IDs', async () => {
     const repo = new Repo(openTestDb());
     const child = repo.createChild('Maya', 10);

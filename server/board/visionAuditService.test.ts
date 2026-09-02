@@ -1,8 +1,17 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { VisionAuditInput } from './visionAudit.js';
-import { createOpenAIVisionAuditPort, visionAuditMessages } from './visionAuditService.js';
+import { createOpenAIVisionAuditPort, createVisionAuditForPipeline, visionAuditMessages } from './visionAuditService.js';
 
 describe('OpenAI vision audit port', () => {
+  it('constructs no audit surface for the classic Director pipeline', () => {
+    const create = vi.fn(() => ({ model: 'gpt-5.6-luna' as const }));
+
+    expect(createVisionAuditForPipeline('classic', create)).toBeNull();
+    expect(create).not.toHaveBeenCalled();
+    expect(createVisionAuditForPipeline('streaming', create)).toEqual({ model: 'gpt-5.6-luna' });
+    expect(create).toHaveBeenCalledOnce();
+  });
+
   it('pins strict decoding and propagates the visual epoch signal', async () => {
     let capturedRequest: Record<string, unknown> | null = null;
     let capturedSignal: AbortSignal | undefined;

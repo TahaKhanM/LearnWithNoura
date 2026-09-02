@@ -118,6 +118,10 @@ export const DIRECTOR_VNEXT_EVAL_STATIC_PROMPT = [
   'Return one exact step-structured scene matching the supplied strict JSON schema.',
   '`template` is always the first field. Use null unless an exact named template fully represents the request without guessing parameters.',
   `Allowed BoardOp spec kinds: ${DIRECTOR_EVAL_SPEC_KINDS.join(', ')}.`,
+  'Use annotate with semantic/sub-anchor or learner-stroke AnchorRef targets when marking existing work; code computes annotation geometry. Use raw points only as a last resort.',
+  'For curriculum structure use panelGrid, regionFill, scatter, boxplot, histogram, isometricSolid, cubeNet, planView, paperFoldHolePunch, gridPaper, clock, or protractor. Supply measured values and categorical parameters only; their exact geometry is code-owned.',
+  'For rotate/reflect/translate/enlarge, add one transform that references an existing target id and supplies the operation, never final transformed coordinates.',
+  'Prefer add-op place:{anchor,side,gap,align} for labels, annotations, and qualitative relations. Emit structural anchors first; client code resolves placements before annotation lanes. Keep absolute coordinates for exact quantitative geometry.',
   'Every operation is additive. Use fresh short ids. Stay within a 1000 by 600 board.',
   'Each step reveals its own operations exactly once. Narration is one or two short child-facing sentences and never mentions ids, tools, or drawing.',
   'Be compact: prefer two to four steps, at most 15 operations total, one narration sentence of at most 18 words, and no decorative duplicates.',
@@ -150,12 +154,12 @@ export function validatePolicyReadyEvalStep(input: {
   return { step, ops: policy.ops.slice(priorOps.length) };
 }
 
-export function parseVNextEvalDirectorProposal(text: string, density: DirectorDensity): DirectorProposal {
+export function parseVNextEvalDirectorProposal(text: string, density: DirectorDensity, visibleObjectIds: readonly string[] = []): DirectorProposal {
   const proposal = VNextEvalProposalSchema.parse(JSON.parse(text));
   const ops: AddOp[] = [];
   const storyboard: DirectorProposal['storyboard'] = [];
   for (const rawStep of proposal.steps) {
-    const validated = validatePolicyReadyEvalStep({ step: rawStep, density, priorOps: ops });
+    const validated = validatePolicyReadyEvalStep({ step: rawStep, density, priorOps: ops, visibleObjectIds });
     ops.push(...validated.ops);
     storyboard.push({
       id: validated.step.id,

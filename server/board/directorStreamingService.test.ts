@@ -1,8 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { DirectorSceneRequest } from './director.js';
 import {
-  createOpenAIDirectorStreamPort,
+  createOpenAIDirectorLayoutCorrectionPort,
+  createOpenAISceneModelPort,
   directorStreamMessages,
+  layoutCorrectionMessages,
 } from './directorStreamingService.js';
 
 describe('OpenAI Director streaming port', () => {
@@ -14,7 +16,7 @@ describe('OpenAI Director streaming port', () => {
       capturedSignal = options?.signal;
       return chunks(['{"template":null,', '"groupLabel":"x"}']);
     });
-    const port = createOpenAIDirectorStreamPort({
+    const port = createOpenAISceneModelPort({
       client: { chat: { completions: { create } } } as never,
       model: 'gpt-5.6-terra',
       reasoningEffort: 'low',
@@ -22,7 +24,7 @@ describe('OpenAI Director streaming port', () => {
     });
     const controller = new AbortController();
     const output: string[] = [];
-    for await (const delta of port.streamProposal({
+    for await (const delta of port.streamPropose({
       request: sceneRequest('one idea'), boardImage: null, signal: controller.signal,
     })) output.push(delta);
 
@@ -53,15 +55,64 @@ describe('OpenAI Director streaming port', () => {
     ]));
   });
 
+  it('streams a low-effort correction from closed ids and bounds only', async () => {
+    let capturedRequest: Record<string, unknown> | null = null;
+    const create = vi.fn(async (request: Record<string, unknown>) => {
+      capturedRequest = request;
+      return chunks(['{"placements":[{"id":"move-me","dx":0,"dy":120,"side":null}]}']);
+    });
+    const port = createOpenAIDirectorLayoutCorrectionPort({
+      client: { chat: { completions: { create } } } as never,
+      model: 'gpt-5.6-terra',
+      reasoningEffort: 'low',
+      maxCompletionTokens: 1_000,
+    });
+    const input = {
+      request: sceneRequest('two colliding boxes'),
+      priorOps: [],
+      rejectedOps: [{
+        op: 'add' as const, id: 'move-me',
+        spec: { kind: 'box' as const, at: [500, 300] as [number, number], w: 220, h: 100, text: 'Meaning stays fixed' },
+      }],
+      layoutIssues: [{
+        code: 'collision' as const,
+        itemId: 'move-me',
+        withItemId: 'visible-box',
+        itemBounds: { x: 390, y: 250, w: 220, h: 100 },
+        withItemBounds: { x: 390, y: 245, w: 220, h: 100 },
+      }],
+      signal: new AbortController().signal,
+    };
+    const output: string[] = [];
+    for await (const delta of port.streamPlacements(input)) output.push(delta);
+
+    expect(output.join('')).toContain('move-me');
+    expect(capturedRequest).toMatchObject({
+      model: 'gpt-5.6-terra',
+      reasoning_effort: 'low',
+      verbosity: 'low',
+      stream: true,
+      max_completion_tokens: 1_000,
+      response_format: { json_schema: { name: 'noura_director_layout_correction', strict: true } },
+    });
+    const messages = layoutCorrectionMessages(input);
+    const userPayload = messages[1]?.content[0];
+    expect(userPayload?.type).toBe('text');
+    expect(userPayload?.type === 'text' ? JSON.parse(userPayload.text) : null).toMatchObject({
+      layoutIssues: [expect.objectContaining({ code: 'collision', itemBounds: expect.any(Object) })],
+    });
+    expect(JSON.stringify(messages)).not.toContain(input.request.learnerContext);
+  });
+
   it('aborts before exposing a delta after the request epoch changes', async () => {
     const create = vi.fn(async () => chunks(['late']));
-    const port = createOpenAIDirectorStreamPort({
+    const port = createOpenAISceneModelPort({
       client: { chat: { completions: { create } } } as never,
       model: 'gpt-5.6-terra', reasoningEffort: 'low', maxCompletionTokens: 4_000,
     });
     const controller = new AbortController();
     controller.abort('superseded visual');
-    const stream = port.streamProposal({
+    const stream = port.streamPropose({
       request: sceneRequest('aborted'), boardImage: null, signal: controller.signal,
     })[Symbol.asyncIterator]();
     await expect(stream.next()).rejects.toMatchObject({ name: 'AbortError' });

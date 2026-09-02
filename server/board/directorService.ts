@@ -1,4 +1,5 @@
 import type OpenAI from 'openai';
+import type { M2SmokeAccounting } from './m2SmokeBudget.js';
 import type { HeadlessSceneValidatorHandle } from '../lesson/headlessSceneValidator.js';
 import {
   directVisual,
@@ -7,7 +8,10 @@ import {
   type DirectorMessage,
   type IllustrationDirectorPort,
 } from './director.js';
-import { createOpenAIDirectorStreamPort } from './directorStreamingService.js';
+import {
+  createOpenAIDirectorLayoutCorrectionPort,
+  createOpenAISceneModelPort,
+} from './directorStreamingService.js';
 import { streamVisual, type StreamingBoardDirector } from './streamingDirector.js';
 import type { OpenAiTelemetryModel } from '../../shared/sessionTelemetry.js';
 
@@ -19,6 +23,8 @@ import type { OpenAiTelemetryModel } from '../../shared/sessionTelemetry.js';
  * (NOURA_DIRECTOR_MODEL / NOURA_DIRECTOR_REASONING_EFFORT).
  */
 
+export const DEFAULT_STREAMING_RECOVERY_STRATEGY = 'medium_escalation' as const;
+
 export interface LiveBoardDirectorOptions {
   client: OpenAI;
   model: string;
@@ -28,18 +34,35 @@ export interface LiveBoardDirectorOptions {
   harness?: HeadlessSceneValidatorHandle | null;
   maxCorrectionRounds?: number;
   illustrations?: IllustrationDirectorPort | null;
+  smokeAccounting?: M2SmokeAccounting;
 }
 
 export function createLiveBoardDirector(options: LiveBoardDirectorOptions): BoardDirector {
   const chat: DirectorChatClient = {
     complete: async ({ messages }) => {
-      const response = await options.client.chat.completions.create({
-        model: options.model,
-        reasoning_effort: options.reasoningEffort,
-        response_format: { type: 'json_object' },
-        messages: messages.map(toOpenAiMessage),
-      });
-      return response.choices[0]?.message?.content ?? null;
+      const callId = options.smokeAccounting?.begin('composition', options.model, options.reasoningEffort);
+      try {
+        const response = await options.client.chat.completions.create({
+          model: options.model,
+          reasoning_effort: options.reasoningEffort,
+          response_format: { type: 'json_object' },
+          messages: messages.map(toOpenAiMessage),
+        });
+        if (callId && response.usage) {
+          options.smokeAccounting?.recordUsage(callId, {
+            inputTokens: response.usage.prompt_tokens,
+            cachedInputTokens: response.usage.prompt_tokens_details?.cached_tokens ?? 0,
+            cacheWriteTokens: response.usage.prompt_tokens_details?.cache_write_tokens ?? 0,
+            outputTokens: response.usage.completion_tokens,
+          });
+        } else if (callId) {
+          options.smokeAccounting?.markCompleted(callId);
+        }
+        return response.choices[0]?.message?.content ?? null;
+      } catch (error) {
+        if (callId) options.smokeAccounting?.markFailed(callId);
+        throw error;
+      }
     },
   };
   return (request) => directVisual({
@@ -55,18 +78,37 @@ export function createLiveBoardDirector(options: LiveBoardDirectorOptions): Boar
 }
 
 export function createLiveStreamingBoardDirector(
-  options: LiveBoardDirectorOptions & { maxCompletionTokens?: number },
+  options: LiveBoardDirectorOptions & {
+    maxCompletionTokens?: number;
+    recoveryStrategy?: 'medium_escalation' | 'targeted_then_medium';
+  },
 ): StreamingBoardDirector {
   const maxCompletionTokens = options.maxCompletionTokens ??
     (options.model.includes('luna') ? 5_000 : 4_000);
-  const port = (reasoningEffort: 'low' | 'medium' | 'high') => createOpenAIDirectorStreamPort({
+  const port = (
+    reasoningEffort: 'low' | 'medium' | 'high',
+    smokeRole: 'composition' | 'recovery',
+  ) => createOpenAISceneModelPort({
     client: options.client,
     model: options.model,
     reasoningEffort,
     maxCompletionTokens,
+    ...(options.smokeAccounting ? { smokeAccounting: options.smokeAccounting, smokeRole } : {}),
   });
-  const primary = port(options.reasoningEffort);
-  const escalated = options.reasoningEffort === 'low' ? port('medium') : null;
+  const primary = port(options.reasoningEffort, 'composition');
+  const escalated = options.reasoningEffort === 'low' ? port('medium', 'recovery') : null;
+  const recoveryStrategy = options.recoveryStrategy ?? DEFAULT_STREAMING_RECOVERY_STRATEGY;
+  const layoutCorrection = recoveryStrategy === 'targeted_then_medium'
+    ? createOpenAIDirectorLayoutCorrectionPort({
+        client: options.client,
+        model: options.model,
+        reasoningEffort: 'low',
+        maxCompletionTokens: 1_000,
+        ...(options.smokeAccounting
+          ? { smokeAccounting: options.smokeAccounting, smokeRole: 'layout_correction' as const }
+          : {}),
+      })
+    : null;
   const telemetryModel = openAiTelemetryModel(options.model);
   const validateScene = options.harness?.validate ?? (async () => ({
     ok: false as const,
@@ -85,15 +127,18 @@ export function createLiveStreamingBoardDirector(
     const run = (
       model: ReturnType<typeof port>,
       reasoningEffort: 'low' | 'medium' | 'high',
+      allowLayoutCorrection: boolean,
     ) => streamVisual({
       model,
       validateScene,
       renderScene,
+      ...(allowLayoutCorrection && layoutCorrection ? { layoutCorrection } : {}),
       ...(telemetryModel ? { composition: { model: telemetryModel, reasoningEffort } } : {}),
     }, request, guardedRuntime);
-    const first = await run(primary, options.reasoningEffort);
+    const first = await run(primary, options.reasoningEffort, true);
     if (first.ok || !first.retryable || deliveredSteps > 0 || !escalated) return first;
-    return run(escalated, 'medium');
+    const retried = await run(escalated, 'medium', false);
+    return retried.ok ? retried : { ...retried, retryable: false };
   };
 }
 

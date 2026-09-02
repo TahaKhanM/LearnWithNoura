@@ -1,27 +1,33 @@
-import { BOARD_H, BOARD_W, type ShapeSpec, type Vec } from '../../shared/boardOps';
+import { anchorRefTargetIds, BOARD_H, BOARD_W, type ShapeSpec, type Vec } from '../../shared/boardOps';
+import type { LayoutBounds, LayoutIssue, LayoutIssueCode } from '../../shared/layoutFeedback';
 import { isCenterArc } from '../../shared/authoredSpecs';
+import { translateCurriculumSpec } from '../../shared/curriculumSpecs';
 import { compileScene, nodeBBox, type BBox } from './compile';
 import { annotationGeometryCollisions } from './annotationLayout';
 import type { SceneItem, SceneState } from './scene';
 
 const SAFE = { x: 24, y: 24, w: BOARD_W - 48, h: BOARD_H - 48 };
 const TOOLBAR = { x: 780, y: 0, w: 220, h: 92 };
-const TEXT_BEARING = new Set<ShapeSpec['kind']>(['text', 'equation', 'label', 'point', 'angle', 'bars', 'numberline', 'box', 'table', 'asset']);
+const TEXT_BEARING = new Set<ShapeSpec['kind']>(['text', 'equation', 'label', 'point', 'angle', 'bars', 'numberline', 'box', 'table', 'asset', 'annotate', 'panelGrid', 'scatter', 'boxplot', 'histogram', 'cubeNet', 'planView', 'paperFoldHolePunch', 'clock', 'protractor']);
 
 export interface SceneInspection {
   accepted: boolean;
-  issues: Array<{ itemId: string; kind: 'bounds' | 'collision' | 'stroke_collision' | 'reserved' | 'non_finite'; withItemId?: string }>;
+  issues: Array<LayoutIssue & { kind: LayoutIssueCode }>;
 }
 
 export function inspectScene(scene: SceneState): SceneInspection {
   const compiled = compileScene(scene.items);
+  const compiledById = new Map(compiled.map((item) => [item.id, item]));
   const issues: SceneInspection['issues'] = [];
+  for (const item of scene.items) if (item.place) {
+    issues.push(layoutIssue('anchor_missing', item.id, compiledById, item.place.anchor));
+  }
   for (const item of compiled) {
     const box = item.bbox;
-    if (![box.x, box.y, box.w, box.h].every(Number.isFinite)) issues.push({ itemId: item.id, kind: 'non_finite' });
-    else if (!contains(SAFE, box)) issues.push({ itemId: item.id, kind: 'bounds' });
+    if (![box.x, box.y, box.w, box.h].every(Number.isFinite)) issues.push(layoutIssue('non_finite', item.id, compiledById));
+    else if (!contains(SAFE, box)) issues.push(layoutIssue('bounds', item.id, compiledById));
     const source = scene.items.find((candidate) => candidate.id === item.id);
-    if (source && TEXT_BEARING.has(source.spec.kind) && intersects(box, TOOLBAR)) issues.push({ itemId: item.id, kind: 'reserved' });
+    if (source && TEXT_BEARING.has(source.spec.kind) && intersects(box, TOOLBAR)) issues.push(layoutIssue('reserved', item.id, compiledById));
   }
   for (let left = 0; left < compiled.length; left += 1) {
     const leftSource = scene.items.find((item) => item.id === compiled[left].id);
@@ -34,14 +40,38 @@ export function inspectScene(scene: SceneState): SceneInspection {
       if (dependentPair(leftSource, rightSource)) continue;
       const rightTextBoxes = compiled[right].nodes.filter((node) => node.type !== 'path').map(nodeBBox);
       if (leftTextBoxes.some((leftBox) => rightTextBoxes.some((rightBox) => overlapRatio(leftBox, rightBox) > 0.16))) {
-        issues.push({ itemId: compiled[right].id, kind: 'collision', withItemId: compiled[left].id });
+        issues.push(layoutIssue('collision', compiled[right].id, compiledById, compiled[left].id));
       }
     }
   }
   for (const collision of annotationGeometryCollisions(scene)) {
-    issues.push({ ...collision, kind: 'stroke_collision' });
+    issues.push(layoutIssue('stroke_collision', collision.itemId, compiledById, collision.withItemId));
   }
   return { accepted: issues.length === 0, issues };
+}
+
+function layoutIssue(
+  code: LayoutIssueCode,
+  itemId: string,
+  compiled: Map<string, { bbox: BBox }>,
+  withItemId?: string,
+): SceneInspection['issues'][number] {
+  const itemBounds = finiteBounds(compiled.get(itemId)?.bbox);
+  const withItemBounds = withItemId ? finiteBounds(compiled.get(withItemId)?.bbox) : undefined;
+  return {
+    code,
+    kind: code,
+    itemId,
+    ...(withItemId ? { withItemId } : {}),
+    ...(itemBounds ? { itemBounds } : {}),
+    ...(withItemBounds ? { withItemBounds } : {}),
+  };
+}
+
+function finiteBounds(box: BBox | undefined): LayoutBounds | undefined {
+  return box && [box.x, box.y, box.w, box.h].every(Number.isFinite)
+    ? { x: box.x, y: box.y, w: box.w, h: box.h }
+    : undefined;
 }
 
 /** One deterministic containment/collision repair pass; callers inspect again. */
@@ -75,25 +105,37 @@ export function repairSceneOnce(scene: SceneState, inspection = inspectScene(sce
   return { ...scene, items };
 }
 
-export function countAvoidableConnectorCrossings(scene: SceneState): number {
+export function avoidableConnectorCrossings(scene: SceneState): LayoutIssue[] {
   const compiled = new Map(compileScene(scene.items).map((item) => [item.id, item]));
   const segments = scene.items.flatMap((item) => {
-    if (item.spec.kind === 'line' && item.spec.arrow === 'end') return [{ from: item.spec.from, to: item.spec.to }];
-    if (item.spec.kind === 'connector' && Array.isArray(item.spec.from) && Array.isArray(item.spec.to)) return [{ from: item.spec.from, to: item.spec.to }];
+    if (item.spec.kind === 'line' && item.spec.arrow === 'end') return [{ itemId: item.id, from: item.spec.from, to: item.spec.to }];
+    if (item.spec.kind === 'connector' && Array.isArray(item.spec.from) && Array.isArray(item.spec.to)) return [{ itemId: item.id, from: item.spec.from, to: item.spec.to }];
     if (item.spec.kind === 'connector') {
       const path = compiled.get(item.id)?.nodes.find((node) => node.type === 'path');
       if (path?.type === 'path') {
         const coords = path.d.match(/-?\d+(?:\.\d+)?/g)?.map(Number) ?? [];
-        if (coords.length >= 4) return [{ from: [coords[0], coords[1]] as Vec, to: [coords[coords.length - 2], coords[coords.length - 1]] as Vec }];
+        if (coords.length >= 4) return [{
+          itemId: item.id,
+          from: [coords[0], coords[1]] as Vec,
+          to: [coords[coords.length - 2], coords[coords.length - 1]] as Vec,
+        }];
       }
     }
     return [];
   });
-  let crossings = 0;
+  const crossings: LayoutIssue[] = [];
   for (let left = 0; left < segments.length; left += 1) for (let right = left + 1; right < segments.length; right += 1) {
-    if (!sharesEndpoint(segments[left], segments[right]) && segmentsCross(segments[left].from, segments[left].to, segments[right].from, segments[right].to)) crossings += 1;
+    if (segments[left].itemId === segments[right].itemId || sharesEndpoint(segments[left], segments[right])) continue;
+    if (!segmentsCross(segments[left].from, segments[left].to, segments[right].from, segments[right].to)) continue;
+    const issue = layoutIssue('connector_crossing', segments[right].itemId, compiled, segments[left].itemId);
+    const { kind: _kind, ...closed } = issue;
+    crossings.push(closed);
   }
   return crossings;
+}
+
+export function countAvoidableConnectorCrossings(scene: SceneState): number {
+  return avoidableConnectorCrossings(scene).length;
 }
 
 function translateSpec(spec: ShapeSpec, dx: number, dy: number): ShapeSpec {
@@ -115,7 +157,9 @@ function translateSpec(spec: ShapeSpec, dx: number, dy: number): ShapeSpec {
     case 'asset': return { ...spec, at: move(spec.at) };
     case 'image': return { ...spec, at: move(spec.at), ...(spec.crop ? { crop: { ...spec.crop, x: spec.crop.x + dx, y: spec.crop.y + dy } } : {}) };
     case 'draggable': case 'snapZone': case 'tappable': return { ...spec, at: move(spec.at) };
-    case 'label': case 'plot': return spec;
+    case 'label': case 'plot': case 'annotate': return spec;
+    case 'transform': case 'panelGrid': case 'regionFill': case 'scatter': case 'boxplot': case 'histogram': case 'isometricSolid': case 'cubeNet': case 'planView': case 'paperFoldHolePunch': case 'gridPaper': case 'clock': case 'protractor':
+      return translateCurriculumSpec(spec, dx, dy);
   }
 }
 
@@ -131,6 +175,8 @@ function dependentPair(left: SceneItem, right: SceneItem): boolean {
   if (right.spec.kind === 'label' && right.spec.target === left.id) return true;
   if (left.spec.kind === 'plot' && left.spec.axes === right.id) return true;
   if (right.spec.kind === 'plot' && right.spec.axes === left.id) return true;
+  if (left.spec.kind === 'annotate' && anchorRefTargetIds(left.spec.target).includes(right.id)) return true;
+  if (right.spec.kind === 'annotate' && anchorRefTargetIds(right.spec.target).includes(left.id)) return true;
   return false;
 }
 

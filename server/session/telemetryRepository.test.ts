@@ -157,6 +157,36 @@ describe('telemetry repository adapters', () => {
     expect(JSON.parse(row?.payload ?? '{}')).toMatchObject({ value: 12 });
   });
 
+  it('waits for a short competing SQLite writer instead of dropping the metric', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'noura-telemetry-lock-'));
+    directories.push(directory);
+    const databasePath = join(directory, 'noura.db');
+    const blocker = new DatabaseSync(databasePath);
+    blocker.exec(`
+      PRAGMA journal_mode = WAL;
+      CREATE TABLE sessions (id TEXT PRIMARY KEY, status TEXT NOT NULL);
+      CREATE TABLE events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id TEXT NOT NULL,
+        ts INTEGER NOT NULL,
+        type TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        released INTEGER NOT NULL DEFAULT 1
+      );
+      INSERT INTO sessions (id, status) VALUES ('session-1', 'active');
+      BEGIN IMMEDIATE;
+    `);
+    const adapter = new SqliteWorkerTelemetryRepository(databasePath);
+    const append = adapter.appendMetric('session-1', observation(14));
+
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    blocker.exec('COMMIT');
+    await expect(append).resolves.toBeGreaterThan(0);
+
+    await adapter.shutdown();
+    blocker.close();
+  });
+
   it('serializes worker append against the immutable SQLite end cutoff', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'noura-end-race-'));
     directories.push(directory);

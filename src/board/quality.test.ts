@@ -41,6 +41,24 @@ describe('board quality budget', () => {
     });
   });
 
+  it('reports exact connector crossing ids and bounds for correction', () => {
+    const scene = applyOps(emptyScene, [
+      { op: 'add', id: 'c1', spec: { kind: 'line', from: [100, 100], to: [900, 500], arrow: 'end' } },
+      { op: 'add', id: 'c2', spec: { kind: 'line', from: [100, 500], to: [900, 100], arrow: 'end' } },
+      { op: 'add', id: 'c3', spec: { kind: 'line', from: [500, 60], to: [500, 540], arrow: 'end' } },
+    ], 'tutor', 'crossed').scene;
+    const report = evaluateBoardQuality(scene);
+
+    expect(report.accepted).toBe(false);
+    expect(report.layoutIssues).toEqual(expect.arrayContaining([expect.objectContaining({
+      code: 'connector_crossing',
+      itemId: expect.stringMatching(/^c[123]$/),
+      withItemId: expect.stringMatching(/^c[123]$/),
+      itemBounds: expect.any(Object),
+      withItemBounds: expect.any(Object),
+    })]));
+  });
+
   it('rejects a section that accumulates too many independent objects', () => {
     const ops = Array.from({ length: 31 }, (_, index) => ({
       op: 'add' as const, id: `item-${index}`, spec: { kind: 'line' as const, from: [30 + index, 100] as [number, number], to: [30 + index, 300] as [number, number] },

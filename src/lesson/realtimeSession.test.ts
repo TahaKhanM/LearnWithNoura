@@ -152,7 +152,139 @@ describe('RealtimeSession connecting metric queue', () => {
   });
 });
 
+describe('RealtimeSession visual preflight feedback', () => {
+  it('returns closed collision ids and bounds to the server', async () => {
+    const { session, harness } = sessionWithVoice();
+    const sent: RuntimeEventEnvelope<Record<string, unknown>>[] = [];
+    harness.ws = {
+      readyState: WebSocket.OPEN,
+      send: (raw) => sent.push(JSON.parse(raw) as RuntimeEventEnvelope<Record<string, unknown>>),
+      close: () => {},
+    };
+    session.onVisualPreflight = async () => ({
+      accepted: false,
+      reasons: ['collision:moving:fixed'],
+      layoutIssues: [{
+        code: 'collision',
+        itemId: 'moving',
+        withItemId: 'fixed',
+        itemBounds: { x: 390, y: 250, w: 220, h: 100 },
+        withItemBounds: { x: 390, y: 245, w: 220, h: 100 },
+      }],
+    });
+
+    harness.handleServer(createRuntimeEvent(session.getIdentity(), 0, 'visual_preflight', {
+      preflight_id: 'preflight-1',
+      ops: [],
+      semanticObjectId: 'section-1',
+    }));
+    await vi.waitFor(() => expect(sent.some((event) => event.type === 'visual_preflight_result')).toBe(true));
+
+    expect(sent.find((event) => event.type === 'visual_preflight_result')?.payload).toMatchObject({
+      preflight_id: 'preflight-1',
+      accepted: false,
+      reasons: ['collision:moving:fixed'],
+      layout_issues: [expect.objectContaining({ code: 'collision', itemId: 'moving', withItemId: 'fixed' })],
+    });
+    session.end();
+  });
+});
+
 describe('RealtimeSession playback-bound release', () => {
+  it('never shows a completed subtitle before its audio starts', () => {
+    const { session, harness, voice } = sessionWithVoice();
+    const identity = session.getIdentity();
+    harness.handleServer(createRuntimeEvent(identity, 0, 'response_started', { response_id: 'caption-response' }));
+    harness.handleServer(createRuntimeEvent(identity, 1, 'transcript_done', {
+      response_id: 'caption-response', text: 'First spoken phrase. Second spoken phrase.',
+    }, { providerResponseId: 'caption-response' }));
+    expect(session.getSnapshot().captions).toEqual([]);
+
+    voice.emitBoundary('started', 'caption-response');
+    expect(session.getSnapshot().captions.map((line) => line.text)).toEqual(['First spoken phrase.']);
+    voice.emitBoundary('stopped', 'caption-response', 2_000);
+    expect(session.getSnapshot().captions.map((line) => line.text)).toEqual([
+      'First spoken phrase. Second spoken phrase.',
+    ]);
+    expect(session.getSnapshot().captions.every((line) => !line.live)).toBe(true);
+  });
+
+  it('keeps consecutive responses ordered when an earlier final transcript arrives late', () => {
+    const { session, harness, voice } = sessionWithVoice();
+    const identity = session.getIdentity();
+    harness.handleServer(createRuntimeEvent(identity, 0, 'response_started', { response_id: 'r1' }));
+    voice.emitBoundary('started', 'r1');
+    harness.handleServer(createRuntimeEvent(identity, 1, 'transcript_delta', { response_id: 'r1', delta: 'First rough phrase. ' }));
+    voice.emitBoundary('stopped', 'r1', 900);
+    harness.handleServer(createRuntimeEvent(identity, 2, 'user_transcript', { text: 'Learner asks next.' }));
+    harness.handleServer(createRuntimeEvent(identity, 3, 'response_started', { response_id: 'r2' }));
+    voice.emitBoundary('started', 'r2');
+    harness.handleServer(createRuntimeEvent(identity, 4, 'transcript_done', { response_id: 'r2', text: 'Second response.' }));
+    voice.emitBoundary('stopped', 'r2', 800);
+    harness.handleServer(createRuntimeEvent(identity, 5, 'transcript_done', { response_id: 'r1', text: 'First corrected phrase.' }));
+
+    expect(session.getSnapshot().captions.map((line) => `${line.role}:${line.text}`)).toEqual([
+      'tutor:First corrected phrase.',
+      'child:Learner asks next.',
+      'tutor:Second response.',
+    ]);
+  });
+
+  it('an interruption freezes the heard subtitle and rejects the unheard tail', () => {
+    const { session, harness, voice } = sessionWithVoice();
+    const identity = session.getIdentity();
+    harness.ws = { readyState: 1, send: () => {} };
+    harness.handleServer(createRuntimeEvent(identity, 0, 'response_started', { response_id: 'interrupted-caption' }));
+    harness.handleServer(createRuntimeEvent(identity, 1, 'transcript_done', {
+      response_id: 'interrupted-caption', text: 'Heard phrase. Unheard future phrase.',
+    }));
+    voice.emitBoundary('started', 'interrupted-caption');
+    session.sendText('Stop there.');
+
+    expect(session.getSnapshot().captions).toEqual([
+      { role: 'tutor', text: 'Heard phrase.', live: false, responseId: 'interrupted-caption' },
+    ]);
+  });
+
+  it('keeps subtitles useful when the media connection fails', () => {
+    const { session, harness, voice } = sessionWithVoice();
+    const identity = session.getIdentity();
+    harness.handleServer(createRuntimeEvent(identity, 0, 'response_started', { response_id: 'caption-only' }));
+    harness.handleServer(createRuntimeEvent(identity, 1, 'transcript_done', {
+      response_id: 'caption-only', text: 'This caption remains available.',
+    }));
+    expect(session.getSnapshot().captions).toEqual([]);
+    voice.fail();
+    expect(session.getSnapshot().captions.map((line) => line.text)).toEqual(['This caption remains available.']);
+  });
+
+  it('acknowledges first paint before draw-on animation completion', async () => {
+    const { session, harness } = sessionWithVoice();
+    const sent: RuntimeEventEnvelope<Record<string, unknown>>[] = [];
+    harness.ws = {
+      readyState: 1,
+      send: (raw) => sent.push(JSON.parse(raw) as RuntimeEventEnvelope<Record<string, unknown>>),
+    };
+    let finishAnimation!: () => void;
+    const animation = new Promise<void>((resolve) => { finishAnimation = resolve; });
+    session.onBoardOps = async (_ops, _animate, identity, cue) => {
+      session.noteBoardReveal(identity, cue ?? {});
+      await animation;
+      return true;
+    };
+    const identity = session.getIdentity();
+    harness.handleServer(createRuntimeEvent(identity, 0, 'board_ops', {
+      response_id: 'draw-response', event_id: 91, ops: [],
+    }, { providerResponseId: 'draw-response' }));
+
+    await vi.waitFor(() => expect(sent.some((event) => event.type === 'ops_presented')).toBe(true));
+    expect(sent.find((event) => event.type === 'ops_presented')?.payload).toEqual({ event_id: 91 });
+    expect(sent.some((event) => event.type === 'ops_shown')).toBe(false);
+
+    finishAnimation();
+    await vi.waitFor(() => expect(sent.some((event) => event.type === 'ops_shown')).toBe(true));
+  });
+
   it('renders Director candidates through the connected lesson browser', async () => {
     const { session, harness } = sessionWithVoice();
     const sent: RuntimeEventEnvelope<Record<string, unknown>>[] = [];
@@ -241,6 +373,7 @@ describe('RealtimeSession playback-bound release', () => {
     expect(sent.filter((event) => event.type === 'playback_boundary').map((event) => event.payload))
       .toEqual([{ response_id: 'response-1', boundary: 'stopped', playedMs: 1_234 }]);
     expect(voice.playbackClears).toBe(1);
+    expect(voice.suppressedResponses).toContain('response-1');
     expect(session.getIdentity()).toMatchObject({
       turnId: 'turn-1',
       generationId: 'generation-1',
@@ -506,6 +639,25 @@ describe('RealtimeSession playback-bound release', () => {
     expect(session.getSnapshot().task).toMatchObject({ taskId: 'circle-acute', responseMode: 'draw', submitPolicy: 'explicit' });
   });
 
+  it('does not deliver a task during the generation-to-audio gap', () => {
+    const { session, harness, voice } = sessionWithVoice();
+    const identity = session.getIdentity();
+    harness.handleServer(createRuntimeEvent(identity, 0, 'response_started', { response_id: 'pending-task-response' }));
+    const task = {
+      taskId: 'pending-task', prompt: 'Point to the larger mark.', responseMode: 'voice', submitPolicy: 'vad',
+      targetObjectIds: [], boardRevision: 0, allowVoiceWhileDrawing: true,
+    };
+    harness.handleServer(createRuntimeEvent(identity, 1, 'learner_task', {
+      task, response_id: 'pending-task-response',
+    }));
+    harness.releasePending();
+    expect(session.getSnapshot().task).toBeNull();
+    voice.emitBoundary('started', 'pending-task-response');
+    expect(session.getSnapshot().task).toBeNull();
+    voice.emitBoundary('stopped', 'pending-task-response', 900);
+    expect(session.getSnapshot().task).toMatchObject({ taskId: 'pending-task' });
+  });
+
   it('replays persisted learner board operations through the learner-owned path', () => {
     const session = new RealtimeSession('session');
     const harness = session as unknown as SessionHarness;
@@ -542,6 +694,28 @@ describe('RealtimeSession playback-bound release', () => {
     harness.releasePending();
     await vi.waitFor(() => expect(sent.some((event) => event.type === 'ops_rejected')).toBe(true));
     expect(sent.find((event) => event.type === 'ops_rejected')?.payload).toMatchObject({ event_id: 77, response_id: 'quality-response' });
+  });
+
+  it('reports a thrown board renderer failure instead of leaving the tool pending', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const session = new RealtimeSession('session');
+    const harness = session as unknown as SessionHarness;
+    const sent: Array<{ type: string; payload: Record<string, unknown> }> = [];
+    harness.ws = { readyState: 1, send: (raw) => sent.push(JSON.parse(raw) as { type: string; payload: Record<string, unknown> }) };
+    session.onBoardOps = async () => { throw new Error('renderer crashed'); };
+    const identity = session.getIdentity();
+    harness.handleServer(createRuntimeEvent(identity, 0, 'board_ops', {
+      response_id: 'render-crash-response', event_id: 78,
+      ops: [{ op: 'add', id: 'line', spec: { kind: 'line', from: [1, 1], to: [2, 2] } }],
+    }, { providerResponseId: 'render-crash-response' }));
+    harness.releasePending();
+    await vi.waitFor(() => expect(sent.some((event) => event.type === 'ops_rejected')).toBe(true));
+    expect(sent.find((event) => event.type === 'ops_rejected')?.payload).toMatchObject({
+      event_id: 78,
+      reason: expect.stringContaining('renderer failed'),
+    });
+    expect(session.getSnapshot().error).toMatch(/could not show/i);
+    expect(consoleError).toHaveBeenCalled();
   });
 
   it('keeps voice playback alive across a sideband envelope reconnect', async () => {
@@ -598,5 +772,28 @@ describe('RealtimeSession playback-bound release', () => {
     harness.handleServer(stale);
     expect(session.getSnapshot().phase).toBe('ended');
     expect(session.getSnapshot().captions).toEqual([]);
+  });
+
+  it('turns a grounding fallback into one normalized image tap event', () => {
+    const { session, harness } = sessionWithVoice();
+    const sent: Array<{ type: string; payload: Record<string, unknown> }> = [];
+    harness.ws = { readyState: WebSocket.OPEN, send: (raw) => sent.push(JSON.parse(raw) as { type: string; payload: Record<string, unknown> }) };
+    const identity = session.getIdentity();
+    harness.handleServer(createRuntimeEvent(identity, 0, 'image_region_tap_request', {
+      request_id: 'ground-1', image_id: 'worksheet-image', hint: 'Tap the axle',
+    }));
+    expect(session.getSnapshot().imageGrounding).toEqual({
+      requestId: 'ground-1', imageId: 'worksheet-image', hint: 'Tap the axle',
+    });
+    expect(session.submitImageRegionTap({ type: 'PointSelector', x: 0.4, y: 0.6 })).toBe(true);
+    expect(sent.at(-1)).toMatchObject({
+      type: 'image_region_tap',
+      payload: {
+        request_id: 'ground-1', image_id: 'worksheet-image',
+        selector: { type: 'PointSelector', x: 0.4, y: 0.6 },
+      },
+    });
+    expect(session.getSnapshot().imageGrounding).toBeNull();
+    expect(session.submitImageRegionTap({ type: 'PointSelector', x: 0.5, y: 0.5 })).toBe(false);
   });
 });

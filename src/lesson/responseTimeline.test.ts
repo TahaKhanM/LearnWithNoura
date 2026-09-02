@@ -13,23 +13,25 @@ function semantic(id: string, sequence: number, responseId = 'response', active 
   return { kind: 'semantic', cueId: id, responseId, sequence, identity: active, state: { activeConcept: id } };
 }
 
-function final(id: string, sequence: number, responseId = 'response', active = identity): ResponseCue {
-  return { kind: 'final', cueId: id, responseId, sequence, identity: active, text: 'Heard phrase.' };
-}
-
 describe('response cue timeline (playback-bound)', () => {
   it('releases ordinary visuals immediately and holds lesson state until speech ends', () => {
     const timeline = new ResponseCueTimeline();
     timeline.enqueue(visual('visual-2', 4));
     timeline.enqueue(semantic('semantic-1', 1));
     timeline.enqueue(visual('visual-1', 3));
-    timeline.enqueue(final('final-1', 5));
     expect(timeline.drain((responseId) => responseId === 'response' ? 'playing' : 'finished').map((cue) => cue.cueId))
       .toEqual(['visual-1', 'visual-2']);
-    expect(timeline.pendingCount()).toBe(2);
+    expect(timeline.pendingCount()).toBe(1);
     expect(timeline.drain(() => 'finished').map((cue) => cue.cueId))
-      .toEqual(['semantic-1', 'final-1']);
+      .toEqual(['semantic-1']);
     expect(timeline.pendingCount()).toBe(0);
+  });
+
+  it('holds semantic state and tasks while audio is pending but not started', () => {
+    const timeline = new ResponseCueTimeline();
+    timeline.enqueue(semantic('pending-state', 1, 'pending-response'));
+    expect(timeline.drain(() => 'pending')).toEqual([]);
+    expect(timeline.drain(() => 'finished').map((cue) => cue.cueId)).toEqual(['pending-state']);
   });
 
   it('releases ordinary visuals even while their response is still speaking', () => {
@@ -48,12 +50,11 @@ describe('response cue timeline (playback-bound)', () => {
     expect(timeline.pendingCount()).toBe(1);
   });
 
-  it('clears unreached visual, semantic, and final state synchronously on repeated interruption', () => {
+  it('clears unreached visual and semantic state synchronously on repeated interruption', () => {
     const timeline = new ResponseCueTimeline();
     timeline.enqueue(semantic('late-state', 1));
     timeline.enqueue(visual('late-drawing', 2));
-    timeline.enqueue(final('late-final', 3));
-    expect(timeline.cancel(identity)).toHaveLength(3);
+    expect(timeline.cancel(identity)).toHaveLength(2);
     expect(timeline.cancel(identity)).toEqual([]);
     expect(timeline.pendingCount()).toBe(0);
     expect(timeline.enqueue(visual('stale-cue', 4))).toBe(false);
