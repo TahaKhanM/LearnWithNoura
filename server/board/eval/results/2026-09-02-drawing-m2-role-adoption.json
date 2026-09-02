@@ -1,0 +1,48 @@
+{
+  "schemaVersion": "1.0.0",
+  "evidenceMode": "offline_hash_bound_role_adoption",
+  "generatedAt": "2026-09-02T04:05:33.892Z",
+  "defaults": {
+    "composition": {
+      "model": "gpt-5.6-terra",
+      "reasoningEffort": "low"
+    },
+    "visionAudit": {
+      "model": "gpt-5.6-luna",
+      "reasoningEffort": "low",
+      "budgetMs": 3000
+    },
+    "recovery": "medium_escalation",
+    "hedge": "off"
+  },
+  "auditEvidence": {
+    "sourceSha256": "e02ccc9f240f72a7937fe192f30867434eb7f857fb6c45a5f8b52fa06507ae79",
+    "selectedConditionId": "luna-low",
+    "deterministicCatchRate": 1,
+    "deterministicFalseRejectRate": 0.0833,
+    "invalidReplyRate": 0,
+    "p50LatencyMs": 1466,
+    "p95LatencyMs": 2398
+  },
+  "recoveryEvidence": {
+    "sourceSha256": "54201d05481fa871abe1708c644a6f009183908a463ee1da5dc97f38e21d76ed",
+    "winner": "medium_escalation",
+    "deliveredValidity": 0.972222,
+    "meanBlindGrade": 3.9643,
+    "evidenceLabel": "corrected-gate evidence"
+  },
+  "contracts": {
+    "scenePort": "SceneModelPort.streamPropose",
+    "auditPort": "VisionAuditPort.inspect",
+    "strictProductionStepSchema": true,
+    "productionStepSchemaSha256": "5ea4e1f0bedc3c0d24279ce548024d815f54674c3cdcec56e7f2755d435e666f",
+    "legacyTextModelDrivesDrawingRoles": false,
+    "piiSentinelEscaped": false
+  },
+  "liveSmoke": {
+    "status": "requires_fresh_authorization",
+    "providerCalls": 0,
+    "costUsd": 0,
+    "claim": "not_live_verified"
+  }
+}

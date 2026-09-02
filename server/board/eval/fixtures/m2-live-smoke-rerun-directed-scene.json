@@ -1,0 +1,22 @@
+{
+  "schemaVersion": "1.0.0",
+  "evidenceMode": "authorized_live_synthetic_provider_output",
+  "scene": {
+    "groupId": "lesson-anchor-alt1",
+    "groupLabel": "Changes of state flow diagram",
+    "template": null,
+    "ops": [
+      { "op": "add", "id": "a1", "spec": { "kind": "asset", "assetId": "raindrop", "at": [220, 250], "size": 70, "label": "Liquid water" }, "color": "#2C5BE0" },
+      { "op": "add", "id": "a2", "spec": { "kind": "asset", "assetId": "cloud", "at": [440, 250], "size": 80, "label": "Water vapour (gas)" }, "color": "#7A4DD8" },
+      { "op": "add", "id": "a3", "spec": { "kind": "connector", "from": [270, 225], "to": [390, 225], "label": "evaporation (heating)" }, "color": "#E14B3C" },
+      { "op": "add", "id": "a4", "spec": { "kind": "asset", "assetId": "sun", "at": [330, 140], "size": 45 }, "color": "#E14B3C" },
+      { "op": "add", "id": "a5", "spec": { "kind": "connector", "from": [390, 300], "to": [270, 300], "label": "condensation (cooling)" }, "color": "#2C5BE0" },
+      { "op": "add", "id": "a6", "spec": { "kind": "asset", "assetId": "snowflake", "at": [330, 385], "size": 42 }, "color": "#2C5BE0" }
+    ],
+    "storyboard": [
+      { "id": "s1", "reveal": "outline", "narration": "Water can change between liquid and gas.", "objectIds": ["a1", "a2"] },
+      { "id": "s2", "reveal": "connector", "narration": "Heating causes evaporation from liquid to gas.", "objectIds": ["a3", "a4"] },
+      { "id": "s3", "reveal": "connector", "narration": "Cooling causes condensation from gas back to liquid.", "objectIds": ["a5", "a6"] }
+    ]
+  }
+}

@@ -1,0 +1,111 @@
+{
+  "schemaVersion": "1.0.0",
+  "evidenceMode": "authorized_live_synthetic_lesson",
+  "generatedAt": "2026-09-02T10:57:30.000Z",
+  "accepted": false,
+  "automatedSmokeGatePassed": true,
+  "manualQualityGatePassed": false,
+  "requiresAuthorizedRerun": true,
+  "authorization": {
+    "hardCapUsd": 1.25,
+    "maximumOperations": {
+      "realtimeConnections": 1,
+      "terraLowCompositionCalls": 2,
+      "lunaLowAuditCalls": 2,
+      "terraMediumRecoveryCalls": 2,
+      "compilerCalls": 0,
+      "imageCalls": 0
+    },
+    "syntheticOnly": true,
+    "preProviderHarnessAttempts": 1,
+    "preProviderHarnessAttemptCalls": 0
+  },
+  "journey": {
+    "fixtureCompiler": true,
+    "elapsedMs": 57199,
+    "firstBoardObserved": true,
+    "secondBoardChangeObserved": true,
+    "secondRequestRoute": "streaming_generative",
+    "browserConsoleErrors": 0,
+    "tutorObjectDisappearances": 0,
+    "telemetryGaps": 0,
+    "directorFirstOpMs": 3363,
+    "directorFirstPaintMs": 22391,
+    "auditDurationMs": 5430,
+    "auditOutcome": "approved",
+    "recoveryUsed": false
+  },
+  "providerUsage": {
+    "providerCalls": 3,
+    "counts": {
+      "realtime": 1,
+      "composition": 1,
+      "visionAudit": 1,
+      "recovery": 0,
+      "layoutCorrection": 0
+    },
+    "realtime": {
+      "model": "gpt-realtime-2.1",
+      "inputTextTokens": 20465,
+      "cachedTextTokens": 3008,
+      "inputAudioTokens": 0,
+      "cachedAudioTokens": 0,
+      "inputImageTokens": 0,
+      "cachedImageTokens": 0,
+      "outputTextTokens": 596,
+      "outputAudioTokens": 886,
+      "estimatedCostUsd": 0.1420392
+    },
+    "composition": {
+      "model": "gpt-5.6-terra",
+      "reasoningEffort": "low",
+      "inputTokens": 3602,
+      "cachedInputTokens": 0,
+      "outputTokens": 294,
+      "estimatedCostUsd": 0.010732
+    },
+    "visionAudit": {
+      "model": "gpt-5.6-luna",
+      "reasoningEffort": "low",
+      "inputTokens": 860,
+      "cachedInputTokens": 0,
+      "outputTokens": 113,
+      "estimatedCostUsd": 0.0003076
+    },
+    "estimatedObservedCostUsd": 0.1530788,
+    "accountedUpperBoundUsd": 0.68,
+    "hardCapHeadroomUsd": 0.57,
+    "providerBillingSurfaceCostUsd": null,
+    "costClaim": "token_meter_estimate_plus_conservative_upper_bound"
+  },
+  "pricingBasis": {
+    "source": "https://developers.openai.com/api/docs/models/gpt-realtime-2.1",
+    "realtimePerMillionTokensUsd": {
+      "inputText": 4,
+      "cachedInputText": 0.4,
+      "outputText": 24,
+      "inputAudio": 32,
+      "cachedInputAudio": 0.4,
+      "outputAudio": 64,
+      "inputImage": 5,
+      "cachedInputImage": 0.5
+    }
+  },
+  "quality": {
+    "originalBrowserPreflightAccepted": true,
+    "originalVisionAuditApproved": true,
+    "manualFinding": "connector_label_overlap",
+    "manualFindingDetail": "The two opposite connector labels overlapped each other and the asset labels in the generated section.",
+    "originalScreenshotRetained": false,
+    "correctedFailingTestAdded": true,
+    "correctedOfflineBrowserAccepted": true,
+    "correctedScreenshotInspected": true,
+    "correctedScreenshotPath": "artifacts/evaluation/drawing-m2-live-smoke-corrected.jpg",
+    "correctedScreenshotSha256": "fb863df21e4b24e1fc0d9233b42ede75fa174df65e375240dc73445e33ad79c1"
+  },
+  "directedScene": {
+    "path": "server/board/eval/fixtures/m2-live-smoke-directed-scene.json",
+    "sha256": "380628f25daa5dd3609d644b03eb99323a2be061c8201443dc08d5a5db118f43"
+  },
+  "decision": "Automated live telemetry passed, but manual visual quality failed. The deterministic compiler correction passes offline; M2 live acceptance requires a separately authorized rerun."
+}
