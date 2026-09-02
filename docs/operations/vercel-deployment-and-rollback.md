@@ -12,7 +12,7 @@
 - Deployment Protection: Standard Vercel Authentication (`all_except_custom_domains`).
 - Stable protected Preview alias: `https://noura-preview-mtk2982007.vercel.app`
 - Public v0: `https://learnwithnoura.com`; `www` permanently redirects to the apex.
-- Current verified public-v0 deployment: `dpl_FWWpHQk2iJkGGyCLPLhE4pBqjUEK`, revision `563f4c3422a1802b2cb43b0ec797ae5dc6b5013a`.
+- Current verified public-v0 deployment: `dpl_FWWpHQk2iJkGGyCLPLhE4pBqjUEK`, revision `563f4c3422a1802b2cb43b0ec797ae5dc6b5013a`. Recovery evidence below is from the 2026-08-26 drawing/storage working tree based on revision `2ce3e0bf4a7c7ac85adfaf6f89e0b41bcf2e878d`.
 
 Do not print or download Production secrets into tracked files. `.vercel/`, `.env*` and databases are ignored.
 
@@ -58,6 +58,23 @@ Launch evidence through revision `563f4c3`:
 - deployed Realtime correctly identified both fractions using board image context alone, and a fresh WSS connection replayed the stored learner stroke;
 - captions-only fallback completed with model tools, semantic board output, evidence, atomic release, immutable ending and Parent summary;
 - all named synthetic smoke records were deleted after verification; the launch database was handed over empty.
+
+Recovery deployment evidence on 2026-08-26:
+
+- Supabase migrations 2–4 are present; `noura.compiled_lessons` and
+  `noura.board_assets` are live rather than sidecar/unavailable fallbacks;
+- the server-only `noura_app` role has SELECT/INSERT/UPDATE on the two new
+  tables, while `anon` and `authenticated` have neither schema usage nor
+  table access; Supabase security advisors report no active findings;
+- `https://learnwithnoura.com/healthz` reports provider configured, durable
+  storage available, schema ready, and overall healthy;
+- the authorized text-only production smoke completed in 59.295 seconds with
+  live provider usage, first audio at 1.003 seconds after the ask boundary,
+  cumulative captions, two board changes (including the requested 0–10 number
+  line with five marked), interruption, Parent Area, and a complete
+  parent-scoped telemetry log;
+- the smoke gate passed with no missing observations, telemetry gaps, browser
+  console errors, duplicate captions, reconnects, or tutor-object loss.
 
 ## Full Production gate
 
