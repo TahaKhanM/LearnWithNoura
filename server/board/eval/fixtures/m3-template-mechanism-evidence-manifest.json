@@ -1,0 +1,13 @@
+{
+  "schemaVersion": "1.0.0",
+  "scope": "mechanism_only",
+  "fixturePath": "server/board/eval/fixtures/m3-template-routing-fixtures.json",
+  "fixtureSha256": "ba4739968be0eb3fd42d2978058e151817cf9b40c387c6e0aa841daa569cbae4",
+  "browserResultPath": "server/board/eval/results/2026-09-02-drawing-m3-template-browser.json",
+  "browserResultSha256": "079554a67026654a4d32d992b5ec17b9572de9b93daa165fed02974c3cdceab1",
+  "screenshots": {
+    "number-line": "a7095fc2dbc809456a4d69240b3106045e913ad4a0f317d7b922cf08e6e4dad1",
+    "fraction-strips": "1861799da4f1c373d8209fb6cbf940919823cf7b004914f4370275a1d1f20356",
+    "plotted-graph": "24dc04503269021f54df2f9bb472eca2ee1e98f2b15f23548673832e5994c160"
+  }
+}

@@ -1,0 +1,66 @@
+{
+  "schemaVersion": "1.0.0",
+  "scope": "mechanism_only",
+  "evidenceMode": "offline_hash_bound_m3_acceptance",
+  "generatedAt": "2026-09-02T14:11:37.867Z",
+  "accepted": true,
+  "mechanism": {
+    "deterministicExtractorEntry": true,
+    "streamHeadShortCircuitEntry": true,
+    "neverGuessParameters": true,
+    "anchorTemplateStreamingOrder": true,
+    "exactTemplateSceneRemoved": true,
+    "matrixInformed": true,
+    "exemplarTemplates": [
+      "number_line",
+      "fraction_comparison",
+      "slope_comparison"
+    ],
+    "exemplarCount": 3,
+    "maximumFirstPaintMs": 36,
+    "firstPaintThresholdMs": 2000,
+    "falseHoldoutCaptures": 0,
+    "browserAccepted": 3,
+    "screenshotsInspected": true
+  },
+  "openSetGenerative": {
+    "templateRoutingDisabled": true,
+    "rows": 40,
+    "firstPassAccepted": 37,
+    "recovered": 3,
+    "delivered": 40,
+    "deliveredValidity": 1,
+    "threshold": 0.95,
+    "passed": true
+  },
+  "blendedFirstPassGate": "deferred_to_m8",
+  "retainedCompletedExtractors": [
+    "unit_circle_projection",
+    "pythagorean_area_proof",
+    "triangle_angle_sum",
+    "causal_cycle",
+    "timeline",
+    "grammar_structure"
+  ],
+  "deferredExtractorPolicy": "No additional extractor is in M3 scope; future catalogue work is pulled matrix-row-by-row no earlier than M8.",
+  "evidence": {
+    "m0Sha256": "e02ccc9f240f72a7937fe192f30867434eb7f857fb6c45a5f8b52fa06507ae79",
+    "m1BrowserSha256": "a8847373ff3a9d3aa8bdd1c34fa5f4dcb99e4bc617ce23459ccdebd67767017a",
+    "m1ReportSha256": "44409bf22112a0e76ed95af0ccb605158f0f1fb01f16600acd5d79b67493d209",
+    "f9RecoverySha256": "54201d05481fa871abe1708c644a6f009183908a463ee1da5dc97f38e21d76ed",
+    "fixtureSha256": "ba4739968be0eb3fd42d2978058e151817cf9b40c387c6e0aa841daa569cbae4",
+    "browserSha256": "079554a67026654a4d32d992b5ec17b9572de9b93daa165fed02974c3cdceab1",
+    "matrixSha256": "bad84b66a673df27841c19fd6c20d921c9c084c190618b3492adea941d13664a",
+    "screenshotHashes": {
+      "number-line": "a7095fc2dbc809456a4d69240b3106045e913ad4a0f317d7b922cf08e6e4dad1",
+      "fraction-strips": "1861799da4f1c373d8209fb6cbf940919823cf7b004914f4370275a1d1f20356",
+      "plotted-graph": "24dc04503269021f54df2f9bb472eca2ee1e98f2b15f23548673832e5994c160"
+    },
+    "sourceHashes": {
+      "templateLane": "3e2087c2ae9e76dcccedaa52a01e0e9020077d3ed154f018381886af5a9296cd",
+      "streamingDirector": "bc57ea4b2fef6dc705aa46850ae8a6d39d8b2d0275f96434c211bdee28f51dd6",
+      "visualRequests": "3a5ece2800830935a766ed4189dc71c46b73d02f188902520b046f8f0dbb6f01"
+    },
+    "providerCalls": 0
+  }
+}

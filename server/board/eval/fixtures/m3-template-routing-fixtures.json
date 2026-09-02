@@ -1,0 +1,39 @@
+{
+  "schemaVersion": "1.1.0",
+  "scope": "mechanism_only",
+  "captures": [
+    { "id": "number-line", "idea": "Show a number line from zero to ten and mark five.", "constraints": "The marked point must be five.", "expectedTemplate": "number_line" },
+    { "id": "fraction-strips", "idea": "Compare 7/12 and 5/8 on exact fraction strips.", "constraints": null, "expectedTemplate": "fraction_comparison" },
+    { "id": "plotted-graph", "idea": "Plot y = x + 2 and y = -x + 6 and mark their intersection.", "constraints": null, "expectedTemplate": "slope_comparison" }
+  ],
+  "retainedCompletedExtractors": [
+    "unit_circle_projection",
+    "pythagorean_area_proof",
+    "triangle_angle_sum",
+    "causal_cycle",
+    "timeline",
+    "grammar_structure"
+  ],
+  "deferredExtractorPolicy": "No additional extractor is in M3 scope; future catalogue work is pulled matrix-row-by-row no earlier than M8.",
+  "corpusExpectedCaptures": {
+    "math-number-line": "number_line",
+    "math-unit-circle": "unit_circle_projection",
+    "math-fraction-strip-holdout": "fraction_comparison",
+    "graph-linear": "slope_comparison",
+    "graph-intersection-holdout": "slope_comparison",
+    "grammar-main-subordinate": "grammar_structure",
+    "compare-fractions": "fraction_comparison"
+  },
+  "openSetIntentIds": [
+    "abstract-opportunity-cost",
+    "abstract-recursion",
+    "abstract-fairness-holdout",
+    "abstract-entropy-holdout"
+  ],
+  "matrixInformedRows": [
+    "arithmetic-number-lines",
+    "arithmetic-fraction-strips",
+    "sat-coordinate-geometry",
+    "sat-systems-graphs"
+  ]
+}
