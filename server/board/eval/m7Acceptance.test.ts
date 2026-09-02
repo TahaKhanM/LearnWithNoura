@@ -54,6 +54,19 @@ describe('M7 acceptance audit', () => {
     expect(evidence.report).toMatchObject({ technicalAccepted: true, accepted: false });
   });
 
+  it('still reproduces when a later e2e recapture changes the gitignored screenshot', () => {
+    const { generatedAt: _generatedAt, ...sources } = input;
+    const evidence = compileM7AcceptanceEvidence({
+      ...sources,
+      fastTierScreenshot: Buffer.from('later-e2e-recapture'),
+      fastTierE2ESource: `${input.fastTierE2ESource}\n// later milestone comment\n`,
+      resultRawJson: read('server/board/eval/results/2026-09-03-drawing-m7-acceptance.json'),
+    });
+    expect(evidence.report.accepted).toBe(false);
+    expect(evidence.report.fastTier.zeroVisionCalls).toBe(true);
+    expect(evidence.report.fastTier.actualLessonE2E).toBe(true);
+  });
+
   it('rejects any incident or G4 artifact tampering', () => {
     expect(() => computeM7Acceptance({ ...input, incidentRawJson: `${input.incidentRawJson} ` })).toThrow(/incident.*hash/i);
     expect(() => computeM7Acceptance({ ...input, m7G4RawJson: input.m7G4RawJson.replace('"rows": 72', '"rows": 71') })).toThrow(/G4.*hash/i);
