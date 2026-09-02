@@ -88,3 +88,27 @@ visual quality and be evaluated against representative and holdout rows. The
 authorized $30 synthetic bake-off cap remains hard, so no additional provider
 study may be started without a new user authorization that explicitly changes
 that ceiling.
+
+## Continuation addendum: corrected acceptance complete
+
+The architecture-owner correction linked from the decision record supersedes
+the “not accepted” operational status above without erasing that history. M1
+now passes G1–G5 under the corrected layered contract. The canonical acceptance
+artifact is
+`server/board/eval/results/2026-09-01-drawing-m1-corrected-acceptance.json`
+(SHA-256 `72e12e65eed3361e169e29dabedbb87d26f83542022db8f7c21903360409c2e7`).
+
+Proven offline: F1–F8 regressions; 360-row authority replay; G1/G2; actual
+Lesson-page G4 distribution and inspected first-paint screenshots; permanence,
+replay, build, type, lint, security, storage, visual and accessibility gates.
+Provider-backed synthetic evidence: the separately authorized F9 study proves
+G3 at 350/360 with Terra-medium escalation and 3.9643 mean blind grade. It used
+53 calls and $0.2692976 of a $3.25 ceiling; no child data entered the study.
+Target hardware, child use, and deployed behavior remain live-required and are
+not inferred from these results.
+
+Working-tree reconciliation preserved the pre-existing auth overlay entirely
+unstaged. The dirty drawing-recovery number-line shortcut was moved out of the
+classic Director into the deterministic template lane ahead of both Director
+paths; explicit learner drawing commands retain their application-owned route.
+No auth file or auth hunk is part of Drawing vNext staging.

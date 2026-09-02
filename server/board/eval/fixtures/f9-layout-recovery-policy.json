@@ -1,0 +1,20 @@
+{
+  "schemaVersion": "1.0.0",
+  "ruleSourcePath": "docs/architecture/2026-09-01-drawing-vnext-m1-acceptance-and-continuation-prompt.md",
+  "sourceEvidencePath": "server/board/eval/results/2026-08-31-drawing-model-bakeoff-raw.json",
+  "sourceEvidenceSha256": "e02ccc9f240f72a7937fe192f30867434eb7f857fb6c45a5f8b52fa06507ae79",
+  "m1BrowserObservationPath": "server/board/eval/results/2026-09-01-drawing-m1-pipeline-browser-observations.json",
+  "m1BrowserObservationSha256": "a8847373ff3a9d3aa8bdd1c34fa5f4dcb99e4bc617ce23459ccdebd67767017a",
+  "layoutFeedbackPath": "server/board/eval/results/2026-09-01-drawing-f9-layout-feedback.json",
+  "layoutFeedbackSha256": "89f0a4ae51ff52031830890ed5038f5e73b4769380da47fc5a97eab65aa488e0",
+  "failureRows": 31,
+  "baseDelivered": 329,
+  "totalRows": 360,
+  "minimumDeliveredValidity": 0.97,
+  "minimumRecoveries": 21,
+  "maximumLiveSpendUsd": 5,
+  "maximumCanaryProviderCalls": 4,
+  "maximumFullProviderCalls": 90,
+  "qualityGradeTolerance": 1,
+  "earlyStopRule": "Stop an arm when its maximum possible recoveries cannot reach 21, or once a cheaper chain has at least 21 recoveries and all remaining outcomes cannot change the cheapest qualifying decision."
+}

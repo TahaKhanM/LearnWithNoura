@@ -1,0 +1,7 @@
+{
+  "schemaVersion": "1.0.0",
+  "resultPath": "server/board/eval/results/2026-09-01-drawing-m1-corrected-acceptance.json",
+  "resultSha256": "72e12e65eed3361e169e29dabedbb87d26f83542022db8f7c21903360409c2e7",
+  "accepted": true,
+  "gates": ["G1", "G2", "G3", "G4", "G5"]
+}

@@ -1,0 +1,153 @@
+{
+  "schemaVersion": "1.0.0",
+  "evidenceMode": "corrected_layered_m1_acceptance",
+  "correctedGateSource": "docs/architecture/2026-09-01-drawing-vnext-m1-acceptance-and-continuation-prompt.md",
+  "generatedAt": "2026-09-02T03:35:08.935Z",
+  "accepted": true,
+  "gates": {
+    "G1": {
+      "name": "structured_single_shot_validity",
+      "numerator": 360,
+      "denominator": 360,
+      "rate": 1,
+      "threshold": 0.95,
+      "passed": true
+    },
+    "G2": {
+      "name": "production_authority_conjunctive_first_pass",
+      "numerator": 329,
+      "denominator": 360,
+      "rate": 0.913889,
+      "threshold": 0.9,
+      "passed": true
+    },
+    "G3": {
+      "name": "delivered_scene_recovery",
+      "numerator": 350,
+      "denominator": 360,
+      "rate": 0.972222,
+      "threshold": 0.97,
+      "recoveryDefault": "medium_escalation",
+      "meanBlindGrade": 3.9643,
+      "passed": true
+    },
+    "G4": {
+      "name": "actual_lesson_ops_presented_first_paint",
+      "pairedRows": 290,
+      "streamingP50Ms": 2818,
+      "classicP50Ms": 4909,
+      "p50Cut": 0.425952,
+      "maximumStreamingP50Ms": 4000,
+      "minimumP50Cut": 0.4,
+      "passed": true
+    },
+    "G5": {
+      "name": "permanence_replay_and_readme_gates",
+      "commands": 19,
+      "failedCommands": [],
+      "passed": true
+    }
+  },
+  "evidence": {
+    "m0SourceSha256": "e02ccc9f240f72a7937fe192f30867434eb7f857fb6c45a5f8b52fa06507ae79",
+    "m1BrowserObservationSha256": "a8847373ff3a9d3aa8bdd1c34fa5f4dcb99e4bc617ce23459ccdebd67767017a",
+    "m1PairedReportSha256": "44409bf22112a0e76ed95af0ccb605158f0f1fb01f16600acd5d79b67493d209",
+    "f9RecoveryResultSha256": "54201d05481fa871abe1708c644a6f009183908a463ee1da5dc97f38e21d76ed",
+    "g4FirstPaintResultSha256": "c54a2798afb290779fe3c8580ed4c3dd3f01c7361f83156b5fab24db4ae27e5e",
+    "screenshots": {
+      "sourceKey": "timeline-ww1:terra-low:cold:1",
+      "streaming": {
+        "path": "artifacts/evaluation/drawing-g4-first-paint/streaming-first-paint.png",
+        "sha256": "3f8732e22456912517697e1f9a21067e9024fe961525d0b3b42ecaaf07ab6070"
+      },
+      "classic": {
+        "path": "artifacts/evaluation/drawing-g4-first-paint/classic-first-paint.png",
+        "sha256": "18fe8fad9f4f3ecdd21047c1197fe1debcda0a2ab961f61356f6fb58292908d0"
+      }
+    },
+    "newProviderSpend": {
+      "authorizedCapUsd": 3.25,
+      "accountedCostUsd": 0.2692976,
+      "headroomUsd": 2.9807024,
+      "providerCalls": 53
+    },
+    "verificationGates": [
+      {
+        "command": "npm run build",
+        "exitCode": 0
+      },
+      {
+        "command": "npm run typecheck:server",
+        "exitCode": 0
+      },
+      {
+        "command": "npm run lint",
+        "exitCode": 0
+      },
+      {
+        "command": "npm run test:smoke-report",
+        "exitCode": 0
+      },
+      {
+        "command": "npm run test:lesson-eval",
+        "exitCode": 0
+      },
+      {
+        "command": "npm test",
+        "exitCode": 0
+      },
+      {
+        "command": "npm audit --omit=dev",
+        "exitCode": 0
+      },
+      {
+        "command": "npm run test:integration",
+        "exitCode": 0
+      },
+      {
+        "command": "npm run test:e2e",
+        "exitCode": 0
+      },
+      {
+        "command": "npm run test:visual",
+        "exitCode": 0
+      },
+      {
+        "command": "npm run test:a11y",
+        "exitCode": 0
+      },
+      {
+        "command": "npm run test:security",
+        "exitCode": 0
+      },
+      {
+        "command": "npm run test:storage",
+        "exitCode": 0
+      },
+      {
+        "command": "npm run test:brand",
+        "exitCode": 0
+      },
+      {
+        "command": "npm run test:runtime-models",
+        "exitCode": 0
+      },
+      {
+        "command": "npm run test:director-eval",
+        "exitCode": 0
+      },
+      {
+        "command": "npm run test:director-m1-eval",
+        "exitCode": 0
+      },
+      {
+        "command": "npm run test:director-recovery",
+        "exitCode": 0
+      },
+      {
+        "command": "npm run test:first-paint",
+        "exitCode": 0
+      }
+    ]
+  }
+}
