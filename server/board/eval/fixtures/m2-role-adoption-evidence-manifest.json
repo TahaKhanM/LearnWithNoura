@@ -1,0 +1,8 @@
+{
+  "schemaVersion": "1.0.0",
+  "resultPath": "server/board/eval/results/2026-09-02-drawing-m2-role-adoption.json",
+  "resultSha256": "0235f1cfde95421ac27f02252b6b12286282134e7fd973ff6edcb216ed4e4db3",
+  "m0SourceSha256": "e02ccc9f240f72a7937fe192f30867434eb7f857fb6c45a5f8b52fa06507ae79",
+  "recoverySourceSha256": "54201d05481fa871abe1708c644a6f009183908a463ee1da5dc97f38e21d76ed",
+  "liveSmoke": "requires_fresh_authorization"
+}

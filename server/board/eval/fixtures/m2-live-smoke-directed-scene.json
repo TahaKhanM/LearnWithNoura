@@ -1,0 +1,20 @@
+{
+  "schemaVersion": "1.0.0",
+  "evidenceMode": "authorized_live_synthetic_provider_output",
+  "scene": {
+    "groupId": "lesson-anchor-alt1",
+    "groupLabel": "Evaporation and Condensation",
+    "template": null,
+    "ops": [
+      { "op": "add", "id": "a1", "spec": { "kind": "asset", "assetId": "raindrop", "at": [220, 280], "size": 70, "label": "Liquid water" }, "color": "#2C5BE0" },
+      { "op": "add", "id": "a2", "spec": { "kind": "asset", "assetId": "cloud", "at": [450, 280], "size": 80, "label": "Water vapor (gas)" }, "color": "#7A4DD8" },
+      { "op": "add", "id": "a3", "spec": { "kind": "connector", "from": [270, 250], "to": [395, 250], "label": "Evaporation (heating)" }, "color": "#E14B3C" },
+      { "op": "add", "id": "a4", "spec": { "kind": "connector", "from": [395, 330], "to": [270, 330], "label": "Condensation (cooling)" }, "color": "#2C5BE0" }
+    ],
+    "storyboard": [
+      { "id": "s1", "reveal": "outline", "narration": "Water can change between liquid and gas.", "objectIds": ["a1", "a2"] },
+      { "id": "s2", "reveal": "connector", "narration": "Heating causes evaporation from liquid to gas.", "objectIds": ["a3"] },
+      { "id": "s3", "reveal": "connector", "narration": "Cooling causes condensation from gas to liquid.", "objectIds": ["a4"] }
+    ]
+  }
+}
