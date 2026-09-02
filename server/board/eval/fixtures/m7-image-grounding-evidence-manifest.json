@@ -1,0 +1,12 @@
+{
+  "schemaVersion": "1.0.0",
+  "fixtureSha256": "221564272447a481f2502988b8756482f869550ac3a7fb2cfcd8aa3753d60833",
+  "rawResultSha256": "d22a458f22e566e516a16c20612b39d01cfaf5032362331643a7ec4432174582",
+  "ledgerSha256": "71c4e57efe292fd67a5611d10df39927d701e522cdfd3695b93fed4430ca3e52",
+  "maximumProviderCalls": 17,
+  "actualProviderCalls": 17,
+  "hardCapUsd": 0.6,
+  "conservativeAccountedCostUsd": 0.51,
+  "observedCostUsd": 0.005022,
+  "syntheticOnly": true
+}

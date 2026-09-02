@@ -1,0 +1,944 @@
+{
+  "schemaVersion": "2.0.0",
+  "claim": "bounded_11_plus_and_sat_taxonomy",
+  "level": "UK 11+ non-verbal reasoning and US SAT/KS2 visual explanation",
+  "baselineMatrixSha256": "bad84b66a673df27841c19fd6c20d921c9c084c190618b3492adea941d13664a",
+  "statusDefinitions": {
+    "supported": "A first-class current BoardSpec or deterministic template represents the visual directly.",
+    "composable": "Current BoardOps can compose the visual generatively and a representative fixture passes the real compile/preflight path.",
+    "missing": "Reliable representation requires one or more M7 capabilities that do not exist yet."
+  },
+  "m7ExitCriterion": "Every row is supported or composable through the generative lane with fixture-backed browser evidence.",
+  "m7MissingCapabilities": [],
+  "rows": [
+    {
+      "id": "nvr-shape-sequences",
+      "domain": "11+ NVR",
+      "family": "interpreting shapes",
+      "visualType": "shape sequences",
+      "requiredCapabilities": [
+        "panelGrid",
+        "shape",
+        "connector"
+      ],
+      "currentCapabilities": [
+        "panelGrid",
+        "shape",
+        "connector"
+      ],
+      "status": "supported",
+      "routeHint": "generative",
+      "template": null,
+      "fixtureId": "fixture-nvr-shape-sequences",
+      "missingCapabilities": [],
+      "evalIntents": [
+        "Show the next shape in a four-panel rotation sequence.",
+        "Explain a size-and-colour alternating shape sequence."
+      ]
+    },
+    {
+      "id": "nvr-shape-matrices",
+      "domain": "11+ NVR",
+      "family": "interpreting shapes",
+      "visualType": "shape matrices",
+      "requiredCapabilities": [
+        "panelGrid",
+        "shape",
+        "connector"
+      ],
+      "currentCapabilities": [
+        "panelGrid",
+        "shape",
+        "connector"
+      ],
+      "status": "supported",
+      "routeHint": "generative",
+      "template": null,
+      "fixtureId": "fixture-nvr-shape-matrices",
+      "missingCapabilities": [],
+      "evalIntents": [
+        "Draw a three-by-three shape matrix with one missing cell.",
+        "Explain a row-and-column transformation matrix."
+      ]
+    },
+    {
+      "id": "nvr-shape-analogies",
+      "domain": "11+ NVR",
+      "family": "interpreting shapes",
+      "visualType": "shape analogies",
+      "requiredCapabilities": [
+        "panelGrid",
+        "shape",
+        "connector"
+      ],
+      "currentCapabilities": [
+        "panelGrid",
+        "shape",
+        "connector"
+      ],
+      "status": "supported",
+      "routeHint": "generative",
+      "template": null,
+      "fixtureId": "fixture-nvr-shape-analogies",
+      "missingCapabilities": [],
+      "evalIntents": [
+        "Show how shape A changes to B and apply it to C.",
+        "Draw a two-pair shape analogy with a missing answer."
+      ]
+    },
+    {
+      "id": "nvr-shape-codes",
+      "domain": "11+ NVR",
+      "family": "interpreting shapes",
+      "visualType": "shape codes",
+      "requiredCapabilities": [
+        "table",
+        "shape",
+        "text"
+      ],
+      "currentCapabilities": [
+        "table",
+        "shape",
+        "text"
+      ],
+      "status": "composable",
+      "routeHint": "generative",
+      "template": null,
+      "fixtureId": "fixture-nvr-shape-codes",
+      "missingCapabilities": [],
+      "evalIntents": [
+        "Decode a symbol-to-letter key in a compact table.",
+        "Show how two shapes map to a two-character code."
+      ]
+    },
+    {
+      "id": "nvr-odd-one-out",
+      "domain": "11+ NVR",
+      "family": "interpreting shapes",
+      "visualType": "odd one out",
+      "requiredCapabilities": [
+        "panelGrid",
+        "shape",
+        "highlight"
+      ],
+      "currentCapabilities": [
+        "panelGrid",
+        "shape",
+        "highlight"
+      ],
+      "status": "supported",
+      "routeHint": "generative",
+      "template": null,
+      "fixtureId": "fixture-nvr-odd-one-out",
+      "missingCapabilities": [],
+      "evalIntents": [
+        "Arrange five candidate shapes for an odd-one-out question.",
+        "Compare four patterned figures and mark the exception."
+      ]
+    },
+    {
+      "id": "nvr-rotation",
+      "domain": "11+ NVR",
+      "family": "moving shapes 2D",
+      "visualType": "rotation",
+      "requiredCapabilities": [
+        "transform",
+        "panelGrid",
+        "shape"
+      ],
+      "currentCapabilities": [
+        "transform",
+        "panelGrid",
+        "shape"
+      ],
+      "status": "supported",
+      "routeHint": "generative",
+      "template": null,
+      "fixtureId": "fixture-nvr-rotation",
+      "missingCapabilities": [],
+      "evalIntents": [
+        "Rotate this asymmetric figure ninety degrees clockwise.",
+        "Compare a shape before and after a half-turn."
+      ]
+    },
+    {
+      "id": "nvr-reflection",
+      "domain": "11+ NVR",
+      "family": "moving shapes 2D",
+      "visualType": "reflection",
+      "requiredCapabilities": [
+        "transform",
+        "panelGrid",
+        "shape"
+      ],
+      "currentCapabilities": [
+        "transform",
+        "panelGrid",
+        "shape"
+      ],
+      "status": "supported",
+      "routeHint": "generative",
+      "template": null,
+      "fixtureId": "fixture-nvr-reflection",
+      "missingCapabilities": [],
+      "evalIntents": [
+        "Reflect an arrow across a vertical mirror line.",
+        "Show the mirror image of an irregular polygon."
+      ]
+    },
+    {
+      "id": "nvr-hidden-shapes",
+      "domain": "11+ NVR",
+      "family": "moving shapes 2D",
+      "visualType": "hidden shapes",
+      "requiredCapabilities": [
+        "shape",
+        "line",
+        "highlight"
+      ],
+      "currentCapabilities": [
+        "shape",
+        "line",
+        "highlight"
+      ],
+      "status": "composable",
+      "routeHint": "generative",
+      "template": null,
+      "fixtureId": "fixture-nvr-hidden-shapes",
+      "missingCapabilities": [],
+      "evalIntents": [
+        "Reveal a triangle hidden inside overlapping lines.",
+        "Trace a target quadrilateral inside a complex figure."
+      ]
+    },
+    {
+      "id": "nvr-paper-fold-hole-punch",
+      "domain": "11+ NVR",
+      "family": "moving shapes 2D",
+      "visualType": "paper folding and hole punching",
+      "requiredCapabilities": [
+        "paperFoldHolePunch",
+        "panelGrid",
+        "transform"
+      ],
+      "currentCapabilities": [
+        "paperFoldHolePunch",
+        "panelGrid",
+        "transform"
+      ],
+      "status": "supported",
+      "routeHint": "generative",
+      "template": null,
+      "fixtureId": "fixture-nvr-paper-fold-hole-punch",
+      "missingCapabilities": [],
+      "evalIntents": [
+        "Show the holes after a twice-folded square is unfolded.",
+        "Explain a diagonal fold and corner punch sequence."
+      ]
+    },
+    {
+      "id": "nvr-combining-shapes",
+      "domain": "11+ NVR",
+      "family": "moving shapes 2D",
+      "visualType": "combining shapes",
+      "requiredCapabilities": [
+        "shape",
+        "connector"
+      ],
+      "currentCapabilities": [
+        "shape",
+        "connector"
+      ],
+      "status": "composable",
+      "routeHint": "generative",
+      "template": null,
+      "fixtureId": "fixture-nvr-combining-shapes",
+      "missingCapabilities": [],
+      "evalIntents": [
+        "Join two right triangles to make a square.",
+        "Show which two pieces combine into the target polygon."
+      ]
+    },
+    {
+      "id": "nvr-nets-and-cubes",
+      "domain": "11+ NVR",
+      "family": "moving shapes 3D",
+      "visualType": "nets and cubes",
+      "requiredCapabilities": [
+        "cubeNet",
+        "transform"
+      ],
+      "currentCapabilities": [
+        "cubeNet",
+        "transform"
+      ],
+      "status": "supported",
+      "routeHint": "generative",
+      "template": null,
+      "fixtureId": "fixture-nvr-nets-and-cubes",
+      "missingCapabilities": [],
+      "evalIntents": [
+        "Fold this six-square net into a labelled cube.",
+        "Decide which cube matches a marked net."
+      ]
+    },
+    {
+      "id": "nvr-rotating-solids",
+      "domain": "11+ NVR",
+      "family": "moving shapes 3D",
+      "visualType": "rotating solids",
+      "requiredCapabilities": [
+        "isometricSolid",
+        "transform"
+      ],
+      "currentCapabilities": [
+        "isometricSolid",
+        "transform"
+      ],
+      "status": "supported",
+      "routeHint": "generative",
+      "template": null,
+      "fixtureId": "fixture-nvr-rotating-solids",
+      "missingCapabilities": [],
+      "evalIntents": [
+        "Rotate a marked cube around a vertical axis.",
+        "Show the same stepped solid from another angle."
+      ]
+    },
+    {
+      "id": "nvr-block-building",
+      "domain": "11+ NVR",
+      "family": "moving shapes 3D",
+      "visualType": "block building",
+      "requiredCapabilities": [
+        "isometricSolid"
+      ],
+      "currentCapabilities": [
+        "isometricSolid"
+      ],
+      "status": "supported",
+      "routeHint": "generative",
+      "template": null,
+      "fixtureId": "fixture-nvr-block-building",
+      "missingCapabilities": [],
+      "evalIntents": [
+        "Build a three-level arrangement of unit cubes.",
+        "Count hidden cubes in an isometric block tower."
+      ]
+    },
+    {
+      "id": "nvr-plan-views",
+      "domain": "11+ NVR",
+      "family": "moving shapes 3D",
+      "visualType": "plan and elevation views",
+      "requiredCapabilities": [
+        "planView",
+        "isometricSolid"
+      ],
+      "currentCapabilities": [
+        "planView",
+        "isometricSolid"
+      ],
+      "status": "supported",
+      "routeHint": "generative",
+      "template": null,
+      "fixtureId": "fixture-nvr-plan-views",
+      "missingCapabilities": [],
+      "evalIntents": [
+        "Draw the top view of a block arrangement.",
+        "Match front elevation to an isometric solid."
+      ]
+    },
+    {
+      "id": "sat-transform-points-and-shapes",
+      "domain": "SAT mathematics",
+      "family": "transformations",
+      "visualType": "point and shape transformations",
+      "requiredCapabilities": [
+        "axes",
+        "shape",
+        "transform"
+      ],
+      "currentCapabilities": [
+        "axes",
+        "shape",
+        "transform"
+      ],
+      "status": "supported",
+      "routeHint": "generative",
+      "template": null,
+      "fixtureId": "fixture-sat-transform-points-and-shapes",
+      "missingCapabilities": [],
+      "evalIntents": [
+        "Translate triangle ABC by vector two comma minus three.",
+        "Dilate a polygon about the origin by scale factor two."
+      ]
+    },
+    {
+      "id": "sat-transform-function-graphs",
+      "domain": "SAT mathematics",
+      "family": "transformations",
+      "visualType": "function graph transformations",
+      "requiredCapabilities": [
+        "axes",
+        "plot",
+        "transform"
+      ],
+      "currentCapabilities": [
+        "axes",
+        "plot",
+        "transform"
+      ],
+      "status": "composable",
+      "routeHint": "generative",
+      "template": null,
+      "fixtureId": "fixture-sat-transform-function-graphs",
+      "missingCapabilities": [],
+      "evalIntents": [
+        "Compare y equals x squared with y equals x squared plus three.",
+        "Reflect an exponential graph across the x-axis."
+      ]
+    },
+    {
+      "id": "sat-coordinate-geometry",
+      "domain": "SAT mathematics",
+      "family": "coordinate geometry",
+      "visualType": "points lines and shapes on axes",
+      "requiredCapabilities": [
+        "axes",
+        "point",
+        "line",
+        "plot"
+      ],
+      "currentCapabilities": [
+        "axes",
+        "point",
+        "line",
+        "plot"
+      ],
+      "status": "supported",
+      "routeHint": "generative",
+      "template": "coordinate_graph",
+      "fixtureId": "fixture-sat-coordinate-geometry",
+      "missingCapabilities": [],
+      "evalIntents": [
+        "Plot two points and find the midpoint.",
+        "Draw the line through negative two one and four five."
+      ]
+    },
+    {
+      "id": "sat-systems-graphs",
+      "domain": "SAT mathematics",
+      "family": "systems",
+      "visualType": "systems of equations on axes",
+      "requiredCapabilities": [
+        "axes",
+        "plot",
+        "point",
+        "text"
+      ],
+      "currentCapabilities": [
+        "axes",
+        "plot",
+        "point",
+        "text"
+      ],
+      "status": "supported",
+      "routeHint": "generative",
+      "template": "coordinate_graph",
+      "fixtureId": "fixture-sat-systems-graphs",
+      "missingCapabilities": [],
+      "evalIntents": [
+        "Graph two linear equations and mark their intersection.",
+        "Compare a line and parabola solution set."
+      ]
+    },
+    {
+      "id": "sat-inequalities",
+      "domain": "SAT mathematics",
+      "family": "systems",
+      "visualType": "inequalities and feasible regions",
+      "requiredCapabilities": [
+        "axes",
+        "plot",
+        "regionFill"
+      ],
+      "currentCapabilities": [
+        "axes",
+        "plot",
+        "regionFill"
+      ],
+      "status": "supported",
+      "routeHint": "generative",
+      "template": null,
+      "fixtureId": "fixture-sat-inequalities",
+      "missingCapabilities": [],
+      "evalIntents": [
+        "Shade the half-plane y greater than two x minus one.",
+        "Show the feasible region for two linear inequalities."
+      ]
+    },
+    {
+      "id": "sat-scatterplots",
+      "domain": "SAT mathematics",
+      "family": "data analysis",
+      "visualType": "scatterplots and trend lines",
+      "requiredCapabilities": [
+        "scatter"
+      ],
+      "currentCapabilities": [
+        "scatter"
+      ],
+      "status": "supported",
+      "routeHint": "generative",
+      "template": null,
+      "fixtureId": "fixture-sat-scatterplots",
+      "missingCapabilities": [],
+      "evalIntents": [
+        "Plot paired data and add a line of best fit.",
+        "Compare positive and negative correlation scatterplots."
+      ]
+    },
+    {
+      "id": "sat-histograms",
+      "domain": "SAT mathematics",
+      "family": "data analysis",
+      "visualType": "histograms",
+      "requiredCapabilities": [
+        "histogram"
+      ],
+      "currentCapabilities": [
+        "histogram"
+      ],
+      "status": "supported",
+      "routeHint": "generative",
+      "template": null,
+      "fixtureId": "fixture-sat-histograms",
+      "missingCapabilities": [],
+      "evalIntents": [
+        "Draw a histogram with unequal class intervals.",
+        "Compare two frequency distributions by bin."
+      ]
+    },
+    {
+      "id": "sat-boxplots",
+      "domain": "SAT mathematics",
+      "family": "data analysis",
+      "visualType": "boxplots",
+      "requiredCapabilities": [
+        "boxplot"
+      ],
+      "currentCapabilities": [
+        "boxplot"
+      ],
+      "status": "supported",
+      "routeHint": "generative",
+      "template": null,
+      "fixtureId": "fixture-sat-boxplots",
+      "missingCapabilities": [],
+      "evalIntents": [
+        "Draw a boxplot from a five-number summary.",
+        "Compare the spread of two box-and-whisker plots."
+      ]
+    },
+    {
+      "id": "sat-two-way-tables",
+      "domain": "SAT mathematics",
+      "family": "data analysis",
+      "visualType": "two-way tables",
+      "requiredCapabilities": [
+        "table",
+        "text"
+      ],
+      "currentCapabilities": [
+        "table",
+        "text"
+      ],
+      "status": "supported",
+      "routeHint": "template_then_generative",
+      "template": "table",
+      "fixtureId": "fixture-sat-two-way-tables",
+      "missingCapabilities": [],
+      "evalIntents": [
+        "Show a two-way table of transport by year group.",
+        "Complete a frequency table and calculate a conditional proportion."
+      ]
+    },
+    {
+      "id": "arithmetic-bar-models",
+      "domain": "11+ and KS2 arithmetic",
+      "family": "proportional reasoning",
+      "visualType": "bar models",
+      "requiredCapabilities": [
+        "box",
+        "equation",
+        "connector"
+      ],
+      "currentCapabilities": [
+        "box",
+        "equation",
+        "connector"
+      ],
+      "status": "composable",
+      "routeHint": "template_then_generative",
+      "template": "part_whole",
+      "fixtureId": "fixture-arithmetic-bar-models",
+      "missingCapabilities": [],
+      "evalIntents": [
+        "Draw a bar model for three parts totalling sixty.",
+        "Compare two quantities with a difference bar."
+      ]
+    },
+    {
+      "id": "arithmetic-fraction-strips",
+      "domain": "11+ and KS2 arithmetic",
+      "family": "fractions",
+      "visualType": "fraction strips",
+      "requiredCapabilities": [
+        "box",
+        "line",
+        "text"
+      ],
+      "currentCapabilities": [
+        "box",
+        "line",
+        "text"
+      ],
+      "status": "composable",
+      "routeHint": "template_then_generative",
+      "template": "part_whole",
+      "fixtureId": "fixture-arithmetic-fraction-strips",
+      "missingCapabilities": [],
+      "evalIntents": [
+        "Compare three quarters and five eighths using fraction strips.",
+        "Show why two sixths equals one third with aligned strips."
+      ]
+    },
+    {
+      "id": "arithmetic-fraction-areas",
+      "domain": "11+ and KS2 arithmetic",
+      "family": "fractions",
+      "visualType": "fraction area models",
+      "requiredCapabilities": [
+        "shape",
+        "line",
+        "text"
+      ],
+      "currentCapabilities": [
+        "shape",
+        "line",
+        "text"
+      ],
+      "status": "composable",
+      "routeHint": "template_then_generative",
+      "template": "part_whole",
+      "fixtureId": "fixture-arithmetic-fraction-areas",
+      "missingCapabilities": [],
+      "evalIntents": [
+        "Shade three fifths of a rectangle.",
+        "Compare one half and four eighths with area models."
+      ]
+    },
+    {
+      "id": "arithmetic-fraction-sets",
+      "domain": "11+ and KS2 arithmetic",
+      "family": "fractions",
+      "visualType": "fraction set models",
+      "requiredCapabilities": [
+        "shape",
+        "text"
+      ],
+      "currentCapabilities": [
+        "shape",
+        "text"
+      ],
+      "status": "composable",
+      "routeHint": "generative",
+      "template": null,
+      "fixtureId": "fixture-arithmetic-fraction-sets",
+      "missingCapabilities": [],
+      "evalIntents": [
+        "Highlight three eighths of a set of counters.",
+        "Show two thirds of twelve objects."
+      ]
+    },
+    {
+      "id": "arithmetic-ratio-tables",
+      "domain": "11+ and KS2 arithmetic",
+      "family": "ratio and proportion",
+      "visualType": "ratio tables",
+      "requiredCapabilities": [
+        "table",
+        "equation"
+      ],
+      "currentCapabilities": [
+        "table",
+        "equation"
+      ],
+      "status": "supported",
+      "routeHint": "template_then_generative",
+      "template": "table",
+      "fixtureId": "fixture-arithmetic-ratio-tables",
+      "missingCapabilities": [],
+      "evalIntents": [
+        "Build a ratio table for flour and water.",
+        "Scale a three-to-five ratio to four equivalent rows."
+      ]
+    },
+    {
+      "id": "arithmetic-number-lines",
+      "domain": "11+ and KS2 arithmetic",
+      "family": "number and magnitude",
+      "visualType": "number lines",
+      "requiredCapabilities": [
+        "numberline"
+      ],
+      "currentCapabilities": [
+        "numberline"
+      ],
+      "status": "supported",
+      "routeHint": "template_then_generative",
+      "template": "number_line",
+      "fixtureId": "fixture-arithmetic-number-lines",
+      "missingCapabilities": [],
+      "evalIntents": [
+        "Draw a number line from zero to ten and mark five.",
+        "Place negative two and three quarters on a number line."
+      ]
+    },
+    {
+      "id": "science-labelled-processes",
+      "domain": "11+ science",
+      "family": "processes",
+      "visualType": "labelled process diagrams",
+      "requiredCapabilities": [
+        "shape",
+        "connector",
+        "text"
+      ],
+      "currentCapabilities": [
+        "shape",
+        "connector",
+        "text"
+      ],
+      "status": "composable",
+      "routeHint": "template_then_generative",
+      "template": "relationship_map",
+      "fixtureId": "fixture-science-labelled-processes",
+      "missingCapabilities": [],
+      "evalIntents": [
+        "Label the stages of the water cycle.",
+        "Draw a simple food chain with directional arrows."
+      ]
+    },
+    {
+      "id": "english-grammar-trees",
+      "domain": "11+ English",
+      "family": "language structure",
+      "visualType": "grammar trees",
+      "requiredCapabilities": [
+        "shape",
+        "connector",
+        "text"
+      ],
+      "currentCapabilities": [
+        "shape",
+        "connector",
+        "text"
+      ],
+      "status": "composable",
+      "routeHint": "template_then_generative",
+      "template": "relationship_map",
+      "fixtureId": "fixture-english-grammar-trees",
+      "missingCapabilities": [],
+      "evalIntents": [
+        "Break a sentence into subject and predicate branches.",
+        "Show clauses and phrases in a grammar tree."
+      ]
+    },
+    {
+      "id": "humanities-timelines",
+      "domain": "11+ humanities",
+      "family": "chronology",
+      "visualType": "timelines",
+      "requiredCapabilities": [
+        "line",
+        "point",
+        "connector",
+        "text"
+      ],
+      "currentCapabilities": [
+        "line",
+        "point",
+        "connector",
+        "text"
+      ],
+      "status": "composable",
+      "routeHint": "template_then_generative",
+      "template": "timeline",
+      "fixtureId": "fixture-humanities-timelines",
+      "missingCapabilities": [],
+      "evalIntents": [
+        "Build a timeline of four Roman Britain events.",
+        "Compare two overlapping historical periods on one timeline."
+      ]
+    },
+    {
+      "id": "annotation-tutor-objects",
+      "domain": "cross-curriculum",
+      "family": "annotation",
+      "visualType": "annotate tutor objects",
+      "requiredCapabilities": [
+        "anchorRef",
+        "annotate"
+      ],
+      "currentCapabilities": [
+        "anchorRef",
+        "annotate"
+      ],
+      "status": "supported",
+      "routeHint": "generative",
+      "template": null,
+      "fixtureId": "fixture-annotation-tutor-objects",
+      "missingCapabilities": [],
+      "evalIntents": [
+        "Add a callout to the existing triangle.",
+        "Label the denominator on the visible fraction strip."
+      ]
+    },
+    {
+      "id": "annotation-subparts",
+      "domain": "cross-curriculum",
+      "family": "annotation",
+      "visualType": "annotate object subparts",
+      "requiredCapabilities": [
+        "anchorRef",
+        "annotate"
+      ],
+      "currentCapabilities": [
+        "anchorRef",
+        "annotate"
+      ],
+      "status": "supported",
+      "routeHint": "generative",
+      "template": null,
+      "fixtureId": "fixture-annotation-subparts",
+      "missingCapabilities": [],
+      "evalIntents": [
+        "Point to one angle inside the existing polygon.",
+        "Annotate a single face of the visible cube."
+      ]
+    },
+    {
+      "id": "annotation-learner-strokes",
+      "domain": "cross-curriculum",
+      "family": "annotation",
+      "visualType": "annotate learner strokes",
+      "requiredCapabilities": [
+        "anchorRef",
+        "annotate"
+      ],
+      "currentCapabilities": [
+        "anchorRef",
+        "annotate"
+      ],
+      "status": "supported",
+      "routeHint": "generative",
+      "template": null,
+      "fixtureId": "fixture-annotation-learner-strokes",
+      "missingCapabilities": [],
+      "evalIntents": [
+        "Circle the learner's incorrect segment.",
+        "Attach feedback to the learner's drawn point."
+      ]
+    },
+    {
+      "id": "annotation-image-regions",
+      "domain": "cross-curriculum",
+      "family": "annotation",
+      "visualType": "annotate image regions",
+      "requiredCapabilities": [
+        "imageRegionGrounding",
+        "anchorRef",
+        "annotate"
+      ],
+      "currentCapabilities": [
+        "imageRegionGrounding",
+        "anchorRef",
+        "annotate"
+      ],
+      "status": "supported",
+      "routeHint": "generative",
+      "template": null,
+      "fixtureId": "fixture-annotation-image-regions",
+      "missingCapabilities": [],
+      "evalIntents": [
+        "Point to the axle in the existing machine image.",
+        "Label one organ in the visible illustration."
+      ]
+    },
+    {
+      "id": "instruments-grid-paper",
+      "domain": "cross-curriculum",
+      "family": "parametric instruments",
+      "visualType": "grid paper",
+      "requiredCapabilities": [
+        "gridPaper"
+      ],
+      "currentCapabilities": [
+        "gridPaper"
+      ],
+      "status": "supported",
+      "routeHint": "generative",
+      "template": null,
+      "fixtureId": "fixture-instruments-grid-paper",
+      "missingCapabilities": [],
+      "evalIntents": [
+        "Draw a centimetre grid for a translation task.",
+        "Show dot grid paper for an area puzzle."
+      ]
+    },
+    {
+      "id": "instruments-clock",
+      "domain": "cross-curriculum",
+      "family": "parametric instruments",
+      "visualType": "analogue clocks",
+      "requiredCapabilities": [
+        "clock"
+      ],
+      "currentCapabilities": [
+        "clock"
+      ],
+      "status": "supported",
+      "routeHint": "generative",
+      "template": null,
+      "fixtureId": "fixture-instruments-clock",
+      "missingCapabilities": [],
+      "evalIntents": [
+        "Show twenty-five minutes past four on an analogue clock.",
+        "Compare elapsed time between two clock faces."
+      ]
+    },
+    {
+      "id": "instruments-protractor",
+      "domain": "cross-curriculum",
+      "family": "parametric instruments",
+      "visualType": "protractors",
+      "requiredCapabilities": [
+        "protractor"
+      ],
+      "currentCapabilities": [
+        "protractor"
+      ],
+      "status": "supported",
+      "routeHint": "generative",
+      "template": null,
+      "fixtureId": "fixture-instruments-protractor",
+      "missingCapabilities": [],
+      "evalIntents": [
+        "Measure a sixty-five degree angle with a protractor.",
+        "Draw a one-hundred-and-twenty degree angle using a protractor."
+      ]
+    }
+  ]
+}

@@ -1,0 +1,188 @@
+{
+  "schemaVersion": "1.0.0",
+  "evidenceMode": "offline_loopback_browser_fixture_validation",
+  "generatedAt": "2026-09-02T03:52:50.746Z",
+  "accepted": true,
+  "providerCalls": 0,
+  "externalRequestCount": 0,
+  "matrixSha256": "bad84b66a673df27841c19fd6c20d921c9c084c190618b3492adea941d13664a",
+  "fixturesSha256": "ba30677f41c7f0532be09c4782c0a2724a4b7db4551f9400001ef454469c87f6",
+  "summary": {
+    "totalRows": 39,
+    "supportedRows": 5,
+    "composableRows": 10,
+    "missingRows": 24,
+    "fixtureRows": 15,
+    "fixturesAccepted": 15
+  },
+  "m7MissingCapabilities": [
+    "anchorRef",
+    "annotate",
+    "boxplot",
+    "clock",
+    "cubeNet",
+    "gridPaper",
+    "histogram",
+    "imageRegionGrounding",
+    "isometricSolid",
+    "panelGrid",
+    "paperFoldHolePunch",
+    "planView",
+    "protractor",
+    "regionFill",
+    "scatter",
+    "transform"
+  ],
+  "rows": [
+    {
+      "rowId": "nvr-shape-codes",
+      "fixtureId": "fixture-nvr-shape-codes",
+      "policyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "rasterSha256": "eacf607ba1ebd5a4afc252b8edd446e1541c0d3c4dc135616dc254d950327dd6",
+      "screenshotPath": "artifacts/evaluation/curriculum-matrix/fixture-nvr-shape-codes.jpg"
+    },
+    {
+      "rowId": "nvr-hidden-shapes",
+      "fixtureId": "fixture-nvr-hidden-shapes",
+      "policyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "rasterSha256": "7a7aa683fdb9b1d46488ebe306e4cca6d11406ea79ba2e6bc96cbddefc06c612",
+      "screenshotPath": "artifacts/evaluation/curriculum-matrix/fixture-nvr-hidden-shapes.jpg"
+    },
+    {
+      "rowId": "nvr-combining-shapes",
+      "fixtureId": "fixture-nvr-combining-shapes",
+      "policyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "rasterSha256": "5f2259c30998919969f914c897063bef96f753b9797172b4711d476f5e8bce2b",
+      "screenshotPath": "artifacts/evaluation/curriculum-matrix/fixture-nvr-combining-shapes.jpg"
+    },
+    {
+      "rowId": "sat-coordinate-geometry",
+      "fixtureId": "fixture-sat-coordinate-geometry",
+      "policyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "rasterSha256": "7874589011dda4688c2ebf19e57872a73003688a1a3c88c064c9cdfab55f2e7a",
+      "screenshotPath": "artifacts/evaluation/curriculum-matrix/fixture-sat-coordinate-geometry.jpg"
+    },
+    {
+      "rowId": "sat-systems-graphs",
+      "fixtureId": "fixture-sat-systems-graphs",
+      "policyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "rasterSha256": "ce70c8cf8b0aa26c083d733cbc34dc5a79a6feb08f569f9bc1424da9fad771c7",
+      "screenshotPath": "artifacts/evaluation/curriculum-matrix/fixture-sat-systems-graphs.jpg"
+    },
+    {
+      "rowId": "sat-two-way-tables",
+      "fixtureId": "fixture-sat-two-way-tables",
+      "policyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "rasterSha256": "3cd34e0438784e705739bf8cd71bbdac0be4a645945f97f8e662b0b6c21891ca",
+      "screenshotPath": "artifacts/evaluation/curriculum-matrix/fixture-sat-two-way-tables.jpg"
+    },
+    {
+      "rowId": "arithmetic-bar-models",
+      "fixtureId": "fixture-arithmetic-bar-models",
+      "policyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "rasterSha256": "0a5de46601453d07d63d6a57227d78a650202bdba54ed6029d212a5cd018a354",
+      "screenshotPath": "artifacts/evaluation/curriculum-matrix/fixture-arithmetic-bar-models.jpg"
+    },
+    {
+      "rowId": "arithmetic-fraction-strips",
+      "fixtureId": "fixture-arithmetic-fraction-strips",
+      "policyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "rasterSha256": "68a91ca324e327d52a5ae880db44d336c70aa9686549a4a641260834fcbd021c",
+      "screenshotPath": "artifacts/evaluation/curriculum-matrix/fixture-arithmetic-fraction-strips.jpg"
+    },
+    {
+      "rowId": "arithmetic-fraction-areas",
+      "fixtureId": "fixture-arithmetic-fraction-areas",
+      "policyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "rasterSha256": "af6184d6c19140239454f0245fe5463777139e6727451af519b7f9db9778baa2",
+      "screenshotPath": "artifacts/evaluation/curriculum-matrix/fixture-arithmetic-fraction-areas.jpg"
+    },
+    {
+      "rowId": "arithmetic-fraction-sets",
+      "fixtureId": "fixture-arithmetic-fraction-sets",
+      "policyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "rasterSha256": "e578860680136c4a45cfc6d7120eaf2acac836e7d77f690e43955fdb967db61e",
+      "screenshotPath": "artifacts/evaluation/curriculum-matrix/fixture-arithmetic-fraction-sets.jpg"
+    },
+    {
+      "rowId": "arithmetic-ratio-tables",
+      "fixtureId": "fixture-arithmetic-ratio-tables",
+      "policyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "rasterSha256": "5a849930d2d8996572b37462d7f9e592b71f9d1328026c15b57550e4e864e50e",
+      "screenshotPath": "artifacts/evaluation/curriculum-matrix/fixture-arithmetic-ratio-tables.jpg"
+    },
+    {
+      "rowId": "arithmetic-number-lines",
+      "fixtureId": "fixture-arithmetic-number-lines",
+      "policyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "rasterSha256": "2543478089cc8028efdf63007f04306db7a9ca774c40b0b5efc9fb40837f1fc4",
+      "screenshotPath": "artifacts/evaluation/curriculum-matrix/fixture-arithmetic-number-lines.jpg"
+    },
+    {
+      "rowId": "science-labelled-processes",
+      "fixtureId": "fixture-science-labelled-processes",
+      "policyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "rasterSha256": "53c677bfb620031ccadf9e3ba3658c16afcd8a68e7eca1d29b19b75c640f29bf",
+      "screenshotPath": "artifacts/evaluation/curriculum-matrix/fixture-science-labelled-processes.jpg"
+    },
+    {
+      "rowId": "english-grammar-trees",
+      "fixtureId": "fixture-english-grammar-trees",
+      "policyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "rasterSha256": "67e05b95158cf7db79024a6366be00ce885d9395b58dc319ab11607d47e1f0dc",
+      "screenshotPath": "artifacts/evaluation/curriculum-matrix/fixture-english-grammar-trees.jpg"
+    },
+    {
+      "rowId": "humanities-timelines",
+      "fixtureId": "fixture-humanities-timelines",
+      "policyAccepted": true,
+      "browserAccepted": true,
+      "reasons": [],
+      "layoutIssues": [],
+      "rasterSha256": "6c6522ff98a6b1d981342ca971aaa1653097d5ab57d5bc9e9486a6f9285c4e4c",
+      "screenshotPath": "artifacts/evaluation/curriculum-matrix/fixture-humanities-timelines.jpg"
+    }
+  ]
+}

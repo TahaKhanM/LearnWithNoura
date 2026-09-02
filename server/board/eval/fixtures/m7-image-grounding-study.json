@@ -1,0 +1,52 @@
+{
+  "schemaVersion": "1.0.0",
+  "syntheticOnly": true,
+  "confidenceThreshold": 0.72,
+  "pointingThreshold": 0.3,
+  "canaryItemIds": ["axle", "fraction-denominator"],
+  "defectItemIds": ["axle", "fraction-denominator", "cell-organelle", "angle-arc", "timeline-event"],
+  "items": [
+    {
+      "id": "axle",
+      "hint": "the black axle through the orange wheel",
+      "svg": "<svg xmlns='http://www.w3.org/2000/svg' width='1000' height='600'><rect width='1000' height='600' fill='#eef4ff'/><rect x='120' y='100' width='760' height='400' rx='30' fill='white' stroke='#2c5be0' stroke-width='8'/><circle cx='500' cy='290' r='90' fill='#f0a227'/><rect x='390' y='275' width='220' height='30' fill='#26231f'/><text x='500' y='440' text-anchor='middle' font-size='42'>Wheel and axle</text></svg>",
+      "expected": { "type": "FragmentSelector", "unit": "percent", "x": 0.39, "y": 0.445, "w": 0.22, "h": 0.085 },
+      "defect": { "type": "FragmentSelector", "unit": "percent", "x": 0.12, "y": 0.16, "w": 0.18, "h": 0.14 }
+    },
+    {
+      "id": "fraction-denominator",
+      "hint": "the denominator 8 in the fraction on the right",
+      "svg": "<svg xmlns='http://www.w3.org/2000/svg' width='1000' height='600'><rect width='1000' height='600' fill='white'/><text x='260' y='180' text-anchor='middle' font-size='48'>3</text><line x1='220' y1='205' x2='300' y2='205' stroke='#26231f' stroke-width='5'/><text x='260' y='270' text-anchor='middle' font-size='48'>4</text><text x='500' y='225' text-anchor='middle' font-size='48'>vs</text><text x='740' y='180' text-anchor='middle' font-size='48'>5</text><line x1='700' y1='205' x2='780' y2='205' stroke='#26231f' stroke-width='5'/><text x='740' y='270' text-anchor='middle' font-size='48' fill='#e14b3c'>8</text><text x='500' y='420' text-anchor='middle' font-size='38'>Which fraction is larger?</text></svg>",
+      "expected": { "type": "FragmentSelector", "unit": "percent", "x": 0.69, "y": 0.37, "w": 0.1, "h": 0.11 },
+      "defect": { "type": "FragmentSelector", "unit": "percent", "x": 0.21, "y": 0.22, "w": 0.1, "h": 0.11 }
+    },
+    {
+      "id": "cell-organelle",
+      "hint": "the bean-shaped mitochondrion inside the cell",
+      "svg": "<svg xmlns='http://www.w3.org/2000/svg' width='1000' height='600'><rect width='1000' height='600' fill='#fff'/><ellipse cx='500' cy='300' rx='340' ry='220' fill='#dff7ef' stroke='#14a07a' stroke-width='8'/><circle cx='390' cy='280' r='95' fill='#d9e2ff' stroke='#2c5be0' stroke-width='6'/><ellipse cx='650' cy='330' rx='105' ry='55' fill='#ffd9d5' stroke='#e14b3c' stroke-width='7'/><path d='M570 330q40-50 80 0t80 0' fill='none' stroke='#e14b3c' stroke-width='5'/><text x='500' y='560' text-anchor='middle' font-size='34'>Animal cell</text></svg>",
+      "expected": { "type": "FragmentSelector", "unit": "percent", "x": 0.54, "y": 0.44, "w": 0.22, "h": 0.2 },
+      "defect": { "type": "FragmentSelector", "unit": "percent", "x": 0.29, "y": 0.3, "w": 0.2, "h": 0.3 }
+    },
+    {
+      "id": "angle-arc",
+      "hint": "the small red angle arc at vertex B",
+      "svg": "<svg xmlns='http://www.w3.org/2000/svg' width='1000' height='600'><rect width='1000' height='600' fill='white'/><path d='M180 470 L500 100 L820 470 Z' fill='none' stroke='#26231f' stroke-width='7'/><path d='M455 152 A65 65 0 0 1 545 152' fill='none' stroke='#e14b3c' stroke-width='10'/><text x='500' y='80' text-anchor='middle' font-size='36'>B</text><text x='170' y='520' font-size='36'>A</text><text x='820' y='520' font-size='36'>C</text></svg>",
+      "expected": { "type": "FragmentSelector", "unit": "percent", "x": 0.44, "y": 0.17, "w": 0.12, "h": 0.13 },
+      "defect": { "type": "FragmentSelector", "unit": "percent", "x": 0.15, "y": 0.72, "w": 0.12, "h": 0.14 }
+    },
+    {
+      "id": "timeline-event",
+      "hint": "the green 1969 Moon landing event",
+      "svg": "<svg xmlns='http://www.w3.org/2000/svg' width='1000' height='600'><rect width='1000' height='600' fill='white'/><line x1='100' y1='300' x2='900' y2='300' stroke='#26231f' stroke-width='7'/><circle cx='220' cy='300' r='14' fill='#2c5be0'/><text x='220' y='260' text-anchor='middle' font-size='32'>1957 Sputnik</text><circle cx='500' cy='300' r='18' fill='#14a07a'/><text x='500' y='250' text-anchor='middle' font-size='34' fill='#14a07a'>1969 Moon landing</text><circle cx='790' cy='300' r='14' fill='#2c5be0'/><text x='790' y='260' text-anchor='middle' font-size='32'>1998 ISS</text></svg>",
+      "expected": { "type": "FragmentSelector", "unit": "percent", "x": 0.4, "y": 0.36, "w": 0.2, "h": 0.18 },
+      "defect": { "type": "FragmentSelector", "unit": "percent", "x": 0.7, "y": 0.36, "w": 0.18, "h": 0.18 }
+    },
+    {
+      "id": "graph-intersection",
+      "hint": "the intersection of the blue and red lines",
+      "svg": "<svg xmlns='http://www.w3.org/2000/svg' width='1000' height='600'><rect width='1000' height='600' fill='white'/><line x1='120' y1='500' x2='900' y2='500' stroke='#26231f' stroke-width='5'/><line x1='200' y1='550' x2='200' y2='60' stroke='#26231f' stroke-width='5'/><line x1='200' y1='450' x2='800' y2='100' stroke='#2c5be0' stroke-width='8'/><line x1='240' y1='100' x2='820' y2='460' stroke='#e14b3c' stroke-width='8'/><circle cx='510' cy='270' r='16' fill='#14a07a'/></svg>",
+      "expected": { "type": "FragmentSelector", "unit": "percent", "x": 0.47, "y": 0.4, "w": 0.08, "h": 0.1 },
+      "defect": { "type": "FragmentSelector", "unit": "percent", "x": 0.72, "y": 0.14, "w": 0.1, "h": 0.12 }
+    }
+  ]
+}

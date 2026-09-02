@@ -1,0 +1,13 @@
+{
+  "schemaVersion": "1.0.0",
+  "sourceSha256": "e02ccc9f240f72a7937fe192f30867434eb7f857fb6c45a5f8b52fa06507ae79",
+  "resultSha256": "2c34608233398ffaad81b81e964b91df88b74a25c1099d896e12908ee8044466",
+  "sourceRows": 36,
+  "eligibleRelationalRows": 34,
+  "originalValidatorAcceptedRows": 32,
+  "relationalRecoveredRows": 2,
+  "acceptedRows": 34,
+  "singleShotConjunctiveValidity": 1,
+  "threshold": 0.95,
+  "providerCalls": 0
+}

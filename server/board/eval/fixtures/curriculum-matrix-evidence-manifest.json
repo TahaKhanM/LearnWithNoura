@@ -1,0 +1,12 @@
+{
+  "schemaVersion": "1.0.0",
+  "matrixPath": "server/board/eval/curriculum-matrix.json",
+  "matrixSha256": "bad84b66a673df27841c19fd6c20d921c9c084c190618b3492adea941d13664a",
+  "fixturesPath": "server/board/eval/fixtures/curriculum-matrix-scenes.json",
+  "fixturesSha256": "ba30677f41c7f0532be09c4782c0a2724a4b7db4551f9400001ef454469c87f6",
+  "resultPath": "server/board/eval/results/2026-09-02-curriculum-matrix-validation.json",
+  "resultSha256": "62d6654d5ea16ae154ba1cfd54d9fc1a41e9fa133b16a2b5e218ffb29553c583",
+  "acceptedFixtureRows": 15,
+  "totalRows": 39,
+  "missingRows": 24
+}
