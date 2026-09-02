@@ -10,6 +10,7 @@
     "build": "tsc -b && vite build",
     "typecheck:server": "tsc -p tsconfig.server.json",
     "lint": "oxlint",
+    "gate:quick": "npm run typecheck:server && npm run lint && vitest run --reporter=dot",
     "preview": "vite preview",
     "test": "vitest run",
     "test:brand": "node scripts/brand-scan.mjs",
