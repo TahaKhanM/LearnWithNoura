@@ -61,11 +61,20 @@ function nodeMarkup(node: RenderNode): string {
     return `<image href="${href}" x="${node.x}" y="${node.y}" width="${node.w}" height="${node.h}"` +
       ` preserveAspectRatio="xMidYMid meet" aria-label="${alt}"${crop}/>`;
   }
-  // Equations render as deterministic plain math text. KaTeX HTML needs its
-  // external stylesheet, which a serialized snapshot cannot rely on; readable
-  // math text keeps the equation legible for vision instead of dropping it.
-  return `<text x="${node.x}" y="${node.y + node.h}" font-size="${node.fontSize}" fill="${escapeXml(node.color)}"` +
-    ` font-family="${escapeXml(FONT_HAND)}" font-weight="600">${escapeXml(latexToPlainText(node.latex))}</text>`;
+  // SVG-as-image cannot paint KaTeX HTML. A measured outline plus readable
+  // math text keeps the equation's occupancy and content in the raster.
+  const fontSize = Math.max(10, Math.min(node.fontSize, node.h * 0.7));
+  return `<g data-katex="true" data-latex="${escapeXml(node.latex)}">` +
+    `<rect x="${fmt(node.x)}" y="${fmt(node.y)}" width="${fmt(node.w)}" height="${fmt(node.h)}"` +
+    ` fill="none" stroke="${escapeXml(node.color)}" stroke-width="1.5" rx="4"/>` +
+    `<text x="${fmt(node.x + node.w / 2)}" y="${fmt(node.y + node.h * 0.72)}" font-size="${fmt(fontSize)}"` +
+    ` fill="${escapeXml(node.color)}" text-anchor="middle" font-family="${escapeXml(FONT_HAND)}"` +
+    ` font-weight="600">${escapeXml(latexToPlainText(node.latex))}</text>` +
+    `</g>`;
+}
+
+function fmt(value: number): string {
+  return Number.isInteger(value) ? String(value) : value.toFixed(1);
 }
 
 /** Best-effort readable text for LaTeX in snapshots. Deterministic. */

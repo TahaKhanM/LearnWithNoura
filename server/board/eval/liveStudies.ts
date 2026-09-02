@@ -3,7 +3,8 @@ import { validateOps, type BoardOp } from '../../../shared/boardOps.js';
 import { applyDirectorBoardPolicy } from '../directorSchema.js';
 import type { HeadlessSceneValidatorHandle } from '../../lesson/headlessSceneValidator.js';
 import { loadSeededDefects, materializeSketchCorpus, type SyntheticSketch } from './corpus.js';
-import type { SeededDefect } from './types.js';
+import { SKETCH_INTERPRETATIONS, type SeededDefect } from './types.js';
+import { SKETCH_REPLY_JSON_SCHEMA, parseSketchReply, syntheticSketchOps } from './sketchCorpus.js';
 import { estimateTextCost } from './streamingProbe.js';
 import { sketchCallReserveUsd, visionCallReserveUsd } from './budget.js';
 import type {
@@ -103,15 +104,7 @@ interface SketchStudyRow {
   costUsd: number;
 }
 
-const SKETCH_SCHEMA = {
-  type: 'object',
-  additionalProperties: false,
-  properties: {
-    interpretation: { type: 'string' },
-    confidence: { type: 'number', minimum: 0, maximum: 1 },
-  },
-  required: ['interpretation', 'confidence'],
-} as const;
+export { syntheticSketchOps } from './sketchCorpus.js';
 
 export interface VisionAuditCandidateSummary {
   conditionId: string;
@@ -284,7 +277,7 @@ export async function runLiveSketchStudy(input: {
     { id: 'terra-low', model: 'gpt-5.6-terra' as const },
     { id: 'luna-low', model: 'gpt-5.6-luna' as const },
   ];
-  const allowed = [...new Set(sketches.map((entry) => entry.expectedInterpretation))];
+  const allowed = [...SKETCH_INTERPRETATIONS];
   const rows: SketchStudyRow[] = [];
   for (const sketch of sketches) {
     const raster = await renderSyntheticSketchRaster(input.harness, sketch);
@@ -302,7 +295,7 @@ export async function runLiveSketchStudy(input: {
         max_completion_tokens: 300,
         response_format: {
           type: 'json_schema',
-          json_schema: { name: 'noura_sketch_interpretation', strict: true, schema: SKETCH_SCHEMA },
+          json_schema: { name: 'noura_sketch_interpretation', strict: true, schema: SKETCH_REPLY_JSON_SCHEMA },
         },
         messages: [
           {
@@ -320,7 +313,7 @@ export async function runLiveSketchStudy(input: {
         }),
       });
       const text = response.choices[0]?.message?.content ?? '';
-      const parsed = parseSketch(text);
+      const parsed = parseSketchReply(text);
       const correct = normalize(parsed.interpretation) === normalize(sketch.expectedInterpretation);
       rows.push({
         sketchId: sketch.id,
@@ -415,15 +408,6 @@ export function seededCleanOps(defect: SeededDefect): BoardOp[] {
   return defect.cleanOps;
 }
 
-export function syntheticSketchOps(sketch: SyntheticSketch): BoardOp[] {
-  return [{
-    op: 'add',
-    id: `synthetic-sketch-${sketch.id}`,
-    color: 'ink',
-    spec: { kind: 'path', points: sketch.points, width: 10 },
-  }];
-}
-
 export async function renderSyntheticSketchRaster(
   harness: HeadlessSceneValidatorHandle,
   sketch: SyntheticSketch,
@@ -465,15 +449,6 @@ function parseVision(text: string): { approved: boolean; valid: boolean } {
   }
 }
 
-function parseSketch(text: string): { interpretation: string; confidence: number; valid: boolean } {
-  try {
-    const parsed = JSON.parse(text) as { interpretation?: unknown; confidence?: unknown };
-    if (typeof parsed.interpretation !== 'string' || typeof parsed.confidence !== 'number' || !Number.isFinite(parsed.confidence)) throw new Error('invalid');
-    return { interpretation: parsed.interpretation.slice(0, 120), confidence: Math.max(0, Math.min(1, parsed.confidence)), valid: true };
-  } catch {
-    return { interpretation: '', confidence: 0, valid: false };
-  }
-}
 
 function completionCost(model: 'gpt-5.6-terra' | 'gpt-5.6-luna', usage: OpenAI.Completions.CompletionUsage | undefined, text: string): number {
   return estimateTextCost(model, {

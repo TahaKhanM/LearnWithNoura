@@ -25,6 +25,14 @@ describe('canonical board snapshot', () => {
     expect(svg).toContain('A+B+C=180°');
   });
 
+  it('renders equations as a measured-outline placeholder instead of bare snapshot text', () => {
+    const svg = sceneToCanonicalSvg(scene);
+    expect(svg).toContain('data-katex="true"');
+    expect(svg).toContain('data-latex="A+B+C=180^\\circ"');
+    expect(svg).toMatch(/<g data-katex="true"[^>]*>[\s\S]*<rect /);
+    expect(svg).toMatch(/data-katex="true"[\s\S]*A\+B\+C=180°/);
+  });
+
   it('contains no transient UI: no highlight halo, pen, or hidden-for-animation styling', () => {
     const svg = sceneToCanonicalSvg(scene);
     expect(svg).not.toContain('board__highlight');
@@ -89,6 +97,16 @@ describe('canonical board snapshot', () => {
     const svg = sceneToCanonicalSvg(pictured);
     expect(svg.indexOf('data-item="pond"')).toBeGreaterThan(-1);
     expect(svg.indexOf('data-item="pond"')).toBeLessThan(svg.indexOf('data-item="frog"'));
+  });
+
+  it('keeps learner-pen strokes at the live preview width in snapshots', () => {
+    const sketched = applyOps(emptyScene, [{
+      op: 'add',
+      id: 'pen',
+      color: '#26231F',
+      spec: { kind: 'path', points: [[120, 300], [220, 300], [420, 300], [520, 300]], width: 4 },
+    }], 'learner', 'sketch').scene;
+    expect(sceneToCanonicalSvg(sketched)).toContain('stroke-width="4"');
   });
 
   it('translates common LaTeX into deterministic readable text', () => {

@@ -96,6 +96,13 @@ describe('realtime prompt / tool-surface consistency', () => {
     expect(prompt).toMatch(/never promise a picture is on the board/i);
   });
 
+  it('treats learner-stroke vector features as hints and asks on vector/vision conflict', () => {
+    expect(prompt).toMatch(/see the drawing, then interpret/i);
+    expect(prompt).toMatch(/vector features are\s+spatial hints/i);
+    expect(prompt).toMatch(/explicit confidence/i);
+    expect(prompt).toMatch(/vector geometry and the image disagree/i);
+  });
+
   it('advertises board_ops only as the fast increment path', () => {
     const tool = REALTIME_TOOLS.find((candidate) => candidate.name === 'board_ops');
     expect(tool?.description).toMatch(/blank board/i);

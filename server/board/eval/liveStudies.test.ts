@@ -110,7 +110,7 @@ describe('Drawing vNext live audit and sketch evidence', () => {
       op: 'add',
       id: `synthetic-sketch-${sketch.id}`,
       color: 'ink',
-      spec: { kind: 'path', points: sketch.points, width: 10 },
+      spec: { kind: 'path', points: sketch.points, width: 4 },
     }]);
   });
 
