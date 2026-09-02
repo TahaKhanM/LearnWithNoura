@@ -20,6 +20,9 @@ docs are records — consult only when investigating how a decision was made.
 
 ## Milestone handoffs (evidence records; read the one you're continuing)
 
+- `2026-09-03-drawing-vnext-m5-grounding-handoff.md` — M5 remainder (KaTeX
+  measured-outline snapshots + C1 sketch-corpus rebuild). Candidate raster
+  and harness-alignment items remain deferred.
 - `2026-09-03-drawing-vnext-m4-illustration-handoff.md` — M4 offline-complete
   (gpt-image-2, parallel lane, overlay-first arrival). Live illustration
   trace still requires itemized authorization.

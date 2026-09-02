@@ -11,6 +11,7 @@ import {
   type DirectorEvalCondition,
   type DirectorEvalIntent,
   type SeededDefect,
+  type SketchInterpretation,
 } from './types.js';
 
 export const DIRECTOR_EVAL_CONDITIONS: DirectorEvalCondition[] = [
@@ -104,7 +105,7 @@ function validateExistingBoardOps(intentId: string, rawOps: unknown[]): BoardOp[
 
 export interface SyntheticSketch {
   id: string;
-  expectedInterpretation: string;
+  expectedInterpretation: SketchInterpretation;
   points: Array<[number, number]>;
   jitterSeed: 1 | 2 | 3;
   synthetic: true;

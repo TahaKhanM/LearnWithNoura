@@ -46,9 +46,24 @@ export type SeededDefect = Omit<ParsedSeededDefect, 'defectOps' | 'cleanOps'> & 
   cleanOps: BoardOp[];
 };
 
+export const SKETCH_INTERPRETATIONS = [
+  'straight line',
+  'underline',
+  'circle',
+  'triangle',
+  'right arrow',
+  'cross mark',
+  'check mark',
+  'box',
+  'increasing curve',
+  'fraction partition',
+] as const;
+export type SketchInterpretation = (typeof SKETCH_INTERPRETATIONS)[number];
+export const SketchInterpretationSchema = z.enum(SKETCH_INTERPRETATIONS);
+
 export const SketchBaseSchema = z.object({
   id: z.string().min(1).max(80),
-  expectedInterpretation: z.string().min(1).max(120),
+  expectedInterpretation: SketchInterpretationSchema,
   points: z.array(z.tuple([z.number().finite(), z.number().finite()])).min(2).max(120),
 });
 export type SketchBase = z.infer<typeof SketchBaseSchema>;
