@@ -8,12 +8,14 @@ import type { BoardDirector } from '../board/director.js';
 import type { StreamingBoardDirector } from '../board/streamingDirector.js';
 import type { VisionAuditPort } from '../board/visionAudit.js';
 import type { ImageGroundingProposalPort } from '../board/imageGrounding.js';
+import type { IllustrationDirectorPort } from '../board/director.js';
 import type { LessonOrchestrationState } from '../lesson/orchestrator.js';
 import type { DomainRepository } from '../store/domain.js';
 import type { SessionTelemetryWriter } from '../session/telemetryWriter.js';
 import type { SessionTelemetryRepository } from '../session/telemetryRepository.js';
 import type { BoardContextTracker } from './boardContext.js';
 import type { StoryboardRunState } from './storyboardRunner.js';
+import type { PendingIllustrationLane } from './illustrationLane.js';
 import type { VisualRequest } from './visualRequests.js';
 
 /**
@@ -152,6 +154,10 @@ export interface CoordinatorState {
   beatResponses: Set<string>;
   /** The storyboard run currently revealing a scene beat by beat. */
   storyboardRun: StoryboardRunState | null;
+  /** Parallel illustration lane for the active Director scene, if any. */
+  pendingIllustration: PendingIllustrationLane | null;
+  /** Paid gpt-image generations this lesson. Cache hits are free. */
+  illustrationGenerationsUsed: number;
 }
 
 export type ClientCueOptional = Partial<Pick<
@@ -182,6 +188,7 @@ export interface CoordinatorContext {
   readonly streamVisual: StreamingBoardDirector | null;
   readonly visionAudit: VisionAuditPort | null;
   readonly imageGroundingProposal: ImageGroundingProposalPort | null;
+  readonly illustrations: IllustrationDirectorPort | null;
   readonly visionAuditBudgetMs: number;
   /** How long one storyboard step may await its visibility confirmation
    * (covers the previous beat's playback plus the draw-on animation). */

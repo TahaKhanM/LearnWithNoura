@@ -3,7 +3,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CompiledLessonSchema, COMPILED_LESSON_SCHEMA_VERSION } from '../../shared/compiledLesson';
 import { createRuntimeEvent, type GenerationIdentity, type RuntimeEventEnvelope } from '../../shared/runtimeProtocol';
 import type { MetricObservation } from '../../shared/sessionTelemetry';
-import type { BoardDirector, DirectorSceneRequest } from '../board/director';
+import type { BoardDirector, DirectorSceneRequest, IllustrationDirectorPort } from '../board/director';
+import type { IllustrationPrepareOk } from '../board/illustration';
 import { streamVisual as runStreamingDirector, type StreamingBoardDirector } from '../board/streamingDirector';
 import type { LayoutCorrectionPort } from '../board/layoutCorrection';
 import { openTestDb } from '../store/db';
@@ -137,6 +138,9 @@ async function connectBoardLed(
     },
     boardCues() {
       return client.sent.filter((event) => event.type === 'board_ops');
+    },
+    illustrationStatuses() {
+      return client.sent.filter((event) => event.type === 'illustration_status');
     },
     responseCreates(): ResponseCreatePayload[] {
       return upstream.ofType<ResponseCreatePayload>('response.create');
@@ -750,27 +754,36 @@ describe('the storyboard runner', () => {
     expect(harness.toolOutput('template-call')).toMatchObject({ status: 'building', semanticGroupId: 'lesson-anchor-alt1' });
   });
 
-  it('falls back to the classic illustration lane before any streamed step is revealed', async () => {
-    const streamVisual: StreamingBoardDirector = async () => ({
-      ok: false,
-      reasons: ['Streaming illustration composition is deferred to the parallel illustration lane.'],
-      fallback: 'classic_illustration',
-    });
-    let classicCalls = 0;
-    const directVisual: BoardDirector = async (request) => {
-      classicCalls += 1;
-      return {
-        ok: true,
-        scene: {
-          groupId: request.sectionId,
-          groupLabel: 'Garden context',
-          template: null,
-          ops: [{ op: 'add', id: 'garden-image', spec: { kind: 'asset', at: [500, 320], assetId: 'garden' } }],
-          storyboard: [{ id: 'garden-step', reveal: 'outline', narration: 'Here is the garden.', objectIds: ['garden-image'] }],
-        },
-      };
+  it('streams overlay steps for an illustration header and arrives the image as the final reveal', async () => {
+    const proposal = {
+      template: null,
+      groupLabel: 'Garden context',
+      representation: 'illustration',
+      illustration: {
+        purpose: 'Show a garden',
+        subject: 'A quiet garden',
+        style: null,
+        requiredElements: ['plants'],
+        forbiddenElements: ['text'],
+        alt: 'A garden',
+      },
+      steps: [{
+        id: 'garden-label', reveal: 'label', narration: 'The garden has plants at the edge.',
+        ops: [{ op: 'add', id: 'plant-label', color: 'ink', spec: { kind: 'box', at: [200, 480], w: 180, h: 70, text: 'plants' } }],
+      }],
     };
-    const harness = await connectBoardLed({ streamVisual, directVisual });
+    const prepared = pondPrepared('illust-garden', 'img-a1b2c3d4e5f67890');
+    const releasePrepare = deferred<void>();
+    const illustrations = scriptedIllustrationPort(async () => {
+      await releasePrepare.promise;
+      return prepared;
+    });
+    const streamVisual: StreamingBoardDirector = (request, runtime) => runStreamingDirector({
+      model: { streamPropose: () => (async function* () { yield JSON.stringify(proposal); })() },
+      validateScene: async () => ({ ok: false, issues: ['request browser port required'] }),
+      renderScene: async () => null,
+    }, request, runtime);
+    const harness = await connectBoardLed({ streamVisual, illustrations });
     harness.upstream.emit({ type: 'response.created', response: { id: 'cover-illustration' } });
     harness.upstream.emit({
       type: 'response.function_call_arguments.done', response_id: 'cover-illustration', call_id: 'illustration-call', name: 'request_visual',
@@ -780,19 +793,51 @@ describe('the storyboard runner', () => {
       }),
     });
     await flushProxy();
-    expect(classicCalls).toBe(1);
-    expect(harness.boardCues()).toEqual([]);
-    const preflight = harness.client.sent.find((event) => event.type === 'visual_preflight');
-    expect(preflight?.payload).toMatchObject({ semanticObjectId: 'lesson-anchor-alt1' });
+    expect(harness.toolOutput('illustration-call')).toMatchObject({ status: 'preparing', semanticGroupId: 'lesson-anchor-alt1' });
+    const overlayPreflight = await vi.waitFor(() => {
+      const event = harness.client.sent.find((item) => item.type === 'visual_preflight');
+      expect(event).toBeTruthy();
+      return event!;
+    });
+    expect(overlayPreflight.payload).toMatchObject({
+      ops: [expect.objectContaining({ id: 'plant-label' })],
+    });
     harness.emitClient('visual_preflight_result', {
-      preflight_id: (preflight!.payload as { preflight_id?: string }).preflight_id,
+      preflight_id: (overlayPreflight!.payload as { preflight_id?: string }).preflight_id,
       accepted: true,
       reasons: [],
     });
     await flushProxy();
-    expect(harness.repo.listEvents(harness.session.id).filter((event) => event.type === 'directed_scene')).toHaveLength(1);
     expect(harness.boardCues()).toHaveLength(1);
-    expect(harness.toolOutput('illustration-call')).toMatchObject({ status: 'preparing', semanticGroupId: 'lesson-anchor-alt1' });
+    expect(harness.boardCues()[0].payload).toMatchObject({ checkpoint: 'label' });
+    expect(JSON.stringify(harness.boardCues()[0].payload)).not.toContain('"kind":"image"');
+    expect(harness.illustrationStatuses().some((event) => event.payload.status === 'preparing')).toBe(true);
+
+    releasePrepare.resolve();
+    await flushProxy();
+    const imagePreflight = await vi.waitFor(() => {
+      const event = [...harness.client.sent].reverse().find((item) => item.type === 'visual_preflight' && JSON.stringify(item.payload).includes('image'));
+      expect(event).toBeTruthy();
+      return event!;
+    });
+    harness.emitClient('visual_preflight_result', {
+      preflight_id: (imagePreflight!.payload as { preflight_id?: string }).preflight_id,
+      accepted: true,
+      reasons: [],
+    });
+    await flushProxy();
+    expect(harness.illustrationStatuses().at(-1)?.payload).toMatchObject({ status: 'ready' });
+    harness.upstream.emit({ type: 'response.done', response: { id: 'cover-illustration', status: 'completed', output: [{ type: 'function_call' }] } });
+    await flushProxy();
+    await settleUnscopedCreate(harness, 'cover-2');
+    harness.showStep(0);
+    await flushProxy();
+    harness.upstream.emit({ type: 'response.created', response: { id: 'overlay-beat' } });
+    harness.upstream.emit({ type: 'response.done', response: { id: 'overlay-beat', status: 'completed', output: [] } });
+    await flushProxy();
+    await vi.waitFor(() => {
+      expect(harness.boardCues().map((cue) => (cue.payload as { ops?: Array<{ spec?: { kind?: string } }> }).ops?.[0]?.spec?.kind)).toEqual(['box', 'image']);
+    });
   });
 
   it('keeps revealed step 1 permanent when a late adaptive audit rejects step 2', async () => {
@@ -1713,3 +1758,203 @@ describe('visual request scoping across turns', () => {
     expect(harness.scopedCreates()[0].response?.instructions).toContain('Here is one number line from zero to one.');
   });
 });
+
+describe('the parallel illustration lane', () => {
+  it('keeps overlay marks when illustration generation fails and emits one honest note', async () => {
+    const illustrations = scriptedIllustrationPort(async () => ({
+      ok: false as const,
+      reasons: ['illustration_vision:rejected'],
+      cacheHit: false,
+      latencyMs: 8,
+      imageCount: 1,
+      totalTokens: 12,
+      refused: false,
+    }));
+    const harness = await connectBoardLed({
+      illustrations,
+      directVisual: pondOverlayDirector(),
+    });
+    await requestCompareVisual(harness, 'fail-illustration', 'fail-call');
+    await acceptLatestPreflight(harness);
+    expect(harness.boardCues()).toHaveLength(1);
+    expect(JSON.stringify(harness.boardCues()[0].payload)).toContain('frog-label');
+    await flushProxy();
+    expect(harness.boardCues()).toHaveLength(1);
+    expect(harness.systemNotes().filter((note) => note.includes('illustration will not appear'))).toHaveLength(1);
+    expect(harness.illustrationStatuses().at(-1)?.payload).toMatchObject({ status: 'failed' });
+  });
+
+  it('arrives a slow illustration as a checkpoint after the overlay run has finished', async () => {
+    const releasePrepare = deferred<void>();
+    const illustrations = scriptedIllustrationPort(async () => {
+      await releasePrepare.promise;
+      return pondPrepared();
+    });
+    const harness = await connectBoardLed({
+      illustrations,
+      directVisual: pondOverlayDirector(),
+    });
+    await requestCompareVisual(harness, 'slow-illustration', 'slow-illust-call');
+    await acceptLatestPreflight(harness);
+    expect(harness.boardCues()).toHaveLength(1);
+    expect(JSON.stringify(harness.boardCues()[0].payload)).toContain('frog-label');
+    harness.upstream.emit({ type: 'response.done', response: { id: 'cover-illustration', status: 'completed', output: [{ type: 'function_call' }] } });
+    await flushProxy();
+    await settleUnscopedCreate(harness, 'cover-2');
+    harness.showStep(0);
+    await flushProxy();
+    const beat = harness.scopedCreates().at(-1);
+    expect(beat?.response?.instructions).toContain('The frog lives at the edge of the pond.');
+    harness.upstream.emit({ type: 'response.created', response: { id: 'overlay-beat' } });
+    harness.upstream.emit({ type: 'response.done', response: { id: 'overlay-beat', status: 'completed', output: [] } });
+    await flushProxy();
+    const handoff = harness.scopedCreates().at(-1);
+    if (handoff && handoff !== beat) {
+      harness.upstream.emit({ type: 'response.created', response: { id: 'overlay-handoff' } });
+      harness.upstream.emit({ type: 'response.done', response: { id: 'overlay-handoff', status: 'completed', output: [] } });
+      await flushProxy();
+    }
+
+    releasePrepare.resolve();
+    await flushProxy();
+    await acceptLatestPreflight(harness);
+    const imageCue = await vi.waitFor(() => {
+      const cue = harness.boardCues().find((item) => JSON.stringify(item.payload).includes('"kind":"image"'));
+      expect(cue).toBeTruthy();
+      return cue!;
+    });
+    harness.showStep(harness.boardCues().indexOf(imageCue));
+    await flushProxy();
+    expect(harness.illustrationStatuses().at(-1)?.payload).toMatchObject({ status: 'ready' });
+    expect(harness.systemNotes().some((note) => note.includes('illustration just arrived'))).toBe(true);
+  });
+
+  it('holds a ready image behind overlay marks so the picture is never first paint', async () => {
+    const illustrations = scriptedIllustrationPort(async () => pondPrepared());
+    const harness = await connectBoardLed({
+      illustrations,
+      directVisual: pondOverlayDirector(),
+    });
+    await requestCompareVisual(harness, 'fast-illustration', 'fast-illust-call');
+    await acceptLatestPreflight(harness);
+    expect(harness.boardCues()).toHaveLength(1);
+    expect(JSON.stringify(harness.boardCues()[0].payload)).toContain('frog-label');
+    expect(JSON.stringify(harness.boardCues()[0].payload)).not.toContain('"kind":"image"');
+    await acceptLatestPreflight(harness);
+    expect(harness.illustrationStatuses().at(-1)?.payload).toMatchObject({ status: 'ready' });
+    expect(harness.boardCues()).toHaveLength(1);
+    harness.upstream.emit({ type: 'response.done', response: { id: 'cover-illustration', status: 'completed', output: [{ type: 'function_call' }] } });
+    await flushProxy();
+    await settleUnscopedCreate(harness, 'cover-2');
+    harness.showStep(0);
+    await flushProxy();
+    harness.upstream.emit({ type: 'response.created', response: { id: 'overlay-beat' } });
+    harness.upstream.emit({ type: 'response.done', response: { id: 'overlay-beat', status: 'completed', output: [] } });
+    await flushProxy();
+    await vi.waitFor(() => {
+      expect(harness.boardCues().map((cue) => (cue.payload as { ops?: Array<{ spec?: { kind?: string } }> }).ops?.[0]?.spec?.kind)).toEqual(['text', 'image']);
+    });
+  });
+
+  it('passes the remaining lesson generation budget into prepare', async () => {
+    const remaining: Array<number | undefined> = [];
+    const illustrations: IllustrationDirectorPort = {
+      enabled: true,
+      prepare: async (_brief, _hooks, options) => {
+        remaining.push(options?.generationBudgetRemaining);
+        return pondPrepared();
+      },
+    };
+    const harness = await connectBoardLed({
+      illustrations,
+      directVisual: pondOverlayDirector(),
+    });
+    await requestCompareVisual(harness, 'budget-1', 'budget-call-1');
+    await acceptLatestPreflight(harness);
+    await acceptLatestPreflight(harness);
+    expect(remaining).toEqual([2]);
+    expect(harness.systemNotes().some((note) => note.includes('illustration will not appear'))).toBe(false);
+  });
+});
+
+function pondPrepared(objectId = 'illust-pond', assetId = 'img-a1b2c3d4e5f67890'): IllustrationPrepareOk {
+  return {
+    ok: true,
+    spec: { kind: 'image', assetId, at: [80, 60], w: 840, h: 420, alt: 'A pond habitat' },
+    objectId,
+    record: {
+      id: assetId,
+      cacheKey: 'e'.repeat(64),
+      mime: 'image/png',
+      bytes: Uint8Array.from([137, 80, 78, 71]),
+      createdAt: 1,
+    },
+    cacheHit: false,
+    latencyMs: 12,
+    imageCount: 1,
+    totalTokens: 40,
+  };
+}
+
+function pondOverlayDirector(): BoardDirector {
+  return async (request) => ({
+    ok: true,
+    illustrationBrief: {
+      purpose: 'Show a pond habitat',
+      subject: 'A calm pond with a frog and reeds',
+      requiredElements: ['frog'],
+      forbiddenElements: ['text'],
+    },
+    scene: {
+      groupId: request.sectionId,
+      groupLabel: 'Pond habitat',
+      template: null,
+      ops: [{ op: 'add', id: 'frog-label', spec: { kind: 'text', at: [200, 540], text: 'frog' } }],
+      storyboard: [{ id: 'pond-label', reveal: 'label', narration: 'The frog lives at the edge of the pond.', objectIds: ['frog-label'] }],
+    },
+  });
+}
+
+function scriptedIllustrationPort(prepare: IllustrationDirectorPort['prepare']): IllustrationDirectorPort {
+  return {
+    enabled: true,
+    prepare: async (brief, hooks, options) => {
+      hooks?.onPreparing?.(brief.alt ?? brief.subject);
+      return prepare(brief, hooks, options);
+    },
+  };
+}
+
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>((done) => { resolve = done; });
+  return { promise, resolve };
+}
+
+async function requestCompareVisual(
+  harness: Awaited<ReturnType<typeof connectBoardLed>>,
+  requestId: string,
+  callId: string,
+  responseId = 'cover-illustration',
+): Promise<void> {
+  harness.upstream.emit({ type: 'response.created', response: { id: responseId } });
+  harness.upstream.emit({
+    type: 'response.function_call_arguments.done', response_id: responseId, call_id: callId, name: 'request_visual',
+    arguments: JSON.stringify({
+      schemaVersion: '3.0.0', requestId, action: 'compare',
+      purpose: 'Show a pond habitat', idea: 'A frog lives among the reeds', density: 'minimal',
+    }),
+  });
+  await flushProxy();
+}
+
+async function acceptLatestPreflight(harness: Awaited<ReturnType<typeof connectBoardLed>>): Promise<void> {
+  const preflight = [...harness.client.sent].reverse().find((event) => event.type === 'visual_preflight');
+  if (!preflight) return;
+  harness.emitClient('visual_preflight_result', {
+    preflight_id: (preflight.payload as { preflight_id?: string }).preflight_id,
+    accepted: true,
+    reasons: [],
+  });
+  await flushProxy();
+}

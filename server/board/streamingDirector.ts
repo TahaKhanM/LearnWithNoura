@@ -140,16 +140,6 @@ export async function streamVisual(
       const parsedSteps = parser.push(chunk);
       failurePhase = 'provider';
       for (const step of parsedSteps) {
-        // M4 owns the parallel image lane. Until then an illustration header
-        // must fail before any overlay callback can queue or reveal a partial
-        // scene that the completed stream is guaranteed to reject.
-        if (step.header.representation === 'illustration') {
-          return {
-            ok: false,
-            reasons: ['Streaming illustration composition is deferred to the parallel illustration lane.'],
-            fallback: 'classic_illustration',
-          };
-        }
         const priorOps = [...cumulativeOps];
         let acceptedOps = step.ops;
         cumulativeOps.push(...acceptedOps);
@@ -194,20 +184,17 @@ export async function streamVisual(
     }
     failurePhase = 'parse';
     const proposal = parser.finish();
-    if (proposal.representation === 'illustration') {
-      return {
-        ok: false,
-        reasons: ['Streaming illustration composition is deferred to the parallel illustration lane.'],
-        fallback: 'classic_illustration',
-      };
-    }
     const scene = buildDirectedScene({
       groupId: request.sectionId,
       groupLabel: proposal.groupLabel,
       ops: [...cumulativeOps],
       storyboard: proposal.storyboard,
     });
-    return { ok: true, scene };
+    return {
+      ok: true,
+      scene,
+      ...(proposal.illustration ? { illustrationBrief: proposal.illustration } : {}),
+    };
   } catch (error) {
     if (isAbortError(error) || options.signal.aborted) throw abortError();
     return {

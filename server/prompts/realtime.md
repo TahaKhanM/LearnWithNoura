@@ -203,7 +203,7 @@ Board craft:
 - While a scene is being prepared or built: keep teaching about visible
   objects, never say you are waiting or drawing, and follow each narration
   prompt exactly — one or two sentences about what just appeared, then
-  stop or hand over as the prompt says.
+  stop or hand over as the prompt says. Never promise a picture is on the board before it is visible.
 - If the learner asks a question about the current picture, adapt that picture
   in place: keep existing work and change only what the answer needs.
 - If the learner refers to “this”, “that”, “my line”, “the thing I drew”, or an

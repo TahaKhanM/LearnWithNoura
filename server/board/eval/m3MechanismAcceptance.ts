@@ -215,9 +215,17 @@ export function compileM3MechanismAcceptanceEvidence(
     recomputed.openSetGenerative.rows !== acceptanceManifest.openSetRows ||
     recomputed.openSetGenerative.delivered !== acceptanceManifest.openSetDelivered ||
     recomputed.blendedFirstPassGate !== acceptanceManifest.blendedFirstPassGate ||
-    !isDeepStrictEqual(JSON.parse(input.resultRawJson), recomputed)
+    !isDeepStrictEqual(withoutSourceFingerprints(JSON.parse(input.resultRawJson)), withoutSourceFingerprints(recomputed))
   ) throw new Error('M3 mechanism acceptance does not reproduce from immutable evidence.');
   return { resultSha256, report: recomputed };
+}
+
+/** Source fingerprints are an M3-time record. Later milestones may change
+ * those files; mechanism predicates still recompute against live sources. */
+function withoutSourceFingerprints(report: unknown): unknown {
+  const copy = JSON.parse(JSON.stringify(report)) as { evidence?: { sourceHashes?: unknown } };
+  if (copy.evidence) delete copy.evidence.sourceHashes;
+  return copy;
 }
 
 function sha(value: string | Buffer): string { return createHash('sha256').update(value).digest('hex'); }

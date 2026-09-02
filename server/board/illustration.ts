@@ -4,6 +4,7 @@ import { BOARD_H, BOARD_W } from '../../shared/boardOps.js';
 import type { ImageSpec } from '../../shared/authoredSpecs.js';
 import { illustrationCacheKey } from './illustrationCache.js';
 import { buildIllustrationPrompt, ILLUSTRATION_VISION_PROMPT } from './illustrationPrompts.js';
+import { closedIllustrationVisionIssues, illustrationVisionReason } from './illustrationArrival.js';
 import { refuseUnsafeIllustrationBrief } from './illustrationSafety.js';
 import type {
   IllustrationBrief,
@@ -59,6 +60,8 @@ export interface PrepareIllustrationDeps {
   enabled: boolean;
   now?: () => number;
   maxRetries?: number;
+  /** Remaining paid generations in this lesson. Cache hits are free. */
+  generationBudgetRemaining?: number;
 }
 
 const DEFAULT_AT: [number, number] = [80, 60];
@@ -98,7 +101,15 @@ export async function prepareIllustration(
     return ok(cached, brief, alt, { cacheHit: true, latencyMs: elapsed(), imageCount: 0, totalTokens: 0 });
   }
 
-  const attempts = 1 + Math.max(0, deps.maxRetries ?? 2);
+  const remaining = deps.generationBudgetRemaining ?? Number.POSITIVE_INFINITY;
+  if (!(remaining > 0)) {
+    return fail(['illustration_budget:exhausted'], { refused: false, latencyMs: elapsed() });
+  }
+
+  const attempts = Math.min(
+    1 + Math.max(0, deps.maxRetries ?? 2),
+    Math.max(1, Math.floor(remaining)),
+  );
   const prompt = buildIllustrationPrompt(brief);
   let lastReasons = ['The illustration could not be prepared.'];
   let imageCount = 0;
@@ -219,18 +230,18 @@ function visionUserText(brief: IllustrationBrief): string {
 function parseVision(reply: string | null): { ok: true } | { ok: false; reasons: string[] } {
   try {
     const verdict = VisionVerdictSchema.parse(JSON.parse(reply ?? ''));
-    const reasons: string[] = [];
-    if (verdict.hasEmbeddedText) reasons.push('The generated image contains text, numbers, or equations; those must be BoardOp overlays.');
-    if (verdict.unsafe) reasons.push('The generated image failed the child-safety inspection.');
-    if (verdict.missingRequired.length > 0) {
-      reasons.push(`The generated image is missing required elements: ${verdict.missingRequired.join(', ')}.`);
-    }
-    if (!verdict.approved) {
-      reasons.push(...(verdict.issues.length > 0 ? verdict.issues.map((issue) => `Illustration inspection: ${issue}`) : ['Illustration inspection rejected the image.']));
-    }
-    return reasons.length === 0 ? { ok: true } : { ok: false, reasons };
+    const issues = closedIllustrationVisionIssues({
+      kind: 'verdict',
+      approved: verdict.approved,
+      hasEmbeddedText: verdict.hasEmbeddedText,
+      unsafe: verdict.unsafe,
+      missingRequired: verdict.missingRequired.length > 0,
+    });
+    return issues.length === 0
+      ? { ok: true }
+      : { ok: false, reasons: issues.map(illustrationVisionReason) };
   } catch {
-    return { ok: false, reasons: ['The illustration inspection reply was invalid.'] };
+    return { ok: false, reasons: closedIllustrationVisionIssues({ kind: 'invalid' }).map(illustrationVisionReason) };
   }
 }
 

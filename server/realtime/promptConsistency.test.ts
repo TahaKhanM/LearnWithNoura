@@ -93,7 +93,7 @@ describe('realtime prompt / tool-surface consistency', () => {
     expect(prompt).toMatch(/any new representation/i);
     expect(prompt).toMatch(/learner's real browser/i);
     expect(prompt).toMatch(/vision-checks/i);
-    expect(prompt).not.toMatch(/Before each new teaching move, call `propose_teaching_move`/);
+    expect(prompt).toMatch(/never promise a picture is on the board/i);
   });
 
   it('advertises board_ops only as the fast increment path', () => {

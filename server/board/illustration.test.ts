@@ -125,7 +125,7 @@ describe('prepareIllustration', () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.cacheHit).toBe(true);
-    expect(result.reasons.some((reason) => /unsafe|safety|child/i.test(reason))).toBe(true);
+    expect(result.reasons).toEqual(['illustration_vision:unsafe']);
   });
 
   it('retries after a vision rejection and fails closed after two retries', async () => {
@@ -151,7 +151,7 @@ describe('prepareIllustration', () => {
     expect(result.refused).toBe(false);
     expect(generateCalls).toHaveLength(3);
     expect(visions).toBe(3);
-    expect(result.reasons.some((reason) => /text|numbers|equations|digits/i.test(reason))).toBe(true);
+    expect(result.reasons).toEqual(['illustration_vision:embedded_text']);
   });
 
   it('accepts the second generation after the first vision check fails', async () => {
@@ -214,5 +214,31 @@ describe('prepareIllustration', () => {
     const cached = await store.getByCacheKey(illustrationCacheKey(brief()));
     expect(cached?.bytes).toEqual(PNG);
     expect(Buffer.from(cached?.bytes ?? []).toString('base64')).not.toBe('partial');
+  });
+
+  it('fails closed without a generate call when the lesson generation budget is exhausted', async () => {
+    const generateCalls: Array<{ prompt: string }> = [];
+    const result = await prepareIllustration(deps({ generateCalls, generationBudgetRemaining: 0 }), brief());
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reasons).toEqual(['illustration_budget:exhausted']);
+    expect(generateCalls).toHaveLength(0);
+  });
+
+  it('still serves a cache hit when the generation budget is exhausted', async () => {
+    const store = new MemoryIllustrationStore();
+    const first = await prepareIllustration(deps({ store }), brief());
+    expect(first.ok).toBe(true);
+    if (first.ok) await persistIllustrationRecord(store, first);
+    const generateCalls: Array<{ prompt: string }> = [];
+    const result = await prepareIllustration(deps({
+      store,
+      generateCalls,
+      generationBudgetRemaining: 0,
+    }), brief());
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.cacheHit).toBe(true);
+    expect(generateCalls).toHaveLength(0);
   });
 });

@@ -4,7 +4,6 @@ import type { SceneRenderer } from '../lesson/headlessSceneValidator.js';
 import { directorProposePrompt, DIRECTOR_VISION_PROMPT } from './directorPrompts.js';
 import { closedVisionAuditIssues } from './visionAudit.js';
 import {
-  persistIllustrationRecord,
   type IllustrationBrief,
   type IllustrationHooks,
   type IllustrationPrepareOk,
@@ -57,7 +56,6 @@ export interface DirectorSceneRequest {
   currentBoardOps: BoardOp[];
   stageBrief: string;
   learnerContext: string;
-  illustrationHooks?: IllustrationHooks;
   assetOwner?: { parentId?: string; sessionId?: string };
   /** Per-session render authority. Live realtime requests bind these to the
    * connected learner browser, so production does not depend on launching
@@ -67,22 +65,26 @@ export interface DirectorSceneRequest {
 }
 
 export type DirectorResult =
-  | { ok: true; scene: DirectedScene; illustration?: IllustrationPrepareResult }
+  | { ok: true; scene: DirectedScene; illustrationBrief?: IllustrationBrief }
   | {
     ok: false;
     reasons: string[];
-    illustration?: IllustrationPrepareResult;
-    /** A safe orchestration-level fallback that must happen before any step
-     * callback. Currently used only to preserve illustrations until M4. */
-    fallback?: 'classic_illustration';
     /** A pre-commit composition/transport failure may make one escalated
      * retry; semantic audit rejections and post-commit failures may not. */
     retryable?: boolean;
   };
 
+export interface IllustrationPrepareOptions {
+  generationBudgetRemaining?: number;
+}
+
 export interface IllustrationDirectorPort {
   enabled: boolean;
-  prepare(brief: IllustrationBrief, hooks?: IllustrationHooks): Promise<IllustrationPrepareResult>;
+  prepare(
+    brief: IllustrationBrief,
+    hooks?: IllustrationHooks,
+    options?: IllustrationPrepareOptions,
+  ): Promise<IllustrationPrepareResult>;
   store?: IllustrationStore;
   persist?(result: IllustrationPrepareOk, owner?: { parentId?: string; sessionId?: string }): Promise<void>;
 }
@@ -109,7 +111,6 @@ export async function directVisual(deps: BoardDirectorDeps, request: DirectorSce
     ? await renderScene(request.currentBoardOps)
     : null;
   let feedback: string[] = [];
-  let lastIllustration: IllustrationPrepareResult | undefined;
 
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     const reply = await deps.client.complete({
@@ -120,6 +121,7 @@ export async function directVisual(deps: BoardDirectorDeps, request: DirectorSce
       continue;
     }
     let scene: DirectedScene;
+    let illustrationBrief: IllustrationBrief | undefined;
     try {
       const proposal = DirectorProposalSchema.parse(JSON.parse(reply));
       // Permanence violations are stripped by the policy; a design that
@@ -128,7 +130,6 @@ export async function directVisual(deps: BoardDirectorDeps, request: DirectorSce
       const overlayOps = Array.isArray(proposal.ops)
         ? proposal.ops.filter((op) => !isImageOp(op))
         : proposal.ops;
-      let illustration: IllustrationPrepareResult | undefined;
       if (proposal.representation === 'illustration') {
         if (!deps.illustrations?.enabled) {
           feedback = ['Illustrations are not available; design a vector or asset diagram instead.'];
@@ -138,42 +139,29 @@ export async function directVisual(deps: BoardDirectorDeps, request: DirectorSce
           feedback = ['An illustration request needs purpose, subject, and required or forbidden elements.'];
           continue;
         }
-        illustration = await deps.illustrations.prepare(proposal.illustration, request.illustrationHooks);
-        lastIllustration = illustration;
-        if (illustration.ok === false) {
-          feedback = [...illustration.reasons, 'Design a vector or asset diagram instead of an illustration.'];
-          continue;
-        }
+        illustrationBrief = proposal.illustration;
       }
-      const imageOp = illustration && illustration.ok
-        ? { op: 'add' as const, id: illustration.objectId, spec: illustration.spec }
-        : null;
       const emptyOverlays = Array.isArray(overlayOps) && overlayOps.length === 0;
-      if (emptyOverlays && !imageOp) {
-        feedback = ['The scene must add objects; erase, clear, update, and highlight are not available to the Director.'];
+      if (emptyOverlays) {
+        feedback = illustrationBrief
+          ? ['Illustration scenes need overlay labels, equations, or arrows as BoardOps; the generated picture cannot carry those.']
+          : ['The scene must add objects; erase, clear, update, and highlight are not available to the Director.'];
         continue;
       }
-      const policy = emptyOverlays && imageOp
-        ? { ok: true as const, ops: [] }
-        : applyDirectorBoardPolicy(overlayOps, {
-          density: request.density,
-          visibleObjectIds: request.visibleObjectIds,
-        });
+      const policy = applyDirectorBoardPolicy(overlayOps, {
+        density: request.density,
+        visibleObjectIds: request.visibleObjectIds,
+      });
       if (policy.ok === false) {
         feedback = policy.reasons;
         continue;
       }
-      const placed = imageOp ? [imageOp, ...policy.ops] : policy.ops;
-      const storyboard = illustration && illustration.ok
-        ? withIllustrationReveal(proposal.storyboard, illustration.objectId)
-        : proposal.storyboard;
       scene = buildDirectedScene({
         groupId: request.sectionId,
         groupLabel: proposal.groupLabel,
-        ops: placed,
-        storyboard,
+        ops: policy.ops,
+        storyboard: proposal.storyboard,
       });
-      if (illustration) lastIllustration = illustration;
     } catch (error) {
       feedback = [describeError(error)];
       continue;
@@ -200,32 +188,14 @@ export async function directVisual(deps: BoardDirectorDeps, request: DirectorSce
       feedback = closedVisionAuditIssues('invalid').map((issue) => `vision_audit:${issue}`);
     }
     if (approved) {
-      if (lastIllustration?.ok) {
-        await persistAcceptedIllustration(deps, lastIllustration, request.assetOwner);
-      }
-      return { ok: true, scene, ...(lastIllustration ? { illustration: lastIllustration } : {}) };
+      return { ok: true, scene, ...(illustrationBrief ? { illustrationBrief } : {}) };
     }
   }
 
   return {
     ok: false,
     reasons: feedback.length > 0 ? feedback : ['The Director produced no acceptable scene.'],
-    ...(lastIllustration ? { illustration: lastIllustration } : {}),
   };
-}
-
-async function persistAcceptedIllustration(
-  deps: BoardDirectorDeps,
-  result: IllustrationPrepareOk,
-  owner?: { parentId?: string; sessionId?: string },
-): Promise<void> {
-  if (deps.illustrations?.persist) {
-    await deps.illustrations.persist(result, owner);
-    return;
-  }
-  if (deps.illustrations?.store) {
-    await persistIllustrationRecord(deps.illustrations.store, result, owner);
-  }
 }
 
 function proposalMessages(
@@ -290,16 +260,6 @@ function isImageOp(raw: unknown): boolean {
   if (typeof raw !== 'object' || raw === null) return false;
   const op = raw as { spec?: { kind?: unknown }; kind?: unknown };
   return op.spec?.kind === 'image' || op.kind === 'image';
-}
-
-function withIllustrationReveal(
-  storyboard: DirectedScene['storyboard'],
-  imageId: string,
-): DirectedScene['storyboard'] {
-  if (storyboard.some((step) => step.objectIds.includes(imageId))) return storyboard;
-  if (storyboard.length === 0) return storyboard;
-  const [first, ...rest] = storyboard;
-  return [{ ...first, objectIds: [imageId, ...first.objectIds] }, ...rest];
 }
 
 function describeError(error: unknown): string {
