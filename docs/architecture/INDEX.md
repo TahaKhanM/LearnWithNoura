@@ -26,6 +26,9 @@ docs are records — consult only when investigating how a decision was made.
 - `2026-09-03-drawing-vnext-m4-illustration-handoff.md` — M4 offline-complete
   (gpt-image-2, parallel lane, overlay-first arrival). Live illustration
   trace still requires itemized authorization.
+- `2026-09-03-drawing-vnext-m7-handoff.md` — M7 technically complete;
+  owner ratified the G4 harness spend incident as process-complete, not
+  retroactive authorization. `accepted` stays false.
 - `2026-09-02-drawing-vnext-m3-mechanism-handoff.md` — M3 accepted (mechanism
   + 3 exemplars; open-set 40/40; extra extractors quarantined).
 - `2026-09-02-drawing-vnext-m2-role-adoption-handoff.md` — M2 accepted
