@@ -12,7 +12,7 @@
 - Deployment Protection: Standard Vercel Authentication (`all_except_custom_domains`).
 - Stable protected Preview alias: `https://noura-preview-mtk2982007.vercel.app`
 - Public v0: `https://learnwithnoura.com`; `www` permanently redirects to the apex.
-- Current verified public-v0 deployment: `dpl_FWWpHQk2iJkGGyCLPLhE4pBqjUEK`, revision `563f4c3422a1802b2cb43b0ec797ae5dc6b5013a`. Recovery evidence below is from the 2026-08-26 drawing/storage working tree based on revision `2ce3e0bf4a7c7ac85adfaf6f89e0b41bcf2e878d`.
+- Current login-gated public-v0 deployment: `dpl_AbnroCy4guyi7Q4vZbh7mJxg8ZXZ`, built from the current recovery working tree based on revision `2ce3e0bf4a7c7ac85adfaf6f89e0b41bcf2e878d`.
 
 Do not print or download Production secrets into tracked files. `.vercel/`, `.env*` and databases are ignored.
 
@@ -34,7 +34,7 @@ The first CLI deployment was forcibly classified by Vercel as Production even wh
 
 ## Public v0 gate
 
-Public v0 is the real Noura product, not a scripted fixture. It uses managed Postgres, live provider calls, the Realtime WebSocket, captions-only fallback, semantic visuals, learner drawing, evidence, immutable ending and the Parent view. Its temporary identity boundary is a signed pseudonymous guest-parent cookie, and the UI remains explicit that only pretend learner details may be used.
+Public v0 is the real Noura product, not a scripted fixture. It uses managed Postgres, live provider calls, the Realtime WebSocket, captions-only fallback, semantic visuals, learner drawing, evidence, immutable ending and the Parent view. Its temporary identity boundary is one server-configured demo account backed by a signed parent-session cookie, and the UI remains explicit that only pretend learner details may be used.
 
 Before setting `NOURA_DEPLOYMENT_MODE=production-v0`, require:
 
@@ -75,6 +75,25 @@ Recovery deployment evidence on 2026-08-26:
   parent-scoped telemetry log;
 - the smoke gate passed with no missing observations, telemetry gaps, browser
   console errors, duplicate captions, reconnects, or tutor-object loss.
+
+Login-gate deployment evidence on 2026-08-26:
+
+- Vercel stores the configured email and password verifier as secrets; the
+  password is represented only by a salted scrypt verifier, never shipped to
+  the browser or committed to the repository;
+- unauthenticated `GET /api/auth/session` returns the public login state while
+  `GET /api/children` fails with 401; `/healthz` remains 200 with provider,
+  managed storage, and schema healthy;
+- the supplied demo account receives a 12-hour signed `HttpOnly`, `Secure`,
+  `SameSite=Lax` parent cookie, can access its parent-scoped APIs, and logout
+  clears the session; pre-login guest cookies are rejected and the lesson
+  capability signing secret was rotated;
+- the post-deployment provider-backed smoke authenticated, connected to the
+  live provider, observed audio, captions, and one board drawing, and recovered
+  a complete telemetry log with no gaps or browser console errors. Its strict
+  reporter gate failed because the follow-up interruption did not cause the
+  required second board change within 40 seconds. Drawing reliability therefore
+  remains an explicit product limitation rather than a passing claim.
 
 ## Full Production gate
 

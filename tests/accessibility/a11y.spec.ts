@@ -11,6 +11,16 @@ test('Home has no serious or critical automated accessibility violations', async
   expect(results.violations.filter((violation) => ['serious', 'critical'].includes(violation.impact ?? ''))).toEqual([]);
 });
 
+test('required login has no serious or critical automated accessibility violations', async ({ page }) => {
+  await page.route('**/api/auth/session', async (route) => {
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ required: true, authenticated: false }) });
+  });
+  await page.goto('/');
+  await expect(page.getByTestId('login-form')).toBeVisible();
+  const results = await new AxeBuilder({ page }).analyze();
+  expect(results.violations.filter((violation) => ['serious', 'critical'].includes(violation.impact ?? ''))).toEqual([]);
+});
+
 test('canonical board fixture exposes a programmatic long description', async ({ page }) => {
   await page.goto('/dev/board');
   await page.getByRole('button', { name: 'fractions' }).click();

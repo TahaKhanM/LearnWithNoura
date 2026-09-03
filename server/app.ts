@@ -16,6 +16,7 @@ import { createOpenAIImageGroundingProposalPort } from './board/imageGroundingSe
 import { createOpenAIVisionAuditPort, createVisionAuditForPipeline } from './board/visionAuditService.js';
 import { illustrationStoreFromRepo } from './board/repoIllustrationStore.js';
 import { fallbackTurns } from './fallbackTutor.js';
+import { createAuthRouter } from './auth.js';
 import { createHeadlessSceneValidator, type HeadlessSceneValidatorHandle } from './lesson/headlessSceneValidator.js';
 import { connectRealtimeProxy } from './realtime/proxy.js';
 import { bootstrapVoiceCall, SidebandRegistry } from './realtime/callBootstrap.js';
@@ -186,6 +187,7 @@ app.get(['/version', '/api/version'], (_req, res) => {
   });
 });
 
+app.use('/api/auth', createAuthRouter(security));
 if (m2SmokeBudget) {
   app.get('/api/dev/m2-smoke-budget', (_req, res) => {
     res.json({
