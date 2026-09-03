@@ -27,8 +27,9 @@
 - M5 item 1: `visual_render` candidate raster from a copy of the live coordinator (LessonPage still uses an empty coordinator when `semanticGroupId` is present).
 - M5 item 3: align harness `nouraRenderScene` with the lesson annotation-layout path.
 - Live sketch re-score with the enum schema. Not run. Do not start it without a fresh itemized cap.
-- M7 spend incident remains unratified; M7 `accepted` stays false.
+- M7 spend incident is owner-ratified as process-complete, not authorized
+  after the fact. Hash-bound `accepted` stays false.
 
 ## Next
 
-Do not start M8 or M6. M7 ratification still requires the user to type `ratified`.
+Do not start M8 or M6. Live `gpt-image-2` still needs a fresh itemized cap.
