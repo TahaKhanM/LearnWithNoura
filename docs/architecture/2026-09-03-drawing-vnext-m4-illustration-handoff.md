@@ -27,7 +27,8 @@
 ## Deferred
 
 - One authorized live `gpt-image-2` trace with latency + cost on `illustration_generation`. Not run. Do not start it without a fresh itemized cap.
-- M7 spend incident remains unratified; M7 `accepted` stays false.
+- M7 spend incident is owner-ratified as process-complete, not authorized
+  after the fact. Hash-bound `accepted` stays false.
 - Harness visual baselines for M7 chrome.
 
 ## Next
