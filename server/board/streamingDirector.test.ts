@@ -159,7 +159,7 @@ describe('streaming Board Director', () => {
     expect(delivered).toEqual(['s1']);
   });
 
-  it('rejects an illustration header before delivering any overlay step', async () => {
+  it('streams overlay steps from an illustration header and returns the brief without falling back', async () => {
     const proposal = {
       ...scene(),
       representation: 'illustration',
@@ -172,22 +172,25 @@ describe('streaming Board Director', () => {
         alt: 'A garden',
       },
     };
-    const onStep = vi.fn(async () => {});
+    const delivered: string[] = [];
     const result = await streamVisual({
       model: { streamPropose: () => oneChunk(JSON.stringify(proposal)) },
       validateScene: async () => ({ ok: true }),
       renderScene: async () => null,
     }, request(), {
       signal: new AbortController().signal,
-      onStep,
+      onStep: async (step) => { delivered.push(step.step.id); },
     });
 
-    expect(result).toEqual({
-      ok: false,
-      reasons: ['Streaming illustration composition is deferred to the parallel illustration lane.'],
-      fallback: 'classic_illustration',
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.illustrationBrief).toMatchObject({
+      purpose: 'Add context',
+      subject: 'A quiet garden',
     });
-    expect(onStep).not.toHaveBeenCalled();
+    expect(delivered).toEqual(['s1', 's2']);
+    expect(result.scene.ops.map((op) => (op.op === 'add' ? op.id : ''))).toEqual(['a', 'b']);
+    expect(JSON.stringify(result.scene.ops)).not.toContain('"kind":"image"');
   });
 
   it('short-circuits a non-null stream head into the exact deterministic template', async () => {

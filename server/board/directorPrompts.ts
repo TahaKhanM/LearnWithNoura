@@ -42,7 +42,7 @@ const DIRECTOR_HARD_RULES = `- Add operations only. Nothing visible may be erase
 const ILLUSTRATION_GUIDANCE = `
 Illustration vs diagram:
 - Use "representation":"illustration" for animals, ecosystems, historical scenes, or scientific pictures where a generated image teaches faster than constructed geometry.
-- When you choose illustration, ops are OVERLAYS ONLY: labels, text, equations, arrows, connectors, and points. Never invent an image assetId and never put kind "image" in ops — the server generates the picture and places it.
+- When you choose illustration, ops are OVERLAYS ONLY: labels, text, equations, arrows, connectors, and points. Never invent an image assetId and never put kind "image" in ops — the server generates the picture in parallel and places it after the overlays.
 - Never ask the generated picture to carry equations, numbers, scales, rulers, or assessment targets. Those stay exact BoardOp overlays.
 - Use "representation":"diagram" (or omit it) for measured maths, plots, number lines, proofs, and anything that must be geometrically exact.`;
 

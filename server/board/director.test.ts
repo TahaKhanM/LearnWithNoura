@@ -318,7 +318,7 @@ describe('the Board Director pipeline', () => {
     expect(userText(scripted.calls[2])).not.toContain('The vision inspection reply was invalid');
   });
 
-  it('places a generated illustration under exact overlay BoardOps and never trusts the image for labels', async () => {
+  it('returns overlay BoardOps and an illustration brief without awaiting image generation', async () => {
     const scripted = scriptedClient([
       validProposal({
         representation: 'illustration',
@@ -338,43 +338,28 @@ describe('the Board Director pipeline', () => {
       }),
       approval,
     ]);
-    const prepared = {
-      ok: true as const,
-      spec: {
-        kind: 'image' as const,
-        assetId: 'img-a1b2c3d4e5f67890',
-        at: [80, 60] as [number, number],
-        w: 840,
-        h: 420,
-        alt: 'A pond habitat',
-      },
-      objectId: 'illust-pond',
-      record: {
-        id: 'img-a1b2c3d4e5f67890',
-        cacheKey: 'e'.repeat(64),
-        mime: 'image/png' as const,
-        bytes: Uint8Array.from([137, 80, 78, 71]),
-        createdAt: 1,
-      },
-      cacheHit: false,
-      latencyMs: 12,
-      imageCount: 1,
-      totalTokens: 40,
-    };
+    let prepareCalls = 0;
     const result = await directVisual(deps(scripted.client, {
       illustrations: {
         enabled: true,
-        prepare: async () => prepared,
+        prepare: async () => {
+          prepareCalls += 1;
+          throw new Error('prepare must run in the parallel illustration lane, not the Director loop');
+        },
       },
     }), request({ purpose: 'Show a pond habitat', idea: 'A frog lives among the reeds' }));
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.scene.ops[0]).toMatchObject({ op: 'add', id: 'illust-pond', spec: { kind: 'image', assetId: 'img-a1b2c3d4e5f67890' } });
-    expect(result.scene.ops.map((op) => op.op === 'add' ? op.spec.kind : '')).toEqual(['image', 'text', 'equation']);
+    expect(prepareCalls).toBe(0);
+    expect(result.illustrationBrief).toMatchObject({
+      purpose: 'Show a pond habitat',
+      subject: 'A calm pond with a frog and reeds',
+    });
+    expect(result.scene.ops.map((op) => (op.op === 'add' ? op.spec.kind : ''))).toEqual(['text', 'equation']);
     expect(JSON.stringify(result.scene.ops)).not.toContain('data:image');
-    expect(result.scene.storyboard[0].objectIds[0]).toBe('illust-pond');
-    expect(result.illustration).toMatchObject({ ok: true, cacheHit: false, imageCount: 1 });
+    expect(result.scene.storyboard[0].objectIds).toEqual(['frog-label', 'eq']);
+    expect('illustration' in result).toBe(false);
   });
 
   it('does not request an illustration when the feature is off', async () => {
@@ -401,34 +386,8 @@ describe('the Board Director pipeline', () => {
     expect(userText(scripted.calls[1])).toContain('Illustrations are not available');
   });
 
-  it('does not leave a get-able asset after a failed illustration attempt', async () => {
-    const { MemoryIllustrationStore } = await import('./memoryIllustrationStore');
-    const { persistIllustrationRecord } = await import('./illustration');
-    const store = new MemoryIllustrationStore();
-    const record = {
-      id: 'img-a1b2c3d4e5f67890',
-      cacheKey: 'd'.repeat(64),
-      mime: 'image/png' as const,
-      bytes: Uint8Array.from([137, 80, 78, 71]),
-      createdAt: 1,
-    };
-    const prepared = {
-      ok: true as const,
-      spec: {
-        kind: 'image' as const,
-        assetId: record.id,
-        at: [80, 60] as [number, number],
-        w: 840,
-        h: 420,
-        alt: 'A pond habitat',
-      },
-      objectId: 'illust-pond',
-      record,
-      cacheHit: false,
-      latencyMs: 12,
-      imageCount: 1,
-      totalTokens: 40,
-    };
+  it('does not call prepare when overlay validation fails', async () => {
+    let prepareCalls = 0;
     const scripted = scriptedClient([
       validProposal({
         representation: 'illustration',
@@ -443,16 +402,16 @@ describe('the Board Director pipeline', () => {
     const result = await directVisual(deps(scripted.client, {
       illustrations: {
         enabled: true,
-        store,
-        prepare: async () => prepared,
+        prepare: async () => {
+          prepareCalls += 1;
+          throw new Error('prepare must not run inside the Director attempt loop');
+        },
       },
       maxCorrectionRounds: 0,
       validateScene: async () => ({ ok: false, issues: ['labels collide'] }),
     }), request({ purpose: 'Show a pond habitat', idea: 'A frog lives among the reeds' }));
 
     expect(result.ok).toBe(false);
-    expect(await store.getById(record.id)).toBeNull();
-    await persistIllustrationRecord(store, { ...prepared, ok: true });
-    expect(await store.getById(record.id)).not.toBeNull();
+    expect(prepareCalls).toBe(0);
   });
 });

@@ -1389,5 +1389,13 @@ export function compileScene(items: SceneItem[]): CompiledItem[] {
     if (item.spec.kind === 'image') ctx.occupied.push(...imageLabelBands(item.spec));
     compiled.push({ id: item.id, owner: item.owner, revision: item.revision, nodes, bbox, anchors });
   }
+  // Illustrations are background containers. Overlay marks must paint on
+  // top even when the image arrives last (M4 parallel lane).
+  const kindById = new Map(items.map((item) => [item.id, item.spec.kind]));
+  compiled.sort((left, right) => {
+    const leftImage = kindById.get(left.id) === 'image' ? 0 : 1;
+    const rightImage = kindById.get(right.id) === 'image' ? 0 : 1;
+    return leftImage - rightImage;
+  });
   return compiled;
 }

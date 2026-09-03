@@ -13,7 +13,7 @@ describe('runtime configuration', () => {
     expect(config.directorPipeline).toBe('streaming');
     expect(config.visionAuditModel).toBe('gpt-5.6-luna');
     expect(config.visionAuditReasoningEffort).toBe('low');
-    expect(config.illustrationModel).toBe('gpt-image-1.5');
+    expect(config.illustrationModel).toBe('gpt-image-2');
     expect(config.illustrationsEnabled).toBe(true);
   });
 

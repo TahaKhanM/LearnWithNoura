@@ -11,11 +11,11 @@ import {
   storyboardRunSteps,
 } from './storyboardRunner.js';
 import { startStreamingDirectedScene } from './streamingVisualRequest.js';
+import { startIllustrationLane } from './illustrationLane.js';
 import { finishTool } from './turnFloor.js';
 import {
   abandonStaleVisualRequest,
   failDirectedScene,
-  recordIllustrationMetric,
   recordVisualRequestOutcome,
 } from './visualRequestOutcomes.js';
 
@@ -287,10 +287,6 @@ function startDirectedScene(
   if (ctx.streamVisual) {
     startStreamingDirectedScene(ctx, tool, request, anchor, {
       directorHandoff: directorHandoff(),
-      fallbackToClassic: (sectionId) => startClassicDirectedScene(ctx, null, request, anchor, {
-        sectionId,
-        alreadyPreparing: true,
-      }),
     });
     return;
   }
@@ -348,7 +344,7 @@ function startClassicDirectedScene(
       accepted: true,
       status: 'preparing',
       semanticGroupId: sectionId,
-      guidance: 'The picture is being designed and checked. Keep teaching naturally about what is already visible — do not say you are waiting, do not describe the new picture, and do not call this tool again. When it is ready the board builds step by step and you will be prompted to narrate each part.',
+      guidance: 'A visual is being designed and checked. Keep teaching what is already visible — do not say you are waiting, do not describe a picture that is not yet on the board, and do not call this tool again. Overlay marks may appear first; narrate only the beats the application supplies.',
       board: state.boardContext.toolSnapshot(),
     });
   }
@@ -375,15 +371,6 @@ function startClassicDirectedScene(
       currentBoardOps: state.boardContext.visibleOps(),
       stageBrief: stage ? `${stage.id} (${stage.kind}) — ${stage.objective}` : `Lesson goal: ${ctx.lessonGoal}`,
       learnerContext: `Lesson goal: ${ctx.lessonGoal}`,
-      illustrationHooks: {
-        onPreparing: (alt) => ctx.sendClient({ type: 'illustration_status', status: 'preparing', alt }),
-        onPartial: (dataUrl, alt) => ctx.sendClient({
-          type: 'illustration_status',
-          status: 'partial',
-          alt,
-          partialDataUrl: dataUrl,
-        }),
-      },
       assetOwner: await resolveAssetOwner(ctx),
       validateScene: async (ops) => {
         const result = await preflightWithClient(ctx, {
@@ -398,7 +385,6 @@ function startClassicDirectedScene(
       },
       renderScene: (ops, semanticGroupId) => renderWithClient(ctx, ops, semanticGroupId),
     });
-    recordIllustrationMetric(ctx, result.illustration);
     if (visualRequestIsStale(ctx, epoch)) {
       recordOutcome('stale');
       staleAbandon(result.ok ? result.scene.storyboard.length : 0);
@@ -452,7 +438,9 @@ function startClassicDirectedScene(
       state.lessonState = { ...state.lessonState, activeSemanticObjectId: scene.groupId };
     }
     recordOutcome('ready');
-    ctx.sendClient({ type: 'illustration_status', status: 'ready' });
+    if (!result.illustrationBrief) {
+      ctx.sendClient({ type: 'illustration_status', status: 'ready' });
+    }
     const floorBusy = state.childHoldsFloor || state.speechInProgress || state.draftOpen;
     startStoryboardRun(ctx, {
       runId,
@@ -467,6 +455,18 @@ function startClassicDirectedScene(
       handoff: directorHandoff(),
       visualIntentStartedAtMs,
     });
+    if (result.illustrationBrief) {
+      startIllustrationLane(ctx, {
+        runId,
+        groupId: scene.groupId,
+        groupLabel: scene.groupLabel,
+        overlayOps: scene.ops,
+        overlayComplete: true,
+        brief: result.illustrationBrief,
+        epoch,
+        assetOwner: await resolveAssetOwner(ctx),
+      });
+    }
   })().catch((error) => {
     ctx.log(`session ${ctx.sessionId}: directed scene error ${String(error).slice(0, 200)}`);
     if (visualRequestIsStale(ctx, epoch)) {

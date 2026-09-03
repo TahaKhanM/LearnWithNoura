@@ -65,6 +65,17 @@ describe('M3 mechanism-only acceptance', () => {
     expect(evidence.report.accepted).toBe(true);
   });
 
+  it('still reproduces when later-milestone source fingerprints drift', () => {
+    const { generatedAt: _generatedAt, ...sources } = input;
+    const evidence = compileM3MechanismAcceptanceEvidence({
+      ...sources,
+      streamingDirectorSource: `${input.streamingDirectorSource}\n// later milestone comment\n`,
+      resultRawJson: read('server/board/eval/results/2026-09-02-drawing-m3-mechanism-acceptance.json'),
+    });
+    expect(evidence.report.accepted).toBe(true);
+    expect(evidence.report.mechanism.anchorTemplateStreamingOrder).toBe(true);
+  });
+
   it('fails if an open-set intent is captured by a template', () => {
     const tampered = JSON.parse(input.browserRawJson) as { openSetCaptures: string[] };
     tampered.openSetCaptures = ['abstract-recursion'];
