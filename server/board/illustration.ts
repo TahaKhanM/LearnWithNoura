@@ -61,7 +61,7 @@ export interface PrepareIllustrationDeps {
   now?: () => number;
   maxRetries?: number;
   /** Remaining paid generations in this lesson. Cache hits are free. */
-  generationBudgetRemaining?: number;
+  generationBudgetRemaining: number;
 }
 
 const DEFAULT_AT: [number, number] = [80, 60];
@@ -101,7 +101,7 @@ export async function prepareIllustration(
     return ok(cached, brief, alt, { cacheHit: true, latencyMs: elapsed(), imageCount: 0, totalTokens: 0 });
   }
 
-  const remaining = deps.generationBudgetRemaining ?? Number.POSITIVE_INFINITY;
+  const remaining = deps.generationBudgetRemaining ?? 0;
   if (!(remaining > 0)) {
     return fail(['illustration_budget:exhausted'], { refused: false, latencyMs: elapsed() });
   }

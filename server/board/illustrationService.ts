@@ -97,7 +97,7 @@ export function createLiveIllustrationService(options: LiveIllustrationOptions):
         store: options.store,
         model: options.imageModel,
         enabled: options.enabled,
-        generationBudgetRemaining: prepareOptions?.generationBudgetRemaining,
+        generationBudgetRemaining: prepareOptions?.generationBudgetRemaining ?? 0,
       }, brief, hooks),
     persist: (result: IllustrationPrepareOk, owner?: { parentId?: string; sessionId?: string }) =>
       persistIllustrationRecord(options.store, result, owner),
