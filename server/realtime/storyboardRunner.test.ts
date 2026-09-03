@@ -1856,6 +1856,53 @@ describe('the parallel illustration lane', () => {
     });
   });
 
+  it('falls back to one checkpoint when the illustration objectId collides and still closes the overlay run', async () => {
+    const illustrations = scriptedIllustrationPort(async () => pondPrepared('frog-label'));
+    const harness = await connectBoardLed({
+      illustrations,
+      directVisual: pondOverlayDirector(),
+    });
+    await requestCompareVisual(harness, 'collide-illustration', 'collide-illust-call');
+    await acceptLatestPreflight(harness);
+    expect(harness.boardCues()).toHaveLength(1);
+    expect(JSON.stringify(harness.boardCues()[0].payload)).toContain('frog-label');
+    expect(JSON.stringify(harness.boardCues()[0].payload)).not.toContain('"kind":"image"');
+    await acceptLatestPreflight(harness);
+
+    const imageCue = await vi.waitFor(() => {
+      const cue = harness.boardCues().find((item) => JSON.stringify(item.payload).includes('"kind":"image"'));
+      expect(cue).toBeTruthy();
+      return cue!;
+    });
+    expect(imageCue.payload).not.toMatchObject({ await_narration: true });
+    expect(harness.boardCues().filter((item) => JSON.stringify(item.payload).includes('"kind":"image"'))).toHaveLength(1);
+
+    harness.showStep(harness.boardCues().indexOf(imageCue));
+    await flushProxy();
+    expect(harness.illustrationStatuses().at(-1)?.payload).toMatchObject({ status: 'ready' });
+    expect(harness.systemNotes().filter((note) => note.includes('illustration just arrived'))).toHaveLength(1);
+
+    harness.upstream.emit({ type: 'response.done', response: { id: 'cover-illustration', status: 'completed', output: [{ type: 'function_call' }] } });
+    await flushProxy();
+    await settleUnscopedCreate(harness, 'cover-2');
+    harness.showStep(0);
+    await flushProxy();
+    const beat = harness.scopedCreates().at(-1);
+    expect(beat?.response?.instructions).toContain('The frog lives at the edge of the pond.');
+    harness.upstream.emit({ type: 'response.created', response: { id: 'overlay-beat' } });
+    harness.upstream.emit({ type: 'response.done', response: { id: 'overlay-beat', status: 'completed', output: [] } });
+    await flushProxy();
+    await vi.waitFor(() => {
+      expect(harness.scopedCreates().at(-1)).not.toBe(beat);
+      expect(harness.scopedCreates().at(-1)?.response?.instructions).toBeTruthy();
+    });
+    harness.upstream.emit({ type: 'response.created', response: { id: 'overlay-handoff' } });
+    harness.upstream.emit({ type: 'response.done', response: { id: 'overlay-handoff', status: 'completed', output: [] } });
+    await flushProxy();
+    expect(harness.progressEvents().at(-1)).toMatchObject({ status: 'completed', revealedSteps: 1, totalSteps: 1 });
+    expect(harness.boardCues().filter((item) => JSON.stringify(item.payload).includes('"kind":"image"'))).toHaveLength(1);
+  });
+
   it('passes the remaining lesson generation budget into prepare', async () => {
     const remaining: Array<number | undefined> = [];
     const illustrations: IllustrationDirectorPort = {

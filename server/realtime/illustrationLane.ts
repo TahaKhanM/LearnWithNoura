@@ -154,8 +154,10 @@ async function arriveAsFinalStep(
     await arriveAsCheckpoint(ctx, lane, step, false);
     return;
   }
+  const wasStreamOpen = run.streamOpen;
   run.streamOpen = true;
   if (!appendStoryboardRunStep(ctx, lane.runId, step)) {
+    run.streamOpen = wasStreamOpen;
     await arriveAsCheckpoint(ctx, lane, step, false);
     return;
   }

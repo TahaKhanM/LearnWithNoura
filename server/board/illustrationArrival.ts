@@ -1,9 +1,5 @@
 export const ILLUSTRATION_GENERATION_BUDGET = 2;
 
-export function canSpendIllustrationGeneration(generationsUsed: number): boolean {
-  return generationsUsed < ILLUSTRATION_GENERATION_BUDGET;
-}
-
 export function generationsSpent(result: { cacheHit: boolean; imageCount: number }): number {
   return result.cacheHit ? 0 : Math.max(0, result.imageCount);
 }
