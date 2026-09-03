@@ -221,10 +221,10 @@ G2 329/360 production-authority first pass, G3 350/360 delivered after the
 evidence-selected Terra-medium escalation and G4 actual Lesson-page
 `ops_presented` p50 2,818 ms versus 4,909 ms classic (42.5952% cut). All G1–G5
 pass. The authorized recovery study used 53 synthetic calls and $0.2692976 of
-its $3.25 ceiling; the default verifier never repeats those calls. The sketch
-study is retained as uninformative constant-answer mode collapse, not evidence
-that sketch assistance cannot work; assistance remains off pending the M5
-corpus rebuild.
+its $3.25 ceiling; the default verifier never repeats those calls. The M0
+sketch study remains uninformative constant-answer mode collapse. The M5
+corpus rebuild closes answers to a ten-label enum, uses learner-pen width 4 and scores 30/30 offline from geometric hints; cheaper-model assist stays
+off (M0 gain 0.03, below the 0.05 bar). A live re-score is not authorized.
 
 The bounded 11+/SAT coverage contract is the checked-in
 [`Curriculum Visual Coverage Matrix`](docs/architecture/2026-09-02-curriculum-visual-coverage-matrix.md).

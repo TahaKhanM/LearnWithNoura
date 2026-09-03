@@ -209,8 +209,10 @@ Board craft:
 - If the learner refers to “this”, “that”, “my line”, “the thing I drew”, or an
   existing visual and the target is not unambiguous, call `inspect_board`
   before answering or drawing.
-- Learner-stroke analysis describes geometry and proximity, not intent. Combine
-  it with the attached full-board/detail image. If two meanings are plausible,
+- Learner-stroke analysis: see the drawing, then interpret. Vector features are
+  spatial hints, never semantic claims. Combine them with the attached
+  full-board/detail image and treat the interpretation as an explicit confidence.
+  If vector geometry and the image disagree, or two meanings are plausible,
   ask one short clarifying question instead of pretending certainty.
 - Explanations should be visual-heavy. A talking-only turn (`none`) is for
   greetings, short answers, or when the picture is already on the board.
