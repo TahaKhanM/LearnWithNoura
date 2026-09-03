@@ -12,7 +12,8 @@
 - Deployment Protection: Standard Vercel Authentication (`all_except_custom_domains`).
 - Stable protected Preview alias: `https://noura-preview-mtk2982007.vercel.app`
 - Public v0: `https://learnwithnoura.com`; `www` permanently redirects to the apex.
-- Current login-gated public-v0 deployment: `dpl_AbnroCy4guyi7Q4vZbh7mJxg8ZXZ`, built from the current recovery working tree based on revision `2ce3e0bf4a7c7ac85adfaf6f89e0b41bcf2e878d`.
+- Rollback target (prior login-gated v0): `dpl_AbnroCy4guyi7Q4vZbh7mJxg8ZXZ`, revision `2ce3e0bf4a7c7ac85adfaf6f89e0b41bcf2e878d`.
+- Current login-gated public-v0 deployment: `dpl_Gn7As8XjzZv7vcZoRKowGp1UAofh`, revision `08a8ace27b5db10cc104c6d484b4f3be70e25eef` (Drawing vNext through M7 + auth overlay; `NOURA_DIRECTOR_PIPELINE=streaming`; illustrations on). Post-deploy `/healthz` reports degraded durable storage (`noura_app` tenant ENOTFOUND — pre-existing); provider smoke authorized but not executed pending DB fix and local demo credentials. Evidence: `docs/operations/2026-09-03-drawing-vnext-production-v0-deploy-handoff.md`.
 
 Do not print or download Production secrets into tracked files. `.vercel/`, `.env*` and databases are ignored.
 
