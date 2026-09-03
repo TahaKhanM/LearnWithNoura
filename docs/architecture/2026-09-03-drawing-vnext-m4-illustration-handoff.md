@@ -17,14 +17,18 @@
 
 ## Offline evidence
 
-- `npm run gate:quick`: 869 tests passed. Zero provider calls.
+- `npm run gate:quick`: 865 tests passed after the follow-up. Zero provider calls.
 - Scripted doubles: overlay-then-image, image-ready-before-overlays, slow checkpoint, generation failure, budget remaining=2, generate skipped at remaining=0.
-- `npx playwright test tests/e2e/illustration-arrival.spec.ts`: 2 passed (fake transport, `NOURA_LESSON_COMPILER=fixture`). Screenshots inspected: preparing banner; overlay `frog` with banner up; banner gone on ready with overlay remaining; failed banner with overlay remaining.
+- `npm run test:e2e`: 30 passed, including `tests/e2e/illustration-arrival.spec.ts`. Screenshots inspected: preparing banner; overlay `frog` with banner up; banner gone on ready with overlay remaining; failed banner with overlay remaining.
+- Offline eval verifiers (`test:director-eval` through `audit:m7-acceptance`) passed. M7 remains `accepted: false` on the spend incident.
+- `npm run test:visual`: 12 home/lesson snapshots passed. 48 `/dev/board` harness snapshots fail because M7 added fixture buttons the baselines do not include. Diffs are chrome, not board geometry. Baselines were not refreshed.
+- `npm audit --omit=dev`: 1 moderate `qs` advisory in a transitive dependency; lockfile unchanged.
 
 ## Deferred
 
 - One authorized live `gpt-image-2` trace with latency + cost on `illustration_generation`. Not run. Do not start it without a fresh itemized cap.
 - M7 spend incident remains unratified; M7 `accepted` stays false.
+- Harness visual baselines for M7 chrome.
 
 ## Next
 
