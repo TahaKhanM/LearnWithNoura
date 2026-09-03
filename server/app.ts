@@ -34,8 +34,18 @@ import {
 import { readRuntimeConfig, productionReadinessErrors, EVENT_SCHEMA_VERSION } from './runtimeConfig.js';
 import { createRepositoryRuntime } from './store/createRepository.js';
 import { capabilityFromProtocols, SecurityBoundary } from './security.js';
+import { assertProviderStartAllowed } from './providerStartGuard.js';
 
 loadEnv({ override: false });
+
+assertProviderStartAllowed({
+  apiKey: process.env.OPENAI_API_KEY,
+  lessonCompiler: process.env.NOURA_LESSON_COMPILER,
+  argv: process.argv,
+  vercel: process.env.VERCEL,
+  authorizedLiveRun: process.env.NOURA_AUTHORIZED_LIVE_RUN === 'true',
+  authorizedM2Smoke: process.env.NOURA_AUTHORIZED_M2_LIVE_SMOKE === 'true',
+});
 
 export const runtimeConfig = readRuntimeConfig();
 const readinessErrors = productionReadinessErrors(runtimeConfig);
