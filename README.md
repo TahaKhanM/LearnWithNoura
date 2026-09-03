@@ -10,7 +10,7 @@ Canonical production origin: [https://learnwithnoura.com](https://learnwithnoura
 | --- | --- | --- |
 | Local | Synthetic development and private single-host demonstrations | Supported with SQLite; microphone/acoustic targets remain hardware-unverified. |
 | Vercel Preview | Access-gated synthetic UI and visual-fixture evaluation | Protected at `noura-preview-mtk2982007.vercel.app`; interactive lessons are disabled because storage is ephemeral and `/healthz` reports degraded. |
-| Public v0 | Full-product synthetic demonstrations | Live at `learnwithnoura.com`. Real voice/WSS, confirmed-speech interruption, persistent tutor/learner board, Realtime image grounding, fallback/tools, evidence, managed Postgres, immutable ending and Parent summary have deployed synthetic evidence. |
+| Public v0 | Login-gated synthetic demonstrations | Live at `learnwithnoura.com`. A server-verified demo account is required before learner/session APIs are available. Real voice/WSS, confirmed-speech interruption, persistent tutor/learner board, Realtime image grounding, fallback/tools, evidence, managed Postgres, immutable ending and Parent summary have deployed synthetic evidence. |
 | Full Production | Real parent/child use | Still blocked fail-closed until real parent authentication is selected, privacy/safety operations are configured and ZDR evidence exists for any under-13 mode. |
 
 Do not use real child details, recordings or transcripts in the current build. Noura does not claim legal compliance or production child readiness.
@@ -88,7 +88,10 @@ The live journey is never authorized or executed by the default gates:
 ```bash
 npm run test:smoke-report
 # DO NOT RUN without explicit deployment and live-provider authorization:
-NOURA_BASE_URL=https://authorized-origin.example npm run e2e:live -- --authorized-live-run --text-only
+NOURA_BASE_URL=https://authorized-origin.example \
+NOURA_SMOKE_LOGIN_EMAIL=... \
+NOURA_SMOKE_LOGIN_PASSWORD=... \
+npm run e2e:live -- --authorized-live-run --text-only
 ```
 
 `NOURA_BASE_URL` must be an HTTP(S) origin only: no credentials, non-root path,
@@ -110,7 +113,10 @@ and `npm run test:smoke-report` exercise report construction offline and never
 establish live-provider evidence. Do not run the normal journey, deploy or
 make paid/provider calls without explicit authorization.
 
-For an access-gated `*.vercel.app` deployment, an explicitly authorized
+When application login is enabled, the live harness requires the demo email
+and password through `NOURA_SMOKE_LOGIN_EMAIL` and
+`NOURA_SMOKE_LOGIN_PASSWORD`; it never copies them into the retained report.
+For a Vercel-access-gated `*.vercel.app` deployment, an explicitly authorized
 operator may supply Vercel's 32-character automation secret through
 `NOURA_VERCEL_PROTECTION_BYPASS`. The harness exchanges it server-side for the
 host-bound `_vercel_jwt` cookie before opening a page; the raw secret is not
@@ -278,7 +284,7 @@ the [M3 handoff](docs/architecture/2026-09-02-drawing-vnext-m3-mechanism-handoff
 ## Known blockers
 
 - The complete domain repository has synchronous SQLite and asynchronous managed-Postgres implementations. The deployed private Supabase schema and least-privilege app role pass parent/session/event/evidence, immutable-end and fallback-staging contracts.
-- Public v0 can issue a long-lived signed pseudonymous guest-parent cookie, while sessions remain parent-scoped and lessons use short-lived signed capabilities. A real external identity provider is still required for full Production.
+- Public v0 requires the single server-configured demo account and issues a signed, `HttpOnly`, `Secure`, `SameSite=Lax` parent session; sessions remain parent-scoped and lessons use short-lived signed capabilities. This is appropriate for controlled demonstrations, not multi-user identity. A real external identity provider is still required for full Production.
 - In-memory rate limits are a local/Preview layer, not the final multi-instance Production control.
 - ZDR/account evidence, legal decisions, retention policy approval, target-hardware audio and real-minor safety evaluation are external gates.
 - Native Vercel WebSockets are currently a public beta and connections terminate at Function duration; reconnect is expected.

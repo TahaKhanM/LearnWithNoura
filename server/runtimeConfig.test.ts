@@ -159,4 +159,27 @@ describe('runtime configuration', () => {
     expect(config).toMatchObject({ production: true, v0: true, guestAccess: true, syntheticOnly: true });
     expect(productionReadinessErrors(config, env)).toEqual([]);
   });
+
+  it('turns off guest issuance and fails closed when required login credentials are incomplete', () => {
+    const env = {
+      NOURA_DEPLOYMENT_MODE: 'production-v0',
+      DATABASE_URL: 'postgres://fixture',
+      OPENAI_API_KEY: 'fixture',
+      NOURA_STORAGE_ADAPTER: 'postgres',
+      NOURA_LESSON_CAPABILITY_SECRET: 'test-secret-at-least-32-characters',
+      NOURA_REQUIRE_LOGIN: 'true',
+    };
+    const incomplete = readRuntimeConfig(env);
+    expect(incomplete).toMatchObject({ loginRequired: true, guestAccess: false, demoAuthenticationConfigured: false });
+    expect(productionReadinessErrors(incomplete, env)).toContain(
+      'login is required but demo authentication credentials are incomplete',
+    );
+
+    const configuredEnv = {
+      ...env,
+      NOURA_DEMO_AUTH_EMAIL: 'demo@example.test',
+      NOURA_DEMO_AUTH_PASSWORD_SCRYPT: `scrypt-v1$${Buffer.alloc(16, 1).toString('base64url')}$${Buffer.alloc(32, 2).toString('base64url')}`,
+    };
+    expect(productionReadinessErrors(readRuntimeConfig(configuredEnv), configuredEnv)).toEqual([]);
+  });
 });

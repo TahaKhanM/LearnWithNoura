@@ -1,19 +1,30 @@
-import { createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
+import { createHmac, randomBytes, randomUUID, scrypt as scryptCallback, timingSafeEqual } from 'node:crypto';
+import { promisify } from 'node:util';
 import type { NextFunction, Request, Response } from 'express';
 import type { ApiSecurity } from './api.js';
 import type { RuntimeConfig } from './runtimeConfig.js';
 
 interface SignedPayload { aud: 'parent' | 'lesson'; sub: string; childId?: string; parentId?: string; exp: number; nonce: string }
 const localSecret = randomBytes(32).toString('base64url');
+const scrypt = promisify(scryptCallback);
+const PARENT_COOKIE = 'noura_parent';
 
 export class SecurityBoundary {
   private readonly secret: string;
   private readonly allowedOrigins: Set<string>;
+  private readonly demoEmail: string | null;
+  private readonly demoPasswordHash: string | null;
+  private readonly demoParentId: string | null;
   private buckets = new Map<string, { count: number; resetAt: number }>();
   private requestParents = new WeakMap<Request, string>();
 
   constructor(private readonly runtime: RuntimeConfig, env: NodeJS.ProcessEnv = process.env) {
     this.secret = env.NOURA_LESSON_CAPABILITY_SECRET || env.NOURA_AUTH_SECRET || localSecret;
+    this.demoEmail = env.NOURA_DEMO_AUTH_EMAIL?.trim().toLowerCase() || null;
+    this.demoPasswordHash = env.NOURA_DEMO_AUTH_PASSWORD_SCRYPT?.trim() || null;
+    this.demoParentId = this.demoEmail
+      ? `demo-${createHmac('sha256', this.secret).update(`parent:${this.demoEmail}`).digest('base64url').slice(0, 32)}`
+      : null;
     const configured = (env.NOURA_ALLOWED_ORIGINS ?? '').split(',').map((value) => value.trim()).filter(Boolean);
     this.allowedOrigins = new Set([
       'https://learnwithnoura.com',
@@ -36,13 +47,20 @@ export class SecurityBoundary {
     if (!this.runtime.production) return 'local-synthetic-parent';
     const attached = this.requestParents.get(request);
     if (attached) return attached;
-    const token = parseCookies(request.headers.cookie ?? '').noura_parent;
+    const token = parseCookies(request.headers.cookie ?? '')[PARENT_COOKIE];
     const payload = token ? this.verify(token, 'parent') : null;
+    if (this.runtime.loginRequired) {
+      return payload?.sub && payload.sub === this.demoParentId ? payload.sub : null;
+    }
     return payload?.sub ?? null;
   }
 
   issueParentSession(parentId: string): { value: string; attributes: string } {
-    const maxAge = this.runtime.guestAccess ? 30 * 24 * 60 * 60 : 30 * 60;
+    const maxAge = this.runtime.loginRequired
+      ? 12 * 60 * 60
+      : this.runtime.guestAccess
+        ? 30 * 24 * 60 * 60
+        : 30 * 60;
     const value = this.sign({ aud: 'parent', sub: parentId, exp: Date.now() + maxAge * 1000, nonce: randomBytes(12).toString('base64url') });
     return { value, attributes: `Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${maxAge}` };
   }
@@ -53,16 +71,40 @@ export class SecurityBoundary {
       next();
       return;
     }
-    const token = parseCookies(request.headers.cookie ?? '').noura_parent;
+    const token = parseCookies(request.headers.cookie ?? '')[PARENT_COOKIE];
     const existing = token ? this.verify(token, 'parent') : null;
     const parentId = existing?.sub ?? `guest-${randomUUID()}`;
     this.requestParents.set(request, parentId);
     if (!existing) {
       const session = this.issueParentSession(parentId);
-      response.appendHeader('Set-Cookie', `noura_parent=${encodeURIComponent(session.value)}; ${session.attributes}`);
+      response.appendHeader('Set-Cookie', `${PARENT_COOKIE}=${encodeURIComponent(session.value)}; ${session.attributes}`);
     }
     next();
   };
+
+  requiresLogin(): boolean {
+    return this.runtime.loginRequired;
+  }
+
+  configuredLoginEmail(): string | null {
+    return this.demoEmail;
+  }
+
+  async verifyDemoLogin(email: string, password: string): Promise<boolean> {
+    const parsed = parseScryptHash(this.demoPasswordHash);
+    if (!this.demoEmail || !parsed || password.length > 512) return false;
+    const derived = await scrypt(password, parsed.salt, parsed.expected.length) as Buffer;
+    const passwordMatches = derived.length === parsed.expected.length && timingSafeEqual(derived, parsed.expected);
+    return email.trim().toLowerCase() === this.demoEmail && passwordMatches;
+  }
+
+  issueDemoParentSession(): { value: string; attributes: string } | null {
+    return this.demoParentId ? this.issueParentSession(this.demoParentId) : null;
+  }
+
+  clearParentCookie(): string {
+    return `${PARENT_COOKIE}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`;
+  }
 
   verifyLessonCapability(token: string | null, sessionId: string): SignedPayload | null {
     if (!token) return null;
@@ -126,6 +168,20 @@ export class SecurityBoundary {
       if (payload.aud !== audience || payload.exp <= Date.now() || !payload.sub || !payload.nonce) return null;
       return payload;
     } catch { return null; }
+  }
+}
+
+function parseScryptHash(value: string | null): { salt: Buffer; expected: Buffer } | null {
+  if (!value) return null;
+  const [version, saltText, hashText] = value.split('$');
+  if (version !== 'scrypt-v1' || !saltText || !hashText) return null;
+  try {
+    const salt = Buffer.from(saltText, 'base64url');
+    const expected = Buffer.from(hashText, 'base64url');
+    if (salt.length < 16 || expected.length !== 32) return null;
+    return { salt, expected };
+  } catch {
+    return null;
   }
 }
 

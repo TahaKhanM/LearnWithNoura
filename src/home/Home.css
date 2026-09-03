@@ -27,6 +27,8 @@
 .home__logo { width: 58px; height: 58px; flex: 0 0 auto; }
 .home__head h1 { margin: -3px 0 0; font-size: clamp(30px, 5vw, 40px); line-height: 1; letter-spacing: -0.035em; }
 .home__head p { margin: 6px 0 0; color: var(--ink-soft); font-size: 15px; }
+.home__signout { margin-left: auto; min-height: 44px; border: 0; background: transparent; color: var(--ink-soft); font: inherit; font-size: 13.5px; font-weight: 650; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+.home__signout:hover { color: var(--blue-deep); }
 .home__head .home__eyebrow { margin: 0 0 5px; color: var(--blue-deep); font-size: 12px; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase; }
 
 .home__boundary {
@@ -149,6 +151,7 @@
   .home { padding: 0; }
   .home__card { min-height: 100%; border: 0; border-radius: 0; padding: 22px 18px 34px; }
   .home__head { align-items: flex-start; }
+  .home__signout { margin-left: 0; white-space: nowrap; }
   .home__head p { font-size: 14px; }
   .home__add { grid-template-columns: 1fr; }
   .home__add > button { width: 100%; margin-top: 0; }

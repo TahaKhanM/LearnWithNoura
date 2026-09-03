@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { projectConceptHistories, type ConceptStatus, type EvidenceOpportunityKind, type ResponseTaxonomy } from '../../shared/pedagogy';
+import { useAuth } from '../auth/authContext';
 import { useRouter } from '../routerContext';
 import './Parent.css';
 
@@ -42,6 +43,7 @@ function statusFor(status: ConceptStatus): { label: string; tone: string } {
 
 export function ParentPage() {
   const { navigate } = useRouter();
+  const { required: loginRequired, signOut } = useAuth();
   const query = useMemo(() => new URLSearchParams(window.location.search), []);
   const requestedSession = query.get('session');
   const [children, setChildren] = useState<Child[]>([]);
@@ -180,11 +182,14 @@ export function ParentPage() {
         <header className="parent__head">
           <div className="parent__head-row">
             <button className="parent__link" onClick={home}>← Parent setup</button>
-            <label className="parent__switch-label">Learner
-              <select value={child.id} onChange={(event) => chooseLearner(event.target.value)}>
-                {children.map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}
-              </select>
-            </label>
+            <div className="parent__head-actions">
+              <label className="parent__switch-label">Learner
+                <select value={child.id} onChange={(event) => chooseLearner(event.target.value)}>
+                  {children.map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}
+                </select>
+              </label>
+              {loginRequired && <button className="parent__link" type="button" onClick={() => void signOut()}>Sign out</button>}
+            </div>
           </div>
           <p className="parent__eyebrow">Noura · Parent Area</p>
           <h1>{child.name}{child.age ? <span className="parent__age"> · age {child.age}</span> : null}</h1>

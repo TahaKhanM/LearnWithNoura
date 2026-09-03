@@ -45,6 +45,8 @@ Environment:
   NOURA_PROVIDER_REPORTED_COST_USD     Optional user-supplied USD amount copied from
                                        the provider billing surface
   NOURA_VERCEL_PROTECTION_BYPASS       Optional 32-character bypass for HTTPS vercel.app targets
+  NOURA_SMOKE_LOGIN_EMAIL              Login email when the target requires demo access
+  NOURA_SMOKE_LOGIN_PASSWORD           Login password when the target requires demo access
 
 Showing this help or using --report-fixture is offline preparation and does not verify live provider evidence.
 Normal journey execution opens the application, may call its configured provider, and must not run without
@@ -311,9 +313,24 @@ async function runLiveJourney(url, { textOnly, wavPath }, vercelProtectionBypass
 
     await page.goto(new URL('/', url).href, { waitUntil: 'domcontentloaded' });
     await page.waitForSelector(
-      '[data-testid=goal-input], .home__child, .home__add',
+      '[data-testid=login-form], [data-testid=goal-input], .home__child, .home__add',
       { timeout: 15_000 },
     );
+    if (await page.locator('[data-testid=login-form]').count()) {
+      const email = process.env.NOURA_SMOKE_LOGIN_EMAIL?.trim() ?? '';
+      const password = process.env.NOURA_SMOKE_LOGIN_PASSWORD ?? '';
+      if (!email || !password) {
+        throw new SmokeReportError(
+          'login_credentials_required',
+          'The target requires login credentials for the authorized synthetic journey.',
+        );
+      }
+      await page.fill('#login-email', email);
+      await page.fill('#login-password', password);
+      await page.click('[data-testid=login-form] button[type=submit]');
+      await page.waitForSelector('[data-testid=login-form]', { state: 'detached', timeout: 15_000 });
+      await page.waitForSelector('[data-testid=goal-input], .home__child, .home__add', { timeout: 15_000 });
+    }
     const navigatedOrigin = new URL(page.url()).origin;
     mark('home_loaded');
     await page.screenshot({ path: `${shots}/e2e-home.png` });
