@@ -27,6 +27,7 @@ import {
   type ShutdownDisposition,
 } from './realtime/lifecycle.js';
 import { assertRealtimePromptReadable } from './realtime/instructions.js';
+import { formatRealtimeIncident, safeIncidentReason } from './realtime/incidentLogging.js';
 import {
   createFixtureCompilationService,
   createLiveCompilationService,
@@ -509,7 +510,12 @@ server.on('upgrade', async (request, socket, head) => {
       ...(illustrationService ? { illustrations: illustrationService } : {}),
       log: (line) => console.log(`[realtime] ${line}`),
       onLifecycle: (lifecycle) => proxyLifecycles.register(lifecycle),
-    }).catch(() => {
+    }).catch((error) => {
+      console.error(`[realtime] ${formatRealtimeIncident('realtime_proxy_setup_error', {
+        sessionId,
+        stage: 'proxy_setup',
+        reason: safeIncidentReason(error),
+      })}`);
       try { client.close(1011, 'lesson service unavailable'); } catch { /* already closed */ }
     });
     proxyLifecycles.trackConnection(connection);

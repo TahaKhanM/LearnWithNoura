@@ -114,6 +114,7 @@ async function connectBoardLed(
   const session = repo.createSession(child.id, 'fractions');
   seedBoardLedLesson(repo, session.id);
   const metrics: MetricObservation[] = [];
+  const logs: string[] = [];
   const client = new FakeClient();
   const { wrapRepo, ...proxyOptions } = options;
   await connectRealtimeProxy(client as never, {
@@ -124,6 +125,7 @@ async function connectBoardLed(
       appendMetric: async (_sessionId, observation) => { metrics.push(observation); return metrics.length; },
       hasPriorReleasedSessionStart: async () => false,
     },
+    log: (line) => logs.push(line),
     ...proxyOptions,
   });
   const active = { ...identity, sessionId: session.id };
@@ -132,7 +134,7 @@ async function connectBoardLed(
   const upstream = FakeUpstream.latest;
 
   return {
-    repo, session, client, upstream, active, metrics,
+    repo, session, client, upstream, active, metrics, logs,
     emitClient(type: string, payload: Record<string, unknown>) {
       client.emit('message', JSON.stringify(createRuntimeEvent(active, sequence.value++, type, payload)));
     },
@@ -273,6 +275,8 @@ describe('the storyboard runner', () => {
     });
     await flushProxy();
     expect(harness.toolOutput('busy-call')).toMatchObject({ ok: false, reason: expect.stringContaining('already in progress') });
+    expect(harness.logs).toContainEqual(expect.stringContaining('"event":"visual_tool_rejected"'));
+    expect(harness.logs).toContainEqual(expect.stringContaining('"reason":"build_in_progress"'));
     harness.upstream.emit({ type: 'error', error: { code: 'conversation_already_has_active_response', message: 'Conversation already has an active response' } });
     await flushProxy();
 
@@ -414,6 +418,9 @@ describe('the storyboard runner', () => {
       expect.objectContaining({ dimensions: expect.objectContaining({ outcome: 'abandoned', source: 'anchor' }) }),
     ]);
     expect(harness.systemNotes().some((note) => note.includes('board build stopped early'))).toBe(true);
+    expect(harness.logs).toContainEqual(expect.stringContaining('"event":"storyboard_abandoned"'));
+    expect(harness.logs).toContainEqual(expect.stringContaining('"stage":"reveal_timeout"'));
+    expect(harness.logs).toContainEqual(expect.stringContaining('"reason":"ops_shown_timeout"'));
     // The tutor is brought back to the floor to continue with what is
     // visible instead of stalling silently.
     expect(harness.responseCreates()).toHaveLength(1);
@@ -434,6 +441,9 @@ describe('the storyboard runner', () => {
     const notes = harness.systemNotes();
     expect(notes.filter((note) => note.includes('Board checkpoint rejected'))).toHaveLength(1);
     expect(notes.filter((note) => note.includes('board build stopped early'))).toEqual([]);
+    expect(harness.logs).toContainEqual(expect.stringContaining('"event":"storyboard_abandoned"'));
+    expect(harness.logs).toContainEqual(expect.stringContaining('"stage":"visibility"'));
+    expect(harness.logs).toContainEqual(expect.stringContaining('"reason":"client_rejected"'));
   });
 
   it('builds a Director scene the same way, announced beside the anchor', async () => {
@@ -911,6 +921,68 @@ describe('the storyboard runner', () => {
       expect.objectContaining({ name: 'director_stream_first_op', dimensions: { model: 'gpt-5.6-terra', reasoningEffort: 'low' } }),
       expect.objectContaining({ name: 'vision_audit_outcome', dimensions: { model: 'gpt-5.6-luna', reasoningEffort: 'low', outcome: 'rejected' } }),
     ]));
+    expect(harness.logs).toContainEqual(expect.stringContaining('"event":"streaming_visual_audit_rejected"'));
+    expect(harness.logs).toContainEqual(expect.stringContaining('"runId":"run-audit-case"'));
+  });
+
+  it('logs a null client raster while the advisory audit releases the storyboard', async () => {
+    const inspect = vi.fn(async () => ({ outcome: 'approved' as const, issues: [] }));
+    const streamVisual: StreamingBoardDirector = (request, runtime) => runStreamingDirector({
+      model: { streamPropose: () => (async function* () { yield JSON.stringify(auditedProposal()); })() },
+      validateScene: async () => ({ ok: false, issues: ['request browser port required'] }),
+      renderScene: async () => null,
+      composition: { model: 'gpt-5.6-terra', reasoningEffort: 'low' },
+    }, request, runtime);
+    const harness = await connectBoardLed({
+      streamVisual,
+      visionAudit: { model: 'gpt-5.6-luna', reasoningEffort: 'low', inspect },
+    });
+    harness.upstream.emit({ type: 'response.created', response: { id: 'cover-null-raster' } });
+    harness.upstream.emit({
+      type: 'response.function_call_arguments.done',
+      response_id: 'cover-null-raster',
+      call_id: 'null-raster-call',
+      name: 'request_visual',
+      arguments: JSON.stringify({
+        schemaVersion: '3.0.0', requestId: 'null-raster', action: 'compare',
+        purpose: 'Audit a relationship', idea: 'two related boxes', density: 'minimal',
+      }),
+    });
+    await flushProxy();
+    const firstPreflight = harness.client.sent.find((event) => event.type === 'visual_preflight');
+    harness.emitClient('visual_preflight_result', {
+      preflight_id: (firstPreflight!.payload as { preflight_id?: string }).preflight_id,
+      accepted: true,
+      reasons: [],
+    });
+    await flushProxy();
+    const render = harness.client.sent.find((event) => event.type === 'visual_render');
+    harness.emitClient('visual_render_result', {
+      render_id: (render!.payload as { render_id?: string }).render_id,
+      image_data_url: '',
+    });
+    await flushProxy();
+    const preflights = harness.client.sent.filter((event) => event.type === 'visual_preflight');
+    expect(preflights).toHaveLength(2);
+    harness.emitClient('visual_preflight_result', {
+      preflight_id: (preflights[1].payload as { preflight_id?: string }).preflight_id,
+      accepted: true,
+      reasons: [],
+    });
+    await flushProxy();
+    harness.upstream.emit({
+      type: 'response.done',
+      response: { id: 'cover-null-raster', status: 'completed', output: [{ type: 'function_call' }] },
+    });
+    await flushProxy();
+    await settleUnscopedCreate(harness, 'cover-null-raster-followup');
+    await vi.waitFor(() => expect(harness.boardCues()).toHaveLength(1));
+
+    expect(inspect).not.toHaveBeenCalled();
+    expect(harness.logs).toContainEqual(expect.stringContaining('"event":"streaming_visual_render_unavailable"'));
+    expect(harness.logs).toContainEqual(expect.stringContaining('"stage":"audit_gate"'));
+    expect(harness.repo.listEvents(harness.session.id).filter((event) => event.type === 'directed_scene')).toHaveLength(1);
+    expect(harness.progressEvents().every((event) => event.status !== 'abandoned')).toBe(true);
   });
 
   it('times out only at the real step-2 boundary and then completes once', async () => {

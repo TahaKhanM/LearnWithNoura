@@ -44,11 +44,24 @@ describe('sideband attach', () => {
     repo.addEvent(session.id, 'voice_call', { callId: 'rtc_attach_1' });
     const client = new FakeClient();
     let seenUrl = '';
+    let reattached: FakeUpstream | null = null;
     await connectRealtimeProxy(client as never, {
       apiKey: 'offline-fixture', model: 'gpt-realtime-2.1', repo, sessionId: session.id,
-      createUpstream: (url) => { seenUrl = url; return new FakeUpstream(url) as never; },
+      createUpstream: (url) => {
+        seenUrl = url;
+        reattached = new FakeUpstream(url);
+        return reattached as never;
+      },
     });
     expect(seenUrl).toBe('wss://api.openai.com/v1/realtime?call_id=rtc_attach_1');
+    reattached!.onopen?.();
+    const update = JSON.parse(reattached!.sent[0]) as {
+      type: string;
+      session: { instructions: string; tools: Array<{ name: string }> };
+    };
+    expect(update.type).toBe('session.update');
+    expect(update.session.instructions).toContain('## Opening anchor gate (mandatory)');
+    expect(update.session.tools.map((tool) => tool.name)).toContain('request_visual');
   });
 
   it('adopts the bootstrap sideband and replays its buffered frames into the coordinator', async () => {
