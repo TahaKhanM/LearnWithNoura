@@ -18,6 +18,7 @@ import {
   failDirectedScene,
   recordVisualRequestOutcome,
 } from './visualRequestOutcomes.js';
+import { formatRealtimeIncident } from './incidentLogging.js';
 
 export { anchorHandoff } from './anchorStoryboard.js';
 
@@ -97,7 +98,13 @@ export function prepareExplicitLearnerVisualRequest(
     ctx.state.boardContext.visibleObjectIdList().length > 0,
   );
   if (!request) return null;
-  if (ctx.state.storyboardRun) abandonStoryboardRun(ctx, { injectNote: false });
+  if (ctx.state.storyboardRun) {
+    abandonStoryboardRun(ctx, {
+      injectNote: false,
+      stage: 'visual_request',
+      reason: 'superseded_by_explicit_learner_request',
+    });
+  }
   const persisted = Promise.resolve(ctx.repo.addEvent(ctx.sessionId, 'learner_visual_request', {
     requestId: request.requestId,
     action: request.action,
@@ -127,7 +134,13 @@ export function scheduleExplicitLearnerVisualRequest(
   ctx: CoordinatorContext,
   request: VisualRequest,
 ): void {
-  if (ctx.state.storyboardRun) abandonStoryboardRun(ctx, { injectNote: false });
+  if (ctx.state.storyboardRun) {
+    abandonStoryboardRun(ctx, {
+      injectNote: false,
+      stage: 'visual_request',
+      reason: 'superseded_before_explicit_schedule',
+    });
+  }
   if (ctx.state.planStagedThisTurn || ctx.state.planAttemptsThisTurn >= 2) return;
   const anchor = anchorGroupId(ctx) ?? 'lesson-anchor';
   startDirectedScene(ctx, null, request, anchor);
@@ -208,6 +221,7 @@ export async function handleVisualRequest(
   // establish | compare: structural scene work. One build at a time, one
   // plan per tutor turn; the server owns sections and all geometry.
   if (state.storyboardRun) {
+    logVisualToolRejection(ctx, request, callId, responseId, 'build_in_progress');
     finishTool(ctx, callId, responseId, {
       ok: false,
       accepted: false,
@@ -218,6 +232,7 @@ export async function handleVisualRequest(
   }
   const planActiveThisTurn = state.planStagedThisTurn && state.visualPlanState !== 'failed';
   if (planActiveThisTurn || state.planAttemptsThisTurn >= 2) {
+    logVisualToolRejection(ctx, request, callId, responseId, 'one_plan_per_turn');
     finishTool(ctx, callId, responseId, {
       ok: false,
       accepted: false,
@@ -231,6 +246,7 @@ export async function handleVisualRequest(
   const anchor = anchorGroupId(ctx) ?? 'lesson-anchor';
   if (request.action === 'establish') {
     if (state.boardContext.hasGroup(anchor)) {
+      logVisualToolRejection(ctx, request, callId, responseId, 'anchor_already_present');
       finishTool(ctx, callId, responseId, {
         ok: false,
         accepted: false,
@@ -247,6 +263,25 @@ export async function handleVisualRequest(
     }
   }
   startDirectedScene(ctx, { callId, responseId }, request, anchor);
+}
+
+function logVisualToolRejection(
+  ctx: CoordinatorContext,
+  request: VisualRequest,
+  callId: string,
+  responseId: string,
+  reason: 'build_in_progress' | 'one_plan_per_turn' | 'anchor_already_present',
+): void {
+  ctx.log(formatRealtimeIncident('visual_tool_rejected', {
+    sessionId: ctx.sessionId,
+    requestId: request.requestId,
+    callId,
+    responseId,
+    action: request.action,
+    stage: 'request_visual',
+    reason,
+    planAttempts: ctx.state.planAttemptsThisTurn,
+  }));
 }
 
 /**

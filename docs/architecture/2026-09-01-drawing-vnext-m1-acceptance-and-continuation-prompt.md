@@ -396,6 +396,21 @@ Acceptance: per-domain blended delivered validity ≥95%; templates-off gate
 passed; re-representation verified in the browser; latency targets held;
 all gates green.
 
+## 2026-09-04 opening-anchor production clarification
+
+For a `board_led` lesson whose Current stage has board purpose
+`establish_anchor` and whose anchor is not yet visible, the voice tutor's
+opening response has a mandatory ordering: one short greeting, then a
+same-response `request_visual` call with action `establish`, before any
+substantive explanation, `propose_teaching_move`, or learner question. The
+voice tutor still supplies intent only; the compiled anchor, deterministic
+validation, storyboard visibility protocol, and permanence rules remain the
+sole path to visible work. This ordering is pinned by
+`server/realtime/promptConsistency.test.ts` after production session
+`350f7a79-857d-4d81-920b-b29d3d49ee0b` persisted ordinary lesson/tool
+activity but no visual ingress or downstream drawing events. Live recovery
+is not proven until the mandated post-deploy provider smoke passes.
+
 ## Unchanged constraints
 
 Everything in the original prompt's "Non-negotiable invariants", "Browser

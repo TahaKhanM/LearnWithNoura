@@ -82,6 +82,12 @@ describe('realtime prompt / tool-surface consistency', () => {
     expect(prompt).not.toMatch(/create the lesson blueprint/i);
   });
 
+  it('makes the opening anchor request an explicit same-response gate', () => {
+    expect(prompt).toContain('## Opening anchor gate (mandatory)');
+    expect(prompt).toMatch(/Current stage[\s\S]*?`establish_anchor`[\s\S]*?same response[\s\S]*?`request_visual`/i);
+    expect(prompt).toMatch(/before[\s\S]*?`propose_teaching_move`[\s\S]*?before[\s\S]*?question/i);
+  });
+
   it('keeps the Board Director available in conversation-led lessons', () => {
     expect(prompt).toContain('conversation_led');
     expect(prompt).toContain('request_visual');
