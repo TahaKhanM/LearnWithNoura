@@ -5,6 +5,7 @@ import type { CoordinatorContext } from './coordinatorContext.js';
 import { addBounded } from './responseRegistry.js';
 import { sendResponseCreate, tutorFloorIsFree } from './turnFloor.js';
 import { recordVisualSceneComplete } from './visualTelemetry.js';
+import { formatRealtimeIncident } from './incidentLogging.js';
 
 /**
  * The interleaved reveal-narrate engine. One runner plays ANY storyboard —
@@ -441,7 +442,11 @@ async function sendStepCue(ctx: CoordinatorContext, tagResponseId: string | null
   } catch (error) {
     if (state.storyboardRun === run) {
       ctx.log(`session ${ctx.sessionId}: storyboard step persistence failed ${String(error).slice(0, 200)}`);
-      abandonStoryboardRun(ctx, { injectNote: true });
+      abandonStoryboardRun(ctx, {
+        injectNote: true,
+        stage: 'step_persistence',
+        reason: 'semantic_scene_write_failed',
+      });
     }
   } finally {
     run.stepCueCreateInFlight = false;
@@ -495,7 +500,11 @@ async function onStepVisibility(ctx: CoordinatorContext, run: StoryboardRunState
   if (!shown) {
     // The client already recorded the rejection and injected the honest
     // system note (ops_rejected); the runner just stops cleanly.
-    abandonStoryboardRun(ctx, { injectNote: false });
+    abandonStoryboardRun(ctx, {
+      injectNote: false,
+      stage: 'visibility',
+      reason: 'client_rejected',
+    });
     return;
   }
   run.revealedSteps += 1;
@@ -569,7 +578,11 @@ function armStepTimer(ctx: CoordinatorContext, run: StoryboardRunState): void {
   clearStepTimer(run);
   const timer = setTimeout(() => {
     if (ctx.state.storyboardRun !== run) return;
-    abandonStoryboardRun(ctx, { injectNote: true });
+    abandonStoryboardRun(ctx, {
+      injectNote: true,
+      stage: 'reveal_timeout',
+      reason: 'ops_shown_timeout',
+    });
   }, ctx.stepRevealTimeoutMs);
   timer.unref?.();
   run.stepTimer = timer;
@@ -598,11 +611,26 @@ function completeStoryboardRun(ctx: CoordinatorContext, outcome: 'completed'): v
  * steps stay on the board (permanence); unrevealed steps never appear. */
 export function abandonStoryboardRun(
   ctx: CoordinatorContext,
-  options: { injectNote: boolean; requestResponse?: boolean; persistBridge?: boolean },
+  options: {
+    injectNote: boolean;
+    requestResponse?: boolean;
+    persistBridge?: boolean;
+    stage: string;
+    reason: string;
+  },
 ): void {
   const { state } = ctx;
   const run = state.storyboardRun;
   if (!run) return;
+  ctx.log(formatRealtimeIncident('storyboard_abandoned', {
+    sessionId: ctx.sessionId,
+    runId: run.runId,
+    stage: options.stage,
+    reason: options.reason,
+    revealedSteps: run.revealedSteps,
+    totalSteps: run.steps.length,
+    pendingEventId: run.pendingStepEventId,
+  }));
   clearStepTimer(run);
   const onAbandoned = run.onAbandoned;
   run.onFirstPaint = null;

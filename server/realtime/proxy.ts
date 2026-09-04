@@ -26,6 +26,7 @@ import { handleClientEvent } from './clientEvents.js';
 import { abandonStoryboardRun, noteStoryboardClientIdentityChanged } from './storyboardRunner.js';
 import { handleUpstreamEvent, type UpstreamEvent } from './upstreamEvents.js';
 import { initialSessionUpdate, realtimeCallUrl, REALTIME_URL } from './sessionConfig.js';
+import { formatRealtimeIncident, safeIncidentReason } from './incidentLogging.js';
 
 /**
  * Bridges one browser lesson to one OpenAI Realtime session.
@@ -298,7 +299,12 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
     state.activeVisualRequestAbortController?.abort(`realtime proxy teardown: ${reason}`);
     state.activeVisualRequestAbortController = null;
     if (state.storyboardRun?.streamOpen) {
-      abandonStoryboardRun(ctx, { injectNote: false, persistBridge: true });
+      abandonStoryboardRun(ctx, {
+        injectNote: false,
+        persistBridge: true,
+        stage: 'proxy_teardown',
+        reason: reason.replaceAll(' ', '_'),
+      });
     }
     sealAdmission();
     const sealedClientWork = clientWork;
@@ -413,7 +419,14 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
     for (const raw of adopted.buffered) handleUpstreamMessage({ data: raw });
   }
 
-  upstream.onerror = () => {
+  upstream.onerror = (event) => {
+    const detail = (event as { error?: unknown; message?: unknown } | undefined)?.error
+      ?? (event as { error?: unknown; message?: unknown } | undefined)?.message;
+    log(formatRealtimeIncident('realtime_upstream_error', {
+      sessionId,
+      stage: 'sideband_socket',
+      reason: detail === undefined ? 'upstream_error' : safeIncidentReason(detail),
+    }));
     ctx.sendClient({ type: 'error', message: 'Lost the connection to the tutor voice service.' });
   };
 
@@ -465,7 +478,12 @@ export async function connectRealtimeProxy(client: ClientSocket, options: ProxyO
         if (openStreamingIntake && state.storyboardRun?.streamOpen) {
           // The full directed_scene does not exist yet, so only already
           // released board events are durable across this reconnect.
-          abandonStoryboardRun(ctx, { injectNote: true, requestResponse: false });
+          abandonStoryboardRun(ctx, {
+            injectNote: true,
+            requestResponse: false,
+            stage: 'client_reconnect',
+            reason: 'streaming_intake_reconnect',
+          });
         } else {
           noteStoryboardClientIdentityChanged(ctx);
         }

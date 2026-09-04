@@ -157,7 +157,11 @@ export function createAdaptiveVisionAuditGate(input: {
     input.onRejected?.();
     input.abortComposition();
     if (input.ctx.state.storyboardRun?.runId === input.runId) {
-      abandonStoryboardRun(input.ctx, { injectNote: true });
+      abandonStoryboardRun(input.ctx, {
+        injectNote: true,
+        stage: 'audit_gate',
+        reason: `vision_audit_${outcome}`,
+      });
     }
     resolveTerminal({ safe: false, aborted: false, outcome });
   }

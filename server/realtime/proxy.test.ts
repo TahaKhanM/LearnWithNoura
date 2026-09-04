@@ -106,6 +106,36 @@ function toolOutput(upstream: FakeUpstream, callId: string): Record<string, unkn
 afterEach(() => vi.unstubAllGlobals());
 
 describe('realtime proxy response annotation', () => {
+  it('logs an upstream socket error with session-scoped structured fields', async () => {
+    vi.stubGlobal('WebSocket', FakeUpstream);
+    const repo = new Repo(openTestDb());
+    const child = repo.createChild('Maya', 10);
+    const session = repo.createSession(child.id, 'fractions');
+    const client = new FakeClient();
+    const logs: string[] = [];
+    await connectRealtimeProxy(client as never, {
+      apiKey: 'offline-fixture',
+      model: 'gpt-realtime-2.1',
+      repo,
+      sessionId: session.id,
+      createUpstream: () => new FakeUpstream() as never,
+      log: (line) => logs.push(line),
+    });
+    const active = { ...identity, sessionId: session.id };
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 0, 'hello', {})));
+    await flushProxy();
+
+    FakeUpstream.latest.onerror?.();
+
+    expect(logs).toContainEqual(expect.stringContaining('"event":"realtime_upstream_error"'));
+    expect(logs).toContainEqual(expect.stringContaining(`"sessionId":"${session.id}"`));
+    expect(logs).toContainEqual(expect.stringContaining('"reason":"upstream_error"'));
+    expect(client.sent).toContainEqual(expect.objectContaining({
+      type: 'error',
+      payload: { message: 'Lost the connection to the tutor voice service.' },
+    }));
+  });
+
   it('leaves response cancellation to the client sustained-speech gate', async () => {
     vi.stubGlobal('WebSocket', FakeUpstream);
     const repo = new Repo(openTestDb());
@@ -1055,9 +1085,11 @@ describe('realtime proxy response annotation', () => {
     seedCompiledLesson(repo, session.id, 'board_led');
     const client = new FakeClient();
     const directorRequests: string[] = [];
+    const logs: string[] = [];
     await connectRealtimeProxy(client as never, {
       apiKey: 'offline-fixture', model: 'gpt-realtime-2.1', repo, sessionId: session.id,
       createUpstream: () => new FakeUpstream() as never,
+      log: (line) => logs.push(line),
       // A Director that never resolves: the voice model must stay unblocked
       // regardless — the tool result returns immediately as "preparing".
       directVisual: (request) => {
@@ -1111,6 +1143,8 @@ describe('realtime proxy response annotation', () => {
       reason: expect.stringContaining('One visual plan per teaching turn'),
       anchorGroupId: 'lesson-anchor',
     });
+    expect(logs).toContainEqual(expect.stringContaining('"event":"visual_tool_rejected"'));
+    expect(logs).toContainEqual(expect.stringContaining('"reason":"one_plan_per_turn"'));
 
     // A learner turn resets the budget; the next comparison gets the next
     // announced side section.
@@ -1127,6 +1161,52 @@ describe('realtime proxy response annotation', () => {
     await flushProxy();
     expect(toolOutput(upstream, 'compare-call-2')).toMatchObject({ status: 'preparing', semanticGroupId: 'lesson-anchor-alt2' });
     expect(directorRequests).toEqual(['lesson-anchor-alt1', 'lesson-anchor-alt2']);
+  });
+
+  it('logs an establish rejection when the anchor is already visible', async () => {
+    vi.stubGlobal('WebSocket', FakeUpstream);
+    const repo = new Repo(openTestDb());
+    const child = repo.createChild('Maya', 10);
+    const session = repo.createSession(child.id, 'fractions');
+    seedCompiledLesson(repo, session.id, 'board_led');
+    repo.addEvent(session.id, 'semantic_scene', {
+      semanticObjectId: 'lesson-anchor',
+      groupLabel: 'Fraction number line',
+      ops: [{ op: 'add', id: 'visible-anchor', spec: { kind: 'text', at: [200, 200], text: 'Visible' } }],
+    });
+    const client = new FakeClient();
+    const logs: string[] = [];
+    await connectRealtimeProxy(client as never, {
+      apiKey: 'offline-fixture',
+      model: 'gpt-realtime-2.1',
+      repo,
+      sessionId: session.id,
+      createUpstream: () => new FakeUpstream() as never,
+      log: (line) => logs.push(line),
+    });
+    const active = { ...identity, sessionId: session.id };
+    client.emit('message', JSON.stringify(createRuntimeEvent(active, 0, 'hello', {})));
+    const upstream = FakeUpstream.latest;
+    upstream.emit({ type: 'response.created', response: { id: 'duplicate-anchor-response' } });
+    upstream.emit({
+      type: 'response.function_call_arguments.done',
+      response_id: 'duplicate-anchor-response',
+      call_id: 'duplicate-anchor-call',
+      name: 'request_visual',
+      arguments: JSON.stringify({
+        schemaVersion: '3.0.0', requestId: 'duplicate-anchor', action: 'establish',
+        purpose: 'Rebuild the anchor', idea: 'the same number line', density: 'minimal',
+      }),
+    });
+    await flushProxy();
+
+    expect(toolOutput(upstream, 'duplicate-anchor-call')).toMatchObject({
+      ok: false,
+      accepted: false,
+      reason: expect.stringContaining('already on the board'),
+    });
+    expect(logs).toContainEqual(expect.stringContaining('"event":"visual_tool_rejected"'));
+    expect(logs).toContainEqual(expect.stringContaining('"reason":"anchor_already_present"'));
   });
 
   it('resolves establish to the precompiled anchor and hands the reveal to the storyboard runner', async () => {

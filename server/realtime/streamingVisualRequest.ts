@@ -1,4 +1,5 @@
 import type { GenerationIdentity } from '../../shared/runtimeProtocol.js';
+import type { BoardOp } from '../../shared/boardOps.js';
 import type { VisionAuditEvent } from '../board/visionAudit.js';
 import { StreamingDirectorPrecommitError } from '../board/streamingDirector.js';
 import { currentStage } from '../lesson/orchestrator.js';
@@ -25,6 +26,7 @@ import {
   recordVisualRequestOutcome,
 } from './visualRequestOutcomes.js';
 import { recordDirectorStreamFirstOp, recordVisionAuditOutcome } from './visualTelemetry.js';
+import { formatRealtimeIncident } from './incidentLogging.js';
 
 type VisualToolCall = { callId: string; responseId: string } | null;
 
@@ -117,7 +119,13 @@ export function startStreamingDirectedScene(
           ? { ok: true }
           : { ok: false, issues: verdict.reasons, layoutIssues: verdict.layoutIssues };
       },
-      renderScene: (ops, semanticGroupId) => renderWithClient(ctx, ops, semanticGroupId),
+      renderScene: (ops, semanticGroupId) => renderStreamingRaster(
+        ctx,
+        runId,
+        'director_render',
+        ops,
+        semanticGroupId,
+      ),
     }, {
       signal: controller.signal,
       onFirstValidatedOp: ({ model, reasoningEffort }) => recordDirectorStreamFirstOp(ctx, {
@@ -189,10 +197,24 @@ export function startStreamingDirectedScene(
                 idea: request.idea,
                 constraints: request.constraints ?? null,
               },
-              raster: renderWithClient(ctx, parsed.cumulativeOps, sectionId),
+              raster: renderStreamingRaster(
+                ctx,
+                runId,
+                'audit_gate',
+                parsed.cumulativeOps,
+                sectionId,
+              ),
               parentSignal: controller.signal,
               abortComposition: () => controller.abort('vision audit rejected the streamed scene'),
-              onRejected: () => { auditRejected = true; },
+              onRejected: () => {
+                auditRejected = true;
+                ctx.log(formatRealtimeIncident('streaming_visual_audit_rejected', {
+                  sessionId: ctx.sessionId,
+                  runId,
+                  stage: 'audit_gate',
+                  reason: 'vision_audit_rejected',
+                }));
+              },
               onOutcome: (event) => recordVisionAuditOutcome(ctx, visionAuditTelemetryInput(event, timingIdentity)),
               budgetMs: ctx.visionAuditBudgetMs,
             });
@@ -211,7 +233,11 @@ export function startStreamingDirectedScene(
       controller.abort('streamed composition failed before terminal scene');
       recordOutcome('director_rejected', result.reasons);
       if (intakeStarted && state.storyboardRun?.runId === runId) {
-        abandonStoryboardRun(ctx, { injectNote: true });
+        abandonStoryboardRun(ctx, {
+          injectNote: true,
+          stage: 'director_stream',
+          reason: 'director_rejected',
+        });
       } else failDirectedScene(ctx, result.reasons);
       return;
     }
@@ -246,7 +272,13 @@ export function startStreamingDirectedScene(
     const aborted = error instanceof Error && error.name === 'AbortError';
     ctx.log(`session ${ctx.sessionId}: streaming directed scene ${aborted ? 'aborted' : 'failed'} ${String(error).slice(0, 200)}`);
     if (state.storyboardRun?.runId === runId) {
-      abandonStoryboardRun(ctx, { injectNote: true });
+      abandonStoryboardRun(ctx, {
+        injectNote: true,
+        stage: auditRejected ? 'audit_gate' : 'director_stream',
+        reason: auditRejected
+          ? 'vision_audit_rejected'
+          : aborted ? 'visual_request_aborted' : 'streaming_director_error',
+      });
     } else if (aborted) {
       if (!intakeStarted) {
         // The tool already promised a preparing visual. Even if cancellation
@@ -269,6 +301,27 @@ export function startStreamingDirectedScene(
     }
   });
   ctx.trackSideEffect(task);
+}
+
+function renderStreamingRaster(
+  ctx: CoordinatorContext,
+  runId: string,
+  stage: 'director_render' | 'audit_gate',
+  ops: BoardOp[],
+  semanticGroupId?: string,
+): Promise<string | null> {
+  return renderWithClient(ctx, ops, semanticGroupId).then((raster) => {
+    if (raster === null) {
+      ctx.log(formatRealtimeIncident('streaming_visual_render_unavailable', {
+        sessionId: ctx.sessionId,
+        runId,
+        stage,
+        reason: 'client_raster_null',
+        opsCount: ops.length,
+      }));
+    }
+    return raster;
+  });
 }
 
 function abortError(): Error {
