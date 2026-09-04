@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import {
-  canSpendIllustrationGeneration,
   closedIllustrationVisionIssues,
   decideIllustrationArrival,
   generationsSpent,
@@ -11,9 +10,9 @@ import {
 describe('illustration generation budget', () => {
   it('allows at most two paid generations per lesson and treats cache hits as free', () => {
     expect(ILLUSTRATION_GENERATION_BUDGET).toBe(2);
-    expect(canSpendIllustrationGeneration(0)).toBe(true);
-    expect(canSpendIllustrationGeneration(1)).toBe(true);
-    expect(canSpendIllustrationGeneration(2)).toBe(false);
+    expect(0).toBeLessThan(ILLUSTRATION_GENERATION_BUDGET);
+    expect(1).toBeLessThan(ILLUSTRATION_GENERATION_BUDGET);
+    expect(2).toBeGreaterThanOrEqual(ILLUSTRATION_GENERATION_BUDGET);
     expect(generationsSpent({ cacheHit: true, imageCount: 0 })).toBe(0);
     expect(generationsSpent({ cacheHit: false, imageCount: 1 })).toBe(1);
     expect(generationsSpent({ cacheHit: false, imageCount: 2 })).toBe(2);

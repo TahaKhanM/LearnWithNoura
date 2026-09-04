@@ -55,6 +55,7 @@ function deps(overrides: Partial<PrepareIllustrationDeps> & {
         return approval;
       },
     },
+    generationBudgetRemaining: 3,
     ...overrides,
   };
 }
@@ -214,6 +215,30 @@ describe('prepareIllustration', () => {
     const cached = await store.getByCacheKey(illustrationCacheKey(brief()));
     expect(cached?.bytes).toEqual(PNG);
     expect(Buffer.from(cached?.bytes ?? []).toString('base64')).not.toBe('partial');
+  });
+
+  it('fails closed without a generate call when the generation budget is omitted, and still serves a cache hit', async () => {
+    const generateCalls: Array<{ prompt: string }> = [];
+    const omitted = deps({ generateCalls });
+    delete (omitted as { generationBudgetRemaining?: number }).generationBudgetRemaining;
+    const refused = await prepareIllustration(omitted, brief());
+    expect(refused.ok).toBe(false);
+    if (refused.ok) return;
+    expect(refused.reasons).toEqual(['illustration_budget:exhausted']);
+    expect(generateCalls).toHaveLength(0);
+
+    const store = new MemoryIllustrationStore();
+    const first = await prepareIllustration(deps({ store }), brief());
+    expect(first.ok).toBe(true);
+    if (first.ok) await persistIllustrationRecord(store, first);
+    const cacheCalls: Array<{ prompt: string }> = [];
+    const hitDeps = deps({ store, generateCalls: cacheCalls });
+    delete (hitDeps as { generationBudgetRemaining?: number }).generationBudgetRemaining;
+    const hit = await prepareIllustration(hitDeps, brief());
+    expect(hit.ok).toBe(true);
+    if (!hit.ok) return;
+    expect(hit.cacheHit).toBe(true);
+    expect(cacheCalls).toHaveLength(0);
   });
 
   it('fails closed without a generate call when the lesson generation budget is exhausted', async () => {

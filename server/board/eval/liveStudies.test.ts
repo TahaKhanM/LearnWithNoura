@@ -114,11 +114,11 @@ describe('Drawing vNext live audit and sketch evidence', () => {
     }]);
   });
 
-  it('will render sketch rasters through the supplied board harness', () => {
+  it('will render sketch rasters through the supplied board harness', async () => {
     const sketch = materializeSketchCorpus()[0];
     const render = vi.fn(async () => 'data:image/jpeg;base64,c2tldGNo');
     const harness = { render } as never;
-    expect(renderSyntheticSketchRaster(harness, sketch)).resolves.toBe('data:image/jpeg;base64,c2tldGNo');
+    await expect(renderSyntheticSketchRaster(harness, sketch)).resolves.toBe('data:image/jpeg;base64,c2tldGNo');
     expect(render).toHaveBeenCalledWith(syntheticSketchOps(sketch), `sketch-${sketch.id}`);
   });
 
