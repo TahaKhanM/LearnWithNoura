@@ -11,9 +11,11 @@
 - GitHub integration: blocked because the repository is private and organization-owned while the inspected Hobby account cannot attach that repository class. Use reviewed manual CLI deployments until account/project ownership changes.
 - Deployment Protection: Standard Vercel Authentication (`all_except_custom_domains`).
 - Stable protected Preview alias: `https://noura-preview-mtk2982007.vercel.app`
+  (currently `dpl_RLkww2nTohabnwmUmkpTH2ccgHmf`, revision `509564cd8866bda436beeb38aff2be624ba9b369`, fixture compiler).
 - Public v0: `https://learnwithnoura.com`; `www` permanently redirects to the apex.
 - Rollback target (prior login-gated v0): `dpl_AbnroCy4guyi7Q4vZbh7mJxg8ZXZ`, revision `2ce3e0bf4a7c7ac85adfaf6f89e0b41bcf2e878d`.
-- Current login-gated public-v0 deployment: `dpl_Gn7As8XjzZv7vcZoRKowGp1UAofh`, revision `08a8ace27b5db10cc104c6d484b4f3be70e25eef` (Drawing vNext through M7 + auth overlay; `NOURA_DIRECTOR_PIPELINE=streaming`; illustrations on). Post-deploy `/healthz` reports degraded durable storage (`noura_app` tenant ENOTFOUND — pre-existing); provider smoke authorized but not executed pending DB fix and local demo credentials. Evidence: `docs/operations/2026-09-03-drawing-vnext-production-v0-deploy-handoff.md`.
+- Current login-gated public-v0 deployment: `dpl_XAErTxXTjmqAwbuhH5AioDQ9nj4f`, revision `509564cd8866bda436beeb38aff2be624ba9b369` (production drawing-incident observability + mandatory opening-anchor prompt; `NOURA_DIRECTOR_PIPELINE=classic`; illustrations remain default-on). Post-deploy `/version`, `/healthz`, login enforcement, unauthenticated REST rejection, and the `www` redirect pass. The owner declined the itemized provider smoke and will test personally, so streaming and the prompt fix are not claimed live-verified. Evidence: `docs/operations/2026-09-04-production-drawing-incident-handoff.md`.
+- Superseded incident deployment: `dpl_Gn7As8XjzZv7vcZoRKowGp1UAofh`, revision `08a8ace27b5db10cc104c6d484b4f3be70e25eef` (`NOURA_DIRECTOR_PIPELINE=streaming`; illustrations on). It produced no drawing in production session `350f7a79-857d-4d81-920b-b29d3d49ee0b`; see the incident handoff above. Its original deployment evidence remains in `docs/operations/2026-09-03-drawing-vnext-production-v0-deploy-handoff.md`.
 
 Do not print or download Production secrets into tracked files. `.vercel/`, `.env*` and databases are ignored.
 
