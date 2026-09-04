@@ -25,6 +25,12 @@
   gap: 16px;
 }
 
+.parent__head-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
 .parent__eyebrow {
   margin: 18px 0 -4px;
   color: var(--blue-deep);
@@ -91,6 +97,11 @@
 
 .parent__link:hover {
   color: var(--blue-deep);
+}
+
+@media (max-width: 560px) {
+  .parent__head-row { align-items: flex-start; }
+  .parent__head-actions { align-items: flex-end; flex-direction: column; gap: 2px; }
 }
 
 .parent__card {

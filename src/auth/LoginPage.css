@@ -1,0 +1,64 @@
+.login {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 24px 16px;
+  background:
+    linear-gradient(rgba(233, 230, 220, 0.72) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(233, 230, 220, 0.72) 1px, transparent 1px),
+    radial-gradient(circle at 18% 12%, rgba(44, 91, 224, 0.11), transparent 28rem),
+    var(--board);
+  background-size: 34px 34px, 34px 34px, auto, auto;
+}
+
+.login__card {
+  position: relative;
+  width: min(460px, 100%);
+  padding: clamp(28px, 6vw, 42px);
+  border: 1px solid var(--rail-line);
+  border-radius: 20px;
+  background: rgba(252, 251, 247, 0.96);
+  box-shadow: 0 30px 80px -42px rgba(38, 35, 31, 0.56);
+}
+
+.login__card::before {
+  content: '';
+  position: absolute;
+  inset: 18px auto 18px 0;
+  width: 4px;
+  border-radius: 0 4px 4px 0;
+  background: var(--blue);
+}
+
+.login__mark { width: 54px; height: 54px; margin-bottom: 22px; }
+.login__mark svg { display: block; width: 100%; height: 100%; }
+.login__eyebrow { margin: 0 0 7px; color: var(--blue-deep); font-size: 12px; font-weight: 750; letter-spacing: 0.1em; text-transform: uppercase; }
+.login__intro h1 { margin: 0; max-width: 380px; font-size: clamp(29px, 7vw, 38px); line-height: 1.06; letter-spacing: -0.035em; }
+.login__intro > p:last-child { margin: 12px 0 0; color: var(--ink-soft); font-size: 15px; line-height: 1.55; }
+.login__form { display: grid; gap: 17px; margin-top: 28px; }
+.login__field { display: grid; gap: 6px; }
+.login__field label { color: var(--ink); font-size: 14px; font-weight: 650; }
+.login__field input { width: 100%; min-height: 48px; border: 1.5px solid var(--rail-line); border-radius: 11px; background: #fffefb; color: var(--ink); font: inherit; font-size: 16px; padding: 10px 13px; }
+.login__field input:focus { border-color: var(--blue); outline: 3px solid rgba(44, 91, 224, 0.13); outline-offset: 1px; }
+.login__password { position: relative; }
+.login__password input { padding-right: 72px; }
+.login__password button { position: absolute; top: 2px; right: 4px; min-width: 60px; min-height: 44px; border: 0; background: transparent; color: var(--blue-deep); font: inherit; font-size: 13px; font-weight: 700; cursor: pointer; }
+.login__error { margin: -3px 0 0; color: #8e2e27; font-size: 14px; }
+.login__submit,
+.login__service-error button { min-height: 50px; border: 0; border-radius: 12px; background: var(--blue); color: white; font: inherit; font-size: 16px; font-weight: 700; cursor: pointer; box-shadow: 0 12px 28px -15px rgba(44, 91, 224, 0.72); }
+.login__submit:hover:not(:disabled), .login__service-error button:hover { background: var(--blue-deep); }
+.login__submit:disabled { opacity: 0.58; cursor: wait; box-shadow: none; }
+.login__boundary { margin: 22px 0 0; padding-top: 16px; border-top: 1px dashed var(--rail-line); color: var(--ink-faint); font-size: 12.5px; text-align: center; }
+.login__service-error { margin-top: 25px; padding: 15px; border: 1px solid rgba(196, 62, 51, 0.24); border-radius: 12px; background: rgba(196, 62, 51, 0.07); color: #8e2e27; }
+.login__service-error p { margin: 0 0 12px; }
+.login__service-error button { min-height: 44px; padding: 0 18px; }
+
+@media (max-width: 520px) {
+  .login { place-items: stretch; padding: 0; background-size: 28px 28px, 28px 28px, auto, auto; }
+  .login__card { min-height: 100dvh; border: 0; border-radius: 0; padding: 34px 24px; box-shadow: none; }
+  .login__card::before { inset-block: 24px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .login__submit, .login__service-error button { transition: none; }
+}

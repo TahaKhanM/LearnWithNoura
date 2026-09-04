@@ -2,6 +2,7 @@ import { lazy, Suspense } from 'react';
 import { RouterProvider } from './router';
 import { useRouter } from './routerContext';
 import { matchPath } from './matchPath';
+import { AuthBoundary } from './auth/AuthBoundary';
 import './App.css';
 
 const HomePage = lazy(() => import('./home/HomePage').then((module) => ({ default: module.HomePage })));
@@ -23,9 +24,11 @@ function App() {
   return (
     <RouterProvider>
       <a className="skip-link" href="#main-content">Skip to main content</a>
-      <Suspense fallback={<main id="main-content" className="route-loading" aria-live="polite">Loading Noura…</main>}>
-        <Routes />
-      </Suspense>
+      <AuthBoundary>
+        <Suspense fallback={<main id="main-content" className="route-loading" aria-live="polite">Loading Noura…</main>}>
+          <Routes />
+        </Suspense>
+      </AuthBoundary>
     </RouterProvider>
   );
 }

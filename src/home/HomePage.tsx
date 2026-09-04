@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useAuth } from '../auth/authContext';
 import { useRouter } from '../routerContext';
 import './Home.css';
 
@@ -36,6 +37,7 @@ const GOAL_IDEAS = [
 
 export function HomePage() {
   const { navigate } = useRouter();
+  const { required: loginRequired, signOut } = useAuth();
   const requestedChildId = useMemo(
     () => new URLSearchParams(window.location.search).get('selectedChildId'),
     [],
@@ -100,8 +102,7 @@ export function HomePage() {
       } catch {
         setConfig({ realtime: false, lessonsAvailable: false, durableStorage: false, deploymentMode: 'unavailable', syntheticOnly: true });
       }
-      // In public v0, /api/config establishes the signed guest-parent cookie.
-      // Load parent-scoped data only after that boundary is stable.
+      // Load parent-scoped data only after deployment configuration is known.
       await refresh();
     })();
   }, [refresh]);
@@ -197,6 +198,7 @@ export function HomePage() {
             <h1>Noura</h1>
             <p>A tutor that talks through ideas and draws while your child learns.</p>
           </div>
+          {loginRequired && <button className="home__signout" type="button" onClick={() => void signOut()}>Sign out</button>}
         </header>
 
         {config?.syntheticOnly && (

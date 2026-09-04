@@ -11,6 +11,8 @@ export interface RuntimeConfig {
   production: boolean;
   v0: boolean;
   guestAccess: boolean;
+  loginRequired: boolean;
+  demoAuthenticationConfigured: boolean;
   syntheticOnly: boolean;
   providerConfigured: boolean;
   durableStorageConfigured: boolean;
@@ -47,6 +49,10 @@ export function readRuntimeConfig(env: NodeJS.ProcessEnv = process.env): Runtime
       : 'local-synthetic';
   const production = deploymentMode === 'production' || deploymentMode === 'production-v0';
   const v0 = deploymentMode === 'production-v0';
+  const loginRequired = env.NOURA_REQUIRE_LOGIN === 'true';
+  const demoAuthenticationConfigured = Boolean(
+    env.NOURA_DEMO_AUTH_EMAIL && env.NOURA_DEMO_AUTH_PASSWORD_SCRYPT,
+  );
   const directorPipeline = env.NOURA_DIRECTOR_PIPELINE === 'classic'
     ? 'classic'
     : env.NOURA_DIRECTOR_PIPELINE === 'streaming'
@@ -63,7 +69,9 @@ export function readRuntimeConfig(env: NodeJS.ProcessEnv = process.env): Runtime
     deploymentMode,
     production,
     v0,
-    guestAccess: v0,
+    guestAccess: v0 && !loginRequired,
+    loginRequired,
+    demoAuthenticationConfigured,
     syntheticOnly: v0 || !production || env.NOURA_SYNTHETIC_ONLY !== 'false',
     providerConfigured: Boolean(env.OPENAI_API_KEY),
     durableStorageConfigured: Boolean(env.DATABASE_URL),
@@ -105,6 +113,9 @@ export function productionReadinessErrors(config: RuntimeConfig, env: NodeJS.Pro
   if (env.NOURA_STORAGE_ADAPTER !== 'postgres') errors.push('Production must use the Postgres storage adapter');
   if (env.NOURA_LESSON_COMPILER === 'fixture') errors.push('the fixture lesson compiler cannot serve production');
   if (!env.NOURA_LESSON_CAPABILITY_SECRET && !env.NOURA_AUTH_SECRET) errors.push('the lesson capability secret is not configured');
+  if (config.loginRequired && !config.demoAuthenticationConfigured) {
+    errors.push('login is required but demo authentication credentials are incomplete');
+  }
   if (config.v0) return errors;
   if (env.NOURA_DATABASE_SSL_REJECT_UNAUTHORIZED === 'false') errors.push('full Production requires verified database TLS');
   if (!config.authenticationConfigured) errors.push('parent authentication is not configured');
