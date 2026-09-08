@@ -31,6 +31,7 @@ export class GenerationScope {
   get active(): boolean { return this.status === 'active' && !this.signal.aborted; }
 
   timeout(callback: () => void, delayMs: number): number {
+    if (!this.active) return 0;
     const id = window.setTimeout(() => {
       this.timeouts.delete(id);
       if (this.active) callback();
@@ -40,12 +41,14 @@ export class GenerationScope {
   }
 
   interval(callback: () => void, delayMs: number): number {
+    if (!this.active) return 0;
     const id = window.setInterval(() => { if (this.active) callback(); }, delayMs);
     this.intervals.add(id);
     return id;
   }
 
   frame(callback: FrameRequestCallback): number {
+    if (!this.active) return 0;
     const id = requestAnimationFrame((time) => {
       this.frames.delete(id);
       if (this.active) callback(time);
@@ -55,6 +58,10 @@ export class GenerationScope {
   }
 
   addCleanup(cleanup: () => void): () => void {
+    if (!this.active) {
+      cleanup();
+      return () => undefined;
+    }
     this.cleanups.add(cleanup);
     return () => this.cleanups.delete(cleanup);
   }

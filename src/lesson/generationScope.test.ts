@@ -30,4 +30,20 @@ describe('GenerationScope', () => {
     vi.runAllTimers();
     expect(callback).not.toHaveBeenCalled();
   });
+
+  it.each(['cancel', 'complete', 'fail'] as const)('does not retain work registered after %s', (finish) => {
+    vi.useFakeTimers();
+    const scope = new GenerationScope({ sessionId: 's', connectionEpoch: 1, turnId: 't', generationId: 'g' });
+    if (finish === 'complete') scope.complete();
+    else scope[finish]('finished');
+    const callback = vi.fn();
+    const cleanup = vi.fn();
+    scope.timeout(callback, 100);
+    scope.interval(callback, 100);
+    scope.frame(callback);
+    scope.addCleanup(cleanup);
+    expect(vi.getTimerCount()).toBe(0);
+    expect(cleanup).toHaveBeenCalledOnce();
+    expect(callback).not.toHaveBeenCalled();
+  });
 });
