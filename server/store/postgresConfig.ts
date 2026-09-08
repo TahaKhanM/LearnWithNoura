@@ -10,11 +10,17 @@ export function postgresPoolConfig(env: NodeJS.ProcessEnv): PoolConfig {
     // URL parsing errors can contain the supplied credentials.
     throw new Error('DATABASE_URL must be a valid Postgres connection URL.');
   }
-  for (const key of ['ssl', 'sslmode', 'sslcert', 'sslkey', 'sslrootcert', 'uselibpqcompat']) {
+  const negotiation = url.searchParams.get('sslnegotiation');
+  if (negotiation !== null && negotiation !== 'postgres' && negotiation !== 'direct') {
+    throw new Error('DATABASE_URL sslnegotiation must be postgres or direct.');
+  }
+  for (const key of ['sslnegotiation', 'ssl', 'sslmode', 'sslcert', 'sslkey', 'sslrootcert', 'uselibpqcompat']) {
     url.searchParams.delete(key);
   }
   return {
     connectionString: url.toString(),
+    // Pass negotiation separately: the URL parser would replace ssl with true.
+    ...(negotiation ? { sslnegotiation: negotiation } : {}),
     max: 1,
     allowExitOnIdle: true,
     connectionTimeoutMillis: 8_000,

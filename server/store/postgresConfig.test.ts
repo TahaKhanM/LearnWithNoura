@@ -21,6 +21,17 @@ describe('Postgres connection security', () => {
     expect(config.connectionString).toContain('application_name=noura');
   });
 
+  it('preserves the explicit CA when direct TLS negotiation is selected in the URL', () => {
+    const config = postgresPoolConfig({
+      DATABASE_URL: 'postgres://user:password@db.example.test/app?sslnegotiation=direct',
+      NOURA_DATABASE_CA_CERT: 'fixture-ca',
+    });
+    const client = new Client(config);
+    expect(client.ssl).toEqual({ rejectUnauthorized: true, ca: 'fixture-ca' });
+    expect(config.sslnegotiation).toBe('direct');
+    expect(config.connectionString).not.toContain('sslnegotiation');
+  });
+
   it('requires the explicit legacy environment opt-out for unverified TLS', () => {
     expect(new Client(postgresPoolConfig({
       DATABASE_URL: 'postgres://user:password@db.example.test/app',
