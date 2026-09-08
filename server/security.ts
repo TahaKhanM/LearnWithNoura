@@ -8,6 +8,8 @@ interface SignedPayload { aud: 'parent' | 'lesson'; sub: string; childId?: strin
 const localSecret = randomBytes(32).toString('base64url');
 const scrypt = promisify(scryptCallback);
 const PARENT_COOKIE = 'noura_parent';
+const MAX_RATE_BUCKETS = 10_000;
+const RATE_SWEEP_MS = 60_000;
 
 export class SecurityBoundary {
   private readonly secret: string;
@@ -16,6 +18,7 @@ export class SecurityBoundary {
   private readonly demoPasswordHash: string | null;
   private readonly demoParentId: string | null;
   private buckets = new Map<string, { count: number; resetAt: number }>();
+  private nextBucketSweepAt = 0;
   private requestParents = new WeakMap<Request, string>();
 
   constructor(private readonly runtime: RuntimeConfig, env: NodeJS.ProcessEnv = process.env) {
@@ -136,16 +139,22 @@ export class SecurityBoundary {
 
   allow(key: string, limit: number, windowMs: number): boolean {
     const now = Date.now();
+    // Sweep on a clock, not on each new key: an attacker controls request paths.
+    if (now >= this.nextBucketSweepAt) {
+      for (const [bucketKey, bucket] of this.buckets) {
+        if (bucket.resetAt <= now) this.buckets.delete(bucketKey);
+      }
+      this.nextBucketSweepAt = now + RATE_SWEEP_MS;
+    }
     const existing = this.buckets.get(key);
     if (!existing || existing.resetAt <= now) {
+      // Keep active counters intact; evicting them would reset the limit.
+      if (!existing && this.buckets.size >= MAX_RATE_BUCKETS) return false;
       this.buckets.set(key, { count: 1, resetAt: now + windowMs });
       return true;
     }
     if (existing.count >= limit) return false;
     existing.count += 1;
-    if (this.buckets.size > 10_000) {
-      for (const [bucketKey, bucket] of this.buckets) if (bucket.resetAt <= now) this.buckets.delete(bucketKey);
-    }
     return true;
   }
 
@@ -156,8 +165,9 @@ export class SecurityBoundary {
   }
 
   private verify(token: string, audience: SignedPayload['aud']): SignedPayload | null {
-    const [encoded, signature] = token.split('.');
-    if (!encoded || !signature) return null;
+    const parts = token.split('.');
+    if (parts.length !== 2 || parts.some((part) => !/^[A-Za-z0-9_-]+$/.test(part))) return null;
+    const [encoded, signature] = parts;
     const expected = createHmac('sha256', this.secret).update(encoded).digest();
     let supplied: Buffer;
     try { supplied = Buffer.from(signature, 'base64url'); }
@@ -165,7 +175,12 @@ export class SecurityBoundary {
     if (expected.length !== supplied.length || !timingSafeEqual(expected, supplied)) return null;
     try {
       const payload = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8')) as SignedPayload;
-      if (payload.aud !== audience || payload.exp <= Date.now() || !payload.sub || !payload.nonce) return null;
+      if (!payload || typeof payload !== 'object' || payload.aud !== audience
+        || typeof payload.exp !== 'number' || !Number.isFinite(payload.exp) || payload.exp <= Date.now()
+        || typeof payload.sub !== 'string' || !payload.sub
+        || typeof payload.nonce !== 'string' || !payload.nonce) return null;
+      if (audience === 'lesson' && (typeof payload.childId !== 'string' || !payload.childId
+        || typeof payload.parentId !== 'string' || !payload.parentId)) return null;
       return payload;
     } catch { return null; }
   }
@@ -191,5 +206,16 @@ export function capabilityFromProtocols(header: string | undefined): string | nu
 }
 
 function parseCookies(header: string): Record<string, string> {
-  return Object.fromEntries(header.split(';').map((part) => part.trim().split('=')).filter((pair) => pair.length === 2).map(([key, value]) => [decodeURIComponent(key), decodeURIComponent(value)]));
+  const cookies: Record<string, string> = Object.create(null);
+  for (const part of header.split(';')) {
+    const separator = part.indexOf('=');
+    if (separator < 1) continue;
+    try {
+      const key = decodeURIComponent(part.slice(0, separator).trim());
+      if (!(key in cookies)) cookies[key] = decodeURIComponent(part.slice(separator + 1).trim());
+    } catch {
+      // An unrelated malformed cookie must not turn authentication into a 500.
+    }
+  }
+  return cookies;
 }
