@@ -32,6 +32,8 @@ npm run build                     # client types and production assets
 npx playwright install chromium
 npm run test:e2e
 npm run test:a11y
+# Optional local database check; requires PostgreSQL binaries:
+npm run test:postgres
 ```
 
 SQLite data is created under `data/` and ignored by Git. `NOURA_DATA_DIR` selects another directory. The Vite development proxy sends API and control WebSocket traffic to port 8787. `NOURA_BACKEND_PORT` and `NOURA_PORT` must agree if that port changes. The old database filename remains supported through a checked migration that preserves a backup; the legacy name is not the product name.
@@ -58,7 +60,7 @@ flowchart LR
 3. **Compile intent into exact geometry.** The voice model requests a visual by intent. An existing anchor, one of three deliberately narrow template exemplars or the streaming Director supplies a scene. BoardOps and scene schemas constrain the vocabulary; geometry, layout and policy checks run before reveal. Text and equations remain exact overlays even when an illustration is generated.
 4. **Acknowledge what appeared.** `ops_presented` marks the first committed paint. `ops_shown` marks completed, durable tutor work and releases it for replay. Failed or timed-out proposals do not enter the released event history.
 5. **Keep interruption local and scoped.** Confirmed speech interruption cancels the current generation's transient work. Visible tutor work stays, learner drafts remain under learner control until **Done** and a storyboard resumes from its first unrevealed step. Captions track actual playback boundaries rather than assuming that a completed transcript was heard.
-6. **Summarize evidence, not hidden activity.** Session ending fixes an immutable event cutoff. Continuation creates a linked session. Parent summaries use released events and source-linked observations rather than treating unrevealed output as a completed lesson.
+6. **Summarize evidence, not hidden activity.** Every evidence source must exist in the same session and meet release rules. Valid fallback evidence can stage with its own turn and release atomically; late completion cannot publish it after the session ends. Postgres writes and ending serialize on the session row. Continuation creates a linked session, preserving the original cutoff.
 
 ## Decisions and costs
 
@@ -111,6 +113,6 @@ In-memory rate limits are bounded but per process. They do not provide distribut
 
 This project began as **Seneca**, a collaborative whiteboard-tutor prototype by [Mohammed Talab](https://github.com/MohiCodeHub). **Muhammad Taha** subsequently developed the live lesson architecture, semantic board compiler, playback and interruption coordination, evidence/replay model, storage contracts and drawing evaluation work represented in the retained commit history. The history also records agent-assisted implementation; author counts are not a measure of sole authorship or independent expertise.
 
-The public project is named **LearnWithNoura**. Noura remains the tutor's name; `NOURA_*` configuration, existing cookies and database migration aliases remain compatible. The September 2026 public-release changes repair fresh-checkout verification, authentication edge cases, TLS configuration and late-generation resource handling. They do not retroactively change the results or chronology of earlier experiments.
+The public project is named **LearnWithNoura**. Noura remains the tutor's name; `NOURA_*` configuration, existing cookies and database migration aliases remain compatible. The September 2026 public-release changes repair fresh-checkout verification, authentication edge cases, TLS configuration, late-generation resource handling and evidence source/cutoff integrity. They do not retroactively change the results or chronology of earlier experiments.
 
 No blanket open-source license has been added to the collaborative source. Existing attribution and commit authors are preserved; public availability alone is not a license grant.

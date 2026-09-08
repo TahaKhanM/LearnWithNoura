@@ -22,6 +22,9 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run gate:quick
+      - name: Install PostgreSQL for the real concurrency contract
+        run: sudo apt-get update && sudo apt-get install --yes postgresql
+      - run: npm run test:postgres
       - run: npm run build
       - run: npm run test:smoke-report
       - run: npm run test:lesson-eval
