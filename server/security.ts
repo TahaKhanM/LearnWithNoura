@@ -50,7 +50,7 @@ export class SecurityBoundary {
     if (!this.runtime.production) return 'local-synthetic-parent';
     const attached = this.requestParents.get(request);
     if (attached) return attached;
-    const token = parseCookies(request.headers.cookie ?? '')[PARENT_COOKIE];
+    const token = parseCookieHeader(request.headers.cookie ?? '')[PARENT_COOKIE];
     const payload = token ? this.verify(token, 'parent') : null;
     if (this.runtime.loginRequired) {
       return payload?.sub && payload.sub === this.demoParentId ? payload.sub : null;
@@ -74,7 +74,7 @@ export class SecurityBoundary {
       next();
       return;
     }
-    const token = parseCookies(request.headers.cookie ?? '')[PARENT_COOKIE];
+    const token = parseCookieHeader(request.headers.cookie ?? '')[PARENT_COOKIE];
     const existing = token ? this.verify(token, 'parent') : null;
     const parentId = existing?.sub ?? `guest-${randomUUID()}`;
     this.requestParents.set(request, parentId);
@@ -205,7 +205,7 @@ export function capabilityFromProtocols(header: string | undefined): string | nu
   return protocol ? protocol.slice(4) : null;
 }
 
-function parseCookies(header: string): Record<string, string> {
+export function parseCookieHeader(header: string): Record<string, string> {
   const cookies: Record<string, string> = Object.create(null);
   for (const part of header.split(';')) {
     const separator = part.indexOf('=');
