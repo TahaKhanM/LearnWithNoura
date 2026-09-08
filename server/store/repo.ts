@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
+import { assertEvidenceSources, evidenceSourceIds } from './evidenceSources.js';
 import {
   CompiledLessonSchema,
   type CompiledLessonRecord,
@@ -435,7 +436,7 @@ export class Repo {
     this.db.exec('BEGIN IMMEDIATE');
     try {
       if (!this.isFallbackTurnActive(identity)) throw new Error('Stale fallback generation write rejected.');
-      const stored = this.addEvidence(identity.sessionId, {
+      const stored = this.addEvidenceWithinTransaction(identity.sessionId, {
         ...entry,
         turnId: identity.turnId,
         generationId: identity.generationId,
@@ -477,6 +478,10 @@ export class Repo {
   finishFallbackTurn(identity: FallbackTurnIdentity, status: 'completed' | 'failed' | 'cancelled', steps: unknown[] = []): boolean {
     this.db.exec('BEGIN IMMEDIATE');
     try {
+      if (status === 'completed' && this.getSession(identity.sessionId)?.status !== 'active') {
+        this.db.exec('ROLLBACK');
+        return false;
+      }
       const result = this.db.prepare(
         `UPDATE fallback_turns SET status = ?, steps_json = ?, updated_at = ?
          WHERE session_id = ? AND idempotency_key = ? AND connection_epoch = ?
@@ -581,17 +586,32 @@ export class Repo {
     }));
   }
 
-  addEvidence(
-    sessionId: string,
-    entry: EvidenceInput,
-    released = true,
-  ): EvidenceRow {
+  addEvidence(sessionId: string, entry: EvidenceInput, released = true): EvidenceRow {
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const result = this.addEvidenceWithinTransaction(sessionId, entry, released);
+      this.db.exec('COMMIT');
+      return result;
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
+  }
+
+  private addEvidenceWithinTransaction(sessionId: string, entry: EvidenceInput, released: boolean): EvidenceRow {
     this.assertActive(sessionId);
     const session = this.getSession(sessionId);
     if (!session) throw new Error('Unknown session.');
     const evidenceId = randomUUID();
-    const sourceEventIds = [...new Set(entry.sourceEventIds ?? [])];
-    if (sourceEventIds.length === 0) throw new Error('Evidence requires at least one source event ID.');
+    const sourceEventIds = evidenceSourceIds(entry);
+    const placeholders = sourceEventIds.map(() => '?').join(', ');
+    const sources = this.db.prepare(
+      `SELECT id, type, payload, released, release_requested FROM events WHERE session_id = ? AND id IN (${placeholders})`,
+    ).all(sessionId, ...sourceEventIds) as unknown as Array<{ id: number; type: string; payload: string; released: number; release_requested: number }>;
+    assertEvidenceSources(sourceEventIds, sources.map(row => ({
+      id: row.id, type: row.type, payload: safeParse(row.payload),
+      released: row.released === 1, releaseRequested: row.release_requested === 1,
+    })), entry, released);
     const excerpt = normalizeExcerpt(entry.excerpt ?? '');
     const sourceSpan = excerpt ? this.validateExcerpt(sessionId, sourceEventIds, excerpt) : null;
     const taxonomy = entry.classification ?? taxonomyFromVerdict(entry.verdict);
