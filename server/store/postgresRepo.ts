@@ -8,6 +8,7 @@ import {
 } from '../../shared/compiledLesson.js';
 import type { ResponseTaxonomy } from '../../shared/pedagogy.js';
 import type { DomainRepository, ManagedDomainRepository } from './domain.js';
+import { assertEvidenceSources, evidenceSourceIds } from './evidenceSources.js';
 import type {
   Child,
   Confidence,
@@ -301,29 +302,33 @@ export class PostgresRepo implements DomainRepository, ManagedDomainRepository {
 
   async addFallbackEvent(identity: FallbackTurnIdentity, type: string, payload: unknown, released = false): Promise<number> {
     await this.initialize();
-    const scopedPayload = {
-      ...(isRecord(payload) ? payload : { value: payload }),
-      turnId: identity.turnId,
-      generationId: identity.generationId,
-      idempotencyKey: identity.idempotencyKey,
-    };
-    const result = await this.pool.query(
-      `INSERT INTO noura.events (session_id, ts, type, payload, released)
-       SELECT $1::text, $6::bigint, $7::text, $8::jsonb, $9::boolean
-       WHERE EXISTS (
-         SELECT 1 FROM noura.fallback_turns f JOIN noura.sessions s ON s.id = f.session_id
-         WHERE f.session_id = $1 AND f.idempotency_key = $2 AND f.connection_epoch = $3
-           AND f.turn_id = $4 AND f.generation_id = $5 AND f.status = 'active' AND s.status = 'active'
-       ) RETURNING id`,
-      [...identityValues(identity), Date.now(), type, JSON.stringify(scopedPayload), released],
-    );
-    if (result.rowCount !== 1) throw new Error('Stale fallback generation write rejected.');
-    return Number(result.rows[0].id);
+    return this.transaction(async (client) => {
+      await this.assertActiveWith(client, identity.sessionId, true);
+      const scopedPayload = {
+        ...(isRecord(payload) ? payload : { value: payload }),
+        turnId: identity.turnId,
+        generationId: identity.generationId,
+        idempotencyKey: identity.idempotencyKey,
+      };
+      const result = await client.query(
+        `INSERT INTO noura.events (session_id, ts, type, payload, released)
+         SELECT $1::text, $6::bigint, $7::text, $8::jsonb, $9::boolean
+         WHERE EXISTS (
+           SELECT 1 FROM noura.fallback_turns f JOIN noura.sessions s ON s.id = f.session_id
+           WHERE f.session_id = $1 AND f.idempotency_key = $2 AND f.connection_epoch = $3
+             AND f.turn_id = $4 AND f.generation_id = $5 AND f.status = 'active' AND s.status = 'active'
+         ) RETURNING id`,
+        [...identityValues(identity), Date.now(), type, JSON.stringify(scopedPayload), released],
+      );
+      if (result.rowCount !== 1) throw new Error('Stale fallback generation write rejected.');
+      return Number(result.rows[0].id);
+    });
   }
 
   async addFallbackEvidence(identity: FallbackTurnIdentity, entry: EvidenceInput): Promise<EvidenceRow> {
     await this.initialize();
     return this.transaction(async (client) => {
+      await this.assertActiveWith(client, identity.sessionId, true);
       if (!(await this.isFallbackTurnActiveWith(client, identity))) throw new Error('Stale fallback generation write rejected.');
       return this.addEvidenceWith(client, identity.sessionId, {
         ...entry,
@@ -336,31 +341,36 @@ export class PostgresRepo implements DomainRepository, ManagedDomainRepository {
 
   async markFallbackEventReleased(identity: FallbackTurnIdentity, eventId: number): Promise<void> {
     await this.initialize();
-    const result = await this.pool.query(
-      `UPDATE noura.events e
-       SET release_requested = TRUE,
-           released = CASE WHEN EXISTS (
-             SELECT 1 FROM noura.fallback_turns completed
-             WHERE completed.session_id = $1 AND completed.idempotency_key = $2
-               AND completed.connection_epoch = $3 AND completed.turn_id = $4
-               AND completed.generation_id = $5 AND completed.status = 'completed'
-           ) THEN TRUE ELSE e.released END
-       WHERE e.id = $6 AND e.session_id = $1 AND e.payload ->> 'idempotencyKey' = $2
-         AND e.payload ->> 'turnId' = $4 AND e.payload ->> 'generationId' = $5
-         AND EXISTS (
-           SELECT 1 FROM noura.fallback_turns f JOIN noura.sessions s ON s.id = f.session_id
-           WHERE f.session_id = $1 AND f.idempotency_key = $2 AND f.connection_epoch = $3
-             AND f.turn_id = $4 AND f.generation_id = $5 AND f.status IN ('active', 'completed')
-             AND s.status = 'active'
-         )`,
-      [...identityValues(identity), eventId],
-    );
-    if (result.rowCount !== 1) throw new Error('Stale fallback checkpoint acknowledgement rejected.');
+    return this.transaction(async (client) => {
+      await this.assertActiveWith(client, identity.sessionId, true);
+      const result = await client.query(
+        `UPDATE noura.events
+         SET release_requested = TRUE,
+             released = CASE WHEN EXISTS (
+               SELECT 1 FROM noura.fallback_turns completed
+               WHERE completed.session_id = $1 AND completed.idempotency_key = $2
+                 AND completed.connection_epoch = $3 AND completed.turn_id = $4
+                 AND completed.generation_id = $5 AND completed.status = 'completed'
+             ) THEN TRUE ELSE released END
+         WHERE id = $6 AND session_id = $1 AND payload ->> 'idempotencyKey' = $2
+           AND payload ->> 'turnId' = $4 AND payload ->> 'generationId' = $5
+           AND EXISTS (
+             SELECT 1 FROM noura.fallback_turns f JOIN noura.sessions s ON s.id = f.session_id
+             WHERE f.session_id = $1 AND f.idempotency_key = $2 AND f.connection_epoch = $3
+               AND f.turn_id = $4 AND f.generation_id = $5 AND f.status IN ('active', 'completed')
+               AND s.status = 'active'
+           )`,
+        [...identityValues(identity), eventId],
+      );
+      if (result.rowCount !== 1) throw new Error('Stale fallback checkpoint acknowledgement rejected.');
+    });
   }
 
   async finishFallbackTurn(identity: FallbackTurnIdentity, status: 'completed' | 'failed' | 'cancelled', steps: unknown[] = []): Promise<boolean> {
     await this.initialize();
     return this.transaction(async (client) => {
+      const session = await client.query('SELECT status FROM noura.sessions WHERE id = $1 FOR UPDATE', [identity.sessionId]);
+      if (status === 'completed' && session.rows[0]?.status !== 'active') return false;
       const result = await client.query(
         `UPDATE noura.fallback_turns SET status = $6, steps_json = $7::jsonb, updated_at = $8
          WHERE session_id = $1 AND idempotency_key = $2 AND connection_epoch = $3
@@ -419,12 +429,15 @@ export class PostgresRepo implements DomainRepository, ManagedDomainRepository {
 
   async markEventReleased(sessionId: string, eventId: number): Promise<void> {
     await this.initialize();
-    const result = await this.pool.query(
-      `UPDATE noura.events SET released = TRUE WHERE id = $1 AND session_id = $2
-       AND EXISTS (SELECT 1 FROM noura.sessions WHERE id = $2 AND status = 'active')`,
-      [eventId, sessionId],
-    );
-    if (result.rowCount !== 1) throw new Error('Session has ended and is immutable.');
+    return this.transaction(async (client) => {
+      await this.assertActiveWith(client, sessionId, true);
+      const result = await client.query(
+        `UPDATE noura.events SET released = TRUE WHERE id = $1 AND session_id = $2
+         AND EXISTS (SELECT 1 FROM noura.sessions WHERE id = $2 AND status = 'active')`,
+        [eventId, sessionId],
+      );
+      if (result.rowCount !== 1) throw new Error('Session has ended and is immutable.');
+    });
   }
 
   async listEvents(sessionId: string, limit = 500, throughEventId?: number | null): Promise<EventRow[]> {
@@ -773,11 +786,19 @@ export class PostgresRepo implements DomainRepository, ManagedDomainRepository {
   }
 
   private async addEvidenceWith(queryable: Queryable, sessionId: string, entry: EvidenceInput, released: boolean): Promise<EvidenceRow> {
-    await this.assertActiveWith(queryable, sessionId);
+    await this.assertActiveWith(queryable, sessionId, true);
     const session = await this.getSessionWith(queryable, sessionId);
     if (!session) throw new Error('Unknown session.');
-    const sourceEventIds = [...new Set(entry.sourceEventIds ?? [])];
-    if (sourceEventIds.length === 0) throw new Error('Evidence requires at least one source event ID.');
+    const sourceEventIds = evidenceSourceIds(entry);
+    const placeholders = sourceEventIds.map((_, index) => `$${index + 2}`).join(', ');
+    const sources = await queryable.query(
+      `SELECT id, type, payload, released, release_requested FROM noura.events WHERE session_id = $1 AND id IN (${placeholders})`,
+      [sessionId, ...sourceEventIds],
+    );
+    assertEvidenceSources(sourceEventIds, sources.rows.map(row => ({
+      id: Number(row.id), type: String(row.type), payload: jsonObject(row.payload),
+      released: row.released === true, releaseRequested: row.release_requested === true,
+    })), entry, released);
     const excerpt = normalizeExcerpt(entry.excerpt ?? '');
     const sourceSpan = excerpt ? await this.validateExcerptWith(queryable, sessionId, sourceEventIds, excerpt) : null;
     const evidenceId = randomUUID();
