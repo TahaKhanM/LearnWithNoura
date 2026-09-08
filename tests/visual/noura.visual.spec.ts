@@ -25,7 +25,7 @@ for (const viewport of [
   test(`Noura Home ${viewport.name}`, async ({ page }) => {
     await page.setViewportSize(viewport);
     await page.goto('/');
-    await expect(page.getByRole('heading', { name: 'Noura' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'LearnWithNoura' })).toBeVisible();
     await expect(page).toHaveScreenshot(`noura-home-${viewport.name}.png`, { fullPage: true, animations: 'disabled' });
   });
 }

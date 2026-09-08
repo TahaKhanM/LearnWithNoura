@@ -1,293 +1,116 @@
-# Noura
+# LearnWithNoura
 
-Noura is a voice-first interactive tutor that leads a child through one small teaching objective at a time, speaks naturally, builds exact educational visuals, listens for interruption and gives a parent an evidence-linked account of what happened.
+LearnWithNoura is a voice tutor with a shared teaching whiteboard. A parent chooses a small learning objective; Noura explains it aloud, builds a diagram in stages, accepts spoken, typed or drawn answers and produces a parent summary linked to session evidence.
 
-Canonical production origin: [https://learnwithnoura.com](https://learnwithnoura.com)
+The difficult part is keeping the lesson truthful when speech, model output, drawing and interruptions finish at different times. This implementation uses a deterministic board compiler, browser acknowledgements and an explicit lesson state machine to decide what the learner has actually seen and heard. A generated scene is a proposal until it passes validation; a queued drawing is not yet replayable evidence.
 
-## Readiness boundary
+**Status:** a synthetic demonstration and engineering prototype. The code supports a login-gated demo at [learnwithnoura.com](https://learnwithnoura.com); that deployment is managed separately from this repository. Real parent/child use, educational efficacy and production privacy readiness have not been established. Use pretend learner details only.
 
-| Environment | Intended use | Current status |
-| --- | --- | --- |
-| Local | Synthetic development and private single-host demonstrations | Supported with SQLite; microphone/acoustic targets remain hardware-unverified. |
-| Vercel Preview | Access-gated synthetic UI and visual-fixture evaluation | Protected at `noura-preview-mtk2982007.vercel.app`; interactive lessons are disabled because storage is ephemeral and `/healthz` reports degraded. |
-| Public v0 | Login-gated synthetic demonstrations | Live at `learnwithnoura.com`. A server-verified demo account is required before learner/session APIs are available. Real voice/WSS, confirmed-speech interruption, persistent tutor/learner board, Realtime image grounding, fallback/tools, evidence, managed Postgres, immutable ending and Parent summary have deployed synthetic evidence. |
-| Full Production | Real parent/child use | Still blocked fail-closed until real parent authentication is selected, privacy/safety operations are configured and ZDR evidence exists for any under-13 mode. |
+![An original synthetic board example comparing evaporation and condensation](artifacts/evaluation/drawing-m2-live-smoke-rerun-full.jpg)
 
-Do not use real child details, recordings or transcripts in the current build. Noura does not claim legal compliance or production child readiness.
+*An original retained diagram from the drawing evaluation. The completed scene above was browser-validated offline; the accompanying live smoke observed only part of its reveal sequence. It is not a screenshot of a new live evaluation.*
 
-## Runtime model boundary
+## Try the implementation
 
-The application runtime baseline remains unchanged:
-
-- `gpt-realtime-2.1` for speech-to-speech, carried on a direct browser ↔ provider WebRTC call whose control lives on a server-owned sideband WebSocket to the same call;
-- `gpt-4o-mini-transcribe` for input transcription;
-- `gpt-5.6-terra` through the existing Chat Completions path for captions-only fallback, parent summaries, the session-creation lesson compiler (`NOURA_COMPILER_MODEL`, reasoning effort `NOURA_COMPILER_REASONING_EFFORT`, default `medium`) and the live Board Director for mid-lesson scene requests (`NOURA_DIRECTOR_MODEL`, reasoning effort `NOURA_DIRECTOR_REASONING_EFFORT`; default `low` for streaming and `medium` for classic);
-- `gpt-5.6-luna` at `low` effort for the independently configured streaming reveal audit (`NOURA_VISION_AUDIT_MODEL`, `NOURA_VISION_AUDIT_REASONING_EFFORT`), selected by M0 audit-role evidence rather than by the composition study;
-- `gpt-image-2` (`NOURA_ILLUSTRATION_MODEL`) for Director-chosen educational illustrations. Set `NOURA_ILLUSTRATIONS=off` to disable the path; the Director then authors vector/asset diagrams only.
-
-`NOURA_DIRECTOR_PIPELINE=streaming|classic` selects the temporary Drawing vNext delivery path. Unset local and Preview environments now use step-structured `streaming` at low effort; Production retains `classic` at medium effort until its separately authorized smoke. `classic` is the documented rollback, not a second long-term architecture.
-
-GPT-5.6 Sol was the Codex implementation agent used for this repository work. It is not an application dependency and did not trigger a model, endpoint, reasoning-effort, provider or topology migration.
-
-## Architecture
-
-The active path is:
-
-1. Parent setup creates or explicitly selects a learner and a goal. Session creation normalizes the goal (a vague goal returns 2–3 candidate objectives for the parent to pick) and compiles the complete lesson ahead of the call: a strong reasoning model authors the blueprint: stages, success criteria, exact check questions, misconception branches: plus, for board-led lessons, an authored-BoardOps anchor scene and storyboard. A configured headless harness provides an optional early render-quality gate; the connected learner browser remains the mandatory final preflight before any anchor reveal. The lesson page shows an honest preparing state until the strong compiled artifact is ready; a lesson never starts on a pending or failed goal.
-2. The child taps **Begin**, which bootstraps the voice call and requests microphone permission: the browser posts its WebRTC SDP offer to the server, which creates the provider call with the API key, attaches its control sideband, applies the full session configuration and returns only the SDP answer. Tutor audio arrives as a remote media track; no PCM transits the server. Denied or missing microphone access negotiates a listen-only call, so typed lessons, tutor audio and subtitles still work.
-3. A versioned event envelope (browser ↔ server WebSocket, control only: never audio) carries session, connection epoch, turn, generation, sequence, provider, visual and idempotency identity.
-4. A deterministic lesson reducer owns legal transitions and forbids waiting without a delivered question or task. The realtime model executes the pre-compiled blueprint stage by stage: it never authors the lesson live.
-5. One `GenerationScope` owns playback binding, provisional captions, transient visuals, character tasks, timers, reconnect work and fallback cancellation.
-6. Transcript generation and local media playback have separate lifecycles. Per-response subtitles stay in conversation order, wait for confirmed local playback, advance a phrase at a time, correct in place from the final transcript and discard unheard tails on interruption. When media is unavailable they become honest captions-only output. Board reveals, semantic state, task delivery and truncation bind to finished playback (`output_audio_buffer.started/stopped/cleared` plus local media truth).
-7. The drawing brain is two-tier. Fast tier: the voice model keeps direct, atomic `board_ops` increments (highlight and small extensions on visible objects). Slow tier: every new representation is requested by INTENT only (`request_visual`) in both board-led and conversation-led lessons; `establish` reuses a pre-compiled anchor when one exists, otherwise the Board Director designs the scene. The connected learner browser-not a Chromium process inside the serverless function-is the live render and validation authority: it supplies the current-board raster, preflights the candidate through the real client pipeline and renders the candidate for the Director's vision check. An optional headless harness remains an early compiler/offline gate. While the Director works, the tutor keeps teaching with what is visible.
-8. Every storyboard-bearing scene plays through one interleaved reveal-narrate engine: each step is revealed at the previous response's real playback boundary, narrated by a beat response with per-response instructions scoped to exactly that step and the stage's check/task is handed over through the existing delivered-task contract after the final step. A barge-in pauses the build (revealed objects stay: permanence) and the run resumes at the first unrevealed step; progress is persisted and restored across reconnects. Board sections are spatial camera regions on one logical canvas (the learner can pan back; nothing is filtered out of the scene). The Director and Lesson Compiler may emit tutor arcs, cubic curves, handwritten Caveat notes, curated local icons, generated illustrations (`image`, server-issued `assetId` only: labels, numbers and equations stay exact BoardOp overlays) and interactive manipulatives (`draggable`, `snapZone`, `tappable`); the voice model's fast-tier `board_ops` path does not. Guided checks may use `responseMode: manipulate`: the child moves or taps board widgets, the browser machine-checks the result locally on Done and one compact summary (plus an optional revision-bound snapshot) reaches the model: no per-drag round trips. Annotations are placed against real geometry and a deterministic quality budget accepts or rejects every checkpoint.
-9. A visual checkpoint has explicit states: queued, first-paint presented and animation-complete/durable. `ops_presented` advances the agent's board mirror and releases a truthful tool result as soon as the learner browser commits the first paint; `ops_shown` releases the stored event only after draw-on completion. A rejected or timed-out checkpoint never enters either truth set.
-10. Learner vectors produce calibrated spatial features plus a transient full-board/detail image for Realtime vision.
-11. Evidence observations carry source event IDs, normalized source spans, taxonomy, confidence basis, opportunity, independence and turn/generation lineage.
-12. Ending creates an immutable event cutoff; continuing creates a new linked session.
-
-See [the active architecture ADR](docs/architecture/2026-08-23-noura-runtime-architecture.md), [the drawing-runtime recovery audit](docs/architecture/2026-08-26-drawing-runtime-recovery.md), [the audio/subtitle recovery audit](docs/architecture/2026-08-26-media-caption-runtime-recovery.md), [Board Intelligence v2](docs/architecture/2026-08-23-board-intelligence-v2.md), [threat model](docs/privacy/threat-model.md) and [traceability matrix](docs/traceability/2026-08-23-noura-traceability.md).
-
-## Phase 0 telemetry and controlled smoke
-
-Privacy-safe observations are validated, pseudonymized with deterministic
-session-scoped opaque identifiers and submitted to a bounded ordered
-non-blocking writer before storage as released `metric` events in the existing
-event log. Local SQLite metric append and reconnect-history lookup execute in a
-worker thread; managed Postgres remains natively asynchronous. Identifier
-tokens carry server-owned encoding metadata and a session-derived prefix and
-fixed per-reason `telemetry_gap` counters preserve exact totals for known server
-queue, persistence, history, accounting and browser pre-ready loss. Gap rows
-are completeness evidence, not chronology evidence under saturation.
-`GET /api/sessions/:id/log` is the
-parent-authenticated, parent-owned projection of those released events; it
-returns bounded duration aggregates, interruption outcomes,
-section/reconnect/disappearance counts, provider token-usage totals, gap totals and a metric-only timeline. The smoke reporter reconstructs the complete
-summary from ascending timeline rows before accepting it. The log does not copy
-transcripts, evidence text or raw turn/generation/provider/visual/section/
-object identifiers.
-
-The Phase 0 timing boundaries are deliberately narrow:
-
-- “First audio” ends when the browser handles the provider’s `output_audio_buffer.started` playback boundary for the current response on the WebRTC data channel. It is a browser-received boundary, not speaker onset or acoustic evidence.
-- `board_reveal_to_narration` is `playback-start boundary − first committed board paint` on one browser monotonic clock. Positive means the board appeared first; negative means narration started first. It is not animation-completion time.
-- Tutor audio duration is the browser-reported heard duration relayed as a `playback_boundary` envelope event, recorded once per response.
-- Drawing vNext adds `visual_first_paint` (accepted visual intent to
-  `ops_presented`), `visual_scene_complete` (intent to the final durable
-  visual step), `director_stream_first_op` and `vision_audit_outcome`.
-  Every drawing duration carries a closed lane/model/outcome vocabulary; the
-  browser acknowledges event identity but never supplies server elapsed time.
-
-These offline and browser-observer definitions prevent lifecycle regressions.
-One authorized synthetic Preview session produced provider usage and duration
-observations, but no live-provider latency distribution or target-hardware
-acoustic claim has been made.
-
-The live journey is never authorized or executed by the default gates:
+Use **Node.js 24** (the SQLite adapter uses `node:sqlite`) and npm. A clean checkout includes the lockfile and the images required by the historical evidence verifiers.
 
 ```bash
-npm run test:smoke-report
-# DO NOT RUN without explicit deployment and live-provider authorization:
-NOURA_BASE_URL=https://authorized-origin.example \
-NOURA_SMOKE_LOGIN_EMAIL=... \
-NOURA_SMOKE_LOGIN_PASSWORD=... \
-npm run e2e:live -- --authorized-live-run --text-only
-```
-
-`NOURA_BASE_URL` must be an HTTP(S) origin only: no credentials, non-root path,
-query or fragment. The reporter reads `/api/version` and the parent-scoped
-session log through the still-authenticated browser context, requires the
-navigated origin/session/schema to match and projects exact hand-written
-allowlists rather than copying endpoint objects. Provider evidence requires
-safe positive, internally consistent usage rows whose sum equals the summary.
-It reports runtime model IDs, exact logged tutor-audio duration,
-provider-reported token usage projected from `response.done`, exact Phase 0
-aggregates, bounded caption/learner/console counts, hardcoded milestones and
-unresolved verification items. Retained reports contain no raw caption,
-learner, identifier, browser-console, credential or query text. A truncated
-session log, missing/malformed provider usage, mismatch or any telemetry gap
-fails the gate. `NOURA_PROVIDER_REPORTED_COST_USD` is optional user-supplied USD
-copied from the provider billing surface; the provider event does not supply a
-currency charge and the script never invents one. `--report-fixture <path>`
-and `npm run test:smoke-report` exercise report construction offline and never
-establish live-provider evidence. Do not run the normal journey, deploy or
-make paid/provider calls without explicit authorization.
-
-When application login is enabled, the live harness requires the demo email
-and password through `NOURA_SMOKE_LOGIN_EMAIL` and
-`NOURA_SMOKE_LOGIN_PASSWORD`; it never copies them into the retained report.
-For a Vercel-access-gated `*.vercel.app` deployment, an explicitly authorized
-operator may supply Vercel's 32-character automation secret through
-`NOURA_VERCEL_PROTECTION_BYPASS`. The harness exchanges it server-side for the
-host-bound `_vercel_jwt` cookie before opening a page; the raw secret is not
-placed on browser requests or copied into reports. The temporary secret must be
-revoked after the run.
-
-The August 26 authorized exercise proved one provider-backed lesson and its
-complete, gap-free parent-scoped telemetry log, but did not produce one
-uninterrupted passing reporter run because the deployed nested log adapter was
-missing during that lesson. The adapter is now present in the codebase and
-offline gates are green. Exact evidence and remaining limits are recorded in the
-[Phase 0 telemetry handoff](docs/architecture/2026-08-25-phase-0-telemetry-handoff.md).
-
-Gap accounting makes known loss visible but is not an end-to-end delivery
-guarantee. If a browser connection never reaches another accepted `ready` or a
-fallback/failed transport never recovers, final browser observations can be
-lost before their aggregate gap is delivered; that run cannot prove telemetry
-completeness.
-
-## Local setup
-
-Requires Node.js 24+.
-
-```bash
-npm install
+git clone https://github.com/TahaKhanM/LearnWithNoura.git
+cd LearnWithNoura
+npm ci
 cp .env.example .env
 npm run dev
 ```
 
-Open `http://localhost:5173`.
+Open [localhost:5173/dev/board](http://localhost:5173/dev/board) to inspect the deterministic scenes and board interactions. The example environment has an empty provider key and `NOURA_LESSON_COMPILER=fixture`; this route works without an account or paid API calls. The home page reports the missing provider honestly and does not offer a working voice lesson in this mode. The browser tests exercise complete lesson journeys with fake voice and control transports.
 
-The provider key stays server-side. The Vite client proxies `/api` and `/ws` to the local backend. Noura self-hosts Outfit and Caveat font assets through the build.
-
-### Local database migration
-
-The active default is `data/noura.db`. On first use, if that file is absent and the historical database exists, Noura:
-
-1. checkpoints the WAL;
-2. runs SQLite integrity checks;
-3. records table row counts;
-4. creates a verified backup;
-5. copies to a migration candidate;
-6. compares integrity and row counts;
-7. atomically renames the verified candidate.
-
-The old database is retained. `NOURA_DATA_DIR` is preferred; the historical environment alias is supported for one documented migration window only. Database files remain ignored.
-
-## Verification commands
+For a provider-backed **local** synthetic lesson, configure `OPENAI_API_KEY`, remove the fixture flag and explicitly set `NOURA_AUTHORIZED_LIVE_RUN=true` before starting the server. This enables paid API use. Model IDs and account access must match your provider account; checked-in defaults describe this implementation, not a guarantee that every account can run them. Keep keys on the server. See [.env.example](.env.example) and [runtime configuration](server/runtimeConfig.ts).
 
 ```bash
-npm run build
-npm run typecheck:server
-npm run lint
-npm run test:smoke-report
-npm run test:lesson-eval
-npm test
-npm audit --omit=dev
-npm run test:integration
+npm run gate:quick                 # server types, lint and unit/contract tests
+npm run build                     # client types and production assets
+npx playwright install chromium
 npm run test:e2e
-npm run test:visual
 npm run test:a11y
-npm run test:security
-npm run test:storage
-npm run test:brand
-npm run test:runtime-models
-npm run test:director-eval
-npm run test:director-m1-eval
-npm run test:director-recovery
-npm run test:first-paint
-npm run test:m1-acceptance
-npm run test:curriculum-matrix
-npm run test:role-adoption
-npm run test:m2-live-smoke
-npm run test:m3-acceptance
-npm run test:image-grounding
-npm run audit:m7-acceptance
 ```
 
-`npx vercel@latest build` is the deployment build gate. The installed global CLI predates Vercel’s native WebSocket public beta, so deployment work uses the current CLI without changing the global installation.
+SQLite data is created under `data/` and ignored by Git. `NOURA_DATA_DIR` selects another directory. The Vite development proxy sends API and control WebSocket traffic to port 8787. `NOURA_BACKEND_PORT` and `NOURA_PORT` must agree if that port changes. The old database filename remains supported through a checked migration that preserves a backup; the legacy name is not the product name.
 
-The browser suites use synthetic learner fixtures. Paid live-provider runs are not part of the default test commands. The Playwright servers set `NOURA_LESSON_COMPILER=fixture`, so a locally configured provider key never triggers live lesson-compilation calls from a test run; production startup refuses that flag.
+## How a lesson works
 
-`npm run test:director-eval` is also deterministic and offline by default. It
-runs the checked-in 24-intent representative corpus plus the sealed 12-intent
-holdout over scripted warm/cold condition fixtures, production proposal and
-board-policy validators, the strict template-first vNext step schema, exact
-defect/control rasters, contextual revision-board rasters and harness-rendered
-synthetic jittered sketches.
-It makes zero provider calls and cannot select a runtime default. The explicit
-`--authorized-live-run` path is separately spend-capped at $30 and requires a
-configured local board harness; do not invoke it without fresh authorization.
-The completed M0 synthetic decision is recorded in
-`docs/architecture/2026-09-01-drawing-model-bakeoff-decision.md`: no
-composition arm cleared the 95% adoption bar, Luna-low was selected for the
-3,000 ms vision-audit role and sketch assistance remains off.
+```mermaid
+flowchart LR
+  Parent[Parent goal] --> Compiler[Lesson compiler]
+  Compiler --> Blueprint[Blueprint and anchor scene]
+  Blueprint --> Coordinator[Server lesson coordinator]
+  Browser[Learner browser] <-->|WebRTC audio| Provider[Realtime provider]
+  Coordinator <-->|Sideband control| Provider
+  Coordinator <-->|Versioned control events| Browser
+  Coordinator --> Director[Scene proposal and validation]
+  Director --> Browser
+  Browser -->|First paint / durable reveal| Coordinator
+  Coordinator --> Store[(Session event store)]
+  Store --> Summary[Evidence-linked parent summary]
+```
 
-`npm run test:director-m1-eval` remains the provider-free verifier for the
-historical paired atomic/incremental report. That report deliberately retains
-its original `false` decision under the retired four-way 95% gate: it records
-0 pp delivery-path validity loss, complete 24/24 grade reuse and a 43.6066%
-provider-readiness proxy without relabelling the proxy as UI first paint.
+1. **Plan before the call.** The compiler turns the objective into stages, checks, misconception branches and an optional anchor scene. An ambiguous goal returns candidate objectives. A failed compilation does not start a lesson with an incomplete plan.
+2. **Give speech and control separate owners.** Audio travels directly between the browser and provider over WebRTC. The server's sideband owns session configuration and response creation; the browser-to-server WebSocket carries control events rather than PCM audio.
+3. **Compile intent into exact geometry.** The voice model requests a visual by intent. An existing anchor, one of three deliberately narrow template exemplars or the streaming Director supplies a scene. BoardOps and scene schemas constrain the vocabulary; geometry, layout and policy checks run before reveal. Text and equations remain exact overlays even when an illustration is generated.
+4. **Acknowledge what appeared.** `ops_presented` marks the first committed paint. `ops_shown` marks completed, durable tutor work and releases it for replay. Failed or timed-out proposals do not enter the released event history.
+5. **Keep interruption local and scoped.** Confirmed speech interruption cancels the current generation's transient work. Visible tutor work stays, learner drafts remain under learner control until **Done** and a storyboard resumes from its first unrevealed step. Captions track actual playback boundaries rather than assuming that a completed transcript was heard.
+6. **Summarize evidence, not hidden activity.** Session ending fixes an immutable event cutoff. Continuation creates a linked session. Parent summaries use released events and source-linked observations rather than treating unrevealed output as a completed lesson.
 
-The architecture-owner correction applies layered gates instead. The default
-`npm run test:director-recovery`, `npm run test:first-paint` and
-`npm run test:m1-acceptance` commands make zero provider calls and verify the
-hash-bound retained evidence. Corrected M1 results are G1 360/360 structured,
-G2 329/360 production-authority first pass, G3 350/360 delivered after the
-evidence-selected Terra-medium escalation and G4 actual Lesson-page
-`ops_presented` p50 2,818 ms versus 4,909 ms classic (42.5952% cut). All G1–G5
-pass. The authorized recovery study used 53 synthetic calls and $0.2692976 of
-its $3.25 ceiling; the default verifier never repeats those calls. The M0
-sketch study remains uninformative constant-answer mode collapse. The M5
-corpus rebuild closes answers to a ten-label enum, uses learner-pen width 4 and scores 30/30 offline from geometric hints; cheaper-model assist stays
-off (M0 gain 0.03, below the 0.05 bar). A live re-score is not authorized.
+## Decisions and costs
 
-The bounded 11+/SAT coverage contract is the checked-in
-[`Curriculum Visual Coverage Matrix`](docs/architecture/2026-09-02-curriculum-visual-coverage-matrix.md).
-Its 39 rows currently classify 5 visual types as directly supported, 10 as
-composable with browser-validated fixtures and 24 as the fixed M7 missing set.
-`npm run test:curriculum-matrix` verifies the source, fixtures and retained
-loopback-browser result by hash with zero provider calls. The matrix informs
-routing; it is not a template-only definition of capability and M8 acceptance
-runs with templates disabled.
+| Choice | Why it is here | Cost and credible alternative |
+| --- | --- | --- |
+| Typed BoardOps and deterministic layout | Makes exact equations, geometry, ownership and permanence inspectable and testable. | A bounded grammar limits visual freedom. Raster-only generation is simpler for illustration, but cannot reliably preserve exact labels or editable semantic objects. |
+| Browser preflight is the final rendering gate | Validates with the actual font metrics, scene compiler and renderer the learner will use. | The server waits for a connected client and must handle stale acknowledgements. A headless server renderer is useful for offline evaluation, but can disagree with the live browser. |
+| First paint and durable reveal are distinct | Separates responsiveness from replay correctness, particularly when an animation is interrupted. | More protocol state and tests than a single “drawn” event; useful only because playback, animation and persistence have independent lifecycles. |
+| Server-owned response creation | Gives interruption, tool results and lesson handoffs one scheduling authority. | Sideband setup and reconnect handling are substantial. A simple request/response tutor would be easier for a text-only product. |
+| SQLite locally, asynchronous Postgres when hosted | Local development needs no database service; hosted sessions need durable shared storage. | Both adapters must satisfy the same domain contracts. SQLite telemetry is moved to a worker to avoid blocking live control work. |
+| Vision audit is advisory | A second model can flag a suspicious diagram without becoming the authority for correctness. | It adds latency and cost and can miss semantic mistakes. Deterministic checks cannot prove pedagogical correctness either; human evaluation remains necessary. |
 
-M2 separates composition and audit behind `SceneModelPort.streamPropose` and
-`VisionAuditPort.inspect`. The adopted defaults are Terra-low composition,
-Luna-low audit with a 3,000 ms budget and Terra-medium whole-scene recovery;
-hedging and the non-qualifying targeted-correction arm are off by default.
-`npm run test:role-adoption` verifies the strict schema, PII sentinel boundary
-and immutable M0/F9 evidence with zero provider calls. The
-[M2 handoff](docs/architecture/2026-09-02-drawing-vnext-m2-role-adoption-handoff.md)
-preserves the first smoke’s manual rejection for overlapping connector labels
-and the separately authorized corrected rerun. The rerun passed the adopted-
-role/second-board-change scope with three calls, no recovery, inspected overlap-
-free live frames and a $0.1412604 token-meter estimate under its fresh $0.85
-ceiling. Its third storyboard reveal remains offline-proven from the retained
-terminal scene, not claimed live.
+Large scheduling modules remain cohesive where splitting them would distribute ownership of one state machine. The implementation separates scene proposal, policy, geometry, playback truth and persistence at their actual boundaries rather than introducing a service for each operation.
 
-M3 is mechanism-only under the architecture-owner’s 2026-09-02 re-scope. It
-proves both template entry points, strict parameter fall-through and exactly
-three browser exemplars (number line, fraction strips, plotted graph) with a
-36 ms maximum harness first paint and zero false open-set captures. The sealed
-unfamiliar/abstract generative lane delivers 40/40 via the retained F9 recovery
-evidence. `npm run test:m3-acceptance` verifies the hash-bound result; blended
-first-pass validity and further catalogue population are deferred to M8. See
-the [M3 handoff](docs/architecture/2026-09-02-drawing-vnext-m3-mechanism-handoff.md).
+`NOURA_DIRECTOR_PIPELINE=streaming|classic` selects drawing delivery. Local and preview environments default to streaming with low composition effort; production retains classic with medium effort. Classic is the retained rollback while the streaming deployment boundary is evaluated. The runtime model and reasoning settings are explicit in `.env.example`; this release does not change them.
 
-## Interaction and privacy notes
+## Where to inspect the code
 
-- Pointer, touch, focus, learner-stroke, tutor-pen, caption, semantic-object and interruption signals drive Noura’s gaze.
-- Character attention is generation-scoped, bounded, damped, reduced-motion aware and subordinate to the board.
-- Camera-responsive behavior is **not implemented**. No lesson needs camera permission. Noura performs no face recognition, biometric processing, emotion inference, attention scoring, engagement scoring or facial comprehension inference.
-- Raw audio, pointer trails and camera data are not persisted.
-- On barge-in the remote tutor track is muted and the provider’s buffered audio is cleared locally before provider confirmation; target-hardware acoustic silence remains **UNVERIFIED**.
-- Voice interruption requires sustained adaptive microphone energy (a WebAudio analyser on the live mic stream) plus independent server speech-start confirmation. Short noises and server VAD alone do not cancel Noura.
-- Confirmed voice interruption temporarily raises semantic endpointing eagerness for that one turn, then restores the normal child-friendly setting. Speech-end-to-response and speech-end-to-audio intervals are recorded separately.
-- Released tutor checkpoints finish and remain visible across re-renders and turn changes, then acknowledge durable replay even if interruption happened mid-animation. Learner strokes are committed as learner-owned BoardOps, replay after refresh and send a compressed transient board image to Realtime so Noura can inspect and respond to a board-only turn.
-- The server mirrors only released tutor checkpoints and committed learner marks into the agent’s current-board instructions. Teaching-move and drawing tool results return reusable object IDs; exact raw redraws and mostly equivalent semantic scenes are suppressed so questions adapt the visible diagram in place.
-- Distinct visual groups are spatial camera regions on one logical canvas. Each region keeps its local 1000×600 coordinates; the camera pans between them on announced navigation (tabs, arrows, “Open it” or a task that names a region). Section-scoped snapshots and quality stay region-local. Learner marks inherit the region they were drawn in.
-- Learner marks send deterministic vector features (shape, closure, direction, bounds, nearest/touched objects) plus one transient composite showing the full section and an enlarged detail. These features are spatial hints, never unverified semantic claims.
-- Exact subject templates and general relationship, worked-step, comparison and proportional part–whole grammars all pass through the same geometry solver, crossing checks and section quality budget.
-- A single atomic Board status and synchronized item-level signaling orient the learner without moving focus or duplicating the spoken explanation.
-- Captions are phrase-paced from local playback start and final-corrected in their original response position. The provider does not expose word timestamps here, so the app claims phrase-level playback alignment, not exact word synchronization.
+| Area | Entry points |
+| --- | --- |
+| API, startup and readiness | [`server/app.ts`](server/app.ts), [`server/runtimeConfig.ts`](server/runtimeConfig.ts), [`server/security.ts`](server/security.ts) |
+| Lesson compilation | [`server/lesson/`](server/lesson/), [`shared/lessonTurn.ts`](shared/lessonTurn.ts) |
+| Drawing contract and compiler | [`shared/boardOps.ts`](shared/boardOps.ts), [`src/board/compile.ts`](src/board/compile.ts), [`src/board/quality.ts`](src/board/quality.ts) |
+| Director and narrow template routing | [`server/board/streamingDirector.ts`](server/board/streamingDirector.ts), [`server/board/templateLane.ts`](server/board/templateLane.ts) |
+| Reveal, narration and cancellation | [`server/realtime/storyboardRunner.ts`](server/realtime/storyboardRunner.ts), [`src/lesson/realtimeSession.ts`](src/lesson/realtimeSession.ts), [`src/lesson/generationScope.ts`](src/lesson/generationScope.ts) |
+| Persistence and parent ownership | [`server/store/domain.ts`](server/store/domain.ts), [`server/store/repo.ts`](server/store/repo.ts), [`server/store/postgresRepo.ts`](server/store/postgresRepo.ts) |
+| Browser journeys and visual regressions | [`tests/e2e/`](tests/e2e/), [`tests/visual/`](tests/visual/), [`tests/accessibility/`](tests/accessibility/) |
 
-## Known blockers
+## Evaluation: what the evidence says
 
-- The complete domain repository has synchronous SQLite and asynchronous managed-Postgres implementations. The deployed private Supabase schema and least-privilege app role pass parent/session/event/evidence, immutable-end and fallback-staging contracts.
-- Public v0 requires the single server-configured demo account and issues a signed, `HttpOnly`, `Secure`, `SameSite=Lax` parent session; sessions remain parent-scoped and lessons use short-lived signed capabilities. This is appropriate for controlled demonstrations, not multi-user identity. A real external identity provider is still required for full Production.
-- In-memory rate limits are a local/Preview layer, not the final multi-instance Production control.
-- ZDR/account evidence, legal decisions, retention policy approval, target-hardware audio and real-minor safety evaluation are external gates.
-- Native Vercel WebSockets are currently a public beta and connections terminate at Function duration; reconnect is expected.
-- Public v0 uses encrypted Supavisor transport with certificate verification disabled because Node does not trust the shared-pooler chain by default. Pinning the Supabase CA remains a full-Production gate.
+The repository contains unit and property tests, transport and storage contracts, synthetic browser journeys, accessibility checks, visual snapshots and hash-bound historical evaluation reports. The default commands make no provider calls. Some “live smoke” commands **verify retained evidence**; they do not repeat the original live experiment.
 
-The historical repository name and local directory are retained intentionally. Immutable historical audit evidence lives under `docs/legacy/`.
+The drawing work used explicit failure examples, a held-out intent set, seeded visual defects and recovery comparisons. Earlier failed decisions remain recorded. Three results illustrate the limits of the evidence:
+
+- The corrected M1 comparison retained browser first-paint medians of **2,818 ms streaming versus 4,909 ms classic** in that synthetic study. This is an intent-to-first-paint measurement, not acoustic latency or a production service-level guarantee.
+- The M3 mechanism report checks exactly **three template exemplars** and retained delivery of **40/40 open-set intents after recovery**. It does not establish a general first-pass success rate or unrestricted curriculum coverage.
+- The M7 curriculum evidence contains **39 browser-accepted fixtures**. Its formal acceptance record remains false; technical gate success and the recorded process incident are separate facts. The fixture set does not establish semantic or teaching correctness for unseen lessons.
+
+The [architecture index](docs/architecture/INDEX.md) identifies the applicable reports, superseded experiments and unresolved milestones. [Verification and evidence](docs/verification.md) lists the reproducible commands and distinguishes a current regression run from historical measurements. Preserving old evidence is preferable to quietly regenerating a favourable report under changed code.
+
+## Deployment and remaining limits
+
+This is not a multi-user child-learning service. The configured demo account is a controlled demonstration gate; a real identity integration, approved retention and privacy operations, real-minor safety evaluation and target-hardware audio measurements remain open work. No camera permission, face recognition, emotion inference or attention scoring is implemented. Raw audio is not persisted by this application; voice and lesson content are still sent to the configured provider.
+
+Hosted storage requires a least-privilege Postgres role and verified TLS. `NOURA_DATABASE_CA_CERT` accepts the provider's PEM CA; connection-URL TLS options cannot override the application's verification setting. The historical v0 opt-out still exists for compatibility and full-production startup rejects it. Changing this source does not certify or reconfigure the separately deployed database connection. See [the node-postgres TLS explanation](https://node-postgres.com/features/ssl) for why URL parsing needs care.
+
+In-memory rate limits are bounded but per process. They do not provide distributed abuse control; at capacity, new keys are rejected until expiry. Demo cookies are signed and scoped but are not a complete account-management system. Provider-backed tests, acoustic interruption timing, educational outcomes and internet-scale load have not been verified by the offline suite.
+
+## Provenance
+
+This project began as **Seneca**, a collaborative whiteboard-tutor prototype by [Mohammed Talab](https://github.com/MohiCodeHub). **Muhammad Taha** subsequently developed the live lesson architecture, semantic board compiler, playback and interruption coordination, evidence/replay model, storage contracts and drawing evaluation work represented in the retained commit history. The history also records agent-assisted implementation; author counts are not a measure of sole authorship or independent expertise.
+
+The public project is named **LearnWithNoura**. Noura remains the tutor's name; `NOURA_*` configuration, existing cookies and database migration aliases remain compatible. The September 2026 public-release changes repair fresh-checkout verification, authentication edge cases, TLS configuration and late-generation resource handling. They do not retroactively change the results or chronology of earlier experiments.
+
+No blanket open-source license has been added to the collaborative source. Existing attribution and commit authors are preserved; public availability alone is not a license grant.
