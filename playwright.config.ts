@@ -29,6 +29,7 @@ export default defineConfig({
         // Hermetic runs: never let a locally configured provider key trigger
         // live lesson-compilation calls from the test server.
         NOURA_LESSON_COMPILER: 'fixture',
+        OPENAI_API_KEY: '',
         NOURA_ALLOWED_ORIGINS: 'http://localhost:5180,http://localhost:8790',
       },
     },

@@ -1,0 +1,33 @@
+name: Verify implementation
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+concurrency:
+  group: verify-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      NOURA_LESSON_COMPILER: fixture
+      OPENAI_API_KEY: ''
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npm run gate:quick
+      - run: npm run build
+      - run: npm run test:smoke-report
+      - run: npm run test:lesson-eval
+      - run: npm run test:brand
+      - run: npm run test:runtime-models
+      - run: npm audit --omit=dev
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+      - run: npm run test:a11y

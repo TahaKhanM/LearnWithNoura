@@ -123,7 +123,7 @@ function telemetryFixture(overrides = {}) {
     sessionId: 'session-fixture',
     navigatedOrigin: 'https://smoke.example.test',
     version: {
-      brand: 'Noura',
+      brand: 'LearnWithNoura',
       version: '1.0.0',
       gitSha: 'fixture-sha',
       environment: 'test',

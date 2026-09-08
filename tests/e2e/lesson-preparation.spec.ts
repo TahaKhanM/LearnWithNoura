@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { ORIGIN, createSyntheticSession } from '../helpers';
+import { ORIGIN, createSyntheticSession, enableFixturePreparation } from '../helpers';
 
 /**
  * Phase 2 session-creation flows: lessons start only from a compiled lesson.
@@ -19,6 +19,7 @@ async function createLearner(request: import('@playwright/test').APIRequestConte
 }
 
 test('a lesson starts from a precompiled fixture lesson', async ({ page, request }) => {
+  await enableFixturePreparation(page);
   const suffix = `prep-${Date.now().toString(36)}`;
   const child = await createLearner(request, suffix);
 
@@ -37,6 +38,7 @@ test('a lesson starts from a precompiled fixture lesson', async ({ page, request
 });
 
 test('a vague goal offers candidate objectives and the chosen one compiles', async ({ page, request }) => {
+  await enableFixturePreparation(page);
   const suffix = `cand-${Date.now().toString(36)}`;
   const child = await createLearner(request, suffix);
 

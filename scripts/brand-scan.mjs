@@ -1,4 +1,12 @@
 import { spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+
+// Preserve the original project's attribution without allowing stale branding elsewhere.
+const readme = readFileSync('README.md', 'utf8').replace('This project began as **S' + 'eneca**,', '');
+if (/s[e]neca/i.test(readme)) {
+  console.error('Brand scan failed: README contains a legacy reference outside its provenance statement.');
+  process.exit(1);
+}
 
 const result = spawnSync(
   'rg',
@@ -22,6 +30,8 @@ const result = spawnSync(
     '!server/store/db.test.ts',
     '-g',
     '!.env.example',
+    '-g',
+    '!README.md',
     's[e]neca',
     '.',
   ],

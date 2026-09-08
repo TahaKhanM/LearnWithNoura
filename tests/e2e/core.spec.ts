@@ -1,10 +1,11 @@
 import { expect, test } from '@playwright/test';
-import { createSyntheticSession, ORIGIN } from '../helpers';
+import { createSyntheticSession, enableFixturePreparation, ORIGIN } from '../helpers';
 
 test('Noura parent setup, explicit learner handoff, and selection persistence', async ({ page }) => {
+  await enableFixturePreparation(page);
   await page.goto('/');
   await expect(page).toHaveTitle(/Noura/);
-  await expect(page.getByRole('heading', { name: 'Noura' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'LearnWithNoura' })).toBeVisible();
   await expect(page.locator('link[rel="canonical"]')).toHaveAttribute('href', 'https://learnwithnoura.com/');
 
   const suffix = Date.now().toString(36);

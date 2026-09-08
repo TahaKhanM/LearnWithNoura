@@ -2,6 +2,15 @@ import type { APIRequestContext, Page } from '@playwright/test';
 
 export const ORIGIN = 'http://localhost:5180';
 
+/** Exercise preparation against the real fixture compiler without inventing a provider key. */
+export async function enableFixturePreparation(page: Page) {
+  await page.route('**/api/config', async (route) => {
+    const response = await route.fetch();
+    const config = await response.json();
+    await route.fulfill({ response, json: { ...config, lessonsAvailable: true } });
+  });
+}
+
 export async function createSyntheticSession(request: APIRequestContext, suffix = Date.now().toString(36)) {
   const childResponse = await request.post('/api/children', {
     headers: { Origin: ORIGIN },
