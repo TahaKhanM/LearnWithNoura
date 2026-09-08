@@ -5,6 +5,7 @@ import type { DomainRepository } from './store/domain.js';
 import { createFixtureCompilationService, type LessonCompilationService } from './lesson/compilationService.js';
 import { readRuntimeConfig, type RuntimeConfig } from './runtimeConfig.js';
 import { summarizeSession } from './summary.js';
+import { parseCookieHeader } from './security.js';
 import {
   SESSION_TELEMETRY_LOG_EVENT_LIMIT,
   buildSessionTelemetryLog,
@@ -337,14 +338,5 @@ function appendLessonCapabilityCookie(response: Response, token: string): void {
   response.appendHeader(
     'Set-Cookie',
     `noura_lesson=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=7200${secure}`,
-  );
-}
-
-function parseCookieHeader(header: string): Record<string, string> {
-  return Object.fromEntries(
-    header.split(';')
-      .map((part) => part.trim().split('='))
-      .filter((pair) => pair.length === 2)
-      .map(([key, value]) => [decodeURIComponent(key), decodeURIComponent(value)]),
   );
 }

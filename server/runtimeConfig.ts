@@ -40,13 +40,10 @@ export function readRuntimeConfig(env: NodeJS.ProcessEnv = process.env): Runtime
       ? 'preview-synthetic'
       : 'local-synthetic';
   const requested = env.NOURA_DEPLOYMENT_MODE ?? inferred;
-  const deploymentMode: DeploymentMode = requested === 'production'
-    ? 'production'
-    : requested === 'production-v0'
-      ? 'production-v0'
-    : requested === 'preview-synthetic'
-      ? 'preview-synthetic'
-      : 'local-synthetic';
+  if (!['local-synthetic', 'preview-synthetic', 'production-v0', 'production'].includes(requested)) {
+    throw new Error('NOURA_DEPLOYMENT_MODE must be local-synthetic, preview-synthetic, production-v0, or production.');
+  }
+  const deploymentMode = requested as DeploymentMode;
   const production = deploymentMode === 'production' || deploymentMode === 'production-v0';
   const v0 = deploymentMode === 'production-v0';
   const loginRequired = env.NOURA_REQUIRE_LOGIN === 'true';
@@ -112,7 +109,9 @@ export function productionReadinessErrors(config: RuntimeConfig, env: NodeJS.Pro
   if (!config.providerConfigured) errors.push('the tutor provider is not configured');
   if (env.NOURA_STORAGE_ADAPTER !== 'postgres') errors.push('Production must use the Postgres storage adapter');
   if (env.NOURA_LESSON_COMPILER === 'fixture') errors.push('the fixture lesson compiler cannot serve production');
-  if (!env.NOURA_LESSON_CAPABILITY_SECRET && !env.NOURA_AUTH_SECRET) errors.push('the lesson capability secret is not configured');
+  const signingSecret = env.NOURA_LESSON_CAPABILITY_SECRET || env.NOURA_AUTH_SECRET;
+  if (!signingSecret) errors.push('the lesson capability secret is not configured');
+  else if (signingSecret.length < 32) errors.push('the signing secret must contain at least 32 characters');
   if (config.loginRequired && !config.demoAuthenticationConfigured) {
     errors.push('login is required but demo authentication credentials are incomplete');
   }

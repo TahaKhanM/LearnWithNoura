@@ -195,7 +195,7 @@ export function HomePage() {
           <NouraMark />
           <div>
             <p className="home__eyebrow">A shared teaching board</p>
-            <h1>Noura</h1>
+            <h1>LearnWith<wbr />Noura</h1>
             <p>A tutor that talks through ideas and draws while your child learns.</p>
           </div>
           {loginRequired && <button className="home__signout" type="button" onClick={() => void signOut()}>Sign out</button>}
@@ -410,7 +410,7 @@ function LearnerForm(props: {
 
 function NouraMark() {
   return (
-    <svg className="home__logo" viewBox="0 0 54 54" role="img" aria-label="Noura">
+    <svg className="home__logo" viewBox="0 0 54 54" role="img" aria-label="LearnWithNoura">
       <g transform="translate(-347,-252)">
         <path d="M348 296 c0 -25, 12 -41, 26 -41 s26 16, 26 41 c0 7 -6 9 -26 9 s-26 -2 -26 -9z" fill="var(--blue)" />
         <circle cx="366" cy="269" r="3.1" fill="var(--board)" />

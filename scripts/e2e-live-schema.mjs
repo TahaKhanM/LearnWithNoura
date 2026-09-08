@@ -66,7 +66,7 @@ function projectVersion(value) {
   assertExactKeys(version, [
     'brand', 'version', 'gitSha', 'environment', 'schemaVersion', 'runtimeModels',
   ], 'version');
-  if (version.brand !== 'Noura' || version.schemaVersion !== '1.0.0') {
+  if (version.brand !== 'LearnWithNoura' || version.schemaVersion !== '1.0.0') {
     throw new Error('The version endpoint schema is not supported.');
   }
   readBoundedString(version.version, 'version.version');

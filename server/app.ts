@@ -175,7 +175,7 @@ app.get(['/healthz', '/api/healthz'], async (_req, res) => {
 
 app.get(['/version', '/api/version'], (_req, res) => {
   res.json({
-    brand: 'Noura',
+    brand: 'LearnWithNoura',
     version: process.env.npm_package_version ?? '0.0.0',
     gitSha: runtimeConfig.buildSha,
     environment: runtimeConfig.environment,

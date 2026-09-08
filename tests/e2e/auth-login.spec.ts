@@ -20,6 +20,6 @@ test('required login gates the application and releases it after valid credentia
   await page.locator('#login-password').fill('fixture-password');
   await page.getByRole('button', { name: 'Sign in' }).click();
 
-  await expect(page.getByRole('heading', { name: 'Noura' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'LearnWithNoura' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Sign out' })).toBeVisible();
 });

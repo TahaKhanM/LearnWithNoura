@@ -145,6 +145,30 @@ describe('REST object authorization', () => {
     expect(Array.from(ok.body as Buffer).slice(0, 4)).toEqual([137, 80, 78, 71]);
   });
 
+  it('ignores unrelated malformed cookies on both parent and lesson asset reads', async () => {
+    const repo = new Repo(openTestDb());
+    repo.putBoardAsset({
+      id: 'img-a1b2c3d4e5f67890', cacheKey: 'd'.repeat(64), mime: 'image/png',
+      bytes: Uint8Array.from([137, 80, 78, 71]), createdAt: 1,
+      parentId: 'parent-a', sessionId: 'session-a',
+    });
+    const app = express();
+    app.use('/api', createApi(repo, null, 'gpt-5.6-terra', {
+      parentId: (req) => req.headers['x-test-parent'] === 'parent-a' ? 'parent-a' : null,
+      verifyLessonCapability: (token, sessionId) => token === 'lesson-cap-a' && sessionId === 'session-a'
+        ? { sub: sessionId, parentId: 'parent-a' } : null,
+    }));
+    const parentRead = await request(app).get('/api/board-assets/img-a1b2c3d4e5f67890')
+      .set('x-test-parent', 'parent-a').set('Cookie', 'unrelated=%E0%A4%A');
+    const lessonRead = await request(app).get('/api/board-assets/img-a1b2c3d4e5f67890')
+      .set('Cookie', 'unrelated=%E0%A4%A; noura_lesson=lesson-cap-a');
+    expect(parentRead.status).toBe(200);
+    expect(lessonRead.status).toBe(200);
+    const invalidRead = await request(app).get('/api/board-assets/img-a1b2c3d4e5f67890')
+      .set('Cookie', 'unrelated=%E0%A4%A; noura_lesson=%');
+    expect(invalidRead.status).toBe(401);
+  });
+
   it('refuses parent B a GET of parent A’s illustration asset', async () => {
     const repo = new Repo(openTestDb());
     repo.putBoardAsset({

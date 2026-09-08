@@ -1,6 +1,6 @@
 {
-  "name": "Noura",
-  "short_name": "Noura",
+  "name": "LearnWithNoura",
+  "short_name": "LearnWithNoura",
   "description": "A voice-first tutor that talks and draws while children learn.",
   "start_url": "/",
   "display": "standalone",

@@ -6,7 +6,7 @@ import { createSyntheticSession, installFakeRealtime, setLessonCapability, waitF
 
 test('Home has no serious or critical automated accessibility violations', async ({ page }) => {
   await page.goto('/');
-  await expect(page.getByRole('heading', { name: 'Noura' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'LearnWithNoura' })).toBeVisible();
   const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa']).analyze();
   expect(results.violations.filter((violation) => ['serious', 'critical'].includes(violation.impact ?? ''))).toEqual([]);
 });

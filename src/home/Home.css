@@ -25,7 +25,8 @@
 }
 
 .home__logo { width: 58px; height: 58px; flex: 0 0 auto; }
-.home__head h1 { margin: -3px 0 0; font-size: clamp(30px, 5vw, 40px); line-height: 1; letter-spacing: -0.035em; }
+.home__head > div { min-width: 0; }
+.home__head h1 { overflow-wrap: anywhere;  margin: -3px 0 0; font-size: clamp(30px, 5vw, 40px); line-height: 1; letter-spacing: -0.035em; }
 .home__head p { margin: 6px 0 0; color: var(--ink-soft); font-size: 15px; }
 .home__signout { margin-left: auto; min-height: 44px; border: 0; background: transparent; color: var(--ink-soft); font: inherit; font-size: 13.5px; font-weight: 650; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
 .home__signout:hover { color: var(--blue-deep); }
