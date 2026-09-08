@@ -4,6 +4,14 @@ import { describe, expect, it } from 'vitest';
 import { productionReadinessErrors, readRuntimeConfig } from './runtimeConfig';
 
 describe('runtime configuration', () => {
+  it.each(['prodution', '', 'Production'])('rejects an invalid deployment mode %j instead of disabling production guards', (mode) => {
+    expect(() => readRuntimeConfig({ VERCEL_ENV: 'production', NOURA_DEPLOYMENT_MODE: mode })).toThrow(/NOURA_DEPLOYMENT_MODE/);
+  });
+
+  it('rejects a short production signing secret', () => {
+    const env = { NOURA_DEPLOYMENT_MODE: 'production-v0', NOURA_AUTH_SECRET: 'short' };
+    expect(productionReadinessErrors(readRuntimeConfig(env), env)).toContain('the signing secret must contain at least 32 characters');
+  });
   it('preserves the reviewed application model defaults', () => {
     const config = readRuntimeConfig({});
     expect(config.realtimeModel).toBe('gpt-realtime-2.1');
